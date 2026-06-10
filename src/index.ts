@@ -97,8 +97,7 @@ const STARTUP_NOTICE_MIN_INTERVAL_MS =
   Number.parseInt(
     process.env.NANOCRAB_STARTUP_NOTICE_MIN_INTERVAL_MS || '',
     10,
-  ) ||
-  5 * 60 * 1000;
+  ) || 5 * 60 * 1000;
 
 let startupNoticeSentThisProcess = false;
 
