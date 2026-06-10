@@ -11,6 +11,7 @@ import {
   isAgentProvider,
   isValidAgentModel,
 } from '../../agent-provider.js';
+import { getState } from '../state.js';
 
 const router = Router();
 
@@ -74,14 +75,47 @@ router.put('/:jid', (req: Request, res: Response) => {
     }
   }
 
+  const enabled =
+    updates.enabled === undefined ? existing.enabled !== false : !!updates.enabled;
+  const isPrimary = updates.isPrimary === undefined ? existing.isPrimary === true : !!updates.isPrimary;
+
+  if (isPrimary && !enabled) {
+    res.status(400).json({ error: 'Primary bot must be enabled' });
+    return;
+  }
+  if (isPrimary && !existing.isMain) {
+    res.status(400).json({ error: 'Primary bot must be a main bot agent' });
+    return;
+  }
+
   const updated = {
     ...existing,
     trigger: updates.trigger ?? existing.trigger,
     requiresTrigger: updates.requiresTrigger ?? existing.requiresTrigger,
     containerConfig: updates.containerConfig ?? existing.containerConfig,
+    enabled: enabled ? undefined : false,
+    isPrimary: isPrimary ? true : undefined,
   };
 
+  if (isPrimary) {
+    for (const [otherJid, group] of Object.entries(groups)) {
+      if (otherJid === jid || !group.isPrimary) continue;
+      const otherUpdated = { ...group, isPrimary: undefined };
+      setRegisteredGroup(otherJid, otherUpdated);
+      try {
+        getState().updateRegisteredGroup?.(otherJid, otherUpdated);
+      } catch {
+        // Admin state may be unavailable in isolated route tests.
+      }
+    }
+  }
+
   setRegisteredGroup(jid, updated);
+  try {
+    getState().updateRegisteredGroup?.(jid, updated);
+  } catch {
+    // Admin state may be unavailable in isolated route tests.
+  }
   res.json({ ok: true, group: updated });
 });
 

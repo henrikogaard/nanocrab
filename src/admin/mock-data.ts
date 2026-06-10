@@ -23,6 +23,7 @@ const groups = [
     enabled: true,
     active: true,
     isMain: true,
+    isPrimary: true,
     description: 'Main operator group for planning, admin, and approvals.',
     containerConfig: {
       persistent: true,
@@ -39,6 +40,8 @@ const groups = [
     channel: 'telegram',
     enabled: true,
     active: true,
+    isMain: true,
+    isPrimary: false,
     description: 'Fleet operations and scheduled orders.',
     containerConfig: {
       persistent: true,
@@ -51,8 +54,10 @@ const groups = [
     name: 'Scouting Desk',
     folder: 'scouts',
     channel: 'signal',
-    enabled: true,
+    enabled: false,
     active: false,
+    isMain: true,
+    isPrimary: false,
     description: 'Recon notes, sightings, and player intel.',
     containerConfig: {
       persistent: false,

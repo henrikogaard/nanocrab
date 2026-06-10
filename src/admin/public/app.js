@@ -1253,7 +1253,7 @@ async function renderGroups(el) {
   el.innerHTML = `
     <div class="page-header"><h2>Registered Groups</h2></div>
     <div class="card table-wrap">
-      <table><thead><tr><th>Name</th><th>JID</th><th>Channel</th><th>Trigger</th><th>Provider</th><th>Model</th><th>MCP Access</th><th>Restrictions</th><th>Role</th></tr></thead>
+      <table><thead><tr><th>Name</th><th>JID</th><th>Channel</th><th>Status</th><th>Trigger</th><th>Provider</th><th>Model</th><th>MCP Access</th><th>Restrictions</th><th>Role</th></tr></thead>
       <tbody>${groups
         .map((g) => {
           const selectedProvider = g.containerConfig?.provider || '';
@@ -1269,6 +1269,10 @@ async function renderGroups(el) {
         <td><strong style="color:var(--text)">${esc(g.name)}</strong><div style="font-size:11px;color:var(--text-muted)">${esc(g.folder)}</div></td>
         <td style="font-family:var(--mono);font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(g.jid)}</td>
         <td>${g.channel ? `<span class="badge badge-accent">${g.channel}</span>` : '-'}</td>
+        <td>
+          <span class="badge ${g.enabled === false ? 'badge-muted' : 'badge-success'}">${g.enabled === false ? 'Disabled' : 'Enabled'}</span>
+          ${g.enabled !== false ? `<button class="btn btn-sm btn-ghost" style="padding:2px 6px;font-size:10px;margin-left:4px" onclick="setGroupEnabled('${esc(g.jid)}',false)">Disable</button>` : `<button class="btn btn-sm btn-ghost" style="padding:2px 6px;font-size:10px;margin-left:4px" onclick="setGroupEnabled('${esc(g.jid)}',true)">Enable</button>`}
+        </td>
         <td><code style="color:var(--accent)">${esc(g.trigger)}</code>${g.requiresTrigger === false ? ' <span class="badge badge-muted">auto</span>' : ''}</td>
         <td><select class="search-input" style="max-width:130px;padding:4px 8px;font-size:11px" onchange="setGroupProviderRuntime('${esc(g.jid)}',this.value)">
           <option value="" ${!selectedProvider ? 'selected' : ''}>inherit</option>
@@ -1286,7 +1290,11 @@ async function renderGroups(el) {
         </select></td>
         <td>${!g.containerConfig?.allowedMcpServers ? '<span class="badge badge-success">All</span>' : g.containerConfig.allowedMcpServers.length === 0 ? '<span class="badge badge-warning">None</span>' : g.containerConfig.allowedMcpServers.map((s) => `<span class="badge badge-info">${s}</span>`).join(' ')}</td>
         <td>${g.containerConfig?.restrictions ? `<span class="badge badge-warning" title="${esc(g.containerConfig.restrictions)}">Active</span>` : '<span class="badge badge-muted">None</span>'} <button class="btn btn-sm btn-ghost" style="padding:2px 6px;font-size:10px" onclick="editRestrictions('${esc(g.jid)}')">Edit</button></td>
-        <td>${g.isMain ? '<span class="badge badge-accent">Main</span>' : '<span class="badge badge-muted">User</span>'}</td>
+        <td>
+          ${g.isPrimary ? '<span class="badge badge-accent">Primary</span> ' : ''}
+          ${g.isMain ? '<span class="badge badge-success">Main</span>' : '<span class="badge badge-muted">User</span>'}
+          ${g.isMain && g.enabled !== false && !g.isPrimary ? `<button class="btn btn-sm btn-ghost" style="padding:2px 6px;font-size:10px;margin-left:4px" onclick="setPrimaryGroup('${esc(g.jid)}')">Set Primary</button>` : ''}
+        </td>
       </tr>`;
         })
         .join('')}</tbody></table>
@@ -1320,6 +1328,46 @@ window.setGroupProviderRuntime = async (jid, provider) => {
     } else toast(r.error || 'Failed', 'error');
   } catch {
     toast('Failed to update provider', 'error');
+  }
+};
+
+window.setGroupEnabled = async (jid, enabled) => {
+  try {
+    const groups = await api('/groups');
+    const group = groups.find((g) => g.jid === jid);
+    if (!group) {
+      toast('Group not found', 'error');
+      return;
+    }
+    if (!enabled && group.isPrimary) {
+      toast('Choose another primary bot before disabling this one', 'warning');
+      return;
+    }
+    const r = await api(`/groups/${encodeURIComponent(jid)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    });
+    if (r.ok) {
+      toast(enabled ? 'Bot agent enabled' : 'Bot agent disabled', 'success');
+      navigate('groups');
+    } else toast(r.error || 'Failed', 'error');
+  } catch {
+    toast('Failed to update bot agent', 'error');
+  }
+};
+
+window.setPrimaryGroup = async (jid) => {
+  try {
+    const r = await api(`/groups/${encodeURIComponent(jid)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: true, isPrimary: true }),
+    });
+    if (r.ok) {
+      toast('Primary bot selected', 'success');
+      navigate('groups');
+    } else toast(r.error || 'Failed', 'error');
+  } catch {
+    toast('Failed to set primary bot', 'error');
   }
 };
 

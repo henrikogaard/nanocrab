@@ -8,6 +8,7 @@ import { GroupQueue } from '../group-queue.js';
 export interface NanoCrabState {
   channels: Channel[];
   registeredGroups: () => Record<string, RegisteredGroup>;
+  updateRegisteredGroup?: (jid: string, group: RegisteredGroup) => void;
   queue: GroupQueue;
   sendMessage: (jid: string, text: string) => Promise<void>;
   startTime: number;

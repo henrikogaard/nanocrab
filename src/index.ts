@@ -178,6 +178,30 @@ function saveState(): void {
   setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
+function isGroupEnabled(group: RegisteredGroup | undefined): boolean {
+  return group?.enabled !== false;
+}
+
+function isPrimaryBot(jid: string, group: RegisteredGroup): boolean {
+  if (!group.isMain || !isGroupEnabled(group)) return false;
+
+  const explicitPrimary = Object.entries(registeredGroups).find(
+    ([, candidate]) =>
+      candidate.isMain === true &&
+      candidate.isPrimary === true &&
+      isGroupEnabled(candidate),
+  );
+  if (explicitPrimary) return explicitPrimary[0] === jid;
+
+  const fallbackPrimary = Object.entries(registeredGroups)
+    .filter(
+      ([, candidate]) =>
+        candidate.isMain === true && isGroupEnabled(candidate),
+    )
+    .sort((a, b) => a[1].added_at.localeCompare(b[1].added_at))[0];
+  return fallbackPrimary?.[0] === jid;
+}
+
 async function sendStartupNotice(): Promise<void> {
   if (!STARTUP_NOTICE_ENABLED || startupNoticeSentThisProcess) return;
 
@@ -201,7 +225,7 @@ async function sendStartupNotice(): Promise<void> {
   let sentCount = 0;
 
   for (const [jid, group] of Object.entries(registeredGroups)) {
-    if (!group.isMain) continue;
+    if (!isPrimaryBot(jid, group)) continue;
 
     const channel = findChannel(channels, jid);
     if (!channel) {
@@ -313,6 +337,13 @@ export function _setRegisteredGroups(
 async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
+  if (!isGroupEnabled(group)) {
+    logger.info(
+      { chatJid, group: group.name },
+      'Skipping queue processing for disabled bot agent',
+    );
+    return true;
+  }
 
   const channel = findChannel(channels, chatJid);
   if (!channel) {
@@ -623,6 +654,13 @@ async function startMessageLoop(): Promise<void> {
         for (const [chatJid, groupMessages] of messagesByGroup) {
           const group = registeredGroups[chatJid];
           if (!group) continue;
+          if (!isGroupEnabled(group)) {
+            logger.info(
+              { chatJid, group: group.name },
+              'Skipping disabled bot agent',
+            );
+            continue;
+          }
 
           const channel = findChannel(channels, chatJid);
           if (!channel) {
@@ -693,6 +731,7 @@ async function startMessageLoop(): Promise<void> {
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    if (!isGroupEnabled(group)) continue;
     const pending = getMessagesSince(
       chatJid,
       getOrRecoverCursor(chatJid),
@@ -839,6 +878,25 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
+      const registeredGroup = registeredGroups[chatJid];
+      const botAgentDisabled =
+        registeredGroup !== undefined && !isGroupEnabled(registeredGroup);
+
+      if (botAgentDisabled) {
+        storeMessage(msg);
+        broadcastMessage({
+          sender_name: msg.sender_name,
+          content: msg.content,
+          chat_jid: msg.chat_jid,
+          timestamp: msg.timestamp,
+        });
+        logger.debug(
+          { chatJid, group: registeredGroup.name },
+          'Message stored for disabled bot agent',
+        );
+        return;
+      }
+
       // Host control commands — intercept before storage
       const trimmed = msg.content.trim();
       if (trimmed === '/remote-control' || trimmed === '/remote-control-end') {
@@ -917,6 +975,11 @@ async function main(): Promise<void> {
     onProcess: (groupJid, proc, containerName, groupFolder) =>
       queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
+      const group = registeredGroups[jid];
+      if (group && !isGroupEnabled(group)) {
+        logger.info({ jid, group: group.name }, 'Scheduled send skipped');
+        return;
+      }
       const channel = findChannel(channels, jid);
       if (!channel) {
         logger.warn({ jid }, 'No channel owns JID, cannot send message');
@@ -928,11 +991,19 @@ async function main(): Promise<void> {
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
+      const group = registeredGroups[jid];
+      if (group && !isGroupEnabled(group)) {
+        throw new Error(`Bot agent "${group.name}" is disabled`);
+      }
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
     sendFile: async (jid, filePath, filename, caption) => {
+      const group = registeredGroups[jid];
+      if (group && !isGroupEnabled(group)) {
+        throw new Error(`Bot agent "${group.name}" is disabled`);
+      }
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       if (
@@ -985,8 +1056,15 @@ async function main(): Promise<void> {
   await initAdminServer({
     channels,
     registeredGroups: () => registeredGroups,
+    updateRegisteredGroup: (jid, group) => {
+      registeredGroups[jid] = group;
+    },
     queue,
     sendMessage: async (jid, text) => {
+      const group = registeredGroups[jid];
+      if (group && !isGroupEnabled(group)) {
+        throw new Error(`Bot agent "${group.name}" is disabled`);
+      }
       const channel = findChannel(channels, jid);
       if (channel) await channel.sendMessage(jid, text);
     },

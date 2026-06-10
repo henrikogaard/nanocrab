@@ -54,10 +54,15 @@ async function renderAgents(el) {
         );
         const isActive = !!container;
         const isIdle = container?.idleWaiting;
+        const isEnabled = g.enabled !== false;
+        const isPrimary = g.isPrimary === true;
         const recentLogs = recent.filter((r) => r.group === g.folder);
 
         let statusBadge, statusColor;
-        if (isActive && !isIdle) {
+        if (!isEnabled) {
+          statusBadge = 'Disabled';
+          statusColor = 'badge-muted';
+        } else if (isActive && !isIdle) {
           statusBadge = 'Running';
           statusColor = 'badge-success';
         } else if (isActive && isIdle) {
@@ -68,18 +73,21 @@ async function renderAgents(el) {
           statusColor = 'badge-error';
         }
 
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);${!isEnabled ? 'opacity:.62' : ''}">
         <div style="display:flex;align-items:center;gap:10px">
-          <span class="status-dot ${isActive ? (isIdle ? 'idle' : 'online') : 'offline'}" style="width:8px;height:8px"></span>
+          <span class="status-dot ${!isEnabled ? '' : isActive ? (isIdle ? 'idle' : 'online') : 'offline'}" style="width:8px;height:8px"></span>
           <div>
             <strong>${esc(g.name)}</strong>
             <span class="badge badge-muted" style="margin-left:6px;font-size:9px">${ch}</span>
             ${g.isMain ? '<span class="badge badge-success" style="font-size:9px;margin-left:3px">Persistent</span>' : ''}
+            ${isPrimary ? '<span class="badge badge-accent" style="font-size:9px;margin-left:3px">Primary</span>' : ''}
             <div style="font-size:11px;color:var(--text-muted)">${g.lastActivity ? 'Active ' + timeAgo(g.lastActivity) : 'No activity'}</div>
           </div>
         </div>
-        <div style="display:flex;gap:6px;align-items:center">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
           <span class="badge ${statusColor}" style="font-size:10px">${statusBadge}</span>
+          <button class="btn btn-sm btn-ghost" onclick="toggleBotAgent('${esc(g.jid)}', ${!isEnabled})">${isEnabled ? 'Disable' : 'Enable'}</button>
+          ${g.isMain && isEnabled && !isPrimary ? `<button class="btn btn-sm btn-ghost" onclick="setPrimaryBotAgent('${esc(g.jid)}')">Set Primary</button>` : ''}
         </div>
       </div>`;
       })
@@ -717,6 +725,50 @@ window.shareAgentTask = async function (id) {
     shareContent('Agent Task', `Prompt: ${prompt}\n\nOutput:\n${output}`);
   } catch (e) {
     toast('Failed to share: ' + e.message, 'error');
+  }
+};
+
+window.toggleBotAgent = async function (jid, enabled) {
+  try {
+    const groups = await api('/groups');
+    const group = groups.find((g) => g.jid === jid);
+    if (!group) {
+      toast('Bot agent not found', 'error');
+      return;
+    }
+    if (!enabled && group.isPrimary) {
+      toast('Choose another primary bot before disabling this one', 'warning');
+      return;
+    }
+    const r = await api('/groups/' + encodeURIComponent(jid), {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    });
+    if (r.ok) {
+      toast(enabled ? 'Bot agent enabled' : 'Bot agent disabled', 'success');
+      navigate('agents');
+    } else {
+      toast(r.error || 'Failed to update bot agent', 'error');
+    }
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
+window.setPrimaryBotAgent = async function (jid) {
+  try {
+    const r = await api('/groups/' + encodeURIComponent(jid), {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: true, isPrimary: true }),
+    });
+    if (r.ok) {
+      toast('Primary bot selected', 'success');
+      navigate('agents');
+    } else {
+      toast(r.error || 'Failed to set primary bot', 'error');
+    }
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
   }
 };
 
