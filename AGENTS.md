@@ -4,7 +4,7 @@ Standalone personal AI assistant platform. See [README.md](README.md) for full d
 
 ## Quick Context
 
-Single Node.js process with multi-channel messaging (WhatsApp, Telegram, Signal), admin dashboard with plugin system, and containerized agent providers. Messages route to isolated Docker containers that can run Claude, Codex/GPT, or local-model providers. Each group has isolated filesystem and memory.
+Single Node.js process with multi-channel messaging (WhatsApp, Telegram, Signal), admin dashboard with plugin system, and containerized agent providers. Messages route to isolated Docker containers that can run Claude, Codex/GPT, OpenCode, or OpenAI-compatible/local-model providers. Each group has isolated filesystem state, while approved global memory and enabled shared skills can be reused across channels.
 
 ## Key Files
 
@@ -20,6 +20,8 @@ Single Node.js process with multi-channel messaging (WhatsApp, Telegram, Signal)
 | `src/db.ts`               | SQLite operations (messages, groups, sessions)                         |
 | `src/config.ts`           | Trigger pattern, paths, intervals                                      |
 | `src/router.ts`           | Message formatting and outbound routing                                |
+| `src/provider-router.ts`  | Provider profiles, capability matrix, model preflights                 |
+| `src/skill-registry.ts`   | Skill metadata, enable/scope/visibility, relevance scoring             |
 | `container/skills/`       | Provider-neutral skills loaded inside agent containers                 |
 | `groups/{name}/AGENTS.md` | Per-group agent instructions; canonical filename read by all providers |
 
@@ -38,19 +40,22 @@ Plugins live in `src/admin/plugins/` and self-register routes, sidebar items, an
 
 Personal/regional plugins (gitignored) are loaded dynamically if present in `src/admin/plugins/` or `plugins/`.
 
-## Container Skills
+## Memory And Skills
 
-Skills loaded at runtime inside agent containers (`container/skills/`). These are provider-neutral; the runner mounts them at `/workspace/skills` and mirrors them into provider-specific homes when needed.
+Skills loaded at runtime inside agent containers (`container/skills/`). These are provider-neutral; the runner builds an active per-group skill directory under `data/runtime-skills/`, mounts it at `/workspace/skills`, and mirrors it into provider-specific homes when needed.
 
-| Skill           | Trigger                                         |
-| --------------- | ----------------------------------------------- |
-| `agent-browser` | Browser automation and web inspection           |
-| `capabilities`  | Report installed skills, tools, and system info |
-| `status`        | Report container/session status                 |
+The skill registry controls:
 
-Personal container skills (gitignored) can be added to `container/skills/` and will be discovered automatically.
+- enabled/disabled state
+- scope: all agents, main-only, or channel agents
+- visibility: shared, private, or system
+- relevance triggers/examples used by the agent runner to inject only the most relevant skills
 
-`groups/**/MEMORY.md` is private runtime memory and must stay out of commits. The root `.gitignore` explicitly excludes it.
+Important bundled skill families include memory curation, journaling, task planning, report writing, GitHub issue work, code review, release management, email/calendar support, inbox triage, document review, web research, incident analysis, security review, operations planning, image/PDF/DOCX helpers, and status/capability reporting.
+
+Agents can call `mcp__nanocrab__list_skills` and `mcp__nanocrab__search_skills` to discover skills related to a request. If repeated instructions or a reusable workflow appears, the agent should ask whether NanoCrab should create a skill draft. Drafts must be approved before installation.
+
+`groups/**/MEMORY.md` is private runtime memory and must stay out of commits. The root `.gitignore` explicitly excludes it. Approved shared memories generate provider-neutral memory context for all configured channels.
 
 ## Credentials
 

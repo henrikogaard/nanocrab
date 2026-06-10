@@ -4,6 +4,20 @@ All notable changes to NanoCrab are documented here.
 
 ## [2.0.0-beta.1] - 2026-06-10
 
+### Beta1 Follow-Up Hardening
+
+- Added bot-agent enable/disable controls and primary-bot selection so only the primary bot receives startup warmup messages.
+- Added configurable startup notice behavior to reduce noisy restart messages.
+- Added Skills and Timeline dashboard surfaces under the workspace navigation.
+- Added bundled provider-neutral skills for memory curation, journaling, task planning, reports, GitHub issue work, code review, release management, email assistance, calendar assistance, contact context, web research, document review, meeting briefings, inbox triage, automation design, incident analysis, security review, and operations planning.
+- Added a skill registry with enabled state, scope, visibility, triggers, examples, risk level, required tools, relevance scoring, and active per-group skill directory generation.
+- Added `list_skills` and `search_skills` MCP tools so agents can discover skills related to a request.
+- Added skill suggestion queues and timeline entries based on recent conversation/task history.
+- Added the optional Infomaniak kSuite MCP preset while keeping private MCP servers and custom containers out of the default product setup.
+- Refreshed NanoCrab branding, logo usage, README positioning, command documentation, and dashboard mock data.
+- Linked the fresh NanoCrab v2 repository to `henrikogaard/nanocrab.git` and kept commits authored from the local workstation.
+- Created GitHub roadmap milestones, epics, and implementation issues for the Hermes/OpenClaw expansion.
+
 ### Hermes-Like Foundations
 
 - Added provider profiles and a static capability matrix for chat, coding, automations, memory, journal, skill factory, reports, documents, and vision.
