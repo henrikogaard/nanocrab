@@ -647,9 +647,10 @@ const skills = [
 ].map((skill) => ({
   scope: 'all',
   visibility: 'shared',
-  riskLevel: skill.name.includes('security') || skill.name.includes('ops')
-    ? 'high'
-    : 'low',
+  riskLevel:
+    skill.name.includes('security') || skill.name.includes('ops')
+      ? 'high'
+      : 'low',
   triggers: skill.name.split('-'),
   examples: [],
   requiredTools: [],

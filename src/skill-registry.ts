@@ -87,10 +87,9 @@ function normalizeState(value: Partial<SkillState> | undefined): SkillState {
 
 export function loadSkillState(): Record<string, SkillState> {
   try {
-    const raw = JSON.parse(fs.readFileSync(SKILL_STATE_PATH, 'utf-8')) as Record<
-      string,
-      Partial<SkillState>
-    >;
+    const raw = JSON.parse(
+      fs.readFileSync(SKILL_STATE_PATH, 'utf-8'),
+    ) as Record<string, Partial<SkillState>>;
     return Object.fromEntries(
       Object.entries(raw).map(([name, state]) => [name, normalizeState(state)]),
     );
@@ -143,7 +142,9 @@ function inferTriggers(name: string, description: string): string[] {
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, ' ')
     .split(/\s+/)
-    .filter((token) => token.length >= 4 && !['when', 'with', 'from'].includes(token));
+    .filter(
+      (token) => token.length >= 4 && !['when', 'with', 'from'].includes(token),
+    );
   return Array.from(new Set(tokens)).slice(0, 16);
 }
 
@@ -168,7 +169,9 @@ export function listSkillRegistry(): SkillRegistryEntry[] {
     gitIgnored = output
       .split('\n')
       .filter(Boolean)
-      .map((p: string) => p.replace('container/skills/', '').replace(/\/$/, ''));
+      .map((p: string) =>
+        p.replace('container/skills/', '').replace(/\/$/, ''),
+      );
   } catch {
     gitIgnored = [];
   }
@@ -206,7 +209,9 @@ export function listSkillRegistry(): SkillRegistryEntry[] {
           enabled: skillState.enabled,
           scope: skillState.scope,
           visibility: skillState.visibility,
-          triggers: triggers.length ? triggers : inferTriggers(name, description),
+          triggers: triggers.length
+            ? triggers
+            : inferTriggers(name, description),
           examples: splitList(fm.examples),
           riskLevel,
           requiredTools: splitList(fm['required-tools'] || fm['allowed-tools']),
@@ -282,7 +287,11 @@ export function prepareActiveSkillsDirectory(options: {
   groupFolder: string;
   isMain: boolean;
 }): string {
-  const destination = path.join(DATA_DIR, 'runtime-skills', options.groupFolder);
+  const destination = path.join(
+    DATA_DIR,
+    'runtime-skills',
+    options.groupFolder,
+  );
   fs.rmSync(destination, { recursive: true, force: true });
   fs.mkdirSync(destination, { recursive: true });
   for (const skill of listSkillRegistry()) {

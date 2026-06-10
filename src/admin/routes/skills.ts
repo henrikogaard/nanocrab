@@ -479,7 +479,11 @@ router.put('/:skillPath/state', (req: Request, res: Response) => {
     return;
   }
   const state = updateSkillState(skillPath, patch);
-  auditLog(req, 'skill_state_updated', `${skillPath}: ${JSON.stringify(patch)}`);
+  auditLog(
+    req,
+    'skill_state_updated',
+    `${skillPath}: ${JSON.stringify(patch)}`,
+  );
   res.json({
     ok: true,
     state,
