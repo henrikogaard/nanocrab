@@ -12,6 +12,7 @@ import {
   getSkillDraftContent,
   getSkillDraftDiff,
   listSkillDrafts,
+  proposeSkillDraft,
   rejectSkillDraft,
   SkillDraftStatus,
 } from '../../skill-factory.js';
@@ -36,6 +37,49 @@ function saveSkillState(state: Record<string, { enabled: boolean }>): void {
 export function isSkillEnabled(skillName: string): boolean {
   const state = loadSkillState();
   return state[skillName]?.enabled !== false; // default: enabled
+}
+
+function sanitizeDraftName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63);
+}
+
+function yamlScalar(value: string): string {
+  return JSON.stringify(value);
+}
+
+function buildSkillDraftMarkdown(input: {
+  name: string;
+  description: string;
+  instructions: string;
+  allowedTools?: string;
+}): string {
+  const name = sanitizeDraftName(input.name);
+  if (!name) throw new Error('Invalid skill name');
+  const description = input.description.trim();
+  if (!description) throw new Error('Description required');
+  const instructions = input.instructions.trim();
+  if (!instructions) throw new Error('Instructions required');
+
+  const frontmatter = [
+    '---',
+    `name: ${name}`,
+    `description: ${yamlScalar(description)}`,
+  ];
+  if (input.allowedTools?.trim()) {
+    frontmatter.push(`allowed-tools: ${input.allowedTools.trim()}`);
+  }
+  frontmatter.push('---');
+
+  const title = name
+    .split('-')
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(' ');
+  return `${frontmatter.join('\n')}\n\n# ${title}\n\n${instructions}\n`;
 }
 
 router.get('/', (_req: Request, res: Response) => {
@@ -125,6 +169,43 @@ router.get('/drafts', (req: Request, res: Response) => {
       ? (req.query.status as SkillDraftStatus)
       : undefined;
   res.json(listSkillDrafts(status));
+});
+
+router.post('/drafts', (req: Request, res: Response) => {
+  try {
+    const {
+      skillMd,
+      name,
+      description,
+      instructions,
+      allowedTools,
+      createdBy,
+      provenance,
+    } = req.body || {};
+    const markdown =
+      typeof skillMd === 'string' && skillMd.trim()
+        ? skillMd
+        : buildSkillDraftMarkdown({
+            name: String(name || ''),
+            description: String(description || ''),
+            instructions: String(instructions || ''),
+            allowedTools:
+              typeof allowedTools === 'string' ? allowedTools : undefined,
+          });
+    const draft = proposeSkillDraft({
+      skillMd: markdown,
+      createdBy: String(createdBy || 'dashboard'),
+      provenance: Array.isArray(provenance)
+        ? provenance.map((item) => String(item))
+        : ['source:dashboard'],
+    });
+    auditLog(req, 'skill_draft_created', draft.name);
+    res.status(201).json({ ok: true, draft });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 router.get('/drafts/:id', (req: Request, res: Response) => {

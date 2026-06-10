@@ -104,7 +104,7 @@ const PAGE_ALIASES = {
   docker: 'containers',
   providers: 'integrations',
   mcp: 'integrations',
-  skills: 'integrations',
+  skills: 'memory',
 };
 
 function canonicalPage(page) {
@@ -669,11 +669,18 @@ async function renderMemoryConsolidated(el) {
       'mem-tabs',
       [
         { id: 'memory', label: 'Shared Memory' },
+        { id: 'skills', label: 'Skills' },
+        { id: 'timeline', label: 'Timeline' },
         { id: 'wiki', label: 'Wiki' },
       ],
       'memory',
     )}</div>`;
   await renderMemory(document.getElementById('mem-tabs-memory'));
+  await renderSkills(document.getElementById('mem-tabs-skills'), {
+    embedded: true,
+    returnPage: 'memory',
+  });
+  await renderMemoryKnowledgeTimeline(document.getElementById('mem-tabs-timeline'));
   await renderWiki(document.getElementById('mem-tabs-wiki'));
 }
 
@@ -684,13 +691,11 @@ async function renderIntegrationsConsolidated(el) {
       [
         { id: 'mcp', label: 'MCP Servers' },
         { id: 'providers', label: 'AI Providers' },
-        { id: 'skills', label: 'Skills' },
       ],
       'mcp',
     )}</div>`;
   await renderMcp(document.getElementById('int-tabs-mcp'));
   await renderProviders(document.getElementById('int-tabs-providers'));
-  await renderSkills(document.getElementById('int-tabs-skills'));
 }
 
 async function renderDevHubConsolidated(el) {
@@ -2000,14 +2005,31 @@ window.setGroupProvider = async (groupFolder, category, providerId) => {
 };
 
 // Skills
-async function renderSkills(el) {
+async function renderSkills(el, options = {}) {
+  const returnPage = options.returnPage || 'memory';
   const [data, drafts] = await Promise.all([
     api('/skills'),
     api('/skills/drafts?status=pending').catch(() => []),
   ]);
   el.innerHTML = `
     <div class="page-header"><h2>Skills</h2>
-      <button class="btn btn-primary btn-sm" onclick="document.getElementById('new-skill-form').style.display=document.getElementById('new-skill-form').style.display==='none'?'block':'none'">New Skill</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('new-skill-draft-form').style.display=document.getElementById('new-skill-draft-form').style.display==='none'?'block':'none'">Draft from Instructions</button>
+        <button class="btn btn-sm btn-ghost" onclick="document.getElementById('new-skill-form').style.display=document.getElementById('new-skill-form').style.display==='none'?'block':'none'">Install Directly</button>
+      </div>
+    </div>
+    <div class="card" id="new-skill-draft-form" style="display:none">
+      <div class="card-title">Draft Skill From Instructions <span class="badge badge-info">Approval required</span></div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Create a provider-neutral skill draft from task instructions. It stays inactive until you review and approve it.</p>
+      <form id="skill-draft-create-form">
+        <div class="grid grid-2">
+          <div class="form-group"><label>Name</label><input id="skill-draft-name" placeholder="operation-briefing" required></div>
+          <div class="form-group"><label>Allowed Tools (optional)</label><input id="skill-draft-tools" placeholder="Bash(command:*), mcp__nanocrab__*"></div>
+        </div>
+        <div class="form-group"><label>Description</label><input id="skill-draft-desc" placeholder="When the agent should use this skill" required></div>
+        <div class="form-group"><label>Task Instructions</label><textarea id="skill-draft-instructions" style="width:100%;min-height:170px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical;line-height:1.55" placeholder="Describe the repeated task, expected output, rules, sources, safety checks, and examples."></textarea></div>
+        <button type="submit" class="btn btn-primary">Create Draft</button>
+      </form>
     </div>
     <div class="card" style="margin-bottom:12px">
       <div class="card-title">Skill Factory Drafts <span class="badge badge-muted">${drafts.length}</span></div>
@@ -2037,7 +2059,8 @@ async function renderSkills(el) {
       }
     </div>
     <div class="card" id="new-skill-form" style="display:none">
-      <div class="card-title">Create Container Skill</div>
+      <div class="card-title">Install Container Skill Directly</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Use this only for trusted admin-authored skills. The safer workflow is to create a draft and approve it.</p>
       <form id="skill-create-form">
         <div class="grid grid-2">
           <div class="form-group"><label>Name</label><input id="skill-name" placeholder="my-skill" required></div>
@@ -2087,6 +2110,28 @@ async function renderSkills(el) {
     <div id="skill-draft-viewer" style="display:none"></div>`;
 
   // Create form handler
+  document.getElementById('skill-draft-create-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const r = await api('/skills/drafts', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: document.getElementById('skill-draft-name').value,
+        description: document.getElementById('skill-draft-desc').value,
+        allowedTools:
+          document.getElementById('skill-draft-tools').value || undefined,
+        instructions:
+          document.getElementById('skill-draft-instructions').value ||
+          undefined,
+        createdBy: 'dashboard',
+        provenance: ['source:dashboard', 'kind:instruction-draft'],
+      }),
+    });
+    if (r.ok) {
+      toast('Skill draft created for review', 'success');
+      navigate(returnPage);
+    } else toast(r.error || 'Failed', 'error');
+  };
+
   document.getElementById('skill-create-form').onsubmit = async (e) => {
     e.preventDefault();
     const r = await api('/skills', {
@@ -2100,7 +2145,7 @@ async function renderSkills(el) {
     });
     if (r.ok) {
       toast(r.message || 'Created', 'success');
-      navigate('integrations');
+      navigate(returnPage);
     } else toast(r.error || 'Failed', 'error');
   };
 }
@@ -2134,7 +2179,7 @@ window.reviewSkillDraft = async (id, action) => {
         action === 'approve' ? 'Skill draft approved' : 'Skill draft rejected',
         'success',
       );
-      navigate('integrations');
+      navigate('memory');
     } else {
       toast(r.error || 'Failed', 'error');
     }
@@ -2188,7 +2233,7 @@ window.deleteSkill = async (skillPath, btnEl) => {
     const r = await api(`/skills/${skillPath}`, { method: 'DELETE' });
     if (r.ok) {
       toast(r.message || 'Deleted', 'success');
-      navigate('integrations');
+      navigate('memory');
     } else toast(r.error || 'Failed', 'error');
   });
 };
@@ -2443,21 +2488,188 @@ window.viewConversation = async (folder, filename) => {
   }
 };
 
+function memoryKnowledgeTimelineItems({ auditData, memories, drafts, limit = 25 }) {
+  const items = [];
+  const seen = new Set();
+  const addItem = (item) => {
+    const ts = item.timestamp || item.createdAt || item.created_at;
+    if (!ts) return;
+    const key = item.key || `${item.kind}:${ts}:${item.title}:${item.detail}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push({ ...item, timestamp: ts });
+  };
+
+  for (const memory of Array.isArray(memories) ? memories : []) {
+    addItem({
+      key: `memory-created:${memory.id}`,
+      kind: 'memory',
+      tone: memory.status === 'pending' ? 'warning' : 'accent',
+      title: 'Memory proposed',
+      detail: memory.content,
+      meta: `${memory.scope || 'memory'} / ${memory.type || 'fact'} / ${memory.status || 'pending'}`,
+      timestamp: memory.created_at,
+    });
+    if (memory.reviewed_at && memory.status !== 'pending') {
+      addItem({
+        key: `memory-reviewed:${memory.id}:${memory.status}`,
+        kind: 'memory',
+        tone:
+          memory.status === 'approved'
+            ? 'success'
+            : memory.status === 'rejected'
+              ? 'danger'
+              : 'warning',
+        title: `Memory ${memory.status}`,
+        detail: memory.content,
+        meta: `${memory.scope || 'memory'} / ${memory.type || 'fact'}`,
+        timestamp: memory.reviewed_at,
+      });
+    }
+  }
+
+  for (const draft of Array.isArray(drafts) ? drafts : []) {
+    addItem({
+      key: `skill-draft-created:${draft.id}`,
+      kind: 'skill',
+      tone: draft.status === 'pending' ? 'warning' : 'accent',
+      title: 'Skill draft proposed',
+      detail: draft.description || draft.name,
+      meta: `${draft.name} / version ${draft.version || 1} / ${draft.status}`,
+      timestamp: draft.createdAt,
+      action:
+        draft.status === 'pending'
+          ? `<button class="btn btn-sm btn-ghost" onclick="switchTab('mem-tabs','skills');setTimeout(()=>viewSkillDraft('${esc(draft.id)}'),50)">Review</button>`
+          : '',
+    });
+    if (draft.reviewedAt && draft.status !== 'pending') {
+      addItem({
+        key: `skill-draft-reviewed:${draft.id}:${draft.status}`,
+        kind: 'skill',
+        tone: draft.status === 'approved' ? 'success' : 'danger',
+        title:
+          draft.status === 'approved'
+            ? 'Skill installed'
+            : `Skill ${draft.status}`,
+        detail: draft.description || draft.name,
+        meta: `${draft.name} / version ${draft.installedVersion || draft.version || 1}`,
+        timestamp: draft.reviewedAt,
+      });
+    }
+  }
+
+  const timelineActions = new Set([
+    'memory_edit',
+    'memory_approved',
+    'memory_rejected',
+    'memory_marked_stale',
+    'memory_marked_contradicted',
+    'skill_draft_created',
+    'skill_draft_approved',
+    'skill_draft_rejected',
+    'skill_created',
+    'skill_updated',
+    'skill_deleted',
+    'skill_enabled',
+    'skill_disabled',
+  ]);
+  for (const event of Array.isArray(auditData) ? auditData : []) {
+    if (!timelineActions.has(event.action)) continue;
+    const isSkill = event.action.startsWith('skill');
+    const isDelete = event.action.endsWith('deleted');
+    addItem({
+      key: `audit:${event.timestamp}:${event.action}:${event.details || ''}`,
+      kind: isSkill ? 'skill' : 'memory',
+      tone: isDelete ? 'danger' : isSkill ? 'accent' : 'success',
+      title: event.action
+        .replaceAll('_', ' ')
+        .replace(/^\w/, (letter) => letter.toUpperCase()),
+      detail: event.details || '',
+      meta: `${event.ip || 'dashboard'} / audit`,
+      timestamp: event.timestamp,
+    });
+  }
+
+  return items
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+    .slice(0, limit);
+}
+
+function renderTimelineItems(items) {
+  if (!items.length) {
+    return '<div class="empty" style="padding:12px">No memory or skill changes recorded yet</div>';
+  }
+  const color = (tone) =>
+    tone === 'success'
+      ? 'var(--success)'
+      : tone === 'danger'
+        ? 'var(--error)'
+        : tone === 'warning'
+          ? 'var(--warning)'
+          : 'var(--accent)';
+  return `
+    <div style="position:relative;padding-left:26px">
+      <div style="position:absolute;left:8px;top:0;bottom:0;width:2px;background:var(--border)"></div>
+      ${items
+        .map(
+          (item) => `
+        <div style="position:relative;margin-bottom:16px">
+          <div style="position:absolute;left:-22px;top:4px;width:11px;height:11px;border-radius:50%;background:${color(item.tone)};box-shadow:0 0 0 4px color-mix(in srgb, ${color(item.tone)} 18%, transparent)"></div>
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+            <div style="min-width:0">
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
+                <span class="badge ${item.kind === 'skill' ? 'badge-accent' : 'badge-info'}">${esc(item.kind)}</span>
+                <span style="font-size:13px;font-weight:700;color:var(--text)">${esc(item.title)}</span>
+              </div>
+              <div style="font-size:12px;color:var(--text-muted);line-height:1.45">${esc(item.detail || '')}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${formatTime(item.timestamp)} &middot; ${esc(item.meta || '')}</div>
+            </div>
+            ${item.action || ''}
+          </div>
+        </div>`,
+        )
+        .join('')}
+    </div>`;
+}
+
+async function renderMemoryKnowledgeTimeline(el) {
+  const [auditData, memories, drafts] = await Promise.all([
+    api('/audit?limit=150').catch(() => []),
+    api('/memory?limit=150').catch(() => []),
+    api('/skills/drafts').catch(() => []),
+  ]);
+  const items = memoryKnowledgeTimelineItems({
+    auditData,
+    memories,
+    drafts,
+    limit: 50,
+  });
+  el.innerHTML = `
+    <div class="page-header"><h2>Memory Timeline</h2></div>
+    <div class="card">
+      <div class="card-title">Memory & Skill Activity</div>
+      ${renderTimelineItems(items)}
+    </div>`;
+}
+
 // Memory
 async function renderMemory(el) {
-  const [memData, groups, auditData, structuredMemories, journalEntries] =
+  const [memData, groups, auditData, structuredMemories, journalEntries, drafts] =
     await Promise.all([
       api('/files/memory'),
       api('/groups'),
       api('/audit?limit=50').catch(() => []),
       api('/memory?limit=100').catch(() => []),
       api('/journal/entries?limit=10').catch(() => []),
+      api('/skills/drafts').catch(() => []),
     ]);
 
-  // Filter audit log for memory-related actions
-  const memoryEvents = (Array.isArray(auditData) ? auditData : [])
-    .filter((e) => e.action === 'memory_edit')
-    .slice(0, 10);
+  const timelineItems = memoryKnowledgeTimelineItems({
+    auditData,
+    memories: structuredMemories,
+    drafts,
+    limit: 12,
+  });
 
   // Load per-group instruction snippets for context
   const groupMemories = await Promise.all(
@@ -2573,25 +2785,8 @@ async function renderMemory(el) {
       </div>
     </div>
     <div class="card">
-      <div class="card-title">Memory Timeline</div>
-      ${
-        memoryEvents.length === 0
-          ? '<div class="empty" style="padding:12px">No memory changes recorded yet</div>'
-          : `
-        <div style="position:relative;padding-left:24px">
-          <div style="position:absolute;left:8px;top:0;bottom:0;width:2px;background:var(--border)"></div>
-          ${memoryEvents
-            .map(
-              (e) => `
-            <div style="position:relative;margin-bottom:16px">
-              <div style="position:absolute;left:-20px;top:4px;width:10px;height:10px;border-radius:50%;background:var(--accent)"></div>
-              <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(e.details || 'Memory updated')}</div>
-              <div style="font-size:11px;color:var(--text-muted)">${formatTime(e.timestamp)} &middot; ${esc(e.ip || '')}</div>
-            </div>`,
-            )
-            .join('')}
-        </div>`
-      }
+      <div class="card-title">Recent Memory & Skill Activity</div>
+      ${renderTimelineItems(timelineItems)}
     </div>
     <div class="card">
       <div class="card-title">Per-Channel Context</div>

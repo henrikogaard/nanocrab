@@ -1286,7 +1286,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   }
   if (pathname === '/skills') return { installed: skills, available: [] };
   if (pathname === '/skills/drafts') {
-    return [
+    const drafts = [
       {
         id: 'skill-mock-1',
         name: 'operation-briefing',
@@ -1298,8 +1298,34 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         reviewedAt: null,
         draftDir: '/mock/store/skill-drafts/skill-mock-1',
         installDir: null,
+        version: 1,
+        installedVersion: null,
+        syncStatus: 'draft',
+        validationStatus: 'valid',
+        validationErrors: [],
+        provenance: ['source:mock-operations-chat'],
+      },
+      {
+        id: 'skill-mock-2',
+        name: 'daily-summary',
+        description:
+          'Installed skill for writing daily summaries for casual players.',
+        status: 'approved',
+        createdBy: 'dashboard',
+        createdAt: iso(75),
+        reviewedAt: iso(38),
+        draftDir: '/mock/store/skill-drafts/skill-mock-2',
+        installDir: '/mock/nanocrab/container/skills/daily-summary',
+        version: 1,
+        installedVersion: 1,
+        syncStatus: 'installed',
+        validationStatus: 'valid',
+        validationErrors: [],
+        provenance: ['source:dashboard', 'kind:instruction-draft'],
       },
     ];
+    const status = typeof req.query.status === 'string' ? req.query.status : '';
+    return status ? drafts.filter((draft) => draft.status === status) : drafts;
   }
   if (pathname.startsWith('/skills/drafts/')) {
     return {
@@ -1484,6 +1510,34 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   }
   if (pathname === '/audit') {
     return [
+      {
+        timestamp: iso(18),
+        action: 'skill_draft_created',
+        ip: '92.221.30.107',
+        details: 'operation-briefing',
+        userAgent: 'Mock browser',
+      },
+      {
+        timestamp: iso(24),
+        action: 'memory_approved',
+        ip: '92.221.30.107',
+        details: 'mem-mock-2',
+        userAgent: 'Mock browser',
+      },
+      {
+        timestamp: iso(38),
+        action: 'skill_draft_approved',
+        ip: '92.221.30.107',
+        details: 'daily-summary',
+        userAgent: 'Mock browser',
+      },
+      {
+        timestamp: iso(66),
+        action: 'memory_edit',
+        ip: '92.221.30.107',
+        details: 'Updated shared MEMORY.md',
+        userAgent: 'Mock browser',
+      },
       {
         timestamp: iso(11),
         action: 'login_success',
