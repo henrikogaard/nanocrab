@@ -243,7 +243,9 @@ function createSchema(database: Database.Database): void {
     database.exec(
       `ALTER TABLE registered_groups ADD COLUMN enabled INTEGER DEFAULT 1`,
     );
-    database.exec(`UPDATE registered_groups SET enabled = 1 WHERE enabled IS NULL`);
+    database.exec(
+      `UPDATE registered_groups SET enabled = 1 WHERE enabled IS NULL`,
+    );
   } catch {
     /* column already exists */
   }

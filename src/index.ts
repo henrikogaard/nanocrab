@@ -195,8 +195,7 @@ function isPrimaryBot(jid: string, group: RegisteredGroup): boolean {
 
   const fallbackPrimary = Object.entries(registeredGroups)
     .filter(
-      ([, candidate]) =>
-        candidate.isMain === true && isGroupEnabled(candidate),
+      ([, candidate]) => candidate.isMain === true && isGroupEnabled(candidate),
     )
     .sort((a, b) => a[1].added_at.localeCompare(b[1].added_at))[0];
   return fallbackPrimary?.[0] === jid;

@@ -76,8 +76,13 @@ router.put('/:jid', (req: Request, res: Response) => {
   }
 
   const enabled =
-    updates.enabled === undefined ? existing.enabled !== false : !!updates.enabled;
-  const isPrimary = updates.isPrimary === undefined ? existing.isPrimary === true : !!updates.isPrimary;
+    updates.enabled === undefined
+      ? existing.enabled !== false
+      : !!updates.enabled;
+  const isPrimary =
+    updates.isPrimary === undefined
+      ? existing.isPrimary === true
+      : !!updates.isPrimary;
 
   if (isPrimary && !enabled) {
     res.status(400).json({ error: 'Primary bot must be enabled' });
