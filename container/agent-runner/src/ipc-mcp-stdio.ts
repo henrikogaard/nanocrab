@@ -1034,6 +1034,40 @@ server.tool(
 );
 
 server.tool(
+  'list_skills',
+  'List active provider-neutral skills available to this group, including scope, visibility, triggers, and descriptions.',
+  {},
+  async () => {
+    try {
+      return hostResultContent(await requestHostTask('list_skills', {}));
+    } catch (err) {
+      return hostErrorContent(err);
+    }
+  },
+);
+
+server.tool(
+  'search_skills',
+  'Find skills related to a request or task. Use when the user asks what skill applies, or before deciding whether to propose a new skill.',
+  {
+    query: z.string().min(1),
+    limit: z.number().int().min(1).max(30).optional(),
+  },
+  async (args) => {
+    try {
+      return hostResultContent(
+        await requestHostTask('search_skills', {
+          query: args.query,
+          limit: args.limit,
+        }),
+      );
+    } catch (err) {
+      return hostErrorContent(err);
+    }
+  },
+);
+
+server.tool(
   'propose_skill_draft',
   'Propose a provider-neutral skill draft. The owner must approve it before it is installed into container/skills.',
   {

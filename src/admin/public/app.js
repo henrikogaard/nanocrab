@@ -2216,13 +2216,34 @@ async function renderSkills(el, options = {}) {
         ${skills
           .map(
             (s) => `
-          <div class="channel-card">
+          <div class="channel-card" style="align-items:flex-start">
             <div class="channel-info" style="flex:1;min-width:0">
-              <span class="channel-name">${esc(s.name)}</span>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <span class="channel-name">${esc(s.name)}</span>
+                <span class="badge ${s.enabled ? 'badge-success' : 'badge-muted'}">${s.enabled ? 'Enabled' : 'Disabled'}</span>
+                <span class="badge badge-info">${esc(s.scope || 'all')}</span>
+                <span class="badge ${s.visibility === 'private' ? 'badge-warning' : 'badge-muted'}">${esc(s.visibility || 'shared')}</span>
+                ${s.riskLevel ? `<span class="badge ${s.riskLevel === 'high' ? 'badge-error' : s.riskLevel === 'medium' ? 'badge-warning' : 'badge-muted'}">risk ${esc(s.riskLevel)}</span>` : ''}
+              </div>
               <div style="font-size:12px;color:var(--text-muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis">${esc(s.description || 'No description')}</div>
+              ${
+                Array.isArray(s.triggers) && s.triggers.length
+                  ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px">Triggers: ${esc(s.triggers.slice(0, 10).join(', '))}</div>`
+                  : ''
+              }
             </div>
-            <div style="display:flex;gap:4px;flex-shrink:0;align-items:center">
-              ${cat !== 'core' ? `<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);cursor:pointer"><input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleSkill('${esc(s.path)}',this.checked)"></label>` : ''}
+            <div style="display:flex;gap:6px;flex-shrink:0;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+              <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted);cursor:pointer"><input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="updateSkillState('${esc(s.path)}',{enabled:this.checked})"> Active</label>
+              <select class="input-sm" style="width:auto;min-width:92px" onchange="updateSkillState('${esc(s.path)}',{scope:this.value})">
+                <option value="all" ${(s.scope || 'all') === 'all' ? 'selected' : ''}>All</option>
+                <option value="main" ${s.scope === 'main' ? 'selected' : ''}>Main only</option>
+                <option value="channels" ${s.scope === 'channels' ? 'selected' : ''}>Channels</option>
+              </select>
+              <select class="input-sm" style="width:auto;min-width:98px" onchange="updateSkillState('${esc(s.path)}',{visibility:this.value})">
+                <option value="shared" ${(s.visibility || 'shared') === 'shared' ? 'selected' : ''}>Shared</option>
+                <option value="private" ${s.visibility === 'private' ? 'selected' : ''}>Private</option>
+                <option value="system" ${s.visibility === 'system' ? 'selected' : ''}>System</option>
+              </select>
               <button class="btn btn-sm btn-ghost" onclick="editSkill('${esc(s.path)}')">Edit</button>
               ${cat !== 'core' ? `<button class="btn btn-sm btn-danger" onclick="deleteSkill('${esc(s.path)}',this)">Delete</button>` : ''}
             </div>
@@ -2364,12 +2385,17 @@ window.reviewSkillDraft = async (id, action) => {
 };
 
 window.toggleSkill = async (skillPath, enabled) => {
+  return updateSkillState(skillPath, { enabled });
+};
+
+window.updateSkillState = async (skillPath, patch) => {
   try {
-    await api(`/skills/${skillPath}/toggle`, {
+    await api(`/skills/${skillPath}/state`, {
       method: 'PUT',
-      body: JSON.stringify({ enabled }),
+      body: JSON.stringify(patch),
     });
-    toast(enabled ? 'Skill enabled' : 'Skill disabled', 'success');
+    toast('Skill registry updated', 'success');
+    navigate(currentPage === 'skills' ? 'skills' : 'memory');
   } catch (e) {
     toast('Failed: ' + e.message, 'error');
   }

@@ -37,6 +37,7 @@ import {
 } from './agent-provider.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { prepareActiveSkillsDirectory } from './skill-registry.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -137,7 +138,10 @@ function buildVolumeMounts(
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
-  const skillsSrc = path.join(projectRoot, 'container', 'skills');
+  const skillsSrc = prepareActiveSkillsDirectory({
+    groupFolder: group.folder,
+    isMain,
+  });
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
@@ -243,14 +247,12 @@ function buildVolumeMounts(
     );
   }
 
-  if (fs.existsSync(skillsSrc)) {
-    syncSkillDirectory(skillsSrc, path.join(groupSessionsDir, 'skills'));
-    mounts.push({
-      hostPath: skillsSrc,
-      containerPath: '/workspace/skills',
-      readonly: true,
-    });
-  }
+  syncSkillDirectory(skillsSrc, path.join(groupSessionsDir, 'skills'));
+  mounts.push({
+    hostPath: skillsSrc,
+    containerPath: '/workspace/skills',
+    readonly: true,
+  });
   // Optional shared data directories for custom MCP servers
   // Auto-mount any subdirectory of data/ that has a .mount marker file
   // or is listed in data/.mounts (one dir name per line)
@@ -272,9 +274,7 @@ function buildVolumeMounts(
   // Shared Codex OAuth tokens (persists ChatGPT login across containers)
   const codexDir = path.join(DATA_DIR, 'codex');
   fs.mkdirSync(codexDir, { recursive: true });
-  if (fs.existsSync(skillsSrc)) {
-    syncSkillDirectory(skillsSrc, path.join(codexDir, 'skills'));
-  }
+  syncSkillDirectory(skillsSrc, path.join(codexDir, 'skills'));
   mounts.push({
     hostPath: codexDir,
     containerPath: '/home/node/.codex',

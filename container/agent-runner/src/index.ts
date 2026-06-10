@@ -137,11 +137,25 @@ function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
 }
 
-function readProviderNeutralSkillsContext(): string | undefined {
-  const skillsDir = '/workspace/skills';
-  if (!fs.existsSync(skillsDir)) return undefined;
+interface SkillRegistryEntry {
+  name: string;
+  description: string;
+  path: string;
+  triggers?: string[];
+  examples?: string[];
+  riskLevel?: string;
+}
 
-  const entries: string[] = [];
+function readActiveSkillRegistry(skillsDir: string): SkillRegistryEntry[] {
+  const registryPath = path.join(skillsDir, 'registry.json');
+  if (fs.existsSync(registryPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(registryPath, 'utf-8')) as SkillRegistryEntry[];
+    } catch (err) {
+      log(`Skill registry parse failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  const entries: SkillRegistryEntry[] = [];
   for (const dirName of fs.readdirSync(skillsDir)) {
     const skillDir = path.join(skillsDir, dirName);
     if (!fs.statSync(skillDir).isDirectory()) continue;
@@ -160,16 +174,58 @@ function readProviderNeutralSkillsContext(): string | undefined {
         if (descMatch) description = descMatch[1].trim();
       }
     }
-
-    const label = name === dirName ? dirName : `${dirName} (${name})`;
-    entries.push(description ? `- ${label}: ${description}` : `- ${label}`);
+    entries.push({ name, description, path: dirName });
   }
+  return entries;
+}
+
+function scoreSkill(skill: SkillRegistryEntry, request: string): number {
+  const text = request.toLowerCase();
+  const terms = new Set(
+    text
+      .replace(/[^a-z0-9\s-]/g, ' ')
+      .split(/\s+/)
+      .filter((token) => token.length >= 3),
+  );
+  let score = 0;
+  for (const trigger of skill.triggers || []) {
+    const normalized = trigger.toLowerCase();
+    if (text.includes(normalized) || terms.has(normalized)) score += 6;
+  }
+  const haystack = `${skill.name} ${skill.description}`.toLowerCase();
+  for (const term of terms) {
+    if (haystack.includes(term)) score += 2;
+  }
+  if (text.includes(skill.name.toLowerCase())) score += 20;
+  return score;
+}
+
+function readProviderNeutralSkillsContext(request = ''): string | undefined {
+  const skillsDir = '/workspace/skills';
+  if (!fs.existsSync(skillsDir)) return undefined;
+
+  const registry = readActiveSkillRegistry(skillsDir);
+  const ranked = registry
+    .map((skill) => ({ ...skill, score: scoreSkill(skill, request) }))
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  const likely = ranked.filter((skill) => skill.score > 0).slice(0, 8);
+  const fallback = ranked.slice(0, 12);
+  const selected = likely.length ? likely : fallback;
+  const entries = selected.map((skill) => {
+    const label = skill.name === skill.path ? skill.path : `${skill.path} (${skill.name})`;
+    const risk = skill.riskLevel ? ` risk:${skill.riskLevel}` : '';
+    return skill.description
+      ? `- ${label}:${risk} ${skill.description}`
+      : `- ${label}:${risk}`;
+  });
 
   if (entries.length === 0) return undefined;
 
   return [
     'Provider-neutral agent skills are available at /workspace/skills.',
+    'The entries below are the currently active/relevant skill registry slice for this request.',
     "When a user request matches a listed skill, read that skill's SKILL.md before acting.",
+    'If the user asks what skills exist or which skills relate to a request, use mcp__nanocrab__list_skills or mcp__nanocrab__search_skills when available.',
     'Skill growth policy: when the user repeats a workflow, gives durable operating instructions, or asks for a reusable way of doing something, briefly ask whether NanoCrab should make a skill from it. If the user agrees, use mcp__nanocrab__propose_skill_draft with a complete provider-neutral SKILL.md. Drafts require owner approval before installation.',
     entries.join('\n'),
   ].join('\n');
@@ -215,14 +271,16 @@ function discoverExtraDirs(): string[] {
 }
 
 function buildSharedSystemContext(
-  extraDirs: string[] = discoverExtraDirs(),
+  extraDirs: string[] | undefined = discoverExtraDirs(),
+  request = '',
 ): string {
+  const resolvedExtraDirs = extraDirs || discoverExtraDirs();
   return (
     joinSystemContext([
       readAgentInstructionsFromDir('/workspace/group'),
       readAgentInstructionsFromDir('/workspace/global'),
-      ...extraDirs.map(readAgentInstructionsFromDir),
-      readProviderNeutralSkillsContext(),
+      ...resolvedExtraDirs.map(readAgentInstructionsFromDir),
+      readProviderNeutralSkillsContext(request),
     ]) || ''
   );
 }
@@ -661,7 +719,10 @@ async function runQuery(
 
   // Load shared system context for all groups. AGENTS.md is canonical;
   // CLAUDE.md is only a backward-compatible fallback.
-  const sharedSystemContext = buildSharedSystemContext(extraDirs);
+  const sharedSystemContext = buildSharedSystemContext(
+    extraDirs,
+    containerInput.prompt,
+  );
 
   for await (const message of query({
     prompt: stream,
@@ -814,7 +875,7 @@ async function runQueryCodex(
   // Build system prompt from instruction and skill files.
   // AGENTS.md is canonical; CLAUDE.md is only a backward-compatible fallback.
   const extraDirs = discoverExtraDirs();
-  const systemPrompt = buildSharedSystemContext(extraDirs);
+  const systemPrompt = buildSharedSystemContext(extraDirs, prompt);
 
   const tomlString = (value: string) => JSON.stringify(value);
   const tomlArray = (values: string[]) =>
@@ -966,7 +1027,7 @@ async function runQueryOpenAiCompatible(
     );
   }
 
-  const systemPrompt = buildSharedSystemContext();
+  const systemPrompt = buildSharedSystemContext(undefined, prompt);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -1107,7 +1168,7 @@ async function runQueryOpenCode(
     containerInput.model ||
     process.env.DEFAULT_MODEL ||
     'opencode/grok-code-fast-1';
-  const systemPrompt = buildSharedSystemContext();
+  const systemPrompt = buildSharedSystemContext(undefined, containerInput.prompt);
   const effectivePrompt = systemPrompt.trim()
     ? `${systemPrompt.trim()}\n\nUser request:\n${prompt}`
     : prompt;

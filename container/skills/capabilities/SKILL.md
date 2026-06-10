@@ -65,6 +65,7 @@ NanoCrab exposes these MCP tools via the compatibility `mcp__nanocrab__*` prefix
 - `propose_memory` — propose structured long-term memory for owner approval
 - `list_memories` / `approve_memory` / `reject_memory` — review memory records (main only)
 - `record_journal_event` / `search_journal_events` — store and search notable events
+- `list_skills` / `search_skills` — inspect the active skill registry and find skills related to a request
 - `propose_skill_draft` — propose provider-neutral skill drafts
 - `list_skill_drafts` / `approve_skill_draft` / `reject_skill_draft` — review and install skills (main only)
 - `create_artifact` / `list_artifacts` — create and list group artifacts

@@ -38,6 +38,7 @@ import {
 } from './skill-factory.js';
 import { createReportJob, listReportJobs } from './report-jobs.js';
 import { createResearchJob, listResearchJobs } from './research-jobs.js';
+import { listSkillRegistry, scoreSkillsForRequest } from './skill-registry.js';
 import { ProviderPurpose, PROVIDER_PURPOSES } from './provider-router.js';
 import { RegisteredGroup } from './types.js';
 
@@ -966,6 +967,36 @@ export async function processTaskIpc(
           createdBy: sourceGroup,
         });
         writeIpcOk(sourceGroup, data.requestId, draft);
+      } catch (err) {
+        writeIpcError(sourceGroup, data.requestId, err);
+      }
+      break;
+
+    case 'list_skills':
+      writeIpcOk(
+        sourceGroup,
+        data.requestId,
+        listSkillRegistry().filter((skill) => {
+          if (!skill.enabled) return false;
+          if (!isMain && skill.visibility === 'private') return false;
+          if (!isMain && skill.scope === 'main') return false;
+          if (isMain && skill.scope === 'channels') return false;
+          return true;
+        }),
+      );
+      break;
+
+    case 'search_skills':
+      try {
+        if (!data.query) throw new Error('query is required');
+        writeIpcOk(
+          sourceGroup,
+          data.requestId,
+          scoreSkillsForRequest(String(data.query), {
+            isMain,
+            limit: typeof data.limit === 'number' ? data.limit : undefined,
+          }),
+        );
       } catch (err) {
         writeIpcError(sourceGroup, data.requestId, err);
       }

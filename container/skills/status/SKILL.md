@@ -51,7 +51,7 @@ Confirm which tool families are available to you:
 - **Core:** Bash, Read, Write, Edit, Glob, Grep
 - **Web:** WebSearch, WebFetch
 - **Orchestration:** Task, TaskOutput, TaskStop, TeamCreate, TeamDelete, SendMessage
-- **MCP:** `mcp__nanocrab__*` (send_message, send_file, schedule_task, task controls, register_group, coding jobs, GitHub issues, memories, journal, skill drafts, artifacts)
+- **MCP:** `mcp__nanocrab__*` (send_message, send_file, schedule_task, task controls, register_group, coding jobs, GitHub issues, memories, journal, skill registry/search, skill drafts, artifacts)
 
 ### 4. Container utilities
 

@@ -596,6 +596,41 @@ const skills = [
     enabled: true,
   },
   {
+    name: 'ops-commander',
+    description: 'Coordinate operations with orders and readiness checks.',
+    path: 'ops-commander',
+    category: 'core',
+    enabled: true,
+  },
+  {
+    name: 'security-reviewer',
+    description: 'Review configs, MCPs, providers, ports, and permissions.',
+    path: 'security-reviewer',
+    category: 'core',
+    enabled: true,
+  },
+  {
+    name: 'incident-analyst',
+    description: 'Reconstruct timelines and postmortems from events and logs.',
+    path: 'incident-analyst',
+    category: 'core',
+    enabled: true,
+  },
+  {
+    name: 'web-researcher',
+    description: 'Research current information with sources and citations.',
+    path: 'web-researcher',
+    category: 'core',
+    enabled: true,
+  },
+  {
+    name: 'automation-designer',
+    description: 'Design safe recurring workflows and monitors.',
+    path: 'automation-designer',
+    category: 'core',
+    enabled: true,
+  },
+  {
     name: 'docx-generation',
     description: 'Generate Word documents and reports.',
     path: 'docx-generation',
@@ -609,7 +644,17 @@ const skills = [
     category: 'custom',
     enabled: true,
   },
-];
+].map((skill) => ({
+  scope: 'all',
+  visibility: 'shared',
+  riskLevel: skill.name.includes('security') || skill.name.includes('ops')
+    ? 'high'
+    : 'low',
+  triggers: skill.name.split('-'),
+  examples: [],
+  requiredTools: [],
+  ...skill,
+}));
 
 const wikiPages = [
   {
@@ -1368,6 +1413,20 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
     ];
   }
   if (pathname === '/skills') return { installed: skills, available: [] };
+  if (pathname === '/skills/search') {
+    return skills
+      .filter((skill) =>
+        `${skill.name} ${skill.description} ${skill.triggers.join(' ')}`
+          .toLowerCase()
+          .includes(String(req.query.q || '').toLowerCase()),
+      )
+      .slice(0, 8)
+      .map((skill, index) => ({
+        ...skill,
+        score: 20 - index,
+        reasons: ['mock-match'],
+      }));
+  }
   if (pathname === '/skills/suggestions') {
     return [
       {

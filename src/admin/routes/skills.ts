@@ -2,11 +2,17 @@ import { Router, Request, Response } from 'express';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
-import { execFileSync } from 'child_process';
 import { auditLog } from '../security.js';
 import { logger } from '../../logger.js';
 
 import { STORE_DIR } from '../../config.js';
+import {
+  listSkillRegistry,
+  scoreSkillsForRequest,
+  SkillScope,
+  SkillVisibility,
+  updateSkillState,
+} from '../../skill-registry.js';
 import {
   approveSkillDraft,
   getSkillDraft,
@@ -20,7 +26,6 @@ import {
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
-const SKILL_STATE_PATH = path.join(STORE_DIR, 'skill-state.json');
 const MESSAGES_DB_PATH = path.join(STORE_DIR, 'messages.db');
 
 interface SuggestedSkill {
@@ -31,24 +36,6 @@ interface SuggestedSkill {
   evidenceCount: number;
   instructions: string;
   provenance: string[];
-}
-
-function loadSkillState(): Record<string, { enabled: boolean }> {
-  try {
-    return JSON.parse(fs.readFileSync(SKILL_STATE_PATH, 'utf-8'));
-  } catch {
-    return {};
-  }
-}
-
-function saveSkillState(state: Record<string, { enabled: boolean }>): void {
-  fs.mkdirSync(path.dirname(SKILL_STATE_PATH), { recursive: true });
-  fs.writeFileSync(SKILL_STATE_PATH, JSON.stringify(state, null, 2));
-}
-
-export function isSkillEnabled(skillName: string): boolean {
-  const state = loadSkillState();
-  return state[skillName]?.enabled !== false; // default: enabled
 }
 
 function sanitizeDraftName(name: string): string {
@@ -95,17 +82,7 @@ function buildSkillDraftMarkdown(input: {
 }
 
 function listInstalledSkillNames(): Set<string> {
-  const skillsDir = path.join(PROJECT_ROOT, 'container', 'skills');
-  try {
-    return new Set(
-      fs
-        .readdirSync(skillsDir, { withFileTypes: true })
-        .filter((dir) => dir.isDirectory())
-        .map((dir) => dir.name),
-    );
-  } catch {
-    return new Set();
-  }
+  return new Set(listSkillRegistry().map((skill) => skill.path));
 }
 
 function keywordCount(messages: string[], patterns: RegExp[]): number {
@@ -230,94 +207,21 @@ function buildSkillSuggestions(): SuggestedSkill[] {
 }
 
 router.get('/', (_req: Request, res: Response) => {
-  const skillsDir = path.join(PROJECT_ROOT, 'container', 'skills');
+  res.json({ installed: listSkillRegistry(), available: [] });
+});
 
-  // Bundled skills that ship with NanoCrab.
-  const CORE_SKILLS = [
-    'agent-browser',
-    'capabilities',
-    'code-reviewer',
-    'email-assistant',
-    'github-issue-agent',
-    'journalist',
-    'memory-curator',
-    'release-manager',
-    'report-writer',
-    'status',
-    'task-planner',
-    'slack-formatting',
-  ];
-  // Plugin-linked skills (managed by NanoCrab plugins)
-  const PLUGIN_SKILLS = [
-    'agent-messaging',
-    'google-workspace',
-    'infomaniak-ksuite',
-  ];
-
-  // Detect custom (gitignored) skills
-  let gitIgnored: string[] = [];
-  try {
-    const output = execFileSync(
-      'git',
-      [
-        'ls-files',
-        '--others',
-        '--ignored',
-        '--exclude-standard',
-        '--directory',
-        'container/skills/',
-      ],
-      { cwd: PROJECT_ROOT, encoding: 'utf-8', timeout: 5000 },
-    );
-    gitIgnored = output
-      .split('\n')
-      .filter(Boolean)
-      .map((p) => p.replace('container/skills/', '').replace(/\/$/, ''));
-  } catch {}
-
-  // Installed skills
-  const installed: {
-    name: string;
-    description: string;
-    path: string;
-    category: string;
-    enabled: boolean;
-  }[] = [];
-  try {
-    const dirs = fs
-      .readdirSync(skillsDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory());
-    for (const dir of dirs) {
-      const skillMd = path.join(skillsDir, dir.name, 'SKILL.md');
-      let name = dir.name;
-      let description = '';
-      if (fs.existsSync(skillMd)) {
-        const content = fs.readFileSync(skillMd, 'utf-8');
-        const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-        if (fmMatch) {
-          const fm = fmMatch[1];
-          const nameMatch = fm.match(/^name:\s*(.+)$/m);
-          const descMatch = fm.match(/^description:\s*(.+)$/m);
-          if (nameMatch) name = nameMatch[1].trim();
-          if (descMatch) description = descMatch[1].trim();
-        }
-      }
-      const isCustom = gitIgnored.includes(dir.name);
-      const category = isCustom
-        ? 'custom'
-        : CORE_SKILLS.includes(dir.name)
-          ? 'core'
-          : PLUGIN_SKILLS.includes(dir.name)
-            ? 'plugin'
-            : 'tool';
-      const enabled = isSkillEnabled(dir.name);
-      installed.push({ name, description, path: dir.name, category, enabled });
-    }
-  } catch {
-    // skills dir may not exist
+router.get('/search', (req: Request, res: Response) => {
+  const query = String(req.query.q || '').trim();
+  if (!query) {
+    res.status(400).json({ error: 'q query parameter required' });
+    return;
   }
-
-  res.json({ installed, available: [] });
+  res.json(
+    scoreSkillsForRequest(query, {
+      isMain: req.query.main !== 'false',
+      limit: Math.min(parseInt(String(req.query.limit || '8'), 10) || 8, 30),
+    }),
+  );
 });
 
 router.get('/drafts', (req: Request, res: Response) => {
@@ -533,22 +437,74 @@ router.delete('/:skillPath', (req: Request, res: Response) => {
 });
 
 // Enable/disable a skill
+router.put('/:skillPath/state', (req: Request, res: Response) => {
+  const skillPath = req.params.skillPath as string;
+  if (!/^[a-z0-9-]+$/.test(skillPath)) {
+    res.status(400).json({ error: 'Invalid skill name' });
+    return;
+  }
+  const { enabled, scope, visibility } = req.body || {};
+  const patch: {
+    enabled?: boolean;
+    scope?: SkillScope;
+    visibility?: SkillVisibility;
+  } = {};
+  if (enabled !== undefined) {
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({ error: 'enabled must be boolean' });
+      return;
+    }
+    patch.enabled = enabled;
+  }
+  if (scope !== undefined) {
+    if (scope !== 'all' && scope !== 'main' && scope !== 'channels') {
+      res.status(400).json({ error: 'Invalid skill scope' });
+      return;
+    }
+    patch.scope = scope;
+  }
+  if (visibility !== undefined) {
+    if (
+      visibility !== 'shared' &&
+      visibility !== 'private' &&
+      visibility !== 'system'
+    ) {
+      res.status(400).json({ error: 'Invalid skill visibility' });
+      return;
+    }
+    patch.visibility = visibility;
+  }
+  if (Object.keys(patch).length === 0) {
+    res.status(400).json({ error: 'No state changes provided' });
+    return;
+  }
+  const state = updateSkillState(skillPath, patch);
+  auditLog(req, 'skill_state_updated', `${skillPath}: ${JSON.stringify(patch)}`);
+  res.json({
+    ok: true,
+    state,
+    note: 'New and restarted containers will use the updated skill registry.',
+  });
+});
+
 router.put('/:skillPath/toggle', (req: Request, res: Response) => {
   const skillPath = req.params.skillPath as string;
   if (!/^[a-z0-9-]+$/.test(skillPath)) {
     res.status(400).json({ error: 'Invalid skill name' });
     return;
   }
-  const { enabled } = req.body;
+  const { enabled } = req.body || {};
   if (typeof enabled !== 'boolean') {
-    res.status(400).json({ error: 'enabled (boolean) required' });
+    res.status(400).json({ error: 'enabled must be boolean' });
     return;
   }
-  const state = loadSkillState();
-  state[skillPath] = { enabled };
-  saveSkillState(state);
+  const state = updateSkillState(skillPath, { enabled });
   auditLog(req, enabled ? 'skill_enabled' : 'skill_disabled', skillPath);
-  res.json({ ok: true, note: 'Rebuild container to apply changes' });
+  res.json({
+    ok: true,
+    state,
+    note: 'New and restarted containers will use the updated skill registry.',
+  });
 });
 
 export default router;
