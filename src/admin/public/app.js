@@ -1760,7 +1760,10 @@ window.deleteCredential = async (key, btnEl) => {
 
 // MCP Servers
 async function renderMcp(el) {
-  const health = await api('/mcp/health');
+  const [health, presets] = await Promise.all([
+    api('/mcp/health'),
+    api('/mcp/presets').catch(() => []),
+  ]);
   const servers = health.servers || [];
   el.innerHTML = `
     <div class="page-header"><h2>MCP Servers</h2>
@@ -1775,6 +1778,31 @@ async function renderMcp(el) {
       </div>
       <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Agents load custom MCP servers from <code>${esc(health.summary?.configPath || 'store/mcp-servers.json')}</code>. Rebuild the agent container after changing server code or dependencies.</p>
     </div>
+    ${
+      presets.length
+        ? `<div class="card">
+      <div class="card-title">Recommended MCP Presets</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Presets are optional templates. They are not enabled until installed, credentials are added, and the agent container is rebuilt.</p>
+      ${presets
+        .map(
+          (preset) => `
+        <div class="channel-card" style="align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <strong style="color:var(--text)">${esc(preset.label)}</strong>
+              <span class="badge badge-muted">${esc(preset.toolPattern || `mcp__${preset.name}__*`)}</span>
+              ${preset.installed ? '<span class="badge badge-success">Installed</span>' : '<span class="badge badge-info">Optional</span>'}
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${esc(preset.notes || '')}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:6px;font-family:var(--mono)">${esc(preset.command)} ${preset.args.map((arg) => esc(arg)).join(' ')}</div>
+          </div>
+          <button class="btn btn-sm ${preset.installed ? 'btn-ghost' : 'btn-primary'}" ${preset.installed ? 'disabled' : ''} onclick="installMcpPreset('${esc(preset.name)}')">${preset.installed ? 'Installed' : 'Install'}</button>
+        </div>`,
+        )
+        .join('')}
+    </div>`
+        : ''
+    }
     <div class="card" id="new-mcp-form" style="display:none">
       <div class="card-title">Add MCP Server</div>
       <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px">MCP servers run inside the agent container and give the bot access to external tools and APIs. After adding, rebuild the container and restart the service.</p>
@@ -1867,6 +1895,16 @@ async function renderMcp(el) {
     } else toast(r.error || 'Failed', 'error');
   };
 }
+
+window.installMcpPreset = async (name) => {
+  const r = await api(`/mcp/presets/${encodeURIComponent(name)}/install`, {
+    method: 'POST',
+  });
+  if (r.ok) {
+    toast(r.message || 'Preset installed', 'success');
+    navigate('integrations');
+  } else toast(r.error || 'Failed', 'error');
+};
 
 window.deleteMcp = async (name, btnEl) => {
   inlineConfirm(btnEl, `Remove "${name}"?`, async () => {

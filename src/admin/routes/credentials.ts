@@ -69,6 +69,42 @@ const CREDENTIAL_KEYS = [
     mcp: 'google-workspace',
     editable: true,
   },
+  {
+    key: 'INFOMANIAK_TOKEN',
+    label: 'Infomaniak API Token',
+    mcp: 'infomaniak',
+    editable: true,
+  },
+  {
+    key: 'KDRIVE_ID',
+    label: 'Infomaniak kDrive ID',
+    mcp: 'infomaniak',
+    editable: true,
+  },
+  {
+    key: 'MAIL_USER',
+    label: 'Mail Username',
+    mcp: 'infomaniak',
+    editable: true,
+  },
+  {
+    key: 'MAIL_PASSWORD',
+    label: 'Mail Password',
+    mcp: 'infomaniak',
+    editable: true,
+  },
+  {
+    key: 'DAV_USER',
+    label: 'DAV Username',
+    mcp: 'infomaniak',
+    editable: true,
+  },
+  {
+    key: 'DAV_PASSWORD',
+    label: 'DAV Password',
+    mcp: 'infomaniak',
+    editable: true,
+  },
 ];
 
 const MCP_SERVERS = [
@@ -79,6 +115,7 @@ const MCP_SERVERS = [
     label: 'Google Workspace',
     alwaysAvailable: false,
   },
+  { name: 'infomaniak', label: 'Infomaniak kSuite', alwaysAvailable: false },
 ];
 
 router.get('/', (_req: Request, res: Response) => {

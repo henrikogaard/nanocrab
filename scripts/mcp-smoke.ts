@@ -30,18 +30,27 @@ function docker(args: string[]): string {
 }
 
 if (!fs.existsSync(configPath)) {
-  fail(`missing config: ${configPath}`);
+  if (runMailCheck) {
+    fail(`missing config: ${configPath}`);
+  }
+  console.log(`MCP smoke ok: no optional MCP config at ${configPath}`);
+  process.exit(0);
 }
 
 const servers = JSON.parse(
   fs.readFileSync(configPath, 'utf-8'),
 ) as McpServerConfig[];
 const names = servers.map((server) => server.name).filter(Boolean);
-if (!names.includes('infomaniak')) {
+if (runMailCheck && !names.includes('infomaniak')) {
   fail('infomaniak is not configured in store/mcp-servers.json');
 }
 
-const envKeys = [...new Set(servers.flatMap((server) => server.envVars || []))];
+const requiredServers = runMailCheck
+  ? servers.filter((server) => server.name === 'infomaniak')
+  : [];
+const envKeys = [
+  ...new Set(requiredServers.flatMap((server) => server.envVars || [])),
+];
 const envFileValues = readEnvFile(envKeys);
 const missing = envKeys.filter((key) => !(process.env[key] || envFileValues[key]));
 if (missing.length > 0) {
@@ -71,18 +80,16 @@ const parsed = JSON.parse(configOutput.trim()) as {
   names: string[];
   env: Array<[string, number]>;
 };
-if (!parsed.names.includes('infomaniak')) {
+if (runMailCheck && !parsed.names.includes('infomaniak')) {
   fail('agent image cannot read infomaniak MCP config');
 }
 const infomaniakEnvCount =
   parsed.env.find(([name]) => name === 'infomaniak')?.[1] || 0;
-if (infomaniakEnvCount === 0) {
+if (runMailCheck && infomaniakEnvCount === 0) {
   fail('agent image does not receive Infomaniak env vars');
 }
 
-console.log(
-  `MCP smoke ok: ${parsed.names.join(', ')} (infomaniak env vars: ${infomaniakEnvCount})`,
-);
+console.log(`MCP smoke ok: ${parsed.names.join(', ') || 'no optional servers'}`);
 
 if (runMailCheck) {
   const input = {

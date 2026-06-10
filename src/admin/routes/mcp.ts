@@ -18,6 +18,25 @@ interface McpServerConfig {
   notes?: string; // setup instructions or caveats
 }
 
+const MCP_PRESETS: McpServerConfig[] = [
+  {
+    name: 'infomaniak',
+    label: 'Infomaniak kSuite',
+    command: 'npx',
+    args: ['-y', '@henrikogaard/infomaniak-mcp'],
+    envVars: [
+      'INFOMANIAK_TOKEN',
+      'KDRIVE_ID',
+      'MAIL_USER',
+      'MAIL_PASSWORD',
+      'DAV_USER',
+      'DAV_PASSWORD',
+    ],
+    notes:
+      'Optional mail, kDrive, and DAV integration for Infomaniak kSuite. Configure credentials first, then rebuild the agent container.',
+  },
+];
+
 function loadConfig(): McpServerConfig[] {
   try {
     return JSON.parse(fs.readFileSync(MCP_CONFIG_PATH, 'utf-8'));
@@ -93,6 +112,41 @@ router.get('/', (_req: Request, res: Response) => {
 
 router.get('/health', (_req: Request, res: Response) => {
   res.json(getStatus());
+});
+
+router.get('/presets', (_req: Request, res: Response) => {
+  const configured = new Set(loadConfig().map((server) => server.name));
+  res.json(
+    MCP_PRESETS.map((preset) => ({
+      ...preset,
+      installed: configured.has(preset.name),
+      toolPattern: `mcp__${preset.name}__*`,
+    })),
+  );
+});
+
+router.post('/presets/:name/install', (req: Request, res: Response) => {
+  const presetName = req.params.name as string;
+  const preset = MCP_PRESETS.find((server) => server.name === presetName);
+  if (!preset) {
+    res.status(404).json({ error: 'Preset not found' });
+    return;
+  }
+
+  const config = loadConfig();
+  if (config.some((server) => server.name === preset.name)) {
+    res.status(409).json({ error: `Server "${preset.name}" already exists` });
+    return;
+  }
+
+  config.push(preset);
+  saveConfig(config);
+  auditLog(req, 'mcp_preset_installed', preset.name);
+  res.json({
+    ok: true,
+    name: preset.name,
+    message: 'MCP preset installed. Add credentials and rebuild the container.',
+  });
 });
 
 // Add a new MCP server

@@ -93,7 +93,11 @@ router.get('/', (_req: Request, res: Response) => {
     'slack-formatting',
   ];
   // Plugin-linked skills (managed by NanoCrab plugins)
-  const PLUGIN_SKILLS = ['agent-messaging', 'google-workspace'];
+  const PLUGIN_SKILLS = [
+    'agent-messaging',
+    'google-workspace',
+    'infomaniak-ksuite',
+  ];
 
   // Detect custom (gitignored) skills
   let gitIgnored: string[] = [];

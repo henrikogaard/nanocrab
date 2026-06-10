@@ -1120,6 +1120,28 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       ],
     };
   }
+  if (pathname === '/mcp/presets') {
+    return [
+      {
+        name: 'infomaniak',
+        label: 'Infomaniak kSuite',
+        command: 'npx',
+        args: ['-y', '@henrikogaard/infomaniak-mcp'],
+        envVars: [
+          'INFOMANIAK_TOKEN',
+          'KDRIVE_ID',
+          'MAIL_USER',
+          'MAIL_PASSWORD',
+          'DAV_USER',
+          'DAV_PASSWORD',
+        ],
+        notes:
+          'Optional mail, kDrive, and DAV integration for Infomaniak kSuite.',
+        installed: false,
+        toolPattern: 'mcp__infomaniak__*',
+      },
+    ];
+  }
   if (pathname === '/providers') return providers();
   if (pathname === '/memory') {
     return [
@@ -1770,8 +1792,9 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
     return [
       {
         id: 'cc-1',
-        name: 'Manual Scraper',
-        description: 'Scrapes game manual pages nightly.',
+        name: 'Sample Worker',
+        description:
+          'Example optional sidecar container for mock dashboard design.',
         image: 'node:22',
         autoStart: true,
         ports: [{ host: 8788, container: 8788 }],
@@ -1782,10 +1805,10 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
             readonly: false,
           },
         ],
-        envVars: { SCRAPE_MODE: 'mock' },
+        envVars: { SAMPLE_MODE: 'mock' },
         state: {
           status: 'running',
-          containerId: 'mock-manual-scraper',
+          containerId: 'mock-sample-worker',
           startedAt: iso(44),
         },
       },
@@ -1816,8 +1839,9 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname.startsWith('/custom-containers/')) {
     return {
       id: 'cc-1',
-      name: 'Manual Scraper',
-      description: 'Scrapes game manual pages nightly.',
+      name: 'Sample Worker',
+      description:
+        'Example optional sidecar container for mock dashboard design.',
       image: 'node:22',
       autoStart: true,
       ports: [{ host: 8788, container: 8788 }],
@@ -1828,10 +1852,10 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           readonly: false,
         },
       ],
-      envVars: { SCRAPE_MODE: 'mock' },
+      envVars: { SAMPLE_MODE: 'mock' },
       state: {
         status: 'running',
-        containerId: 'mock-manual-scraper',
+        containerId: 'mock-sample-worker',
         startedAt: iso(44),
       },
     };

@@ -52,8 +52,8 @@ Run these from the NanoCrab repository on the host or VPS.
 | `npm run update:nanocrab` | Update from the latest NanoCrab GitHub release from the host shell. |
 | `npm run migrate:nanocrab` | Move old NanoClaw-named local state to NanoCrab paths. |
 | `npm run deploy` | Run the deployment verification/build script. |
-| `npm run mcp:smoke` | Run the MCP smoke test. |
-| `npm run mcp:smoke:mail` | Run the MCP smoke test with mail coverage. |
+| `npm run mcp:smoke` | Run the generic MCP smoke test. Does not require optional mail providers. |
+| `npm run mcp:smoke:mail` | Run the optional Infomaniak mail smoke test. Requires the Infomaniak MCP preset and credentials. |
 | `./container/build.sh` | Build `nanocrab-agent:latest`. |
 | `./container/build.sh beta1-smoke` | Build a tagged agent image for smoke testing. |
 

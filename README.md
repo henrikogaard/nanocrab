@@ -145,6 +145,26 @@ success responses and do not mutate live files or services.
 - **Reports And Research** — agents and admins can request report jobs, outline approval, Markdown/HTML/DOCX/PDF exports, Playwright-backed research notes, and optional official NotebookLM Enterprise configuration.
 - **Unified Approvals** — risky actions such as provider fallback, PR creation, report delivery, publishing, uploads, external messages, and shell-like work flow through `/api/approvals`.
 
+### Default Integrations
+
+The repository ships only generic defaults. Private runtime state is not source
+code:
+
+- `store/mcp-servers.json` is instance-specific and gitignored.
+- `store/custom-containers.json` is instance-specific and gitignored.
+- Custom Docker containers shown in the dashboard are discovered from the local
+  Docker host and custom-container store; they are not default NanoCrab product
+  features.
+- Private MCP servers such as game, hobby, company, or one-off data collectors
+  should stay in runtime state or private plugins unless they are useful to
+  generic NanoCrab users.
+
+Built-in/default MCP behavior is intentionally small: NanoCrab IPC and GitHub.
+Optional dashboard presets can add provider integrations. NanoCrab currently
+includes an opt-in Infomaniak kSuite preset and an `infomaniak-ksuite` skill for
+mail, kDrive, and DAV workflows. Google Workspace remains a bundled skill and
+credential surface for deployments that provide a compatible MCP server.
+
 ### Security
 
 - 2FA with TOTP (QR code setup)
