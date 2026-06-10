@@ -1,0 +1,41 @@
+{
+  "name": "NanoCrab Admin",
+  "short_name": "NanoCrab",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f0f14",
+  "theme_color": "#0f0f14",
+  "icons": [
+    {
+      "src": "/static/nanocrab-mark.png",
+      "sizes": "560x560",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "url": "/#/dashboard",
+      "icons": [
+        {
+          "src": "/static/nanocrab-mark.png",
+          "sizes": "560x560",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Chat",
+      "url": "/#/chat",
+      "icons": [
+        {
+          "src": "/static/nanocrab-mark.png",
+          "sizes": "560x560",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

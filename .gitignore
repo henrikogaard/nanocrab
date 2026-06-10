@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+.npm-cache/
+# Build output
+dist/
+
+# Local data & auth
+store/
+data/
+logs/
+
+# Groups - only track base structure and specific instruction files
+groups/*
+!groups/main/
+!groups/global/
+groups/main/*
+groups/global/*
+!groups/main/CLAUDE.md
+!groups/global/CLAUDE.md
+!groups/main/AGENTS.md
+!groups/global/AGENTS.md
+
+# Runtime memory is private operator data. Keep it out even if group layout changes.
+/MEMORY.md
+/memory.md
+/groups/**/MEMORY.md
+/groups/**/memory.md
+
+# Secrets
+*.keys.json
+.env
+
+# Temp files
+.tmp-*
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Local agent/skill state
+.agents/
+.claude/
+.nanoclaw/
+
+agents-sdk-docs
+backups/
+
+# Marketplace-installed plugins at the repository root
+/plugins/
+container/skills/sdk-scraper/
+src/admin/plugins/fishing/
+container/skills/fishing/
+src/admin/public/pages/fishing.js
+data/.mounts
+.mcp.json

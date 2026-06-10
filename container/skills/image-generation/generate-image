@@ -1,0 +1,253 @@
+#!/usr/bin/env node
+
+/**
+ * generate-image — Multi-provider AI image generation CLI
+ * Supports: fal.ai, OpenAI DALL-E, Leonardo.ai
+ */
+
+import fs from 'fs';
+import path from 'path';
+
+const DEFAULTS = {
+  provider: 'fal',
+  size: '1024x1024',
+  output: 'generated-image.png',
+};
+
+const MODELS = {
+  fal: 'fal-ai/flux/dev',
+  openai: 'dall-e-3',
+  leonardo: 'default',
+};
+
+function parseArgs(args) {
+  const result = { prompt: '', provider: DEFAULTS.provider, size: DEFAULTS.size, output: DEFAULTS.output, model: '' };
+  const positional = [];
+
+  for (let i = 0; i < args.length; i++) {
+    switch (args[i]) {
+      case '--provider': result.provider = args[++i]; break;
+      case '--size': result.size = args[++i]; break;
+      case '--output': result.output = args[++i]; break;
+      case '--model': result.model = args[++i]; break;
+      case '--help': case '-h': usage(); process.exit(0);
+      default: positional.push(args[i]);
+    }
+  }
+
+  result.prompt = positional.join(' ');
+  if (!result.prompt) {
+    console.error('Error: No prompt provided');
+    usage();
+    process.exit(1);
+  }
+  return result;
+}
+
+function usage() {
+  console.error(`Usage: generate-image "prompt" [--provider fal|openai|leonardo] [--size WxH] [--output file.png] [--model model-name]`);
+}
+
+// === FAL.AI ===
+
+async function generateFal(prompt, model, size) {
+  const key = process.env.FAL_KEY;
+  if (!key) throw new Error('FAL_KEY environment variable not set');
+
+  const [width, height] = size.split('x').map(Number);
+  const modelId = model || MODELS.fal;
+
+  // Submit to queue
+  const submitRes = await fetch(`https://queue.fal.run/${modelId}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Key ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, image_size: { width, height }, num_images: 1 }),
+  });
+
+  if (!submitRes.ok) {
+    const err = await submitRes.text();
+    throw new Error(`fal.ai submit failed (${submitRes.status}): ${err}`);
+  }
+
+  const submitData = await submitRes.json();
+
+  // If images returned directly (sync response), use them
+  if (submitData.images?.length > 0) return submitData.images[0].url;
+
+  // Otherwise poll the queue using URLs from the response
+  const { request_id, status_url, response_url } = submitData;
+  if (!request_id) throw new Error('fal.ai: no request_id or images in response');
+
+  // Use URLs from response (fal.ai may remap the model path, e.g. flux/dev → flux)
+  const pollStatusUrl = status_url || `https://queue.fal.run/${modelId}/requests/${request_id}/status`;
+  const pollResultUrl = response_url || `https://queue.fal.run/${modelId}/requests/${request_id}`;
+
+  console.error(`Waiting for fal.ai (request: ${request_id})...`);
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    const statusRes = await fetch(pollStatusUrl, {
+      headers: { 'Authorization': `Key ${key}` },
+    });
+    const status = await statusRes.json();
+
+    if (status.status === 'COMPLETED') {
+      const resultRes = await fetch(pollResultUrl, {
+        headers: { 'Authorization': `Key ${key}` },
+      });
+      const result = await resultRes.json();
+      if (result.images?.length > 0) return result.images[0].url;
+      throw new Error('fal.ai: completed but no images in result');
+    }
+    if (status.status === 'FAILED') {
+      throw new Error(`fal.ai generation failed: ${JSON.stringify(status)}`);
+    }
+  }
+  throw new Error('fal.ai: timed out waiting for result');
+}
+
+// === OPENAI DALL-E ===
+
+async function generateOpenAI(prompt, model, size) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error('OPENAI_API_KEY environment variable not set');
+
+  const res = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: model || MODELS.openai,
+      prompt,
+      n: 1,
+      size: size,
+      response_format: 'url',
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`OpenAI API failed (${res.status}): ${err}`);
+  }
+
+  const data = await res.json();
+  return data.data[0].url;
+}
+
+// === LEONARDO.AI ===
+
+async function generateLeonardo(prompt, model, size) {
+  const key = process.env.LEONARDO_API_KEY;
+  if (!key) throw new Error('LEONARDO_API_KEY environment variable not set');
+
+  const [width, height] = size.split('x').map(Number);
+
+  // Create generation
+  const createRes = await fetch('https://cloud.leonardo.ai/api/rest/v1/generations', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt,
+      width,
+      height,
+      num_images: 1,
+      ...(model && model !== 'default' ? { modelId: model } : {}),
+    }),
+  });
+
+  if (!createRes.ok) {
+    const err = await createRes.text();
+    throw new Error(`Leonardo API failed (${createRes.status}): ${err}`);
+  }
+
+  const { sdGenerationJob } = await createRes.json();
+  const genId = sdGenerationJob?.generationId;
+  if (!genId) throw new Error('Leonardo: no generationId in response');
+
+  console.error(`Waiting for Leonardo (generation: ${genId})...`);
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    const statusRes = await fetch(`https://cloud.leonardo.ai/api/rest/v1/generations/${genId}`, {
+      headers: { 'Authorization': `Bearer ${key}` },
+    });
+    const result = await statusRes.json();
+    const images = result.generations_by_pk?.generated_images;
+    if (images?.length > 0) return images[0].url;
+  }
+  throw new Error('Leonardo: timed out waiting for result');
+}
+
+// === MAIN ===
+
+async function downloadImage(url, outputPath) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to download image: ${res.status}`);
+  const buffer = Buffer.from(await res.arrayBuffer());
+  fs.writeFileSync(outputPath, buffer);
+  return outputPath;
+}
+
+// Estimated costs per image generation
+const COST_ESTIMATES = {
+  'fal': { 'fal-ai/flux/dev': 0.025, 'fal-ai/flux/schnell': 0.003, 'fal-ai/flux-pro': 0.05, 'default': 0.025 },
+  'openai': { 'dall-e-3': 0.04, 'dall-e-2': 0.02, 'default': 0.04 },
+  'leonardo': { 'default': 0.02 },
+};
+
+function logUsage(provider, model, size, prompt, durationMs) {
+  const costs = COST_ESTIMATES[provider] || {};
+  const cost = costs[model] || costs['default'] || 0.03;
+  const entry = {
+    timestamp: new Date().toISOString(),
+    provider,
+    service: 'image-generation',
+    model: model || 'default',
+    size,
+    estimatedCost: cost,
+    durationMs,
+    prompt: prompt.slice(0, 100),
+  };
+  // Write to store if available (main groups), otherwise /tmp
+  const logPaths = ['/workspace/project/store/provider-usage.jsonl', '/workspace/group/provider-usage.jsonl'];
+  for (const logPath of logPaths) {
+    try {
+      fs.appendFileSync(logPath, JSON.stringify(entry) + '\n');
+      break;
+    } catch { /* try next */ }
+  }
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const outputPath = path.resolve(args.output);
+
+  console.error(`Generating image with ${args.provider}...`);
+  console.error(`Prompt: "${args.prompt}"`);
+
+  const startTime = Date.now();
+  let imageUrl;
+  switch (args.provider) {
+    case 'fal':
+      imageUrl = await generateFal(args.prompt, args.model, args.size);
+      break;
+    case 'openai':
+      imageUrl = await generateOpenAI(args.prompt, args.model, args.size);
+      break;
+    case 'leonardo':
+      imageUrl = await generateLeonardo(args.prompt, args.model, args.size);
+      break;
+    default:
+      console.error(`Unknown provider: ${args.provider}`);
+      process.exit(1);
+  }
+
+  const durationMs = Date.now() - startTime;
+  logUsage(args.provider, args.model || MODELS[args.provider], args.size, args.prompt, durationMs);
+
+  await downloadImage(imageUrl, outputPath);
+  console.log(outputPath);
+  console.error(`Image saved to: ${outputPath}`);
+}
+
+main().catch(err => {
+  console.error(`Error: ${err.message}`);
+  process.exit(1);
+});

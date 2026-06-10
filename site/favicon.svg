@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#0a0b10"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#7c3aed" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="eyeGlow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <ellipse cx="32" cy="30" rx="20" ry="14" fill="#2a1a3a" stroke="#4c1d95" stroke-width="0.8"/>
+  <ellipse cx="32" cy="30" rx="16" ry="10" fill="#1e1030" opacity="0.6"/>
+  <line x1="22" y1="24" x2="17" y2="16" stroke="#3b2060" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="42" y1="24" x2="47" y2="16" stroke="#3b2060" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="16" cy="15" r="4" fill="url(#glow)" filter="url(#eyeGlow)"/>
+  <circle cx="48" cy="15" r="4" fill="url(#glow)" filter="url(#eyeGlow)"/>
+  <circle cx="16" cy="15" r="2" fill="#c4b5fd"/>
+  <circle cx="48" cy="15" r="2" fill="#c4b5fd"/>
+  <circle cx="15.5" cy="14.5" r="0.8" fill="#fff"/>
+  <circle cx="47.5" cy="14.5" r="0.8" fill="#fff"/>
+  <path d="M8 38 Q4 34 6 30 Q8 28 10 30 L14 36" fill="none" stroke="#4c1d95" stroke-width="2" stroke-linecap="round"/>
+  <path d="M4 32 Q2 30 4 28" fill="none" stroke="#4c1d95" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M56 38 Q60 34 58 30 Q56 28 54 30 L50 36" fill="none" stroke="#4c1d95" stroke-width="2" stroke-linecap="round"/>
+  <path d="M60 32 Q62 30 60 28" fill="none" stroke="#4c1d95" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="14" y1="36" x2="8" y2="44" stroke="#3b2060" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="16" y1="38" x2="10" y2="48" stroke="#3b2060" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="19" y1="40" x2="14" y2="50" stroke="#3b2060" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="50" y1="36" x2="56" y2="44" stroke="#3b2060" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="48" y1="38" x2="54" y2="48" stroke="#3b2060" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="45" y1="40" x2="50" y2="50" stroke="#3b2060" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M27 36 Q32 40 37 36" fill="none" stroke="#6d28d9" stroke-width="1" stroke-linecap="round" opacity="0.6"/>
+</svg>

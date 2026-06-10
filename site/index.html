@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NanoCrab</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0b10;
+      color: #e1e4ed;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .container { text-align: center; padding: 40px; position: relative; z-index: 1; }
+    .avatar {
+      width: 240px; height: 240px; border-radius: 50%; object-fit: contain;
+      padding: 24px;
+      background: radial-gradient(circle at 50% 45%, rgba(21, 34, 50, 0.96), rgba(10, 11, 16, 0.92));
+      border: 3px solid rgba(67, 167, 154, 0.35);
+      box-shadow: 0 0 60px rgba(67, 167, 154, 0.14), 0 0 120px rgba(38, 129, 255, 0.06);
+      margin-bottom: 32px; transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .avatar:hover { transform: scale(1.05); box-shadow: 0 0 80px rgba(67, 167, 154, 0.24), 0 0 160px rgba(38, 129, 255, 0.1); }
+    h1 {
+      font-size: 36px; font-weight: 700; margin-bottom: 8px;
+      background: linear-gradient(135deg, #f3f6fb 0%, #43a79a 48%, #2681ff 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .tagline { font-size: 16px; color: #8b90a0; margin-bottom: 40px; }
+    .status {
+      display: inline-flex; align-items: center; gap: 8px; padding: 8px 20px;
+      background: rgba(34, 197, 94, 0.08); border: 1px solid rgba(34, 197, 94, 0.2);
+      border-radius: 20px; font-size: 13px; color: #22c55e;
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: #22c55e;
+      box-shadow: 0 0 8px #22c55e; animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .bg-glow {
+      position: fixed; width: 600px; height: 600px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(67, 167, 154, 0.06) 0%, transparent 70%);
+      top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none;
+    }
+    .no-avatar { width: 240px; height: 240px; border-radius: 50%; background: rgba(67,167,154,0.1); border: 3px solid rgba(67,167,154,0.3); display: flex; align-items: center; justify-content: center; margin: 0 auto 32px; }
+    .no-avatar img { width: 78%; height: 78%; object-fit: contain; }
+  </style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="container">
+    <img src="/static/nanocrab-mark.png" alt="NanoCrab logo" class="avatar" onerror="this.style.display='none';document.getElementById('fallback-avatar').style.display='flex'">
+    <div id="fallback-avatar" class="no-avatar" style="display:none"><img src="/static/nanocrab-logo.png" alt="NanoCrab logo"></div>
+    <h1 id="site-name">NanoCrab</h1>
+    <p class="tagline">Work smarter, not harder</p>
+    <div class="status">
+      <span class="status-dot"></span>
+      Online
+    </div>
+  </div>
+  <script>
+    // Try to load assistant name from config
+    fetch('/static/config.json').then(r => r.json()).then(c => {
+      if (c.name) { document.getElementById('site-name').textContent = c.name; document.title = c.name; }
+    }).catch(() => {});
+  </script>
+</body>
+</html>
