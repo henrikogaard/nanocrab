@@ -540,6 +540,62 @@ const skills = [
     enabled: true,
   },
   {
+    name: 'memory-curator',
+    description: 'Review and maintain durable cross-channel memories.',
+    path: 'memory-curator',
+    category: 'core',
+    enabled: true,
+  },
+  {
+    name: 'journalist',
+    description: 'Extract notable events and create daily or weekly summaries.',
+    path: 'journalist',
+    category: 'core',
+    enabled: true,
+  },
+  {
+    name: 'task-planner',
+    description: 'Turn chat requests into tasks, reminders, and follow-ups.',
+    path: 'task-planner',
+    category: 'core',
+    enabled: true,
+  },
+  {
+    name: 'report-writer',
+    description: 'Create cited reports and exportable documents.',
+    path: 'report-writer',
+    category: 'core',
+    enabled: true,
+  },
+  {
+    name: 'github-issue-agent',
+    description: 'Triage GitHub issues and prepare coding jobs.',
+    path: 'github-issue-agent',
+    category: 'core',
+    enabled: true,
+  },
+  {
+    name: 'code-reviewer',
+    description: 'Review diffs for bugs, regressions, and missing tests.',
+    path: 'code-reviewer',
+    category: 'core',
+    enabled: true,
+  },
+  {
+    name: 'release-manager',
+    description: 'Prepare changelogs, release notes, and rollout checks.',
+    path: 'release-manager',
+    category: 'core',
+    enabled: true,
+  },
+  {
+    name: 'email-assistant',
+    description: 'Search, summarize, triage, and draft email.',
+    path: 'email-assistant',
+    category: 'core',
+    enabled: true,
+  },
+  {
     name: 'docx-generation',
     description: 'Generate Word documents and reports.',
     path: 'docx-generation',
@@ -1312,6 +1368,34 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
     ];
   }
   if (pathname === '/skills') return { installed: skills, available: [] };
+  if (pathname === '/skills/suggestions') {
+    return [
+      {
+        name: 'operation-planning',
+        description:
+          'Plan recurring operations from chat requests, participant counts, orders, and journal context.',
+        reason:
+          'Recent mock messages include operation requests, orders, and participant planning.',
+        confidence: 0.86,
+        evidenceCount: 7,
+        instructions:
+          'Extract participants, resources, timing, target, constraints, open questions, and risks. Require approval before publishing orders.',
+        provenance: ['source:mock-history', 'kind:history-suggestion'],
+      },
+      {
+        name: 'dashboard-design-review',
+        description:
+          'Review dashboard screens for navigation, polish, and missing states.',
+        reason:
+          'Recent mock activity includes sidebar, icon, logo, and dashboard redesign work.',
+        confidence: 0.78,
+        evidenceCount: 4,
+        instructions:
+          'Check navigation clarity, visual hierarchy, text fit, empty/loading/error states, responsiveness, and icon consistency.',
+        provenance: ['source:mock-history', 'kind:history-suggestion'],
+      },
+    ];
+  }
   if (pathname === '/skills/drafts') {
     const drafts = [
       {

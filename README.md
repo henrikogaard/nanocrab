@@ -23,6 +23,7 @@ NanoCrab 2.0-Beta1 is a major step toward a long-running personal agent. It can 
 - **Structured memory** is stored as reviewed records with scope, type, content, source, confidence, sensitivity, visibility, stale-review state, and contradiction metadata.
 - **Shared context** is generated from approved memories into runtime `MEMORY.md` files, so chat, automations, coding jobs, journal extraction, and reports can all benefit from the same remembered facts and preferences.
 - **Provider-neutral skills** live as `SKILL.md` packages. Agents can propose new skills, validate them, show a diff in the dashboard, and request approval before installation into `container/skills`.
+- **Skill suggestions** appear in the dashboard when recent conversation history looks like a reusable workflow. The agent is also instructed to ask whether it should make a skill when the user repeats a task or gives durable operating instructions.
 - **Cross-channel continuity** means a useful approved memory or installed skill is no longer trapped inside one WhatsApp, Signal, Telegram, or dashboard conversation.
 - **Safety by default** means memories, skills, report delivery, PR creation, publishing, uploads, external messages, and provider fallback for write-capable work all pass through explicit approval surfaces.
 
@@ -142,6 +143,8 @@ success responses and do not mutate live files or services.
 - **Memory v2** — agents can propose structured memories with sensitivity, source, stale, and contradiction metadata; the dashboard reviews what becomes active.
 - **Journal v2** — agents can record notable events, extract daily/weekly summaries, and answer natural questions like "when was that fleet crash?" with cited events.
 - **Skill Factory v2** — agents can propose provider-neutral `SKILL.md` drafts with version/provenance metadata, validation, diff review, and approval before installation into `container/skills`.
+- **Bundled Default Skills** — NanoCrab ships with generic skills for memory curation, journaling, task planning, reports, GitHub issue work, code review, release management, email assistance, browser research, documents, images, and capabilities/status.
+- **Suggested Skills** — the dashboard Skills page highlights reusable workflow candidates from recent history, such as private operations planning or dashboard design review. Suggestions become inactive drafts first and still require approval.
 - **Reports And Research** — agents and admins can request report jobs, outline approval, Markdown/HTML/DOCX/PDF exports, Playwright-backed research notes, and optional official NotebookLM Enterprise configuration.
 - **Unified Approvals** — risky actions such as provider fallback, PR creation, report delivery, publishing, uploads, external messages, and shell-like work flow through `/api/approvals`.
 

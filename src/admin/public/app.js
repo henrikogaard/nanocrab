@@ -104,7 +104,6 @@ const PAGE_ALIASES = {
   docker: 'containers',
   providers: 'integrations',
   mcp: 'integrations',
-  skills: 'memory',
 };
 
 function canonicalPage(page) {
@@ -268,6 +267,10 @@ const navIconPaths = {
     '<path d="M7 4.5h10A1.5 1.5 0 0 1 18.5 6v12A1.5 1.5 0 0 1 17 19.5H7A1.5 1.5 0 0 1 5.5 18V6A1.5 1.5 0 0 1 7 4.5Z"/><path d="m8.5 10 1.5 1.5L13 8.5"/><path d="M14.5 10h1.5"/><path d="m8.5 15 1.5 1.5L13 13.5"/><path d="M14.5 15h1.5"/>',
   memory:
     '<path d="M7.5 5.5h9A1.5 1.5 0 0 1 18 7v10.5l-2.5-1-2 2-2-2-2 2-2-2-2.5 1V7a1.5 1.5 0 0 1 1.5-1.5Z"/><path d="M8.5 9.5h7"/><path d="M8.5 12.5h5"/>',
+  skills:
+    '<path d="M12 3.5 19 7.5v8L12 20.5l-7-5v-8l7-4Z"/><path d="M8.5 10.5 12 8.5l3.5 2"/><path d="M8.5 14 12 16l3.5-2"/><path d="M12 8.5v7.5"/>',
+  timeline:
+    '<path d="M7 5.5v13"/><circle cx="7" cy="7" r="2"/><circle cx="7" cy="12" r="2"/><circle cx="7" cy="17" r="2"/><path d="M10 7h8"/><path d="M10 12h6"/><path d="M10 17h8"/>',
   wiki: '<path d="M6.5 4.5h8a3 3 0 0 1 3 3v12h-8a3 3 0 0 1-3-3v-12Z"/><path d="M6.5 4.5v12"/><path d="M9.5 8h5"/><path d="M9.5 11h4"/>',
   workflows:
     '<path d="M5 7.5h5v5H5z"/><path d="M14 12h5v5h-5z"/><path d="M10 10h2.5a2 2 0 0 1 2 2"/><path d="M14 14.5h-2.5a2 2 0 0 1-2-2"/>',
@@ -329,6 +332,8 @@ function showShell(page) {
     { id: 'groups', icon: 'groups', label: 'Groups', section: 'Workspace' },
     { id: 'tasks', icon: 'tasks', label: 'Tasks' },
     { id: 'memory', icon: 'memory', label: 'Memory' },
+    { id: 'skills', icon: 'skills', label: 'Skills' },
+    { id: 'timeline', icon: 'timeline', label: 'Timeline' },
   ];
 
   // Inject enabled plugins
@@ -548,6 +553,8 @@ const _pageMap = {
   chat: 'renderChat',
   messages: 'renderMessages',
   memory: 'renderMemoryConsolidated',
+  skills: 'renderSkillsPage',
+  timeline: 'renderMemoryKnowledgeTimeline',
   usage: 'renderUsage',
   sessions: 'renderSessions',
   groups: 'renderGroups',
@@ -2091,12 +2098,18 @@ window.setGroupProvider = async (groupFolder, category, providerId) => {
 };
 
 // Skills
+async function renderSkillsPage(el) {
+  await renderSkills(el, { embedded: false, returnPage: 'skills' });
+}
+
 async function renderSkills(el, options = {}) {
   const returnPage = options.returnPage || 'memory';
-  const [data, drafts] = await Promise.all([
+  const [data, drafts, suggestions] = await Promise.all([
     api('/skills'),
     api('/skills/drafts?status=pending').catch(() => []),
+    api('/skills/suggestions').catch(() => []),
   ]);
+  window._skillSuggestions = Array.isArray(suggestions) ? suggestions : [];
   el.innerHTML = `
     <div class="page-header"><h2>Skills</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -2116,6 +2129,33 @@ async function renderSkills(el, options = {}) {
         <div class="form-group"><label>Task Instructions</label><textarea id="skill-draft-instructions" style="width:100%;min-height:170px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical;line-height:1.55" placeholder="Describe the repeated task, expected output, rules, sources, safety checks, and examples."></textarea></div>
         <button type="submit" class="btn btn-primary">Create Draft</button>
       </form>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-title">Suggested Skills <span class="badge badge-muted">${window._skillSuggestions.length}</span></div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">NanoCrab looks for repeated workflows in recent conversation and suggests reusable skills. Suggestions are inactive until you create and approve a draft.</p>
+      ${
+        window._skillSuggestions.length === 0
+          ? '<div class="empty" style="padding:12px">No new skill suggestions from recent history</div>'
+          : window._skillSuggestions
+              .map(
+                (suggestion, index) => `
+        <div class="channel-card" style="align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <span style="font-weight:600;color:var(--text)">${esc(suggestion.name)}</span>
+              <span class="badge badge-info">${Math.round((suggestion.confidence || 0) * 100)}%</span>
+              <span class="badge badge-muted">${esc(String(suggestion.evidenceCount || 0))} signals</span>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${esc(suggestion.description)}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(suggestion.reason || '')}</div>
+          </div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-primary" onclick="createSkillDraftFromSuggestion(${index})">Create Draft</button>
+          </div>
+        </div>`,
+              )
+              .join('')
+      }
     </div>
     <div class="card" style="margin-bottom:12px">
       <div class="card-title">Skill Factory Drafts <span class="badge badge-muted">${drafts.length}</span></div>
@@ -2193,7 +2233,8 @@ async function renderSkills(el, options = {}) {
       })
       .join('')}
     <div id="skill-editor" style="display:none"></div>
-    <div id="skill-draft-viewer" style="display:none"></div>`;
+    <div id="skill-draft-viewer" style="display:none"></div>
+    ${options.embedded ? '' : '<div id="skills-page-timeline"></div>'}`;
 
   // Create form handler
   document.getElementById('skill-draft-create-form').onsubmit = async (e) => {
@@ -2234,7 +2275,55 @@ async function renderSkills(el, options = {}) {
       navigate(returnPage);
     } else toast(r.error || 'Failed', 'error');
   };
+
+  if (!options.embedded) {
+    const timelineEl = document.getElementById('skills-page-timeline');
+    if (timelineEl) {
+      const [auditData, memories, allDrafts] = await Promise.all([
+        api('/audit?limit=150').catch(() => []),
+        api('/memory?limit=150').catch(() => []),
+        api('/skills/drafts').catch(() => []),
+      ]);
+      const items = memoryKnowledgeTimelineItems({
+        auditData,
+        memories,
+        drafts: allDrafts,
+        limit: 20,
+      });
+      timelineEl.innerHTML = `
+        <div class="card" style="margin-top:12px">
+          <div class="card-title">Recent Memory & Skill Activity</div>
+          ${renderTimelineItems(items)}
+        </div>`;
+    }
+  }
 }
+
+window.createSkillDraftFromSuggestion = async (index) => {
+  const suggestion = (window._skillSuggestions || [])[index];
+  if (!suggestion) return;
+  try {
+    const r = await api('/skills/drafts', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: suggestion.name,
+        description: suggestion.description,
+        instructions: suggestion.instructions,
+        createdBy: 'dashboard-suggestion',
+        provenance: suggestion.provenance || [
+          'source:dashboard-suggestion',
+          'kind:history-suggestion',
+        ],
+      }),
+    });
+    if (r.ok) {
+      toast('Suggested skill draft created for review', 'success');
+      navigate('skills');
+    } else toast(r.error || 'Failed', 'error');
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
 
 window.viewSkillDraft = async (id) => {
   const data = await api(`/skills/drafts/${encodeURIComponent(id)}`);
@@ -2265,7 +2354,7 @@ window.reviewSkillDraft = async (id, action) => {
         action === 'approve' ? 'Skill draft approved' : 'Skill draft rejected',
         'success',
       );
-      navigate('memory');
+      navigate(currentPage === 'skills' ? 'skills' : 'memory');
     } else {
       toast(r.error || 'Failed', 'error');
     }
@@ -2625,7 +2714,7 @@ function memoryKnowledgeTimelineItems({ auditData, memories, drafts, limit = 25 
       timestamp: draft.createdAt,
       action:
         draft.status === 'pending'
-          ? `<button class="btn btn-sm btn-ghost" onclick="switchTab('mem-tabs','skills');setTimeout(()=>viewSkillDraft('${esc(draft.id)}'),50)">Review</button>`
+          ? `<button class="btn btn-sm btn-ghost" onclick="navigate('skills');setTimeout(()=>viewSkillDraft('${esc(draft.id)}'),80)">Review</button>`
           : '',
     });
     if (draft.reviewedAt && draft.status !== 'pending') {

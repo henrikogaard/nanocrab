@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
@@ -20,6 +21,17 @@ import {
 const router = Router();
 const PROJECT_ROOT = process.cwd();
 const SKILL_STATE_PATH = path.join(STORE_DIR, 'skill-state.json');
+const MESSAGES_DB_PATH = path.join(STORE_DIR, 'messages.db');
+
+interface SuggestedSkill {
+  name: string;
+  description: string;
+  reason: string;
+  confidence: number;
+  evidenceCount: number;
+  instructions: string;
+  provenance: string[];
+}
 
 function loadSkillState(): Record<string, { enabled: boolean }> {
   try {
@@ -82,6 +94,141 @@ function buildSkillDraftMarkdown(input: {
   return `${frontmatter.join('\n')}\n\n# ${title}\n\n${instructions}\n`;
 }
 
+function listInstalledSkillNames(): Set<string> {
+  const skillsDir = path.join(PROJECT_ROOT, 'container', 'skills');
+  try {
+    return new Set(
+      fs
+        .readdirSync(skillsDir, { withFileTypes: true })
+        .filter((dir) => dir.isDirectory())
+        .map((dir) => dir.name),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function keywordCount(messages: string[], patterns: RegExp[]): number {
+  return messages.reduce(
+    (count, content) =>
+      count + (patterns.some((pattern) => pattern.test(content)) ? 1 : 0),
+    0,
+  );
+}
+
+function readRecentConversationText(limit = 400): string[] {
+  if (!fs.existsSync(MESSAGES_DB_PATH)) return [];
+  const db = new Database(MESSAGES_DB_PATH, { readonly: true });
+  try {
+    const rows = db
+      .prepare(
+        `SELECT content
+         FROM messages
+         WHERE content IS NOT NULL
+           AND content != ''
+           AND is_bot_message = 0
+         ORDER BY timestamp DESC
+         LIMIT ?`,
+      )
+      .all(limit) as { content: string }[];
+    return rows.map((row) => row.content);
+  } catch {
+    return [];
+  } finally {
+    db.close();
+  }
+}
+
+function buildSkillSuggestions(): SuggestedSkill[] {
+  const installed = listInstalledSkillNames();
+  const drafted = new Set(listSkillDrafts().map((draft) => draft.name));
+  const messages = readRecentConversationText();
+  const candidates: Array<
+    Omit<SuggestedSkill, 'evidenceCount' | 'confidence'> & {
+      patterns: RegExp[];
+      baseConfidence: number;
+    }
+  > = [
+    {
+      name: 'operation-planning',
+      description:
+        'Plan recurring operations from chat requests, participant counts, orders, and journal context.',
+      reason:
+        'Recent conversation mentions operations, attacks, fleets, planets, or alliance planning.',
+      patterns: [
+        /\b(operation|attack|fleet|planet|alliance|orders?|soldiers?)\b/i,
+      ],
+      baseConfidence: 0.74,
+      instructions:
+        'Use this skill when users coordinate recurring operations, attacks, fleet movements, participant lists, or orders. Extract participants, resources, timing, target, constraints, open questions, and risks. Prefer structured plans, cite source messages when available, and require explicit approval before sending orders or publishing plans.',
+      provenance: ['source:recent-message-history', 'kind:history-suggestion'],
+    },
+    {
+      name: 'personal-workflow-rules',
+      description:
+        'Capture repeated personal preferences and turn them into reusable operating rules.',
+      reason:
+        'Recent conversation includes durable preferences such as always/never/when I ask/use this.',
+      patterns: [
+        /\b(always|never|when i ask|use this|prefer|standard|default)\b/i,
+      ],
+      baseConfidence: 0.68,
+      instructions:
+        'Use this skill when the user gives durable preferences, repeated phrasing rules, language choices, formatting habits, or recurring workflow instructions. Summarize the candidate rule, ask whether it should become memory, a skill, or both, and create a skill draft only after consent.',
+      provenance: ['source:recent-message-history', 'kind:history-suggestion'],
+    },
+    {
+      name: 'dashboard-design-review',
+      description:
+        'Review dashboard screens for navigation, visual hierarchy, polish, and missing states.',
+      reason:
+        'Recent conversation mentions dashboard, UI, sidebar, logo, redesign, or visual changes.',
+      patterns: [
+        /\b(dashboard|sidebar|logo|ui|ux|redesign|design|icon|layout)\b/i,
+      ],
+      baseConfidence: 0.66,
+      instructions:
+        'Use this skill when reviewing or changing dashboard UI. Check navigation clarity, visual hierarchy, text fit, empty/loading/error states, responsiveness, icons, and consistency with the NanoCrab design language. Prefer concrete file-level suggestions and verify with browser screenshots when possible.',
+      provenance: ['source:recent-message-history', 'kind:history-suggestion'],
+    },
+    {
+      name: 'private-integration-triage',
+      description:
+        'Decide whether an integration belongs in core, as an optional preset, or as private runtime state.',
+      reason:
+        'Recent conversation discusses MCP servers, default skills, Docker containers, and private integrations.',
+      patterns: [
+        /\b(mcp|integration|docker|container|default setup|private|preset)\b/i,
+      ],
+      baseConfidence: 0.65,
+      instructions:
+        'Use this skill when assessing integrations. Classify each item as core default, optional preset, bundled skill, marketplace/plugin candidate, or private runtime-only state. Call out credentials, data sensitivity, required approvals, and whether the item should be committed to the repo.',
+      provenance: ['source:recent-message-history', 'kind:history-suggestion'],
+    },
+  ];
+
+  return candidates
+    .map((candidate) => {
+      const evidenceCount = keywordCount(messages, candidate.patterns);
+      return {
+        ...candidate,
+        evidenceCount,
+        confidence: Math.min(
+          0.95,
+          candidate.baseConfidence + Math.max(0, evidenceCount - 1) * 0.04,
+        ),
+      };
+    })
+    .filter(
+      (candidate) =>
+        candidate.evidenceCount > 0 &&
+        !installed.has(candidate.name) &&
+        !drafted.has(candidate.name),
+    )
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, 8);
+}
+
 router.get('/', (_req: Request, res: Response) => {
   const skillsDir = path.join(PROJECT_ROOT, 'container', 'skills');
 
@@ -89,7 +236,15 @@ router.get('/', (_req: Request, res: Response) => {
   const CORE_SKILLS = [
     'agent-browser',
     'capabilities',
+    'code-reviewer',
+    'email-assistant',
+    'github-issue-agent',
+    'journalist',
+    'memory-curator',
+    'release-manager',
+    'report-writer',
     'status',
+    'task-planner',
     'slack-formatting',
   ];
   // Plugin-linked skills (managed by NanoCrab plugins)
@@ -173,6 +328,10 @@ router.get('/drafts', (req: Request, res: Response) => {
       ? (req.query.status as SkillDraftStatus)
       : undefined;
   res.json(listSkillDrafts(status));
+});
+
+router.get('/suggestions', (_req: Request, res: Response) => {
+  res.json(buildSkillSuggestions());
 });
 
 router.post('/drafts', (req: Request, res: Response) => {

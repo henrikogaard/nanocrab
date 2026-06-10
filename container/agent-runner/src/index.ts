@@ -170,6 +170,7 @@ function readProviderNeutralSkillsContext(): string | undefined {
   return [
     'Provider-neutral agent skills are available at /workspace/skills.',
     "When a user request matches a listed skill, read that skill's SKILL.md before acting.",
+    'Skill growth policy: when the user repeats a workflow, gives durable operating instructions, or asks for a reusable way of doing something, briefly ask whether NanoCrab should make a skill from it. If the user agrees, use mcp__nanocrab__propose_skill_draft with a complete provider-neutral SKILL.md. Drafts require owner approval before installation.',
     entries.join('\n'),
   ].join('\n');
 }
