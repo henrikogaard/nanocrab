@@ -11,6 +11,7 @@ import path from 'path';
 import { logger } from '../logger.js';
 import { getState } from './state.js';
 import { validateSession, getSessionUser, AdminUser } from './auth.js';
+import { SESSIONS_DIR, TERMINAL_IDLE_TIMEOUT_MS } from '../config.js';
 
 interface WsMessage {
   type: string;
@@ -20,7 +21,6 @@ interface WsMessage {
 
 let wss: WebSocketServer | null = null;
 const logWatchers = new Map<WebSocket, fs.FSWatcher>();
-const TERMINAL_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const terminals = new Map<
   string,
   {
@@ -33,6 +33,95 @@ const terminals = new Map<
   }
 >();
 const MAX_TERMINALS = 3;
+const historicalSessions = new Map<string, string>();
+
+const INDEX_PATH = path.join(SESSIONS_DIR, 'index.json');
+
+interface SessionMetadata {
+  id: string;
+  name: string;
+  owner: string;
+  createdAt: string;
+  endedAt: string | null;
+  bytes: number;
+}
+
+function loadSessionIndex(): SessionMetadata[] {
+  try {
+    return JSON.parse(fs.readFileSync(INDEX_PATH, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function saveSessionIndex(index: SessionMetadata[]): void {
+  fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+  fs.writeFileSync(INDEX_PATH, JSON.stringify(index, null, 2));
+}
+
+export function createSessionFile(sessionId: string): void {
+  let index = loadSessionIndex();
+  index = index.filter(e => e.id !== sessionId);
+  index.push({
+    id: sessionId,
+    name: sessionId,
+    owner: 'owner',
+    createdAt: new Date().toISOString(),
+    endedAt: null,
+    bytes: 0,
+  });
+  saveSessionIndex(index);
+}
+
+export function finalizeSessionFile(sessionId: string): void {
+  const index = loadSessionIndex();
+  const entry = index.find(e => e.id === sessionId);
+  if (entry) {
+    entry.endedAt = new Date().toISOString();
+    const logPath = path.join(SESSIONS_DIR, `${sessionId}.log`);
+    try {
+      entry.bytes = fs.statSync(logPath).size;
+    } catch {}
+    saveSessionIndex(index);
+  }
+}
+
+export function appendToSessionLog(sessionId: string, data: string): void {
+  if (!data) return;
+  const logPath = path.join(SESSIONS_DIR, `${sessionId}.log`);
+  try {
+    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    fs.appendFileSync(logPath, data, 'utf-8');
+  } catch (err) {
+    logger.warn({ err, sessionId }, 'Failed to append to session log');
+  }
+}
+
+export function readSessionLog(sessionId: string): string {
+  const logPath = path.join(SESSIONS_DIR, `${sessionId}.log`);
+  try {
+    return fs.readFileSync(logPath, 'utf-8');
+  } catch {
+    return '';
+  }
+}
+
+export function loadHistoricalSessions(): number {
+  try {
+    if (!fs.existsSync(SESSIONS_DIR)) return 0;
+    const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.log'));
+    let count = 0;
+    for (const file of files) {
+      const sessionId = file.replace('.log', '');
+      const content = fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf-8');
+      historicalSessions.set(sessionId, content);
+      count++;
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
 
 export function initWebSocket(server: HttpServer): void {
   wss = new WebSocketServer({ server, path: '/ws' });
@@ -81,6 +170,7 @@ export function initWebSocket(server: HttpServer): void {
             // Reset idle timer
             clearTimeout(term.idleTimer);
             term.idleTimer = setTimeout(() => {
+              finalizeSessionFile(msg.sessionId!);
               term.process.kill();
               terminals.delete(msg.sessionId!);
               broadcastTerminal(
@@ -91,14 +181,29 @@ export function initWebSocket(server: HttpServer): void {
           }
         }
         if (msg.type === 'terminal_attach' && msg.sessionId) {
-          const term = terminals.get(msg.sessionId);
+          const sid = msg.sessionId as string;
+          const term = terminals.get(sid);
           if (term) {
             term.clients.add(ws);
             send(ws, {
               type: 'terminal_output',
               data: term.transcript.slice(-50000),
-              sessionId: msg.sessionId,
+              sessionId: sid,
             });
+          } else {
+            const historical = historicalSessions.get(sid);
+            if (historical) {
+              send(ws, {
+                type: 'terminal_output',
+                data: historical.slice(-50000),
+                sessionId: sid,
+              });
+              send(ws, {
+                type: 'terminal_output',
+                data: '\r\n[Session ended — read-only view. Close this and spawn a new session to continue.]\r\n',
+                sessionId: sid,
+              });
+            }
           }
         }
         if (msg.type === 'terminal_close' && msg.sessionId) {
@@ -121,6 +226,7 @@ export function initWebSocket(server: HttpServer): void {
     broadcast({ type: 'status', data: getStatusData() });
   }, 3000);
 
+  loadHistoricalSessions();
   logger.debug('WebSocket server initialized');
 }
 
@@ -226,11 +332,15 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
     cwd: process.cwd(),
   });
 
+  createSessionFile(sessionId);
+  appendToSessionLog(sessionId, `[Session started at ${new Date().toISOString()}]\r\n`);
+
   const idleTimer = setTimeout(() => {
     broadcastTerminal(
       sessionId,
       '\r\n[Session timed out after 30 minutes of inactivity]\r\n',
     );
+    finalizeSessionFile(sessionId);
     proc.kill();
     terminals.delete(sessionId);
   }, TERMINAL_IDLE_TIMEOUT_MS);
@@ -252,6 +362,7 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
   });
   proc.on('close', () => {
     broadcastTerminal(sessionId, '\r\n[Process exited]\r\n');
+    finalizeSessionFile(sessionId);
     terminals.delete(sessionId);
   });
 
@@ -262,6 +373,7 @@ function broadcastTerminal(sessionId: string, data: string): void {
   const term = terminals.get(sessionId);
   if (!term) return;
   term.transcript = `${term.transcript}${data}`.slice(-200000);
+  appendToSessionLog(sessionId, data);
   for (const client of term.clients) {
     send(client, { type: 'terminal_output', data, sessionId });
   }
@@ -272,13 +384,23 @@ export function listTerminalSessions(): Array<{
   name: string;
   owner: string;
   transcriptBytes: number;
+  active: boolean;
 }> {
-  return [...terminals.entries()].map(([id, term]) => ({
+  const active = [...terminals.entries()].map(([id, term]) => ({
     id,
     name: term.name,
     owner: term.owner,
     transcriptBytes: Buffer.byteLength(term.transcript),
+    active: true,
   }));
+  const historical = [...historicalSessions.entries()].map(([id, transcript]) => ({
+    id,
+    name: id,
+    owner: 'unknown',
+    transcriptBytes: Buffer.byteLength(transcript),
+    active: false,
+  }));
+  return [...active, ...historical];
 }
 
 function send(ws: WebSocket, msg: WsMessage & { sessionId?: string }): void {

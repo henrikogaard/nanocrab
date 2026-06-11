@@ -1,0 +1,77 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+
+const TEST_DIR = vi.hoisted(
+  () => {
+    const os = require('os');
+    const p = require('path');
+    return p.join(os.tmpdir(), `nanocrab-term-test-${Date.now()}`);
+  },
+);
+
+vi.mock('../config.js', () => ({
+  SESSIONS_DIR: TEST_DIR,
+  TERMINAL_IDLE_TIMEOUT_MS: 7200000,
+}));
+
+vi.mock('../logger.js', () => ({
+  logger: { info: vi.fn(), debug: vi.fn(), error: vi.fn(), warn: vi.fn(), fatal: vi.fn() },
+}));
+
+import { createSessionFile, appendToSessionLog, readSessionLog, finalizeSessionFile, loadHistoricalSessions } from './websocket.js';
+
+describe('file-backed terminal sessions', () => {
+  beforeEach(() => {
+    fs.mkdirSync(TEST_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it('createSessionFile creates index entry', () => {
+    createSessionFile('term-test-1');
+    const index: Array<{ id: string; endedAt: string | null }> = JSON.parse(fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8'));
+    expect(index).toHaveLength(1);
+    expect(index[0].id).toBe('term-test-1');
+    expect(index[0].endedAt).toBeNull();
+  });
+
+  it('appendToSessionLog writes data to file', () => {
+    appendToSessionLog('term-test-2', 'hello world\n');
+    const content = readSessionLog('term-test-2');
+    expect(content).toContain('hello world');
+  });
+
+  it('finalizeSessionFile sets endedAt and bytes', () => {
+    createSessionFile('term-finalize');
+    appendToSessionLog('term-finalize', 'some data');
+    finalizeSessionFile('term-finalize');
+    const index: Array<{ id: string; endedAt: string | null; bytes: number }> = JSON.parse(fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8'));
+    const entry = index.find(e => e.id === 'term-finalize')!;
+    expect(entry.endedAt).toBeTruthy();
+    expect(entry.bytes).toBeGreaterThan(0);
+  });
+
+  it('loadHistoricalSessions loads from .log files', () => {
+    fs.writeFileSync(path.join(TEST_DIR, 'term-hist-1.log'), 'output1\n');
+    fs.writeFileSync(path.join(TEST_DIR, 'term-hist-2.log'), 'output2\n');
+    const count = loadHistoricalSessions();
+    expect(count).toBe(2);
+  });
+
+  it('readSessionLog returns empty string for missing session', () => {
+    const content = readSessionLog('nonexistent');
+    expect(content).toBe('');
+  });
+
+  it('handles multiple appends to same session', () => {
+    appendToSessionLog('term-multi', 'line1\n');
+    appendToSessionLog('term-multi', 'line2\n');
+    appendToSessionLog('term-multi', 'line3\n');
+    const content = readSessionLog('term-multi');
+    expect(content).toBe('line1\nline2\nline3\n');
+  });
+});
