@@ -15,9 +15,10 @@ import { createServer } from 'http';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 import Database from 'better-sqlite3';
 
-import { STORE_DIR } from '../config.js';
+import { STORE_DIR, SESSIONS_DIR } from '../config.js';
 import { logger } from '../logger.js';
 import { NanoCrabState, setState, getState } from './state.js';
 import { initAuth } from './auth.js';
@@ -90,6 +91,11 @@ const ADMIN_PORT = parseInt(process.env.ADMIN_PORT || '', 10) || 9744;
 
 export async function initAdminServer(state: NanoCrabState): Promise<void> {
   setState(state);
+
+  // Ensure sessions directory exists
+  if (!fs.existsSync(SESSIONS_DIR)) {
+    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+  }
 
   const db = new Database(path.join(STORE_DIR, 'messages.db'));
   db.exec(`

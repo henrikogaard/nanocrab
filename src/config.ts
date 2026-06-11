@@ -41,6 +41,11 @@ export const SENDER_ALLOWLIST_PATH = path.join(
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+export const SESSIONS_DIR = path.resolve(STORE_DIR, 'sessions');
+export const TERMINAL_IDLE_TIMEOUT_MS = parseInt(
+  process.env.TERMINAL_IDLE_TIMEOUT_MS || '7200000',
+  10,
+); // 2 hours default
 export const CODING_WORKSPACE_DIR = path.resolve(DATA_DIR, 'coding-workspaces');
 export const CONTAINER_SKILLS_DIR = path.resolve(
   PROJECT_ROOT,
