@@ -175,6 +175,14 @@ let handleWsMessage = function (msg) {
       });
       viewer.scrollTop = viewer.scrollHeight;
     }
+    // Also update terminal log viewer if present
+    const termLog = document.getElementById('term-log-viewer');
+    if (termLog) {
+      msg.data.lines.forEach((l) => {
+        termLog.textContent += l + '\n';
+      });
+      termLog.scrollTop = termLog.scrollHeight;
+    }
   }
 };
 
@@ -3366,33 +3374,118 @@ window.clearWebhookEvents = async () => {
 // Terminal
 async function renderTerminal(el) {
   if ((window._userRole || 'owner') !== 'owner') {
-    el.innerHTML =
-      '<div class="card"><div class="empty">Terminal access requires owner role.</div></div>';
+    el.innerHTML = '<div class="card"><div class="empty">Terminal access requires owner role.</div></div>';
     return;
   }
+
+  // Build the split-pane HTML
   el.innerHTML = `
-    <div class="page-header"><h2>Terminal</h2></div>
-    <div class="card" style="padding:0;overflow:hidden">
-      <div style="display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--surface2);flex-wrap:wrap">
-        <input class="search-input" id="terminal-session-id" value="${esc(localStorage.getItem('terminal_session_id') || 'term-' + Math.random().toString(36).slice(2, 8))}" style="max-width:180px;padding:5px 8px;font-family:var(--mono);font-size:12px">
+    <div class="page-header" style="margin-bottom:0">
+      <h2>Terminal</h2>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input class="search-input" id="terminal-session-id"
+          value="${esc(localStorage.getItem('terminal_session_id') || 'term-' + Math.random().toString(36).slice(2, 8))}"
+          style="max-width:180px;padding:5px 8px;font-family:var(--mono);font-size:12px">
         <button class="btn btn-sm btn-ghost" onclick="reconnectTerminal()">Reconnect</button>
         <button class="btn btn-sm btn-ghost" onclick="clearTerminal()">Clear</button>
-        <button class="btn btn-sm btn-ghost" onclick="copyTerminalTranscript()">Copy Transcript</button>
-        <span style="font-size:11px;color:var(--text-muted)">Owner-only shell in the NanoCrab process working directory</span>
+        <button class="btn btn-sm btn-ghost" onclick="copyTerminalTranscript()">Copy</button>
+        <button class="btn btn-sm btn-ghost" onclick="spawnNewTerminal()">New</button>
       </div>
-      <div id="terminal-container" style="height:500px;background:#09090b"></div>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden;flex:1;display:flex;flex-direction:column;margin-top:8px">
+      <div class="split-container" id="terminal-split">
+        <div class="split-pane" id="pane-left" style="flex:1">
+          <div class="pane-tabs" id="pane-left-tabs">
+            <div class="pane-tab active" data-tab="terminal" onclick="switchTermPane('left', 'terminal')">Terminal</div>
+            <div class="pane-tab" data-tab="files" onclick="switchTermPane('left', 'files')">Files</div>
+          </div>
+          <div class="pane-content" id="pane-left-content">
+            <div class="tab-content active" id="left-terminal">
+              <div id="terminal-container" style="height:100%;background:var(--bg)"></div>
+            </div>
+            <div class="tab-content" id="left-files" style="display:none">
+              <div class="term-file-tree" id="term-file-tree">Loading...</div>
+            </div>
+          </div>
+        </div>
+        <div class="split-divider" id="split-divider"></div>
+        <div class="split-pane" id="pane-right" style="flex:1">
+          <div class="pane-tabs" id="pane-right-tabs">
+            <div class="pane-tab active" data-tab="logs" onclick="switchTermPane('right', 'logs')">Logs</div>
+            <div class="pane-tab" data-tab="search" onclick="switchTermPane('right', 'search')">Search</div>
+          </div>
+          <div class="pane-content" id="pane-right-content">
+            <div class="tab-content active" id="right-logs">
+              <div class="term-log-viewer" id="term-log-viewer">Loading logs...</div>
+            </div>
+            <div class="tab-content" id="right-search" style="display:none">
+              <div class="term-search-pane" id="term-search-pane">
+                <div class="search-input-row">
+                  <input class="search-input" id="term-search-input" placeholder="Search terminal history..." style="flex:1">
+                  <button class="btn btn-sm btn-primary" onclick="runTerminalSearch()">Search</button>
+                </div>
+                <div style="display:flex;gap:8px;font-size:11px;color:var(--text-muted)">
+                  <label>From: <input type="date" id="term-search-from" class="search-input" style="width:auto;padding:2px 6px"></label>
+                  <label>To: <input type="date" id="term-search-to" class="search-input" style="width:auto;padding:2px 6px"></label>
+                </div>
+                <div class="search-results" id="term-search-results">
+                  <div style="color:var(--text-muted);padding:12px;text-align:center;font-size:12px">Enter a query to search across all terminal sessions</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>`;
 
-  // Load xterm.js from CDN
-  await loadCss(
-    'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css',
-  );
-  await loadScript(
-    'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js',
-  );
-  await loadScript(
-    'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js',
-  );
+  // --- Split divider drag ---
+  const divider = document.getElementById('split-divider');
+  let isDragging = false;
+
+  divider.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const container = document.getElementById('terminal-split');
+    const rect = container.getBoundingClientRect();
+    const leftPane = document.getElementById('pane-left');
+    const rightPane = document.getElementById('pane-right');
+    let pos = e.clientX - rect.left;
+    const minWidth = 200;
+    pos = Math.max(minWidth, Math.min(pos, rect.width - minWidth));
+    const pct = (pos / rect.width) * 100;
+    leftPane.style.flex = `0 0 ${pct}%`;
+    rightPane.style.flex = `1 1 ${100 - pct}%`;
+    localStorage.setItem('terminal_split_pos', pct.toString());
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isDragging) {
+      isDragging = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  });
+
+  // Restore saved split position
+  const savedPos = localStorage.getItem('terminal_split_pos');
+  if (savedPos) {
+    const pct = parseFloat(savedPos);
+    if (pct > 20 && pct < 80) {
+      document.getElementById('pane-left').style.flex = `0 0 ${pct}%`;
+      document.getElementById('pane-right').style.flex = `1 1 ${100 - pct}%`;
+    }
+  }
+
+  // --- Load xterm.js ---
+  await loadCss('https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css');
+  await loadScript('https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js');
+  await loadScript('https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js');
+  await loadScript('https://cdn.jsdelivr.net/npm/@xterm/addon-search@0.16.0/lib/addon-search.min.js');
 
   const term = new window.Terminal({
     cursorBlink: true,
@@ -3403,16 +3496,28 @@ async function renderTerminal(el) {
   });
   const fitAddon = new window.FitAddon.FitAddon();
   term.loadAddon(fitAddon);
+  const searchAddon = new window.SearchAddon.SearchAddon();
+  term.loadAddon(searchAddon);
+
   term.open(document.getElementById('terminal-container'));
   setTimeout(() => fitAddon.fit(), 100);
+
+  // Ctrl+Shift+F inline search
+  term.onKey((e) => {
+    if (e.key === 'F' && (e.domEvent.ctrlKey || e.domEvent.metaKey) && e.domEvent.shiftKey) {
+      const query = prompt('Search terminal (Ctrl+G next, Shift+Ctrl+G prev):');
+      if (query) searchAddon.findNext(query);
+    }
+  });
 
   const sessionId = document.getElementById('terminal-session-id').value;
   localStorage.setItem('terminal_session_id', sessionId);
   activeTerminal = { sessionId, term, transcript: '' };
 
-  // Wait for WS to be ready, reconnect if needed
-  const spawnTerminal = () => {
+  // Spawn or attach terminal session
+  const initTerminal = () => {
     if (ws?.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'terminal_attach', sessionId }));
       ws.send(JSON.stringify({ type: 'terminal_spawn', data: sessionId }));
       return;
     }
@@ -3423,6 +3528,7 @@ async function renderTerminal(el) {
       attempts++;
       if (ws?.readyState === 1) {
         clearInterval(check);
+        ws.send(JSON.stringify({ type: 'terminal_attach', sessionId }));
         ws.send(JSON.stringify({ type: 'terminal_spawn', data: sessionId }));
       } else if (attempts > 20) {
         clearInterval(check);
@@ -3430,25 +3536,123 @@ async function renderTerminal(el) {
       }
     }, 500);
   };
-  window._spawnTerminalSession = spawnTerminal;
-  spawnTerminal();
+  window._spawnTerminalSession = initTerminal;
+  initTerminal();
 
   term.onData((data) => {
-    if (ws?.readyState === 1)
+    if (ws?.readyState === 1) {
       ws.send(JSON.stringify({ type: 'terminal_input', sessionId, data }));
+    }
   });
 
   const container = document.getElementById('terminal-container');
   if (container) new ResizeObserver(() => fitAddon.fit()).observe(container);
+
+  // --- Load file tree ---
+  loadTerminalFileTree();
+
+  // --- Load logs ---
+  loadTerminalLogs();
 }
 
+// Tab switching within panes
+window.switchTermPane = function (side, tabId) {
+  const tabs = document.getElementById(`pane-${side}-tabs`);
+  if (!tabs) return;
+  tabs.querySelectorAll('.pane-tab').forEach(t => t.classList.remove('active'));
+  const tab = tabs.querySelector(`[data-tab="${tabId}"]`);
+  if (tab) tab.classList.add('active');
+
+  const contents = document.getElementById(`pane-${side}-content`);
+  if (!contents) return;
+  contents.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+  const target = document.getElementById(`${side}-${tabId}`);
+  if (target) {
+    target.style.display = '';
+    target.classList.add('active');
+  }
+};
+
+// File tree in terminal pane
+async function loadTerminalFileTree() {
+  const el = document.getElementById('term-file-tree');
+  if (!el) return;
+  try {
+    const repos = await api('/files/repos');
+    if (repos.length === 0) {
+      el.innerHTML = '<div style="padding:8px;color:var(--text-muted)">No repos mounted</div>';
+      return;
+    }
+    const repo = repos[0].name;
+    const tree = await api(`/files/repos/${encodeURIComponent(repo)}/tree`);
+    el.innerHTML = `<div class="repo-header">${esc(repo)}</div>${renderTermTree(tree, '', repo)}`;
+  } catch {
+    el.innerHTML = '<div style="padding:8px;color:var(--text-muted)">Failed to load</div>';
+  }
+}
+
+function renderTermTree(items, prefix, repo) {
+  if (!items || !Array.isArray(items)) return '';
+  return items.map(item => {
+    const fullPath = prefix ? `${prefix}/${item.name}` : item.name;
+    if (item.type === 'dir') {
+      return `<details style="padding-left:10px"><summary style="cursor:pointer;padding:2px 0;font-size:12px;color:var(--text-secondary);list-style:none">${esc(item.name)}/</summary>${renderTermTree(item.children || [], fullPath, repo)}</details>`;
+    }
+    return `<div class="tree-item" onclick="openTermFile('${esc(repo)}','${esc(fullPath)}')">${esc(item.name)}</div>`;
+  }).join('');
+}
+
+window.openTermFile = function (repo, path) {
+  navigate('gitcode');
+  setTimeout(() => {
+    if (typeof window.openEditorFile === 'function') {
+      window.openEditorFile(repo, path);
+    }
+  }, 500);
+};
+
+// Log viewer in terminal pane
+async function loadTerminalLogs() {
+  const el = document.getElementById('term-log-viewer');
+  if (!el) return;
+  try {
+    const logs = await api('/logs/system?lines=100');
+    el.innerHTML = logs.lines && logs.lines.length
+      ? logs.lines.map(l => colorizeLog([l])).join('\n')
+      : 'No log entries';
+    el.scrollTop = el.scrollHeight;
+  } catch {
+    el.innerHTML = 'Failed to load logs';
+  }
+  // Subscribe to live logs
+  if (ws?.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'subscribe_logs', data: 'system' }));
+  }
+}
+
+// New terminal session
+window.spawnNewTerminal = function () {
+  const newId = 'term-' + Math.random().toString(36).slice(2, 8);
+  const input = document.getElementById('terminal-session-id');
+  if (input) input.value = newId;
+  localStorage.setItem('terminal_session_id', newId);
+  if (activeTerminal && activeTerminal.term) {
+    activeTerminal.term.dispose();
+    activeTerminal = null;
+  }
+  if (currentPage === 'devhub') navigate('devhub');
+};
+
 window.reconnectTerminal = function () {
-  const sessionId = document.getElementById('terminal-session-id')?.value;
+  const input = document.getElementById('terminal-session-id');
+  const sessionId = input?.value;
   if (!sessionId || !activeTerminal) return;
   localStorage.setItem('terminal_session_id', sessionId);
-  activeTerminal.sessionId = sessionId;
-  activeTerminal.transcript = '';
-  activeTerminal.term.reset();
+  if (activeTerminal.term) {
+    activeTerminal.sessionId = sessionId;
+    activeTerminal.transcript = '';
+    activeTerminal.term.reset();
+  }
   if (typeof window._spawnTerminalSession === 'function') {
     window._spawnTerminalSession();
   }
@@ -3457,7 +3661,7 @@ window.reconnectTerminal = function () {
 window.clearTerminal = function () {
   if (!activeTerminal) return;
   activeTerminal.transcript = '';
-  activeTerminal.term.clear();
+  if (activeTerminal.term) activeTerminal.term.clear();
 };
 
 window.copyTerminalTranscript = async function () {
@@ -6507,3 +6711,77 @@ window.addEventListener('hashchange', () => {
     showShell(pages[p] ? p : 'dashboard');
   } else showLogin();
 })();
+
+// --- Terminal Search ---
+
+window.runTerminalSearch = async function () {
+  const input = document.getElementById('term-search-input');
+  const from = document.getElementById('term-search-from');
+  const to = document.getElementById('term-search-to');
+  const resultsEl = document.getElementById('term-search-results');
+  const query = input?.value?.trim();
+
+  if (!query) {
+    if (resultsEl) resultsEl.innerHTML = '<div style="color:var(--text-muted);padding:12px;text-align:center;font-size:12px">Enter a query to search</div>';
+    return;
+  }
+
+  if (resultsEl) resultsEl.innerHTML = '<div style="padding:12px;text-align:center;font-size:12px;color:var(--text-muted)">Searching...</div>';
+
+  try {
+    const body = { query };
+    if (from?.value) body.dateFrom = from.value + 'T00:00:00Z';
+    if (to?.value) body.dateTo = to.value + 'T23:59:59Z';
+
+    const data = await api('/sessions/terminal/search', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+
+    const results = data.results || [];
+
+    if (!resultsEl) return;
+
+    if (results.length === 0) {
+      resultsEl.innerHTML = '<div style="color:var(--text-muted);padding:16px;text-align:center;font-size:12px">No results found for <strong>' + esc(query) + '</strong></div>';
+      return;
+    }
+
+    resultsEl.innerHTML = results.map((r, i) => `
+      <div class="search-result-item" onclick="viewTerminalTranscript('${esc(r.sessionId)}')">
+        <div class="search-result-line">${esc(truncate(r.text, 100))}</div>
+        <div class="search-result-meta">
+          Session: ${esc(r.sessionId)} &middot; Line ${r.line}
+        </div>
+        <div class="search-result-context">${esc(truncate(r.context, 200))}</div>
+      </div>
+    `).join('') +
+    '<div style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted)">' + results.length + ' result' + (results.length !== 1 ? 's' : '') + '</div>';
+  } catch (e) {
+    if (resultsEl) resultsEl.innerHTML = '<div style="color:var(--error);padding:12px;text-align:center;font-size:12px">Search failed: ' + esc(e.message) + '</div>';
+  }
+};
+
+window.viewTerminalTranscript = async function (sessionId) {
+  try {
+    const data = await api('/sessions/terminal/' + encodeURIComponent(sessionId) + '/transcript');
+    // Switch to left pane terminal tab
+    window.switchTermPane('left', 'terminal');
+    const container = document.getElementById('terminal-container');
+    if (activeTerminal && activeTerminal.term) {
+      activeTerminal.term.reset();
+      activeTerminal.term.write((data.content || '').slice(-50000));
+      activeTerminal.term.write('\r\n\r\n[END OF SESSION — ' + esc(sessionId) + ']\r\n');
+    }
+    toast('Loaded session: ' + sessionId, 'info');
+  } catch (e) {
+    toast('Failed to load transcript: ' + e.message, 'error');
+  }
+};
+
+// Enter key to search from search input
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Enter' && document.activeElement === document.getElementById('term-search-input')) {
+    window.runTerminalSearch();
+  }
+});
