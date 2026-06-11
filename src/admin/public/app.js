@@ -75,6 +75,11 @@ function connectWs() {
   ws = new WebSocket(url);
   ws.onopen = () => {
     console.log('WS connected');
+    const savedSessionId = localStorage.getItem('terminal_session_id');
+    if (savedSessionId) {
+      ws.send(JSON.stringify({ type: 'terminal_attach', sessionId: savedSessionId }));
+      ws.send(JSON.stringify({ type: 'terminal_spawn', data: savedSessionId }));
+    }
   };
   ws.onmessage = (e) => {
     try {
@@ -1547,8 +1552,39 @@ async function renderMessages(el) {
 
 // Tasks
 async function renderTasks(el) {
-  const tasks = await api('/tasks');
-  const groups = await api('/groups');
+  const [tasks, groups, providerInfo] = await Promise.all([
+    api('/tasks'),
+    api('/groups'),
+    api('/system/provider').catch(() => ({ provider: 'claude' })),
+  ]);
+  const providerModels = providerInfo.models || {
+    claude: [
+      'claude-opus-4-6',
+      'claude-sonnet-4-6',
+      'claude-haiku-4-5-20251001',
+    ],
+    codex: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2', 'o4-mini', 'o3-mini', 'gpt-4.1'],
+    opencode: ['opencode/grok-code-fast-1'],
+    ollama: ['llama3', 'llama3.1', 'mistral', 'codestral', 'gemma4:e2b'],
+    openrouter: [
+      'openrouter/auto',
+      'anthropic/claude-sonnet-4.5',
+      'google/gemini-2.5-pro',
+    ],
+    google: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
+  };
+  const providerDefinitions = providerInfo.definitions || {
+    claude: { id: 'claude', name: 'Claude' },
+    codex: { id: 'codex', name: 'Codex' },
+    opencode: { id: 'opencode', name: 'OpenCode' },
+    ollama: { id: 'ollama', name: 'Ollama' },
+    openrouter: { id: 'openrouter', name: 'OpenRouter' },
+    google: { id: 'google', name: 'Google' },
+  };
+  const providerOptions = Object.values(providerDefinitions)
+    .filter((p) => p && p.selectable !== false)
+    .map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`)
+    .join('');
 
   const TASK_TEMPLATES = [
     {
@@ -1617,6 +1653,10 @@ async function renderTasks(el) {
           <div class="form-group"><label>Schedule Type</label><select id="task-type"><option value="cron">Cron</option><option value="interval">Interval</option><option value="once">Once</option></select></div>
         </div>
         <div class="form-group"><label>Schedule Value (cron expression or interval like "30m", "2h")</label><input id="task-schedule" placeholder="0 9 * * *"></div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Provider (optional — overrides group default)</label><select id="task-provider" onchange="updateTaskModelSelect('task-provider','task-model')"><option value="">Inherit</option>${providerOptions}</select></div>
+          <div class="form-group"><label>Model (optional — overrides group default)</label><select id="task-model"><option value="">Inherit</option></select></div>
+        </div>
         <div class="form-group"><label>Prompt</label><textarea id="task-prompt" style="width:100%;min-height:80px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:13px;resize:vertical" placeholder="What should the bot do?"></textarea></div>
         <div class="form-group"><label>Script (optional — runs before the agent, stdout is passed as context)</label><textarea id="task-script" style="width:100%;min-height:60px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical" placeholder="#!/bin/bash\n# Script output is passed to the agent"></textarea></div>
         <div class="form-group">
@@ -1633,12 +1673,14 @@ async function renderTasks(el) {
       tasks.length === 0
         ? '<div class="card empty">No scheduled tasks</div>'
         : `<div class="card table-wrap"><table>
-    <thead><tr><th>Prompt</th><th>Group</th><th>Schedule</th><th>Status</th><th>Last Run</th><th>Next Run</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Prompt</th><th>Group</th><th>Provider</th><th>Model</th><th>Schedule</th><th>Status</th><th>Last Run</th><th>Next Run</th><th>Actions</th></tr></thead>
     <tbody>${tasks
       .map(
         (t) => `<tr>
       <td style="max-width:300px;color:var(--text)">${esc(truncate(t.prompt, 100))}</td>
       <td><span class="badge badge-muted">${esc(t.group_folder)}</span></td>
+      <td>${t.provider ? `<span class="badge badge-accent">${esc(t.provider)}</span>` : '<span class="badge badge-muted">inherit</span>'}</td>
+      <td>${t.model ? `<span style="font-family:var(--mono);font-size:11px;color:var(--text)">${esc(t.model)}</span>` : '<span class="badge badge-muted">inherit</span>'}</td>
       <td><code>${t.schedule_type}: ${esc(t.schedule_value)}</code></td>
       <td><span class="badge ${t.status === 'active' ? 'badge-success' : t.status === 'paused' ? 'badge-warning' : 'badge-muted'}">${t.status}</span></td>
       <td>${t.last_run ? formatTime(t.last_run) : '-'}</td>
@@ -1656,10 +1698,12 @@ async function renderTasks(el) {
     <div id="task-editor"></div>`;
 
   window._taskTemplates = TASK_TEMPLATES;
+  window._taskProviderModels = providerModels;
+  window._taskProviderDefs = providerDefinitions;
 
   const form = document.getElementById('task-create-form');
   if (form)
-    form.onsubmit = async (e) => {
+      form.onsubmit = async (e) => {
       e.preventDefault();
       const [groupFolder, chatJid] = document
         .getElementById('task-group')
@@ -1668,6 +1712,8 @@ async function renderTasks(el) {
         document.querySelector('input[name="task-context-mode"]:checked')
           ?.value || 'isolated';
       const script = document.getElementById('task-script').value;
+      const provider = document.getElementById('task-provider')?.value || '';
+      const model = document.getElementById('task-model')?.value || '';
       const r = await api('/tasks', {
         method: 'POST',
         body: JSON.stringify({
@@ -1678,6 +1724,8 @@ async function renderTasks(el) {
           scheduleValue: document.getElementById('task-schedule').value,
           script: script || undefined,
           contextMode,
+          provider: provider || undefined,
+          model: model || undefined,
         }),
       });
       if (r.ok) navigate('tasks');
@@ -4655,6 +4703,14 @@ window.editTask = async (id) => {
   const task = await api(`/tasks/${id}`);
   const editor = document.getElementById('task-editor');
   if (!editor) return;
+  const defs = window._taskProviderDefs || {};
+  const models = window._taskProviderModels || {};
+  const providerOptions = Object.values(defs)
+    .filter((p) => p && p.selectable !== false)
+    .map((p) => `<option value="${esc(p.id)}" ${task.provider === p.id ? 'selected' : ''}>${esc(p.name || p.id)}</option>`)
+    .join('');
+  const modelsForProvider = models[task.provider || ''] || [];
+  const modelOptions = `<option value="">Inherit</option>${modelsForProvider.map((m) => `<option value="${esc(m)}" ${task.model === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}`;
   editor.innerHTML = `
     <div class="card" style="margin-top:12px">
       <div class="card-title">Edit Task <span class="badge badge-muted">${esc(task.id.slice(0, 8))}</span></div>
@@ -4666,6 +4722,10 @@ window.editTask = async (id) => {
             <option value="once" ${task.schedule_type === 'once' ? 'selected' : ''}>Once</option>
           </select></div>
           <div class="form-group"><label>Schedule Value</label><input id="edit-task-schedule" value="${esc(task.schedule_value)}"></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Provider</label><select id="edit-task-provider" onchange="updateTaskModelSelect('edit-task-provider','edit-task-model')"><option value="">Inherit</option>${providerOptions}</select></div>
+          <div class="form-group"><label>Model</label><select id="edit-task-model">${modelOptions}</select></div>
         </div>
         <div class="form-group"><label>Prompt</label><textarea id="edit-task-prompt" style="width:100%;min-height:120px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:13px;resize:vertical">${esc(task.prompt)}</textarea></div>
         <div class="form-group"><label>Script (optional)</label><textarea id="edit-task-script" style="width:100%;min-height:60px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical">${esc(task.script || '')}</textarea></div>
@@ -4683,6 +4743,8 @@ window.editTask = async (id) => {
   editor.scrollIntoView({ behavior: 'smooth' });
   document.getElementById('task-edit-form').onsubmit = async (e) => {
     e.preventDefault();
+    const provider = document.getElementById('edit-task-provider')?.value || '';
+    const model = document.getElementById('edit-task-model')?.value || '';
     const r = await api('/tasks/' + id, {
       method: 'PUT',
       body: JSON.stringify({
@@ -4690,10 +4752,12 @@ window.editTask = async (id) => {
         schedule_type: document.getElementById('edit-task-type').value,
         schedule_value: document.getElementById('edit-task-schedule').value,
         status: document.getElementById('edit-task-status').value,
+        provider: provider || undefined,
+        model: model || undefined,
       }),
     });
     if (r.ok) {
-      toast('Task updated', 'success');
+      toast('Updated', 'success');
       navigate('tasks');
     } else {
       const m = document.getElementById('edit-task-msg');
@@ -4701,6 +4765,15 @@ window.editTask = async (id) => {
       m.style.color = 'var(--error)';
     }
   };
+};
+
+window.updateTaskModelSelect = function (providerSelectId, modelSelectId) {
+  const providerEl = document.getElementById(providerSelectId);
+  const modelEl = document.getElementById(modelSelectId);
+  if (!providerEl || !modelEl) return;
+  const models = window._taskProviderModels || {};
+  const modelsForProvider = models[providerEl.value] || [];
+  modelEl.innerHTML = `<option value="">Inherit</option>${modelsForProvider.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('')}`;
 };
 
 window.taskAction = async (id, action, btnEl) => {
@@ -5715,6 +5788,7 @@ async function renderMonitoring(el) {
       <span class="badge badge-muted" id="monitoring-refresh-badge">Auto-refresh: 30s</span>
     </div>
     <div id="monitoring-stats"><div class="loading">Loading</div></div>
+    <div id="monitoring-health"></div>
     <div class="card" id="monitoring-chart-card">
       <div class="card-title">History</div>
       <div id="monitoring-chart"><div class="loading">Loading</div></div>
@@ -5770,6 +5844,36 @@ async function renderMonitoring(el) {
               : ''
           }
         </div>`;
+
+      // Load provider health
+      try {
+        const health = await api('/providers/health').catch(() => null);
+        const healthEl = document.getElementById('monitoring-health');
+        if (healthEl && health && Array.isArray(health.entries)) {
+          const allOk = health.entries.every((e) => e.ok);
+          healthEl.innerHTML = `
+            <div class="card" style="margin:0;margin-top:16px">
+              <div class="card-title" style="display:flex;align-items:center;gap:8px">
+                Provider Health
+                <span class="badge ${allOk ? 'badge-success' : 'badge-warning'}" style="font-size:10px">${health.entries.filter((e) => e.ok).length}/${health.entries.length} OK</span>
+                <button class="btn btn-sm btn-ghost" style="margin-left:auto;font-size:11px" onclick="runAllProbes()">Re-probe All</button>
+              </div>
+              <div class="table-wrap"><table>
+                <thead><tr><th>Profile</th><th>Provider</th><th>Model</th><th>Status</th><th>Last Probe</th><th>Capabilities</th></tr></thead>
+                <tbody>${health.entries.map((e) => `
+                  <tr>
+                    <td style="font-weight:500;color:var(--text)">${esc(e.purpose)}</td>
+                    <td><span class="badge badge-accent">${esc(e.provider)}</span></td>
+                    <td style="font-family:var(--mono);font-size:11px;color:var(--text)">${esc(e.model)}</td>
+                    <td><span class="status-dot ${e.ok ? 'online' : 'offline'}" style="margin-right:4px"></span><span class="badge ${e.ok ? 'badge-success' : 'badge-error'}" style="font-size:10px">${e.ok ? 'Ready' : 'Failed'}</span>${e.errorMessage ? `<div style="font-size:10px;color:var(--error);margin-top:2px">${esc(e.errorMessage)}</div>` : ''}</td>
+                    <td style="font-size:11px;color:var(--text-muted)">${e.lastProbeAt ? formatTime(e.lastProbeAt) : '-'}</td>
+                    <td>${e.capabilities.length > 0 ? e.capabilities.map((c) => `<span class="badge badge-info" style="font-size:9px">${esc(c)}</span>`).join(' ') : '<span class="badge badge-muted" style="font-size:9px">unprobed</span>'}</td>
+                  </tr>`).join('')}
+                </tbody>
+              </table></div>
+            </div>`;
+        }
+      } catch { /* provider health not available */ }
     } catch {}
 
     // Load history
@@ -5824,6 +5928,21 @@ async function renderMonitoring(el) {
   monitoringTimer = setInterval(loadMonitoring, 30000);
   pollTimers.push(monitoringTimer);
 }
+
+window.runAllProbes = async function () {
+  const btn = document.activeElement;
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/providers/probe-all', { method: 'POST' });
+    if (r.ok) toast('All providers re-probed', 'success');
+    else toast(r.error || 'Probe failed', 'error');
+  } catch (e) {
+    toast('Probe error: ' + e.message, 'error');
+  }
+  if (btn) btn.disabled = false;
+  // Refresh the monitoring view to show updated health
+  navigate('monitoring');
+};
 
 // --- Deploy Pipelines ---
 async function renderPipelines(el) {
