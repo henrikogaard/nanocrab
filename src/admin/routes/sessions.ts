@@ -5,6 +5,10 @@ import readline from 'readline';
 
 import { DATA_DIR } from '../../config.js';
 import { listTerminalSessions } from '../websocket.js';
+import {
+  listTerminalTranscriptSummaries,
+  searchTerminalTranscripts,
+} from '../../terminal-transcripts.js';
 
 const router = Router();
 
@@ -127,6 +131,28 @@ router.get('/', async (_req: Request, res: Response) => {
 
 router.get('/terminal/active', (_req: Request, res: Response) => {
   res.json(listTerminalSessions());
+});
+
+router.get('/terminal/history', (_req: Request, res: Response) => {
+  res.json({ sessions: listTerminalTranscriptSummaries() });
+});
+
+router.get('/terminal/search', (req: Request, res: Response) => {
+  try {
+    const query = typeof req.query.query === 'string' ? req.query.query : '';
+    res.json({
+      hits: searchTerminalTranscripts({
+        query,
+        owner:
+          typeof req.query.owner === 'string' ? req.query.owner : undefined,
+        limit: Math.min(parseInt(req.query.limit as string) || 50, 200),
+      }),
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 router.get('/:group/:sessionId', async (req: Request, res: Response) => {

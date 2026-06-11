@@ -66,8 +66,16 @@ Additional plugins can be installed from git URLs via the Marketplace page, or c
 ### Autonomous Coding
 
 - **Coding Task Launcher** — pick tool (Claude Code / Codex / Copilot), model, working directory, and describe the task
-- **GitHub Coding Jobs** — register repos, list/pick issues, start dedicated coding containers, inspect diffs/output, request approval, open PRs, retry, cancel, and revert
+- **GitHub Coding Jobs** — register repos with coding rules/defaults/assignees, list/pick issues, claim picked issues, review an implementation plan before mutation, start dedicated coding containers, inspect diffs/output/timeline/test/CI status, approve implementation, open PRs, retry, cancel, and revert
+- **Agent Cockpit** — the Agents dashboard keeps a persistent overview/timeline/approvals/providers pane and streams normalized coding-job timeline events for repeated operator check-ins
+- **Channel Health** — dashboard channel and Bot Agent status use centralized `active`/`degraded`/`offline` semantics; Signal reports heartbeat-backed last-active diagnostics from `signal-cli`
+- **Dashboard WhatsApp Pairing** — authenticated owners can start QR or pairing-code WhatsApp setup from the Channels panel, refresh/cancel/reset safely, and inspect pairing errors without exposing `store/auth` session files
+- **Built-In Avatar Gallery** — Settings includes the NanoCrab default, uploaded-avatar state, and five original SVG avatar choices stored under `static/avatars/`
+- **Assistant Profile** — Settings groups assistant personality and skill-family preferences into a managed profile block that can be propagated to group `AGENTS.md` files without clobbering local instructions
+- **Mobile Coding Commands** — main-group slash commands such as `/coding-pick`, `/coding-jobs`, `/coding-approve`, `/coding-pr`, and `/coding-ci` control the same approval-gated workflow from chat
+- **Dry Run And Audit Replay** — set `NANOCRAB_DRY_RUN=true` to evaluate risky coding actions without launching containers or opening PRs, and use `/api/audit/replay` for a normalized admin/approval/coding timeline
 - **Isolated Coding Jobs** — WhatsApp/Signal/Telegram agents can request repo coding jobs through MCP; an ephemeral coding container clones and edits inside `data/coding-workspaces`
+- **First-Run Readiness** — `npx tsx setup/index.ts --step preflight` and the System page check clean-VPS prerequisites, resumable setup state, container runtime/image readiness, writable state directories, credentials-present flags, and release checklist items without exposing secrets
 - **Scheduled Tasks** — recurring coding jobs (hourly, daily, weekly)
 - **GitHub Autofix Pipeline** — webhook-driven: issue created → agent fixes → PR opened → bot notifies you
 - **PR Review** — an agent reviews every new PR and posts comments
@@ -82,6 +90,8 @@ List open GitHub issues for henrikogaard/nanocrab.
 Pick an autofix issue from henrikogaard/nanocrab and start a coding job.
 Start a Codex coding job for henrikogaard/nanocrab to improve the settings page.
 Create a scheduled task that periodically asks the main agent to pick an autofix issue and open a PR.
+/coding-pick henrikogaard/nanocrab labels=autofix provider=codex
+/coding-approve code-...
 ```
 
 The agent calls MCP tools such as `register_coding_repo`,
@@ -90,7 +100,8 @@ the scheduled-task tools. The dashboard exposes the same flow under
 **Agents -> GitHub Coding Jobs**. The host creates job metadata and launches a
 short-lived agent container with only that job directory mounted at
 `/workspace/coding-job`. The container performs clone/edit/commit/push work;
-the host then creates the GitHub PR through the API after approval. Job metadata is stored in
+issue jobs first produce an implementation plan and require approval before that
+container can mutate code. The host then creates the GitHub PR through the API after approval. Job metadata is stored in
 `store/coding-jobs.json`, registered repos live in `store/coding-repos.json`,
 and workspaces live under `data/coding-workspaces/jobs/`.
 
@@ -141,14 +152,29 @@ success responses and do not mutate live files or services.
 
 ### Memory, Journal, And Skills
 
-- **Memory v2** — agents can propose structured memories with sensitivity, source, stale, and contradiction metadata; the dashboard reviews what becomes active.
+- **Memory v2** — agents can propose structured memories with sensitivity, source links, stale, expiry, and contradiction metadata; the dashboard review queue filters by reason and shows related memories before anything becomes active.
 - **Journal v2** — agents can record notable events, extract daily/weekly summaries, and answer natural questions like "when was that fleet crash?" with cited events.
-- **Skill Factory v2** — agents can propose provider-neutral `SKILL.md` drafts with version/provenance metadata, validation, diff review, and approval before installation into `container/skills`.
+- **Journal Q&A** — the Memory page can answer journal questions from stored events and summaries with explicit citations back to journal records.
+- **Skill Factory v2** — agents can propose provider-neutral `SKILL.md` drafts with version/provenance metadata, revision history, rollback, validation, diff review, and approval before installation into `container/skills`.
 - **Bundled Default Skills** — NanoCrab ships with generic skills for memory curation, journaling, task planning, reports, GitHub issue work, code review, release management, email assistance, browser research, documents, images, and capabilities/status.
-- **Suggested Skills** — the dashboard Skills page highlights reusable workflow candidates from recent history, such as private operations planning or dashboard design review. Suggestions become inactive drafts first and still require approval.
-- **Skill Registry** — skills can be enabled/disabled and scoped to all agents, main-only, or channel agents. Visibility can be shared, private, or system. Agents can also call `list_skills` and `search_skills` to find skills related to a user request.
+- **Suggested Skills** — the dashboard Skills page keeps a persistent queue of reusable workflow candidates from recent history, with recurrence counts, dismiss controls, and draft linkage. Suggestions become inactive drafts first and still require approval.
+- **Skill Registry** — skills can be enabled/disabled and scoped to all agents, main-only, or channel agents. Visibility can be shared, private, or system. Agents can call `list_skills` and `search_skills`; matching reports missing required tools and avoids generic high-risk/tool-gated fallback injection.
 - **Reports And Research** — agents and admins can request report jobs, outline approval, Markdown/HTML/DOCX/PDF exports, Playwright-backed research notes, and optional official NotebookLM Enterprise configuration.
+- **Report Studio** — the Agents dashboard can create report jobs, preview outlines, track artifact exports, and route outline/delivery approval through the unified approval inbox before delivery.
+- **Artifact Vault** — the Agents dashboard indexes report deliverables and group artifacts with search, retention/expiry status, and source links back to reports or cited records.
+- **Persistent Terminal Transcripts** — owner-only dashboard terminals persist transcript events with owner metadata and searchable history under `data/terminal-sessions/`.
+- **Inference Health** — System shows local versus remote provider profile health, probe freshness, failed checks, and configured/degraded counts.
+- **Model Operations Metrics** — Usage tracks provider/model cost, average latency, context-window usage, success rate, and last error from provider usage logs.
 - **Unified Approvals** — risky actions such as provider fallback, PR creation, report delivery, publishing, uploads, external messages, and shell-like work flow through `/api/approvals`.
+- **Agent Boundaries** — main agents can be scoped to all group chats, registered groups only, or an explicit `allowedGroupFolders` list.
+- **Connector Catalog** — Integrations shows a unified setup catalog for channels and MCP-backed connectors, including installed/configured status, missing credentials, setup steps, related skills, permission scopes, and approval-gated risk. The bundled `connector-operator` skill gives agents a default safe workflow for connector tasks.
+- **GitHub Connector Health** — the Webhooks page checks token, secret, enabled state, target group, setup steps, and recent webhook deliveries.
+- **Email Connector Workflows** — the connector catalog includes approval-aware inbox triage, draft reply, and approved-send workflow templates for Gmail/Infomaniak MCP connectors.
+- **Calendar Connector Workflows** — availability review, meeting prep, and approval-gated event changes are listed with connector scopes and skills.
+- **kDrive Document Workflows** — file search, document-backed reports, and approval-gated upload/share/move flows are cataloged for Infomaniak kSuite.
+- **Daily/Weekly Briefings** — Settings includes scheduled briefing presets that configure the report pipeline for daily operations briefs or weekly digests with outline approval.
+- **Missions And Runbooks** — the Missions dashboard stores mission runbooks with owners, due dates, group context, step status, blocker notes, progress summaries, and archive controls.
+- **Recurring Operations Reminders** — Missions can create validated cron, interval, or one-time reminder tasks for registered operation groups, with optional confirmation prompts.
 
 ### Default Integrations
 
@@ -283,7 +309,7 @@ when needed, which is the normal VPS/Linux container path.
 ### Switching Providers Later
 
 - **Settings -> Agent Provider** changes the global default.
-- **Settings -> Provider Profiles** chooses provider/model/tool policy for chat, coding, automations, memory, journal, skill factory, reports, documents, and vision.
+- **Settings -> Provider Profiles** chooses provider/model/tool policy for chat, coding, automations, memory, journal, skill factory, reports, documents, and vision. Live probe results are persisted and write-capable fallback requires approval.
 - **Groups -> Provider** overrides the provider per group.
 - **Integrations -> AI Providers** enables/disables API-key providers.
 
@@ -400,6 +426,7 @@ NanoCrab 2.0-Beta1 is tested with Node.js 24. Node.js 20-24 are the supported ra
 Useful release checks:
 
 ```bash
+npx tsx setup/index.ts --step preflight
 npm install
 npm run typecheck
 npm run build
@@ -410,6 +437,22 @@ npm run mock:admin:build
 ```
 
 `npm run mock:admin` starts a complete sample-data dashboard for UI work without touching live channels or credentials.
+
+Clean VPS validation path:
+
+```bash
+git clone <repo-url> nanocrab
+cd nanocrab
+npx tsx setup/index.ts --step preflight
+npm install
+npm run setup -- --step admin
+npm run setup -- --step provider
+npm run build
+./container/build.sh
+npm run setup -- --step verify
+```
+
+The preflight can be rerun after any partial failure. It prints NanoCrab branding, required versus optional checks, recovery guidance, and only credential presence flags. When testing on a disposable VPS, tear down the VM after verification instead of copying runtime state back to a workstation.
 
 ## Roadmap
 

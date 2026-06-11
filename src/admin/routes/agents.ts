@@ -19,15 +19,18 @@ import {
 } from '../../agent-provider.js';
 import {
   getCodingJob,
+  getCodingJobCockpitSummary,
   approveCodingJob,
   cancelCodingJob,
   closeCodingJobPr,
+  listCodingJobTimeline,
   listGitHubIssues,
   loadCodingJobs,
   loadCodingRepos,
   openCodingJobPr,
   pickGitHubIssue,
   registerCodingRepo,
+  refreshCodingJobCi,
   retryCodingJob,
   revertCodingJob,
   startCodingJob,
@@ -94,6 +97,17 @@ router.post('/coding/repos', async (req: Request, res: Response) => {
       repo: req.body.repo,
       defaultBranch: req.body.defaultBranch,
       labels: Array.isArray(req.body.labels) ? req.body.labels : [],
+      assignee:
+        typeof req.body.assignee === 'string' ? req.body.assignee : undefined,
+      milestone:
+        typeof req.body.milestone === 'string' ? req.body.milestone : undefined,
+      defaultProvider: req.body.defaultProvider,
+      defaultModel: req.body.defaultModel,
+      codingRules:
+        typeof req.body.codingRules === 'string'
+          ? req.body.codingRules
+          : undefined,
+      trustedForPr: req.body.trustedForPr === true,
     });
     auditLog(req, 'coding_repo_registered', repo.fullName);
     res.json({ ok: true, repo });
@@ -117,6 +131,18 @@ router.get('/coding/jobs', (_req: Request, res: Response) => {
         output:
           job.output.length > 1200 ? `${job.output.slice(-1200)}` : job.output,
       })),
+  );
+});
+
+router.get('/coding/summary', (_req: Request, res: Response) => {
+  res.json(getCodingJobCockpitSummary());
+});
+
+router.get('/coding/timeline', (req: Request, res: Response) => {
+  res.json(
+    listCodingJobTimeline(
+      Math.min(parseInt(String(req.query.limit || '50'), 10) || 50, 200),
+    ),
   );
 });
 
@@ -188,6 +214,21 @@ router.post('/coding/jobs/:id/open-pr', async (req: Request, res: Response) => {
       .json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
+
+router.post(
+  '/coding/jobs/:id/refresh-ci',
+  async (req: Request, res: Response) => {
+    try {
+      const job = await refreshCodingJobCi(req.params.id as string);
+      auditLog(req, 'coding_job_ci_refreshed', job.id);
+      res.json({ ok: true, job });
+    } catch (err) {
+      res
+        .status(400)
+        .json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+);
 
 router.post('/coding/jobs/:id/revert', async (req: Request, res: Response) => {
   try {

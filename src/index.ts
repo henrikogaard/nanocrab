@@ -17,6 +17,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { parseCodingCommand, runCodingCommand } from './coding-commands.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -308,12 +309,27 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
-export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
+export function getAvailableGroups(
+  sourceGroup?: RegisteredGroup,
+): import('./container-runner.js').AvailableGroup[] {
   const chats = getAllChats();
   const registeredJids = new Set(Object.keys(registeredGroups));
+  const scope = sourceGroup?.containerConfig?.channelScope || 'all';
+  const allowedFolders = new Set(
+    sourceGroup?.containerConfig?.allowedGroupFolders || [],
+  );
 
   return chats
     .filter((c) => c.jid !== '__group_sync__' && c.is_group)
+    .filter((c) => {
+      if (!sourceGroup?.isMain || scope === 'all') return true;
+      const registered = registeredGroups[c.jid];
+      if (scope === 'registered') return !!registered;
+      if (scope === 'allowed') {
+        return !!registered && allowedFolders.has(registered.folder);
+      }
+      return true;
+    })
     .map((c) => ({
       jid: c.jid,
       name: c.name,
@@ -536,7 +552,7 @@ async function runAgent(
   );
 
   // Update available groups snapshot (main group only can see all groups)
-  const availableGroups = getAvailableGroups();
+  const availableGroups = getAvailableGroups(group);
   writeGroupsSnapshot(
     group.folder,
     isMain,
@@ -874,6 +890,50 @@ async function main(): Promise<void> {
     }
   }
 
+  async function handleCodingCommand(
+    commandText: string,
+    chatJid: string,
+    msg: NewMessage,
+  ): Promise<void> {
+    const group = registeredGroups[chatJid];
+    const channel = findChannel(channels, chatJid);
+    if (!group?.isMain || !channel) {
+      logger.warn(
+        { chatJid, sender: msg.sender },
+        'Coding command rejected: not main group',
+      );
+      return;
+    }
+
+    try {
+      const command = parseCodingCommand(commandText);
+      if (!command) return;
+      const response = await runCodingCommand(command, msg.sender);
+      await channel.sendMessage(chatJid, response);
+      storeMessageDirect({
+        id: `coding-command-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        chat_jid: chatJid,
+        sender: ASSISTANT_NAME,
+        sender_name: ASSISTANT_NAME,
+        content: response,
+        timestamp: new Date().toISOString(),
+        is_from_me: true,
+        is_bot_message: true,
+      });
+      broadcastMessage({
+        sender_name: ASSISTANT_NAME,
+        content: response,
+        chat_jid: chatJid,
+        timestamp: new Date().toISOString(),
+      });
+      logger.info({ chatJid, sender: msg.sender }, 'Coding command handled');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error({ err, chatJid }, 'Coding command failed');
+      await channel.sendMessage(chatJid, `Coding command failed: ${message}`);
+    }
+  }
+
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
@@ -907,6 +967,12 @@ async function main(): Promise<void> {
       if (trimmed === '/update-nanocrab') {
         handleNanoCrabUpdate(chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'NanoCrab update command error'),
+        );
+        return;
+      }
+      if (parseCodingCommand(trimmed)) {
+        handleCodingCommand(trimmed, chatJid, msg).catch((err) =>
+          logger.error({ err, chatJid }, 'Coding command error'),
         );
         return;
       }
@@ -1023,7 +1089,7 @@ async function main(): Promise<void> {
           .map((ch) => ch.syncGroups!(force)),
       );
     },
-    getAvailableGroups,
+    getAvailableGroups: (group) => getAvailableGroups(group),
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
     onTasksChanged: () => {

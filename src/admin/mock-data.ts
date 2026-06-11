@@ -25,6 +25,13 @@ const groups = [
     isMain: true,
     isPrimary: true,
     description: 'Main operator group for planning, admin, and approvals.',
+    channelHealth: {
+      name: 'whatsapp',
+      connected: true,
+      status: 'active',
+      lastActiveAt: iso(1),
+      detail: 'Mock WhatsApp session is connected.',
+    },
     containerConfig: {
       persistent: true,
       provider: 'codex',
@@ -43,6 +50,13 @@ const groups = [
     isMain: true,
     isPrimary: false,
     description: 'Fleet operations and scheduled orders.',
+    channelHealth: {
+      name: 'telegram',
+      connected: true,
+      status: 'active',
+      lastActiveAt: iso(3),
+      detail: 'Mock Telegram bot is polling.',
+    },
     containerConfig: {
       persistent: true,
       provider: 'openrouter',
@@ -54,11 +68,18 @@ const groups = [
     name: 'Scouting Desk',
     folder: 'scouts',
     channel: 'signal',
-    enabled: false,
-    active: false,
+    enabled: true,
+    active: true,
     isMain: true,
     isPrimary: false,
     description: 'Recon notes, sightings, and player intel.',
+    channelHealth: {
+      name: 'signal',
+      connected: true,
+      status: 'active',
+      lastActiveAt: iso(2),
+      detail: 'Mock signal-cli daemon heartbeat is healthy.',
+    },
     containerConfig: {
       persistent: false,
       provider: 'ollama',
@@ -68,9 +89,27 @@ const groups = [
 ];
 
 const channels = [
-  { name: 'whatsapp', connected: true, status: 'healthy', lastSeen: iso(1) },
-  { name: 'telegram', connected: true, status: 'healthy', lastSeen: iso(3) },
-  { name: 'signal', connected: false, status: 'degraded', lastSeen: iso(47) },
+  {
+    name: 'whatsapp',
+    connected: true,
+    status: 'active',
+    lastActiveAt: iso(1),
+    detail: 'Mock WhatsApp session is connected.',
+  },
+  {
+    name: 'telegram',
+    connected: true,
+    status: 'active',
+    lastActiveAt: iso(3),
+    detail: 'Mock Telegram bot is polling.',
+  },
+  {
+    name: 'signal',
+    connected: true,
+    status: 'active',
+    lastActiveAt: iso(2),
+    detail: 'Mock signal-cli daemon heartbeat is healthy.',
+  },
 ];
 
 const containers = [
@@ -194,6 +233,79 @@ const tasks = [
     status: 'paused',
     context_mode: 'isolated',
     created_at: day(-20) + 'T09:00:00.000Z',
+  },
+];
+
+const runbooks = [
+  {
+    id: 'runbook-release-readiness',
+    title: 'Release Readiness',
+    mission: 'Prepare the RC1 personal-ops slice for review.',
+    status: 'active',
+    owner: 'mock-owner',
+    groupFolder: 'main',
+    dueAt: day(1) + 'T15:00:00.000Z',
+    links: [
+      {
+        label: 'Roadmap',
+        url: 'https://github.com/henrikogaard/nanocrab/issues/51',
+      },
+    ],
+    createdAt: day(-1) + 'T08:30:00.000Z',
+    updatedAt: iso(12),
+    steps: [
+      {
+        id: 'step-read-roadmap',
+        title: 'Read roadmap issue and child acceptance criteria',
+        status: 'done',
+        owner: 'mock-owner',
+        notes: 'Scope confirmed.',
+        updatedAt: iso(90),
+      },
+      {
+        id: 'step-wire-api',
+        title: 'Wire API and dashboard controls',
+        status: 'in_progress',
+        owner: 'mock-owner',
+        updatedAt: iso(12),
+      },
+      {
+        id: 'step-run-checks',
+        title: 'Run typecheck, tests, and build',
+        status: 'todo',
+        owner: 'mock-owner',
+        updatedAt: iso(12),
+      },
+    ],
+  },
+  {
+    id: 'runbook-connector-cleanup',
+    title: 'Connector Cleanup',
+    mission:
+      'Resolve missing credential and webhook setup before enabling write-capable connector workflows.',
+    status: 'blocked',
+    owner: 'designer',
+    groupFolder: 'operations',
+    links: [],
+    createdAt: day(-2) + 'T11:00:00.000Z',
+    updatedAt: iso(40),
+    steps: [
+      {
+        id: 'step-confirm-scopes',
+        title: 'Confirm external write scopes',
+        status: 'blocked',
+        owner: 'designer',
+        notes: 'Waiting on provider token rotation.',
+        updatedAt: iso(40),
+      },
+      {
+        id: 'step-test-webhook',
+        title: 'Send test webhook event',
+        status: 'todo',
+        owner: 'designer',
+        updatedAt: iso(40),
+      },
+    ],
   },
 ];
 
@@ -870,6 +982,40 @@ function usage(): JsonValue {
       { provider: 'google', service: 'summary', count: 26, totalCost: 2.44 },
       { provider: 'fal', service: 'image', count: 5, totalCost: 1.72 },
     ],
+    modelMetrics: [
+      {
+        provider: 'openrouter',
+        model: 'openrouter/auto',
+        calls: 93,
+        failures: 2,
+        successRate: 98,
+        totalCost: 8.62,
+        avgLatencyMs: 1840,
+        inputTokens: 280000,
+        outputTokens: 92000,
+        contextTokens: 18000,
+        contextWindow: 128000,
+        costTier: 'medium',
+        lastUsedAt: iso(7),
+        lastError: null,
+      },
+      {
+        provider: 'ollama',
+        model: 'llama3.2',
+        calls: 44,
+        failures: 6,
+        successRate: 86,
+        totalCost: 0,
+        avgLatencyMs: 920,
+        inputTokens: 76000,
+        outputTokens: 22000,
+        contextTokens: 12000,
+        contextWindow: 8192,
+        costTier: 'local',
+        lastUsedAt: iso(20),
+        lastError: 'Context window exceeded on one report draft.',
+      },
+    ],
   };
 }
 
@@ -911,6 +1057,108 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       appVersion: '1.2.52-mock',
       projectRoot: '/mock/nanocrab',
       mockMode: true,
+    };
+  }
+  if (pathname === '/system/avatars') {
+    return {
+      selected: {
+        kind: 'builtin',
+        id: 'tide-crab',
+        url: '/static/avatars/tide-crab.svg',
+        updatedAt: iso(8),
+      },
+      uploaded: {
+        id: 'uploaded',
+        name: 'Uploaded Avatar',
+        kind: 'uploaded',
+        url: '/static/avatar.jpg',
+        available: true,
+      },
+      gallery: [
+        {
+          id: 'nanocrab-default',
+          name: 'NanoCrab Default',
+          description: 'The standard NanoCrab logo mark.',
+          kind: 'default',
+          url: '/static/nanocrab-mark.png',
+        },
+        {
+          id: 'tide-crab',
+          name: 'Tide Crab',
+          description: 'Bright red shell with a blue tide backdrop.',
+          kind: 'builtin',
+          url: '/static/avatars/tide-crab.svg',
+        },
+        {
+          id: 'kelp-hermit',
+          name: 'Kelp Hermit',
+          description: 'Warm hermit body with a green shell.',
+          kind: 'builtin',
+          url: '/static/avatars/kelp-hermit.svg',
+        },
+        {
+          id: 'coral-lobster',
+          name: 'Coral Lobster',
+          description: 'Coral-toned lobster with bold claws.',
+          kind: 'builtin',
+          url: '/static/avatars/coral-lobster.svg',
+        },
+        {
+          id: 'amber-shrimp',
+          name: 'Amber Shrimp',
+          description: 'Curled amber shrimp on a mint field.',
+          kind: 'builtin',
+          url: '/static/avatars/amber-shrimp.svg',
+        },
+        {
+          id: 'midnight-crab',
+          name: 'Midnight Crab',
+          description: 'Dark blue crab with bright eyes.',
+          kind: 'builtin',
+          url: '/static/avatars/midnight-crab.svg',
+        },
+      ],
+    };
+  }
+  if (pathname === '/system/assistant-profile') {
+    return {
+      personality:
+        'Be warm, concise, and operational. Surface risks early, keep approvals explicit, and preserve local-first defaults.',
+      updatedAt: iso(16),
+      skillPreferences: [
+        {
+          id: 'memory',
+          label: 'Memory',
+          description: 'Lean on approved shared memory when it is relevant.',
+          enabled: true,
+        },
+        {
+          id: 'coding',
+          label: 'Coding',
+          description: 'Use staged coding workflows with approval gates.',
+          enabled: true,
+        },
+        {
+          id: 'reports',
+          label: 'Reports',
+          description:
+            'Prefer outlines, citations, and reviewable deliverables.',
+          enabled: true,
+        },
+        {
+          id: 'connectors',
+          label: 'Connectors',
+          description:
+            'Use connector tools only within configured permission scopes.',
+          enabled: false,
+        },
+        {
+          id: 'operations',
+          label: 'Operations',
+          description: 'Track missions, reminders, and runbook progress.',
+          enabled: true,
+        },
+      ],
     };
   }
   if (pathname === '/system/provider') return providerInfo;
@@ -1031,6 +1279,128 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       ],
     };
   }
+  if (pathname === '/system/first-run-readiness') {
+    return {
+      generatedAt: iso(0),
+      productName: 'NanoCrab',
+      headline: 'First-run readiness for clean VPS installs',
+      asciiArt: [
+        '  _   _                   ____          _     ',
+        ' | \\ | | __ _ _ __   ___ / ___|_ __ __ _| |__  ',
+        " |  \\| |/ _` | '_ \\ / _ \\ |   | '__/ _` | '_ \\ ",
+        ' | |\\  | (_| | | | | (_) | |___| | | (_| | |_) |',
+        ' |_| \\_|\\__,_|_| |_|\\___/ \\____|_|  \\__,_|_.__/ ',
+      ],
+      overall: 'warn',
+      failed: 0,
+      warnings: 2,
+      secretPolicy:
+        'Readiness checks report only whether credentials exist. Secret values are never returned.',
+      checks: [
+        {
+          id: 'node-version',
+          label: 'Supported Node.js runtime',
+          status: 'pass',
+          required: true,
+          detail: 'Running a supported mock Node.js runtime.',
+        },
+        {
+          id: 'container-image',
+          label: 'Agent container image built',
+          status: 'warn',
+          required: false,
+          detail: 'nanocrab-agent:mock is not inspected in mock mode.',
+          remediation: 'Run ./container/build.sh on the real host.',
+          resumeNote: 'Rebuilds can be rerun safely after partial setup.',
+        },
+        {
+          id: 'provider-config',
+          label: 'Provider credential path',
+          status: 'warn',
+          required: false,
+          detail: 'Mock mode does not contain real provider credentials.',
+          remediation: 'Run the provider setup step on the real host.',
+        },
+      ],
+      setupSteps: [
+        {
+          label: 'Preflight',
+          command: 'npx tsx setup/index.ts --step preflight',
+          required: true,
+        },
+        {
+          label: 'Install dependencies',
+          command: 'npm install',
+          required: true,
+        },
+        {
+          label: 'Configure admin login',
+          command: 'npm run setup -- --step admin',
+          required: true,
+        },
+        {
+          label: 'Build agent container',
+          command: './container/build.sh',
+          required: true,
+        },
+      ],
+    };
+  }
+  if (pathname === '/system/inference-health') {
+    return {
+      summary: {
+        total: 3,
+        healthy: 2,
+        degraded: 1,
+        local: 1,
+        remote: 2,
+        stale: 1,
+      },
+      items: [
+        {
+          profileId: 'default_chat',
+          label: 'Chat',
+          provider: 'ollama',
+          model: 'llama3.2',
+          locality: 'local',
+          configured: true,
+          ok: true,
+          status: 'healthy',
+          lastProbeAt: iso(4),
+          failedChecks: [],
+          toolPolicy: 'read-only',
+        },
+        {
+          profileId: 'default_coding',
+          label: 'Coding',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+          locality: 'remote',
+          configured: true,
+          ok: true,
+          status: 'healthy',
+          lastProbeAt: iso(8),
+          failedChecks: [],
+          toolPolicy: 'approval-required',
+        },
+        {
+          profileId: 'default_reports',
+          label: 'Reports',
+          provider: 'openrouter',
+          model: 'openrouter/auto',
+          locality: 'remote',
+          configured: false,
+          ok: false,
+          status: 'unconfigured',
+          lastProbeAt: null,
+          failedChecks: [
+            'Provider is missing credentials or base URL configuration',
+          ],
+          toolPolicy: 'read-only',
+        },
+      ],
+    };
+  }
   if (pathname === '/system') return system();
   if (pathname === '/system/stats') {
     return {
@@ -1093,6 +1463,9 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           icon: 'WA',
           description: 'Primary alliance command channel.',
           connected: true,
+          status: 'active',
+          lastActiveAt: iso(1),
+          healthDetail: 'Mock WhatsApp session is connected.',
           envVars: ['WHATSAPP_PHONE_NUMBER'],
           config: { WHATSAPP_PHONE_NUMBER: '+47 *** ** 107' },
         },
@@ -1102,6 +1475,9 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           icon: 'TG',
           description: 'Operations and casual-player summaries.',
           connected: true,
+          status: 'active',
+          lastActiveAt: iso(3),
+          healthDetail: 'Mock Telegram bot is polling.',
           envVars: ['TELEGRAM_BOT_TOKEN'],
           config: { TELEGRAM_BOT_TOKEN: 'mock-token-set' },
         },
@@ -1110,9 +1486,22 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           name: 'Signal',
           icon: 'SG',
           description: 'Scout desk and private alerts.',
-          connected: false,
+          connected: true,
+          status: 'active',
+          lastActiveAt: iso(2),
+          healthDetail: 'Mock signal-cli daemon heartbeat is healthy.',
           envVars: ['SIGNAL_PHONE_NUMBER'],
           config: { SIGNAL_PHONE_NUMBER: '+47 *** ** 107' },
+        },
+      ],
+      diagnosticScenarios: [
+        {
+          id: 'signal-stale-heartbeat',
+          name: 'Signal stale heartbeat',
+          connected: false,
+          status: 'degraded',
+          lastActiveAt: iso(47),
+          healthDetail: 'signal-cli daemon heartbeat is stale.',
         },
       ],
       available: [
@@ -1132,6 +1521,37 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           envVars: ['SLACK_BOT_TOKEN'],
           skill: 'container/skills/slack/SKILL.md',
         },
+      ],
+    };
+  }
+  if (pathname === '/channels/whatsapp/pairing') {
+    return {
+      state: 'waiting_for_qr_scan',
+      method: 'qr',
+      startedAt: iso(2),
+      updatedAt: iso(1),
+      qrCodeDataUrl:
+        'data:image/svg+xml;utf8,' +
+        encodeURIComponent(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="260" height="260"><rect width="260" height="260" fill="white"/><rect x="24" y="24" width="56" height="56" fill="black"/><rect x="180" y="24" width="56" height="56" fill="black"/><rect x="24" y="180" width="56" height="56" fill="black"/><rect x="110" y="110" width="24" height="24" fill="black"/><rect x="150" y="110" width="24" height="24" fill="black"/><rect x="110" y="150" width="64" height="24" fill="black"/></svg>',
+        ),
+      qrExpiresAt: iso(-1),
+      pairingCode: null,
+      error: null,
+      connected: false,
+      phone: null,
+      authConfigured: false,
+      processRunning: true,
+      scenarios: [
+        {
+          state: 'paired',
+          label: 'Session files saved, channel reconnect pending',
+        },
+        {
+          state: 'expired_qr',
+          label: 'QR expired and can be refreshed safely',
+        },
+        { state: 'error', label: 'Setup error is shown without log tailing' },
       ],
     };
   }
@@ -1161,6 +1581,11 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname.startsWith('/tasks/')) {
     const id = decodeURIComponent(pathname.split('/')[2] || '');
     return tasks.find((t) => t.id === id) || tasks[0];
+  }
+  if (pathname === '/runbooks') return { runbooks };
+  if (pathname.startsWith('/runbooks/')) {
+    const id = decodeURIComponent(pathname.split('/')[2] || '');
+    return runbooks.find((runbook) => runbook.id === id) || runbooks[0];
   }
   if (pathname === '/credentials') {
     return {
@@ -1336,7 +1761,24 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname === '/journal/search') {
     return {
       query: req.query.query || 'fleet crash',
-      answer: `${day(-1)}: Fleet crash near Kepler-442b (operations)`,
+      answer: `[1] ${day(-1)}: Fleet crash near Kepler-442b (operations), confidence 82%.\n[2] ${day(-1)} daily: 42 messages reviewed. Notable events included a fleet crash near Kepler-442b and new orders for the evening operation.`,
+      citations: [
+        {
+          id: 'evt-mock-1',
+          type: 'event',
+          label: 'Fleet crash near Kepler-442b',
+          source: 'journal-event:evt-mock-1',
+          timestamp: iso(90),
+          confidence: 0.82,
+        },
+        {
+          id: 'journal-mock-1',
+          type: 'summary',
+          label: `${day(-1)} daily summary`,
+          source: 'journal-summary:journal-mock-1',
+          timestamp: iso(50),
+        },
+      ],
       events: [
         {
           id: 'evt-mock-1',
@@ -1349,6 +1791,20 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           tags_json: '["fleet","crash"]',
           group_folder: 'operations',
           created_at: iso(88),
+        },
+      ],
+      entries: [
+        {
+          id: 'journal-mock-1',
+          date: day(-1),
+          scope: 'daily',
+          group_folder: 'operations',
+          summary:
+            '42 messages reviewed. Notable events included a fleet crash near Kepler-442b and new orders for the evening operation.',
+          notable_events_json: '[]',
+          source_message_ids_json: '[]',
+          provider_profile_id: 'default_journal',
+          created_at: iso(50),
         },
       ],
     };
@@ -1377,6 +1833,62 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         error: null,
       },
     ];
+  }
+  if (pathname === '/artifacts') {
+    const artifacts = [
+      {
+        id: 'deliverable:weekly-alliance-digest-report-mock-1.md',
+        kind: 'deliverable',
+        name: 'weekly-alliance-digest-report-mock-1.md',
+        path: '/mock/store/deliverables/weekly-alliance-digest-report-mock-1.md',
+        relativePath: 'weekly-alliance-digest-report-mock-1.md',
+        extension: 'md',
+        size: 24576,
+        createdAt: iso(55),
+        updatedAt: iso(50),
+        expiresAt: day(89) + 'T20:45:00.000Z',
+        expired: false,
+        sourceLinks: [
+          {
+            label: 'Weekly Alliance Digest',
+            source: 'report-job:report-mock-1',
+          },
+          {
+            label: 'Fleet crash near Kepler-442b',
+            source: 'journal-event:evt-mock-1',
+          },
+        ],
+      },
+      {
+        id: 'group:main/artifacts/orders.csv',
+        kind: 'group',
+        name: 'orders.csv',
+        path: '/mock/groups/main/artifacts/orders.csv',
+        relativePath: 'main/artifacts/orders.csv',
+        extension: 'csv',
+        size: 4096,
+        createdAt: iso(1440),
+        updatedAt: iso(1440),
+        expiresAt: day(-1) + 'T20:45:00.000Z',
+        expired: true,
+        sourceLinks: [],
+      },
+    ];
+    const query =
+      typeof req.query.query === 'string' ? req.query.query.toLowerCase() : '';
+    const kind = typeof req.query.kind === 'string' ? req.query.kind : '';
+    return {
+      artifacts: artifacts.filter(
+        (artifact) =>
+          (!kind || artifact.kind === kind) &&
+          (!query ||
+            `${artifact.name} ${artifact.relativePath} ${artifact.sourceLinks
+              .map((link) => `${link.label} ${link.source}`)
+              .join(' ')}`
+              .toLowerCase()
+              .includes(query)),
+      ),
+    };
   }
   if (pathname === '/research/jobs') {
     return [
@@ -1412,6 +1924,33 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         transcriptBytes: 1834,
       },
     ];
+  }
+  if (pathname === '/sessions/terminal/history') {
+    return {
+      sessions: [
+        {
+          sessionId: 'mock-terminal-main',
+          owner: 'mock-owner',
+          startedAt: iso(25),
+          lastActivity: iso(2),
+          eventCount: 42,
+          transcriptBytes: 18432,
+        },
+      ],
+    };
+  }
+  if (pathname === '/sessions/terminal/search') {
+    return {
+      hits: [
+        {
+          sessionId: 'mock-terminal-main',
+          owner: 'mock-owner',
+          timestamp: iso(2),
+          type: 'output',
+          snippet: 'npm test\n\nTest Files 39 passed\nTests 410 passed',
+        },
+      ],
+    };
   }
   if (pathname === '/skills') return { installed: skills, available: [] };
   if (pathname === '/skills/search') {

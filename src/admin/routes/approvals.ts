@@ -7,6 +7,15 @@ import {
   listApprovals,
   reviewApproval,
 } from '../../approvals.js';
+import {
+  approveCodingJob,
+  openCodingJobPr,
+  revertCodingJob,
+} from '../../coding-jobs.js';
+import {
+  approveReportDelivery,
+  approveReportOutline,
+} from '../../report-jobs.js';
 import { requireRole } from '../middleware.js';
 import { auditLog } from '../security.js';
 
@@ -61,7 +70,7 @@ router.post('/', requireRole('admin'), (req: Request, res: Response) => {
 router.post(
   '/:id/approve',
   requireRole('admin'),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const approval = reviewApproval(
         req.params.id as string,
@@ -69,6 +78,31 @@ router.post(
         req.user?.username || 'dashboard',
         typeof req.body.note === 'string' ? req.body.note : undefined,
       );
+      if (approval.targetType === 'coding-job' && approval.targetId) {
+        if (approval.kind === 'coding-implement') {
+          approveCodingJob(
+            approval.targetId,
+            req.user?.username || 'dashboard',
+          );
+        } else if (approval.kind === 'coding-open-pr') {
+          await openCodingJobPr(
+            approval.targetId,
+            req.user?.username || 'dashboard',
+          );
+        } else if (approval.kind === 'coding-revert') {
+          await revertCodingJob(
+            approval.targetId,
+            req.user?.username || 'dashboard',
+          );
+        }
+      }
+      if (approval.targetType === 'report-job' && approval.targetId) {
+        if (approval.kind === 'report-outline') {
+          await approveReportOutline(approval.targetId);
+        } else if (approval.kind === 'report-delivery') {
+          approveReportDelivery(approval.targetId);
+        }
+      }
       auditLog(req, 'approval_approved', `${approval.kind}/${approval.id}`);
       res.json({ ok: true, approval });
     } catch (err) {

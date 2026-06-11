@@ -12,6 +12,7 @@ import {
   isValidAgentModel,
 } from '../../agent-provider.js';
 import { getState } from '../state.js';
+import { getChannelHealth } from '../../channel-health.js';
 
 const router = Router();
 
@@ -19,14 +20,35 @@ router.get('/', (_req: Request, res: Response) => {
   const groups = getAllRegisteredGroups();
   const chats = getAllChats();
   const chatMap = new Map(chats.map((c) => [c.jid, c]));
+  let channelHealth = new Map<string, ReturnType<typeof getChannelHealth>>();
+  try {
+    channelHealth = new Map(
+      getState().channels.map((channel) => [
+        channel.name.toLowerCase(),
+        getChannelHealth(channel),
+      ]),
+    );
+  } catch {
+    // Admin state may be unavailable in isolated route tests.
+  }
 
   const result = Object.entries(groups).map(([jid, group]) => {
     const chat = chatMap.get(jid);
+    const channel =
+      chat?.channel ||
+      (jid.startsWith('tg:')
+        ? 'telegram'
+        : jid.startsWith('sig:')
+          ? 'signal'
+          : jid.startsWith('wa:')
+            ? 'whatsapp'
+            : null);
     return {
       jid,
       ...group,
       lastActivity: chat?.last_message_time || null,
-      channel: chat?.channel || null,
+      channel,
+      channelHealth: channel ? channelHealth.get(channel) || null : null,
     };
   });
 
@@ -73,6 +95,24 @@ router.put('/:jid', (req: Request, res: Response) => {
       });
       return;
     }
+  }
+  if (
+    updates.containerConfig?.channelScope &&
+    !['all', 'registered', 'allowed'].includes(
+      updates.containerConfig.channelScope,
+    )
+  ) {
+    res.status(400).json({
+      error: 'channelScope must be one of: all, registered, allowed',
+    });
+    return;
+  }
+  if (
+    updates.containerConfig?.allowedGroupFolders !== undefined &&
+    !Array.isArray(updates.containerConfig.allowedGroupFolders)
+  ) {
+    res.status(400).json({ error: 'allowedGroupFolders must be an array' });
+    return;
   }
 
   const enabled =

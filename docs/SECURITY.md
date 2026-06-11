@@ -86,11 +86,15 @@ Real API credentials **never enter containers**. NanoCrab uses its built-in cred
 5. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`.
 
 **Provider routes:**
-Claude, OpenRouter, and Google Gemini API traffic can be proxied this way. Ollama normally uses a local or LAN endpoint without a secret. NanoCrab has provider profiles for chat, coding, automations, memory, journal extraction, skill factory, reports, documents, and vision. Write-capable profiles should keep `approval-required` tool policy unless the deployment is explicitly trusted. Live per-model capability probes and fallback enforcement are still hardening work.
+Claude, OpenRouter, and Google Gemini API traffic can be proxied this way. Ollama normally uses a local or LAN endpoint without a secret. NanoCrab has provider profiles for chat, coding, automations, memory, journal extraction, skill factory, reports, documents, and vision. Write-capable profiles should keep `approval-required` tool policy unless the deployment is explicitly trusted. Provider probes persist status and errors for dashboard review, and write-capable provider fallback requires an approved `provider-fallback` request. `NANOCRAB_DRY_RUN=true` evaluates risky coding operations without launching implementation containers or opening PRs.
+
+**Agent boundaries:**
+Main-agent `containerConfig.channelScope` can be `all`, `registered`, or `allowed`; `allowed` requires `allowedGroupFolders`. These scopes filter group discovery snapshots and block direct IPC group registration outside the configured boundary. Non-main agents still cannot see the available-groups snapshot.
 
 **NOT Mounted:**
 
 - Channel auth sessions (`store/auth/`) — host only
+- Dashboard WhatsApp pairing exposes only QR images, pairing codes, and minimal setup state to authenticated owners. Session files in `store/auth/` are never served by the browser API.
 - Mount allowlist — external, never mounted
 - Any credentials matching blocked patterns
 - `.env` is shadowed with `/dev/null` in the project root mount

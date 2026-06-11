@@ -13,6 +13,7 @@ vi.mock('./config.js', () => ({
 
 import { _closeDatabase, _initTestDatabase } from './db.js';
 import {
+  answerJournalQuestion,
   findJournalEvents,
   recordJournalEntry,
   recordJournalEvent,
@@ -91,5 +92,42 @@ describe('journal store', () => {
       provider_profile_id: 'default_journal',
     });
     expect(JSON.parse(entry.source_message_ids_json)).toEqual(['m1', 'm2']);
+  });
+
+  it('answers journal questions with citations', () => {
+    const event = recordJournalEvent({
+      title: 'Fleet crash at planet X-17',
+      timestamp: '2026-06-09T20:00:00.000Z',
+      entities: ['Fleet Alpha'],
+      tags: ['fleet-crash'],
+      locationContext: 'Planet X-17',
+      confidence: 0.85,
+      groupFolder: 'main',
+    });
+    const entry = recordJournalEntry({
+      date: '2026-06-09',
+      scope: 'daily',
+      groupFolder: 'main',
+      summary: 'Large fleet movement and one confirmed crash.',
+    });
+
+    const answer = answerJournalQuestion({
+      query: 'when was the fleet crash',
+      groupFolder: 'main',
+    });
+
+    expect(answer.answer).toContain('Fleet crash at planet X-17');
+    expect(answer.citations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: event.id, type: 'event' }),
+        expect.objectContaining({ id: entry.id, type: 'summary' }),
+      ]),
+    );
+  });
+
+  it('rejects empty journal questions', () => {
+    expect(() => answerJournalQuestion({ query: '   ' })).toThrow(
+      'journal question is required',
+    );
   });
 });

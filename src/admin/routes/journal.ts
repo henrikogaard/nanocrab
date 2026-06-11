@@ -5,6 +5,7 @@ import path from 'path';
 import { STORE_DIR } from '../../config.js';
 import { getAllRegisteredGroups } from '../../db.js';
 import {
+  answerJournalQuestion,
   findJournalEvents,
   listJournalEntryRecords,
   recordJournalEntry,
@@ -121,24 +122,14 @@ router.get('/search', (req: Request, res: Response) => {
     });
     return;
   }
-  const events = findJournalEvents({
-    query,
-    groupFolder:
-      typeof req.query.group === 'string' ? req.query.group : undefined,
-    limit: Math.min(parseInt(req.query.limit as string) || 10, 50),
-  });
-  const answer = events.length
-    ? events
-        .slice(0, 5)
-        .map(
-          (event) =>
-            `${event.timestamp.slice(0, 10)}: ${event.title}${
-              event.location_context ? ` (${event.location_context})` : ''
-            }`,
-        )
-        .join('\n')
-    : 'No matching journal events found.';
-  res.json({ query, answer, events });
+  res.json(
+    answerJournalQuestion({
+      query,
+      groupFolder:
+        typeof req.query.group === 'string' ? req.query.group : undefined,
+      limit: Math.min(parseInt(req.query.limit as string) || 10, 50),
+    }),
+  );
 });
 
 router.post(

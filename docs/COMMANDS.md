@@ -15,6 +15,14 @@ These are exact text commands intercepted by the NanoCrab host before they are s
 | `/update-nanocrab` | Main control group | Main group only | Starts the host-side updater from the latest NanoCrab GitHub release. Writes logs under `store/updates/` and may restart the service. |
 | `/remote-control` | Main control group | Main group only | Starts Claude Remote Control and replies with the remote-control URL. |
 | `/remote-control-end` | Main control group | Main group only | Stops the active Claude Remote Control session. |
+| `/coding-help` | Main control group | Main group only | Shows mobile coding-job commands. |
+| `/coding-jobs` | Main control group | Main group only | Lists recent coding jobs with status, plan, PR, and test summary. |
+| `/coding-job <jobId>` | Main control group | Main group only | Shows one coding job. |
+| `/coding-pick owner/repo labels=a,b provider=codex model=gpt-5.4 [no-pr]` | Main control group | Main group only | Picks a matching issue, claims it when configured, prepares the implementation plan, and returns the approval command. |
+| `/coding-approve <jobId>` | Main control group | Main group only | Approves implementation for an approval-gated coding job. |
+| `/coding-pr <jobId>` | Main control group | Main group only | Requests or approves PR opening for a coding job. |
+| `/coding-ci <jobId>` | Main control group | Main group only | Refreshes PR/commit CI status for a coding job. |
+| `/coding-cancel <jobId>` | Main control group | Main group only | Cancels a coding job. |
 | `/chatid` | Telegram | Any Telegram chat with the bot | Replies with the Telegram registration id, name, and chat type. Useful when registering Telegram groups. |
 | `/ping` | Telegram | Any Telegram chat with the bot | Replies with a short online status message. |
 
@@ -119,15 +127,15 @@ The agent sees these as `mcp__nanocrab__*` tools. You usually do not type these 
 
 | Tool | What It Does |
 | --- | --- |
-| `mcp__nanocrab__register_coding_repo` | Main group only. Registers a GitHub repo for host-managed coding jobs. |
+| `mcp__nanocrab__register_coding_repo` | Main group only. Registers a GitHub repo for host-managed coding jobs, including optional labels, assignee, and repo coding preferences. |
 | `mcp__nanocrab__list_coding_repos` | Main group only. Lists registered coding repos. |
 | `mcp__nanocrab__list_github_issues` | Main group only. Lists open issues from a registered repo. |
 | `mcp__nanocrab__start_coding_job` | Main group only. Starts a dedicated coding job container/workspace. |
-| `mcp__nanocrab__pick_github_issue` | Main group only. Picks a matching GitHub issue and starts a coding job. |
+| `mcp__nanocrab__pick_github_issue` | Main group only. Picks a matching GitHub issue, assigns it when the repo has an assignee, prepares an implementation plan, and starts the approval-gated coding job. |
 | `mcp__nanocrab__schedule_github_issue_loop` | Main group only. Schedules recurring issue pickup. |
 | `mcp__nanocrab__list_coding_jobs` | Main group only. Lists recent coding jobs. |
 | `mcp__nanocrab__get_coding_job` | Main group only. Gets full status/output for a coding job. |
-| `mcp__nanocrab__control_coding_job` | Main group only. Approves, cancels, retries, opens PR, or requests revert for a coding job. |
+| `mcp__nanocrab__control_coding_job` | Main group only. Approves, cancels, retries, opens PR, refreshes CI, or requests revert for a coding job. |
 
 ### Memory, Journal, And Skills
 

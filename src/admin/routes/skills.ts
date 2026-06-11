@@ -18,11 +18,20 @@ import {
   getSkillDraft,
   getSkillDraftContent,
   getSkillDraftDiff,
+  listSkillDraftRevisions,
   listSkillDrafts,
   proposeSkillDraft,
   rejectSkillDraft,
+  rollbackSkillDraft,
   SkillDraftStatus,
+  updateSkillDraft,
 } from '../../skill-factory.js';
+import {
+  dismissSkillSuggestion,
+  listSkillSuggestions,
+  markSkillSuggestionDrafted,
+  upsertSkillSuggestions,
+} from '../../skill-suggestions.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -235,7 +244,20 @@ router.get('/drafts', (req: Request, res: Response) => {
 });
 
 router.get('/suggestions', (_req: Request, res: Response) => {
-  res.json(buildSkillSuggestions());
+  upsertSkillSuggestions(buildSkillSuggestions());
+  res.json(listSkillSuggestions('suggested'));
+});
+
+router.post('/suggestions/:id/dismiss', (req: Request, res: Response) => {
+  try {
+    const suggestion = dismissSkillSuggestion(req.params.id as string);
+    auditLog(req, 'skill_suggestion_dismissed', suggestion.name);
+    res.json({ ok: true, suggestion });
+  } catch (err) {
+    res.status(404).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 router.post('/drafts', (req: Request, res: Response) => {
@@ -248,6 +270,7 @@ router.post('/drafts', (req: Request, res: Response) => {
       allowedTools,
       createdBy,
       provenance,
+      suggestionId,
     } = req.body || {};
     const markdown =
       typeof skillMd === 'string' && skillMd.trim()
@@ -266,6 +289,9 @@ router.post('/drafts', (req: Request, res: Response) => {
         ? provenance.map((item) => String(item))
         : ['source:dashboard'],
     });
+    if (typeof suggestionId === 'string' && suggestionId) {
+      markSkillSuggestionDrafted(suggestionId, draft.id);
+    }
     auditLog(req, 'skill_draft_created', draft.name);
     res.status(201).json({ ok: true, draft });
   } catch (err) {
@@ -291,6 +317,57 @@ router.get('/drafts/:id/diff', (req: Request, res: Response) => {
     res.type('text/plain').send(getSkillDraftDiff(req.params.id as string));
   } catch (err) {
     res.status(404).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.get('/drafts/:id/revisions', (req: Request, res: Response) => {
+  try {
+    res.json(listSkillDraftRevisions(req.params.id as string));
+  } catch (err) {
+    res.status(404).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.put('/drafts/:id', (req: Request, res: Response) => {
+  try {
+    const skillMd = String(req.body?.skillMd || '');
+    if (!skillMd.trim()) {
+      res.status(400).json({ error: 'skillMd is required' });
+      return;
+    }
+    const draft = updateSkillDraft(req.params.id as string, {
+      skillMd,
+      updatedBy: String(req.body?.updatedBy || 'dashboard'),
+    });
+    auditLog(req, 'skill_draft_updated', draft.name);
+    res.json({ ok: true, draft });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post('/drafts/:id/rollback', (req: Request, res: Response) => {
+  try {
+    const version = Number(req.body?.version);
+    if (!Number.isInteger(version) || version < 1) {
+      res.status(400).json({ error: 'valid revision version is required' });
+      return;
+    }
+    const draft = rollbackSkillDraft(
+      req.params.id as string,
+      version,
+      String(req.body?.rolledBackBy || 'dashboard'),
+    );
+    auditLog(req, 'skill_draft_rolled_back', `${draft.name}: v${version}`);
+    res.json({ ok: true, draft });
+  } catch (err) {
+    res.status(400).json({
       error: err instanceof Error ? err.message : String(err),
     });
   }

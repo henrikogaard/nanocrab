@@ -1,8 +1,17 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import QRCode from 'qrcode';
 import { getState } from '../state.js';
 import { readEnvFile } from '../../env.js';
+import { getChannelHealth } from '../../channel-health.js';
+import { requireRole } from '../middleware.js';
+import {
+  cancelWhatsAppPairing,
+  getWhatsAppPairingStatus,
+  resetWhatsAppPairing,
+  startWhatsAppPairing,
+} from '../../whatsapp-pairing.js';
 
 const router = Router();
 
@@ -69,6 +78,74 @@ const SUPPORTED_CHANNELS = [
   },
 ];
 
+function whatsappConnected(): boolean {
+  try {
+    const channel = getState().channels.find(
+      (ch) => ch.name.toLowerCase() === 'whatsapp',
+    );
+    return channel ? getChannelHealth(channel).connected : false;
+  } catch {
+    return false;
+  }
+}
+
+async function whatsappPairingPayload(): Promise<Record<string, unknown>> {
+  const status = getWhatsAppPairingStatus({ connected: whatsappConnected() });
+  const qrCodeDataUrl =
+    status.qrData && status.state === 'waiting_for_qr_scan'
+      ? await QRCode.toDataURL(status.qrData, {
+          margin: 1,
+          width: 320,
+          errorCorrectionLevel: 'M',
+        })
+      : null;
+  return {
+    ...status,
+    qrCodeDataUrl,
+    qrData: undefined,
+  };
+}
+
+router.get('/whatsapp/pairing', async (_req: Request, res: Response) => {
+  res.json(await whatsappPairingPayload());
+});
+
+router.post(
+  '/whatsapp/pairing/start',
+  requireRole('owner'),
+  async (req: Request, res: Response) => {
+    const method = req.body?.method === 'pairing-code' ? 'pairing-code' : 'qr';
+    const phone =
+      typeof req.body?.phone === 'string'
+        ? req.body.phone.replace(/[^\d]/g, '')
+        : '';
+    if (method === 'pairing-code' && !phone) {
+      res.status(400).json({ error: 'phone is required for pairing-code' });
+      return;
+    }
+    startWhatsAppPairing({ method, phone });
+    res.json(await whatsappPairingPayload());
+  },
+);
+
+router.post(
+  '/whatsapp/pairing/cancel',
+  requireRole('owner'),
+  async (_req: Request, res: Response) => {
+    cancelWhatsAppPairing();
+    res.json(await whatsappPairingPayload());
+  },
+);
+
+router.post(
+  '/whatsapp/pairing/reset',
+  requireRole('owner'),
+  async (_req: Request, res: Response) => {
+    resetWhatsAppPairing();
+    res.json(await whatsappPairingPayload());
+  },
+);
+
 router.get('/', (_req: Request, res: Response) => {
   const state = getState();
 
@@ -80,6 +157,7 @@ router.get('/', (_req: Request, res: Response) => {
   const activeChannels = state.channels.map((ch) => {
     const def = SUPPORTED_CHANNELS.find((s) => s.id === ch.name.toLowerCase());
     const config: Record<string, string> = {};
+    const health = getChannelHealth(ch);
 
     if (def) {
       for (const key of def.envVars) {
@@ -116,7 +194,11 @@ router.get('/', (_req: Request, res: Response) => {
     return {
       name: ch.name,
       id: ch.name.toLowerCase(),
-      connected: ch.isConnected(),
+      connected: health.connected,
+      status: health.status,
+      lastActiveAt: health.lastActiveAt,
+      healthDetail: health.detail,
+      diagnostics: health.diagnostics || {},
       config,
       envVars: def?.envVars || [],
       description: def?.description || '',

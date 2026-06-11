@@ -53,8 +53,26 @@ import {
   probeProviderProfile,
   ProviderPurpose,
   PROVIDER_PURPOSES,
+  runLiveProviderProbe,
   saveProviderProfile,
 } from '../../provider-router.js';
+import {
+  getBriefingPreset,
+  listBriefingPresets,
+} from '../../briefing-presets.js';
+import { buildInferenceHealth } from '../../inference-health.js';
+import { buildSetupReadiness } from '../../setup-readiness.js';
+import { channelStatusBadge, getChannelHealth } from '../../channel-health.js';
+import {
+  getAvatarGalleryItem,
+  listAvatarGallery,
+} from '../../avatar-gallery.js';
+import {
+  defaultAssistantProfile,
+  loadAssistantProfile,
+  propagateAssistantProfileToGroups,
+  saveAssistantProfile,
+} from '../../assistant-profile.js';
 
 const router = Router();
 
@@ -118,6 +136,48 @@ function getDiskUsage(): {
   return null;
 }
 
+type DiagnosticStatus = 'pass' | 'warn' | 'fail';
+
+function diagnostic(
+  label: string,
+  status: DiagnosticStatus,
+  detail: string,
+  remediation?: string,
+): {
+  label: string;
+  status: DiagnosticStatus;
+  detail: string;
+  remediation?: string;
+} {
+  return { label, status, detail, remediation };
+}
+
+function commandSucceeds(command: string, args: string[]): boolean {
+  try {
+    execFileSync(command, args, { stdio: 'ignore', timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function directoryWritable(dir: string): boolean {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, `.nanocrab-write-${process.pid}`);
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function nodeVersionSupported(): boolean {
+  const major = parseInt(process.versions.node.split('.')[0] || '0', 10);
+  return major >= 20 && major < 26;
+}
+
 router.get('/', (_req: Request, res: Response) => {
   const state = getState();
   const uptimeMs = Date.now() - state.startTime;
@@ -152,14 +212,136 @@ router.get('/', (_req: Request, res: Response) => {
   });
 });
 
+router.get('/install-diagnostics', (_req: Request, res: Response) => {
+  const env = readEnvFile(['GITHUB_TOKEN', 'ADMIN_PASSWORD', 'ADMIN_USERNAME']);
+  const projectRoot = process.cwd();
+  const diagnostics = [
+    diagnostic(
+      'Node.js version',
+      nodeVersionSupported() ? 'pass' : 'fail',
+      `Running ${process.version}; package engine expects >=20 <26.`,
+      'Install a supported Node.js runtime before release.',
+    ),
+    diagnostic(
+      'Dependency lockfile',
+      fs.existsSync(path.join(projectRoot, 'package-lock.json'))
+        ? 'pass'
+        : 'warn',
+      'package-lock.json keeps installs reproducible.',
+      'Run npm install and commit the lockfile if it is missing.',
+    ),
+    diagnostic(
+      'Built server output',
+      fs.existsSync(path.join(projectRoot, 'dist', 'index.js'))
+        ? 'pass'
+        : 'warn',
+      'dist/index.js is present for npm start/systemd runs.',
+      'Run npm run build before release.',
+    ),
+    diagnostic(
+      'Container runtime',
+      commandSucceeds(CONTAINER_RUNTIME_BIN, ['--version']) ? 'pass' : 'fail',
+      `${CONTAINER_RUNTIME_BIN} is required for agent containers.`,
+      'Install/start Docker or the configured container runtime.',
+    ),
+    diagnostic(
+      'Agent container image',
+      commandSucceeds(CONTAINER_RUNTIME_BIN, [
+        'image',
+        'inspect',
+        CONTAINER_IMAGE,
+      ])
+        ? 'pass'
+        : 'warn',
+      `${CONTAINER_IMAGE} should exist locally before production use.`,
+      'Run ./container/build.sh.',
+    ),
+    diagnostic(
+      'Writable store directory',
+      directoryWritable(STORE_DIR) ? 'pass' : 'fail',
+      STORE_DIR,
+      'Fix filesystem permissions for the NanoCrab service user.',
+    ),
+    diagnostic(
+      'Writable groups directory',
+      directoryWritable(GROUPS_DIR) ? 'pass' : 'fail',
+      GROUPS_DIR,
+      'Fix filesystem permissions for the NanoCrab service user.',
+    ),
+    diagnostic(
+      'Writable data directory',
+      directoryWritable(DATA_DIR) ? 'pass' : 'fail',
+      DATA_DIR,
+      'Fix filesystem permissions for the NanoCrab service user.',
+    ),
+    diagnostic(
+      'Environment file',
+      fs.existsSync(path.join(projectRoot, '.env')) ? 'pass' : 'warn',
+      '.env is used by the credential proxy and service configuration.',
+      'Create .env or provide equivalent service environment variables.',
+    ),
+    diagnostic(
+      'Admin credentials',
+      env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD ? 'pass' : 'warn',
+      'Admin credentials are configured outside the container.',
+      'Run setup or set ADMIN_USERNAME/ADMIN_PASSWORD.',
+    ),
+    diagnostic(
+      'GitHub token',
+      env.GITHUB_TOKEN || process.env.GITHUB_TOKEN ? 'pass' : 'warn',
+      'GITHUB_TOKEN enables coding jobs, issue assignment, and PR creation.',
+      'Set GITHUB_TOKEN if GitHub coding workflows should run.',
+    ),
+  ];
+  const releaseChecklist = [
+    {
+      label: 'TypeScript build',
+      ok: fs.existsSync(path.join(projectRoot, 'dist', 'index.js')),
+      command: 'npm run build',
+    },
+    {
+      label: 'Agent container image built',
+      ok: commandSucceeds(CONTAINER_RUNTIME_BIN, [
+        'image',
+        'inspect',
+        CONTAINER_IMAGE,
+      ]),
+      command: './container/build.sh',
+    },
+    {
+      label: 'Backup route available',
+      ok: fs.existsSync(
+        path.join(projectRoot, 'src', 'admin', 'routes', 'backup.ts'),
+      ),
+      command: 'Create a backup from the dashboard before migration.',
+    },
+    {
+      label: 'Writable runtime directories',
+      ok: [STORE_DIR, GROUPS_DIR, DATA_DIR].every(directoryWritable),
+      command: 'Check service-user permissions.',
+    },
+  ];
+  const failed = diagnostics.filter((item) => item.status === 'fail').length;
+  const warnings = diagnostics.filter((item) => item.status === 'warn').length;
+  res.json({
+    generatedAt: new Date().toISOString(),
+    overall: failed > 0 ? 'fail' : warnings > 0 ? 'warn' : 'pass',
+    failed,
+    warnings,
+    diagnostics,
+    releaseChecklist,
+  });
+});
+
+router.get('/first-run-readiness', (_req: Request, res: Response) => {
+  res.json(buildSetupReadiness());
+});
+
 // Combined dashboard endpoint — single call instead of 8+ separate ones
 router.get('/dashboard', async (_req: Request, res: Response) => {
   const state = getState();
   const uptimeMs = Date.now() - state.startTime;
-  const channels = state.channels.map((ch) => ({
-    name: ch.name,
-    connected: ch.isConnected(),
-  }));
+  const channels = state.channels.map(getChannelHealth);
   const containers = state.queue.getActiveContainers();
 
   const db = new Database(path.join(STORE_DIR, 'messages.db'), {
@@ -356,11 +538,14 @@ router.post(
 // Channel health check
 router.get('/health', (_req: Request, res: Response) => {
   const state = getState();
-  const health = state.channels.map((ch) => ({
-    name: ch.name,
-    connected: ch.isConnected(),
-    status: ch.isConnected() ? 'healthy' : 'down',
-  }));
+  const health = state.channels.map((ch) => {
+    const channelHealth = getChannelHealth(ch);
+    return {
+      ...channelHealth,
+      status: channelStatusBadge(channelHealth.status),
+      runtimeStatus: channelHealth.status,
+    };
+  });
 
   const allHealthy = health.every((h) => h.connected);
   res.json({
@@ -417,6 +602,97 @@ router.get('/stats', (_req: Request, res: Response) => {
 });
 
 // Upload avatar
+const AVATAR_SELECTION_PATH = path.join(DATA_DIR, 'avatar-selection.json');
+
+function saveAvatarSelection(selection: {
+  kind: 'uploaded' | 'default' | 'builtin';
+  id: string;
+  url: string;
+}): void {
+  fs.mkdirSync(path.dirname(AVATAR_SELECTION_PATH), { recursive: true });
+  fs.writeFileSync(
+    AVATAR_SELECTION_PATH,
+    JSON.stringify(
+      { ...selection, updatedAt: new Date().toISOString() },
+      null,
+      2,
+    ),
+  );
+}
+
+function loadAvatarSelection(): {
+  kind: 'uploaded' | 'default' | 'builtin';
+  id: string;
+  url: string;
+  updatedAt?: string;
+} {
+  try {
+    return JSON.parse(fs.readFileSync(AVATAR_SELECTION_PATH, 'utf-8'));
+  } catch {
+    return {
+      kind: fs.existsSync(
+        path.join(
+          process.cwd(),
+          'src',
+          'admin',
+          'public',
+          'static',
+          'avatar.jpg',
+        ),
+      )
+        ? 'uploaded'
+        : 'default',
+      id: fs.existsSync(
+        path.join(
+          process.cwd(),
+          'src',
+          'admin',
+          'public',
+          'static',
+          'avatar.jpg',
+        ),
+      )
+        ? 'uploaded'
+        : 'nanocrab-default',
+      url: fs.existsSync(
+        path.join(
+          process.cwd(),
+          'src',
+          'admin',
+          'public',
+          'static',
+          'avatar.jpg',
+        ),
+      )
+        ? '/static/avatar.jpg'
+        : '/static/nanocrab-mark.png',
+    };
+  }
+}
+
+router.get('/avatars', (_req: Request, res: Response) => {
+  res.json({
+    selected: loadAvatarSelection(),
+    gallery: listAvatarGallery(),
+    uploaded: {
+      id: 'uploaded',
+      name: 'Uploaded Avatar',
+      kind: 'uploaded',
+      url: '/static/avatar.jpg',
+      available: fs.existsSync(
+        path.join(
+          process.cwd(),
+          'src',
+          'admin',
+          'public',
+          'static',
+          'avatar.jpg',
+        ),
+      ),
+    },
+  });
+});
+
 router.post('/avatar', async (req: Request, res: Response) => {
   const chunks: Buffer[] = [];
   req.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -446,8 +722,93 @@ router.post('/avatar', async (req: Request, res: Response) => {
     );
     fs.mkdirSync(distStatic, { recursive: true });
     fs.writeFileSync(path.join(distStatic, 'avatar.jpg'), buffer);
+    saveAvatarSelection({
+      kind: 'uploaded',
+      id: 'uploaded',
+      url: '/static/avatar.jpg',
+    });
     res.json({ ok: true });
   });
+});
+
+router.post('/avatar/select', async (req: Request, res: Response) => {
+  const id = typeof req.body?.id === 'string' ? req.body.id : '';
+  if (id === 'uploaded') {
+    const uploadedPath = path.join(
+      process.cwd(),
+      'src',
+      'admin',
+      'public',
+      'static',
+      'avatar.jpg',
+    );
+    if (!fs.existsSync(uploadedPath)) {
+      res.status(404).json({ error: 'uploaded avatar not found' });
+      return;
+    }
+    saveAvatarSelection({
+      kind: 'uploaded',
+      id: 'uploaded',
+      url: '/static/avatar.jpg',
+    });
+    res.json({ ok: true, selected: loadAvatarSelection() });
+    return;
+  }
+  const item = getAvatarGalleryItem(id);
+  if (!item) {
+    res.status(404).json({ error: 'avatar not found' });
+    return;
+  }
+  saveAvatarSelection({
+    kind: item.kind,
+    id: item.id,
+    url: item.url,
+  });
+  res.json({ ok: true, selected: loadAvatarSelection() });
+});
+
+router.get('/assistant-profile', (_req: Request, res: Response) => {
+  res.json(loadAssistantProfile());
+});
+
+router.put('/assistant-profile', (req: Request, res: Response) => {
+  try {
+    const profile =
+      req.body?.reset === true
+        ? saveAssistantProfile({
+            personality: defaultAssistantProfile().personality,
+            enabledSkillPreferenceIds: defaultAssistantProfile()
+              .skillPreferences.filter((item) => item.enabled)
+              .map((item) => item.id),
+          })
+        : saveAssistantProfile({
+            personality:
+              typeof req.body?.personality === 'string'
+                ? req.body.personality
+                : undefined,
+            enabledSkillPreferenceIds: Array.isArray(
+              req.body?.enabledSkillPreferenceIds,
+            )
+              ? req.body.enabledSkillPreferenceIds.filter(
+                  (item: unknown) => typeof item === 'string',
+                )
+              : undefined,
+          });
+    const propagated =
+      req.body?.propagate === true
+        ? propagateAssistantProfileToGroups(profile)
+        : [];
+    auditLog(
+      req,
+      'assistant_profile_updated',
+      `propagated=${propagated.length}`,
+    );
+    res.json({ ok: true, profile, propagated });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 // Alerts
@@ -483,10 +844,11 @@ router.get('/alerts', async (_req: Request, res: Response) => {
 
   // Check offline channels
   for (const ch of state.channels) {
-    if (!ch.isConnected()) {
+    const health = getChannelHealth(ch);
+    if (!health.connected) {
       alerts.push({
         type: 'error',
-        message: `Channel "${ch.name}" is offline`,
+        message: `Channel "${ch.name}" is ${health.status}: ${health.detail}`,
       });
     }
   }
@@ -627,6 +989,10 @@ router.get('/provider/profiles', (_req: Request, res: Response) => {
   });
 });
 
+router.get('/inference-health', (_req: Request, res: Response) => {
+  res.json(buildInferenceHealth());
+});
+
 router.put(
   '/provider/profiles/:id',
   requireRole('owner'),
@@ -690,21 +1056,36 @@ router.put(
   },
 );
 
-router.get('/provider/profiles/:id/probe', (req: Request, res: Response) => {
-  const id = req.params.id as ProviderPurpose;
-  if (!PROVIDER_PURPOSES.includes(id)) {
-    res.status(400).json({
-      error: `profile id must be one of: ${PROVIDER_PURPOSES.join(', ')}`,
-    });
-    return;
-  }
-  const profile = loadProviderProfiles().find((item) => item.id === id);
-  if (!profile) {
-    res.status(404).json({ error: 'profile not found' });
-    return;
-  }
-  res.json(probeProviderProfile(profile));
-});
+router.get(
+  '/provider/profiles/:id/probe',
+  async (req: Request, res: Response) => {
+    const id = req.params.id as ProviderPurpose;
+    if (!PROVIDER_PURPOSES.includes(id)) {
+      res.status(400).json({
+        error: `profile id must be one of: ${PROVIDER_PURPOSES.join(', ')}`,
+      });
+      return;
+    }
+    const profile = loadProviderProfiles().find((item) => item.id === id);
+    if (!profile) {
+      res.status(404).json({ error: 'profile not found' });
+      return;
+    }
+    try {
+      const probe = await runLiveProviderProbe(profile);
+      auditLog(
+        req,
+        'provider_profile_probe_run',
+        `${profile.id} -> ${profile.provider}/${profile.model}`,
+      );
+      res.json(probe);
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
 
 router.get(
   '/provider/preflight/:provider',
@@ -1024,6 +1405,32 @@ function loadReportConfig(): ReportConfig {
 
 router.get('/report-config', (_req: Request, res: Response) => {
   res.json(loadReportConfig());
+});
+
+router.get('/briefing-presets', (_req: Request, res: Response) => {
+  res.json({ presets: listBriefingPresets() });
+});
+
+router.post('/report-config/preset/:id', (req: Request, res: Response) => {
+  const preset = getBriefingPreset(req.params.id as string);
+  if (!preset) {
+    res.status(404).json({ error: 'Briefing preset not found' });
+    return;
+  }
+  const current = loadReportConfig();
+  const config: ReportConfig = {
+    ...current,
+    enabled: true,
+    schedule: preset.schedule,
+    providerProfileId: 'default_reports',
+    requireOutlineApproval: preset.requireOutlineApproval,
+    outputFormats: preset.outputFormats,
+    sourceScopes: preset.sourceScopes,
+  };
+  fs.mkdirSync(path.dirname(REPORT_CONFIG_PATH), { recursive: true });
+  fs.writeFileSync(REPORT_CONFIG_PATH, JSON.stringify(config, null, 2));
+  auditLog(req, 'report_briefing_preset_applied', preset.id);
+  res.json({ ok: true, config, preset });
 });
 
 router.put('/report-config', (req: Request, res: Response) => {

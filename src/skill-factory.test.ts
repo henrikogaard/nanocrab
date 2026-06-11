@@ -12,9 +12,13 @@ vi.mock('./config.js', () => ({
 
 import {
   approveSkillDraft,
+  getSkillDraftContent,
+  listSkillDraftRevisions,
   listSkillDrafts,
   proposeSkillDraft,
   rejectSkillDraft,
+  rollbackSkillDraft,
+  updateSkillDraft,
 } from './skill-factory.js';
 
 const VALID_SKILL = `---
@@ -94,6 +98,32 @@ describe('skill factory', () => {
     expect(rejected.status).toBe('rejected');
     expect(fs.existsSync(path.join(TEST_ROOT, 'container', 'skills'))).toBe(
       false,
+    );
+  });
+
+  it('tracks draft revisions and rolls back into a new pending revision', () => {
+    const draft = proposeSkillDraft({
+      skillMd: VALID_SKILL,
+      createdBy: 'whatsapp_main',
+    });
+
+    const updated = updateSkillDraft(draft.id, {
+      updatedBy: 'dashboard',
+      skillMd: VALID_SKILL.replace(
+        'concise operational notes',
+        'structured operational notes',
+      ),
+    });
+    expect(updated.version).toBe(2);
+    expect(listSkillDraftRevisions(draft.id).map((rev) => rev.version)).toEqual(
+      [2, 1],
+    );
+
+    const rolledBack = rollbackSkillDraft(draft.id, 1, 'dashboard');
+    expect(rolledBack.version).toBe(3);
+    expect(rolledBack.status).toBe('pending');
+    expect(getSkillDraftContent(draft.id)).toContain(
+      'concise operational notes',
     );
   });
 });

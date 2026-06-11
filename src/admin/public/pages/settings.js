@@ -32,6 +32,25 @@ async function renderSettings(el) {
   try {
     providerInfo = await api('/system/provider');
   } catch {}
+  let avatarInfo = {
+    selected: {
+      kind: 'default',
+      id: 'nanocrab-default',
+      url: '/static/nanocrab-mark.png',
+    },
+    gallery: [],
+    uploaded: { available: false, url: '/static/avatar.jpg' },
+  };
+  try {
+    avatarInfo = await api('/system/avatars');
+  } catch {}
+  let assistantProfile = {
+    personality: '',
+    skillPreferences: [],
+  };
+  try {
+    assistantProfile = await api('/system/assistant-profile');
+  } catch {}
   const providerModels = providerInfo.models || {
     claude: [
       'claude-sonnet-4-6',
@@ -222,6 +241,45 @@ async function renderSettings(el) {
     </div>`;
 
   const isOwner = (window._userRole || 'owner') === 'owner';
+  const selectedAvatarUrl =
+    avatarInfo.selected?.url || '/static/nanocrab-mark.png';
+  const avatarChoices = [
+    ...(avatarInfo.uploaded?.available
+      ? [
+          {
+            id: 'uploaded',
+            name: 'Uploaded',
+            kind: 'uploaded',
+            url: avatarInfo.uploaded.url,
+            description: 'Your uploaded avatar image.',
+          },
+        ]
+      : []),
+    ...(avatarInfo.gallery || []),
+  ];
+  const avatarGalleryHtml = avatarChoices
+    .map((avatar) => {
+      const selected = avatarInfo.selected?.id === avatar.id;
+      return `<button class="theme-option ${selected ? 'active' : ''}" style="align-items:flex-start;text-align:left;min-height:112px" onclick="selectBuiltInAvatar('${esc(avatar.id)}')">
+        <img src="${esc(avatar.url)}" alt="${esc(avatar.name)}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;background:var(--surface);border:1px solid var(--border)">
+        <span>${esc(avatar.name)}</span>
+        <span style="font-size:10px;color:var(--text-muted);line-height:1.25">${esc(avatar.kind)} · ${esc(avatar.description || '')}</span>
+      </button>`;
+    })
+    .join('');
+  const assistantSkillHtml = (assistantProfile.skillPreferences || [])
+    .map(
+      (
+        pref,
+      ) => `<label style="display:flex;gap:8px;align-items:flex-start;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2)">
+        <input type="checkbox" class="assistant-skill-pref" value="${esc(pref.id)}" ${pref.enabled ? 'checked' : ''} style="margin-top:3px">
+        <span>
+          <span style="display:block;font-size:12px;color:var(--text);font-weight:600">${esc(pref.label)}</span>
+          <span style="display:block;font-size:11px;color:var(--text-muted);line-height:1.3">${esc(pref.description)}</span>
+        </span>
+      </label>`,
+    )
+    .join('');
 
   el.innerHTML = `
     <div class="page-header"><h2>Settings</h2></div>
@@ -247,6 +305,30 @@ async function renderSettings(el) {
           </div>
           <p style="font-size:11px;color:var(--text-muted);margin-top:8px">Changes update .env and all group agent instruction files. Requires restart.</p>
         </form>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">Assistant Profile</div>
+      <div style="display:grid;grid-template-columns:minmax(260px,1.2fr) minmax(240px,.8fr);gap:16px">
+        <div>
+          <div class="form-group">
+            <label>Personality</label>
+            <textarea id="assistant-personality" rows="7" style="width:100%;font-size:13px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;resize:vertical;line-height:1.45">${esc(assistantProfile.personality || '')}</textarea>
+          </div>
+          <label style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--text-muted);margin-bottom:10px">
+            <input type="checkbox" id="assistant-profile-propagate" checked>
+            Apply the managed Assistant Profile block to group AGENTS.md files
+          </label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-sm btn-primary" onclick="saveAssistantProfile()">Save Profile</button>
+            <button class="btn btn-sm btn-ghost" onclick="resetAssistantProfile()">Reset Default</button>
+            <span id="assistant-profile-msg" style="font-size:12px;color:var(--text-muted)"></span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Skill Preferences</div>
+          <div style="display:grid;gap:8px">${assistantSkillHtml}</div>
+        </div>
       </div>
     </div>
     ${
@@ -299,12 +381,16 @@ async function renderSettings(el) {
         <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
           <div class="card-title">Bot Avatar</div>
           <div style="display:flex;align-items:center;gap:16px">
-            <img src="/static/avatar.jpg" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--border)" onerror="this.onerror=null;this.src='/static/nanocrab-mark.png'" id="avatar-preview" alt="Bot avatar">
+            <img src="${esc(selectedAvatarUrl)}${avatarInfo.selected?.kind === 'uploaded' ? '?' + Date.now() : ''}" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--border);background:var(--surface2)" onerror="this.onerror=null;this.src='/static/nanocrab-mark.png'" id="avatar-preview" alt="Bot avatar">
             <div>
               <input type="file" id="avatar-file" accept="image/*" style="display:none">
               <button class="btn btn-sm btn-ghost" onclick="document.getElementById('avatar-file').click()">Upload New Avatar</button>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Current: ${esc(avatarInfo.selected?.kind || 'default')} / ${esc(avatarInfo.selected?.id || 'nanocrab-default')}</div>
               <div id="avatar-msg" style="font-size:12px;color:var(--text-muted);margin-top:4px"></div>
             </div>
+          </div>
+          <div class="theme-grid" style="margin-top:14px;grid-template-columns:repeat(auto-fit,minmax(118px,1fr))">
+            ${avatarGalleryHtml}
           </div>
         </div>
       </div>
@@ -471,6 +557,72 @@ async function renderSettings(el) {
     } catch {
       msgEl.textContent = 'Upload error';
       msgEl.style.color = 'var(--error)';
+    }
+  };
+
+  window.selectBuiltInAvatar = async function (id) {
+    const msgEl = document.getElementById('avatar-msg');
+    if (msgEl) {
+      msgEl.textContent = 'Saving avatar...';
+      msgEl.style.color = 'var(--text-muted)';
+    }
+    try {
+      const res = await api('/system/avatar/select', {
+        method: 'POST',
+        body: JSON.stringify({ id }),
+      });
+      if (res.ok) {
+        toast('Avatar selected', 'success');
+        renderSettings(el);
+      }
+    } catch {
+      if (msgEl) {
+        msgEl.textContent = 'Avatar selection failed';
+        msgEl.style.color = 'var(--error)';
+      }
+    }
+  };
+
+  window.saveAssistantProfile = async function () {
+    const msg = document.getElementById('assistant-profile-msg');
+    const personality =
+      document.getElementById('assistant-personality')?.value || '';
+    const enabledSkillPreferenceIds = Array.from(
+      document.querySelectorAll('.assistant-skill-pref:checked'),
+    ).map((input) => input.value);
+    const propagate =
+      document.getElementById('assistant-profile-propagate')?.checked === true;
+    if (msg) msg.textContent = 'Saving...';
+    try {
+      const res = await api('/system/assistant-profile', {
+        method: 'PUT',
+        body: JSON.stringify({
+          personality,
+          enabledSkillPreferenceIds,
+          propagate,
+        }),
+      });
+      if (msg)
+        msg.textContent = `Saved${res.propagated?.length ? ` · updated ${res.propagated.length} group file${res.propagated.length === 1 ? '' : 's'}` : ''}`;
+      toast('Assistant profile saved', 'success');
+    } catch (e) {
+      if (msg) msg.textContent = 'Save failed';
+      toast('Assistant profile failed: ' + e.message, 'error');
+    }
+  };
+
+  window.resetAssistantProfile = async function () {
+    const propagate =
+      document.getElementById('assistant-profile-propagate')?.checked === true;
+    try {
+      await api('/system/assistant-profile', {
+        method: 'PUT',
+        body: JSON.stringify({ reset: true, propagate }),
+      });
+      toast('Assistant profile reset', 'success');
+      renderSettings(el);
+    } catch (e) {
+      toast('Reset failed: ' + e.message, 'error');
     }
   };
 
@@ -1082,9 +1234,10 @@ window.revokeApiToken = async (id, btnEl) => {
 // --- Report Config ---
 async function loadReportConfig() {
   try {
-    const [config, providerProfiles] = await Promise.all([
+    const [config, providerProfiles, briefingPresets] = await Promise.all([
       api('/system/report-config'),
       api('/system/provider/profiles').catch(() => ({ profiles: [] })),
+      api('/system/briefing-presets').catch(() => ({ presets: [] })),
     ]);
     const el = document.getElementById('report-config-area');
     if (!el) return;
@@ -1098,6 +1251,26 @@ async function loadReportConfig() {
     ];
     const formatOptions = ['markdown', 'docx', 'pdf', 'html'];
     el.innerHTML = `
+      ${
+        briefingPresets.presets?.length
+          ? `<div style="display:grid;gap:8px;margin-bottom:12px">
+          ${briefingPresets.presets
+            .map(
+              (
+                preset,
+              ) => `<div class="channel-card" style="align-items:flex-start">
+                <div>
+                  <div style="font-weight:600;color:var(--text);font-size:13px">${esc(preset.title)}</div>
+                  <div style="font-size:12px;color:var(--text-muted);margin-top:3px">${esc(preset.request)}</div>
+                  <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Schedule: <code>${esc(preset.schedule)}</code> Sources: ${preset.sourceScopes.map((scope) => `<code>${esc(scope)}</code>`).join(' ')}</div>
+                </div>
+                <button class="btn btn-sm btn-ghost" onclick="applyBriefingPreset('${esc(preset.id)}')">Apply</button>
+              </div>`,
+            )
+            .join('')}
+        </div>`
+          : ''
+      }
       <div class="channel-card" style="padding:8px 0">
         <span>Enable scheduled report pipeline</span>
         <input type="checkbox" id="report-enabled" ${config.enabled ? 'checked' : ''}>
@@ -1197,6 +1370,29 @@ window.saveReportConfig = async () => {
   setTimeout(() => {
     if (msg) msg.textContent = '';
   }, 3000);
+};
+
+window.applyBriefingPreset = async (presetId) => {
+  const msg = document.getElementById('report-msg');
+  try {
+    const r = await api(
+      `/system/report-config/preset/${encodeURIComponent(presetId)}`,
+      {
+        method: 'POST',
+      },
+    );
+    if (!r.ok) throw new Error(r.error || 'Failed');
+    if (msg) {
+      msg.textContent = `Applied ${r.preset.title}`;
+      msg.style.color = 'var(--success)';
+    }
+    await loadReportConfig();
+  } catch (err) {
+    if (msg) {
+      msg.textContent = err.message || 'Failed to apply preset';
+      msg.style.color = 'var(--error)';
+    }
+  }
 };
 
 // --- Pin/Unpin Messages ---

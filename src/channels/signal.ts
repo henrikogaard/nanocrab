@@ -16,7 +16,7 @@ import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { transcribeAudio } from '../transcription.js';
 import { registerChannel, ChannelOpts } from './registry.js';
-import { Channel, NewMessage } from '../types.js';
+import { Channel, ChannelHealth, NewMessage } from '../types.js';
 
 const SIGNAL_CLI_PORT = 8080;
 const DAEMON_STARTUP_TIMEOUT_MS = 90000;
@@ -76,6 +76,9 @@ export class SignalChannel implements Channel {
   private daemonRestarts = 0;
   private rpcId = 0;
   private lastTimestamps = new Set<number>();
+  private lastActiveAt: string | null = null;
+  private lastError: string | null = null;
+  private healthHeartbeat: NodeJS.Timeout | null = null;
   // Map UUID → phone number for JID resolution
   private uuidToPhone = new Map<string, string>();
 
@@ -89,6 +92,7 @@ export class SignalChannel implements Channel {
   async connect(): Promise<void> {
     await this.startDaemon();
     this.connected = true;
+    this.markActive();
 
     // Pre-populate UUID→phone map from contacts
     await this.resolveUuidToPhone('').catch(() => {});
@@ -178,6 +182,9 @@ export class SignalChannel implements Channel {
         await this.rpc('version', {});
         logger.info('signal-cli daemon ready');
         this.daemonRestarts = 0;
+        this.lastError = null;
+        this.markActive();
+        this.startHealthHeartbeat();
         this.startMemoryWatchdog();
         return;
       } catch {
@@ -194,6 +201,7 @@ export class SignalChannel implements Channel {
     if (this.daemonRestarts >= MAX_DAEMON_RESTARTS) {
       logger.error('signal-cli daemon exceeded max restarts, giving up');
       this.connected = false;
+      this.lastError = 'signal-cli daemon exceeded max restarts';
       return;
     }
 
@@ -208,10 +216,13 @@ export class SignalChannel implements Channel {
 
     try {
       await this.startDaemon();
+      this.connected = true;
+      this.lastError = null;
       logger.info('signal-cli daemon restarted successfully');
     } catch (err) {
       logger.error({ err }, 'Failed to restart signal-cli daemon');
       this.connected = false;
+      this.lastError = err instanceof Error ? err.message : String(err);
     }
   }
 
@@ -304,6 +315,7 @@ export class SignalChannel implements Channel {
       }
     }
     const timestamp = new Date(ts).toISOString();
+    this.markActive(timestamp);
     const msgId = ts.toString();
 
     // Build content
@@ -510,12 +522,51 @@ export class SignalChannel implements Channel {
     return this.connected;
   }
 
+  getHealth(): ChannelHealth {
+    const daemonRunning = !!this.daemon?.pid && !this.daemon.killed;
+    const lastActiveMs = this.lastActiveAt
+      ? new Date(this.lastActiveAt).getTime()
+      : 0;
+    const stale =
+      lastActiveMs > 0 &&
+      Date.now() - lastActiveMs > DAEMON_MEMORY_CHECK_INTERVAL;
+    const connected = this.connected && daemonRunning && !stale;
+    const status: ChannelHealth['status'] = connected
+      ? 'active'
+      : this.connected && daemonRunning
+        ? 'degraded'
+        : 'offline';
+
+    return {
+      name: this.name,
+      connected,
+      status,
+      lastActiveAt: this.lastActiveAt,
+      detail:
+        status === 'active'
+          ? 'signal-cli daemon heartbeat is healthy.'
+          : this.lastError ||
+            (daemonRunning
+              ? 'signal-cli daemon heartbeat is stale.'
+              : 'signal-cli daemon is not running.'),
+      diagnostics: {
+        daemonRunning,
+        restartCount: this.daemonRestarts,
+        port: this.port,
+      },
+    };
+  }
+
   ownsJid(jid: string): boolean {
     return jid.startsWith('sig:');
   }
 
   async disconnect(): Promise<void> {
     this.connected = false;
+    if (this.healthHeartbeat) {
+      clearInterval(this.healthHeartbeat);
+      this.healthHeartbeat = null;
+    }
 
     if (this.daemon) {
       this.daemon.kill('SIGTERM');
@@ -538,6 +589,20 @@ export class SignalChannel implements Channel {
   }
 
   // --- Helpers ---
+
+  private markActive(timestamp = new Date().toISOString()): void {
+    this.lastActiveAt = timestamp;
+  }
+
+  private startHealthHeartbeat(): void {
+    if (this.healthHeartbeat) clearInterval(this.healthHeartbeat);
+    this.healthHeartbeat = setInterval(() => {
+      if (!this.connected) return;
+      this.rpc('version', {}).catch((err) => {
+        this.lastError = err instanceof Error ? err.message : String(err);
+      });
+    }, 60000);
+  }
 
   /**
    * Try to resolve a UUID to a phone number via signal-cli contacts.
@@ -584,10 +649,13 @@ export class SignalChannel implements Channel {
 
     const json = (await res.json()) as JsonRpcResponse;
     if (json.error) {
+      this.lastError = json.error.message;
       throw new Error(
         `signal-cli RPC error (${json.error.code}): ${json.error.message}`,
       );
     }
+    this.lastError = null;
+    this.markActive();
     return json.result;
   }
 }

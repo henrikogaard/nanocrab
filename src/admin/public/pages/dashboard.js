@@ -100,14 +100,21 @@ async function renderDashboard(el) {
       const channelRows =
         channels
           .map((ch, index) => {
-            const status = ch.connected ? 'online' : 'offline';
+            const runtimeStatus =
+              ch.status || (ch.connected ? 'active' : 'offline');
+            const status =
+              runtimeStatus === 'active'
+                ? 'online'
+                : runtimeStatus === 'degraded'
+                  ? 'idle'
+                  : 'offline';
             return `
               <div class="dash-line-item dash-reveal" style="--i:${index}">
                 <div class="dash-line-main">
                   <span class="status-dot ${status}"></span>
                   <span class="dash-line-title">${esc(ch.name || 'channel')}</span>
                 </div>
-                <span class="dash-pill ${ch.connected ? 'is-good' : 'is-bad'}">${ch.connected ? 'On' : 'Off'}</span>
+                <span class="dash-pill ${runtimeStatus === 'active' ? 'is-good' : 'is-bad'}">${esc(runtimeStatus)}</span>
               </div>`;
           })
           .join('') ||

@@ -15,7 +15,10 @@ vi.mock('./config.js', () => ({
 import { _closeDatabase, _initTestDatabase } from './db.js';
 import {
   approveMemory,
+  listMemoryReviewQueue,
   listMemoryRecords,
+  markMemoryStale,
+  memoryReviewReasons,
   proposeMemory,
   rejectMemory,
 } from './memory-store.js';
@@ -93,5 +96,43 @@ describe('memory store', () => {
     );
     expect(memoryMd).not.toContain('Do not keep this.');
     expect(listMemoryRecords({ status: 'rejected' })).toHaveLength(1);
+  });
+
+  it('surfaces stale, sensitive, and contradictory memories in the review queue', () => {
+    const approved = proposeMemory({
+      scope: 'global',
+      type: 'fact',
+      content: 'Henrik prefers morning release windows.',
+      confidence: 0.8,
+      visibility: 'global',
+      createdBy: 'whatsapp_main',
+    });
+    approveMemory(approved.id);
+
+    const contradiction = proposeMemory({
+      scope: 'global',
+      type: 'fact',
+      content: 'Henrik no longer prefers morning release windows.',
+      confidence: 0.8,
+      visibility: 'global',
+      createdBy: 'whatsapp_main',
+    });
+
+    const sensitive = proposeMemory({
+      scope: 'global',
+      type: 'fact',
+      content: 'Henrik personal phone is captured in private notes.',
+      confidence: 0.8,
+      visibility: 'global',
+      createdBy: 'whatsapp_main',
+    });
+    approveMemory(sensitive.id);
+
+    markMemoryStale(approved.id);
+
+    expect(memoryReviewReasons(contradiction)).toContain('contradiction');
+    const queue = listMemoryReviewQueue({ reason: 'sensitive' });
+    expect(queue.map((memory) => memory.id)).toContain(sensitive.id);
+    expect(queue[0]?.review_reasons.length).toBeGreaterThan(0);
   });
 });

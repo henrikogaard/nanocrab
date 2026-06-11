@@ -4,6 +4,8 @@ import path from 'path';
 import readline from 'readline';
 
 import { DATA_DIR, STORE_DIR } from '../../config.js';
+import { isAgentProvider } from '../../agent-provider.js';
+import { getProviderCapabilities } from '../../provider-router.js';
 
 const router = Router();
 
@@ -205,13 +207,18 @@ async function scanTranscripts(): Promise<{
   return { daily, totals, byGroup };
 }
 
-interface ProviderUsageEntry {
+export interface ProviderUsageEntry {
   timestamp: string;
   provider: string;
   service: string;
   model: string;
   estimatedCost: number;
   durationMs?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  contextTokens?: number;
+  success?: boolean;
+  error?: string;
   details?: string;
   prompt?: string;
   size?: string;
@@ -225,8 +232,97 @@ interface ProviderSummary {
   entries: ProviderUsageEntry[];
 }
 
+export interface ModelMetricSummary {
+  provider: string;
+  model: string;
+  calls: number;
+  failures: number;
+  successRate: number;
+  totalCost: number;
+  avgLatencyMs: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  contextTokens: number;
+  contextWindow: number;
+  costTier: string;
+  lastUsedAt: string | null;
+  lastError: string | null;
+}
+
+export function summarizeModelMetrics(
+  entries: ProviderUsageEntry[],
+): ModelMetricSummary[] {
+  const byModel = new Map<
+    string,
+    ModelMetricSummary & { latencyTotal: number; latencyCount: number }
+  >();
+  for (const entry of entries) {
+    const key = `${entry.provider}:${entry.model || 'unknown'}`;
+    const capabilities = isAgentProvider(entry.provider)
+      ? getProviderCapabilities(entry.provider)
+      : { context_window: 0, cost_tier: 'unknown' };
+    const existing =
+      byModel.get(key) ||
+      ({
+        provider: entry.provider,
+        model: entry.model || 'unknown',
+        calls: 0,
+        failures: 0,
+        successRate: 100,
+        totalCost: 0,
+        avgLatencyMs: null,
+        latencyTotal: 0,
+        latencyCount: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        contextTokens: 0,
+        contextWindow: capabilities.context_window || 0,
+        costTier: capabilities.cost_tier || 'unknown',
+        lastUsedAt: null,
+        lastError: null,
+      } satisfies ModelMetricSummary & {
+        latencyTotal: number;
+        latencyCount: number;
+      });
+    existing.calls++;
+    if (entry.success === false || entry.error) {
+      existing.failures++;
+      existing.lastError =
+        entry.error || entry.details || 'Provider call failed';
+    }
+    existing.totalCost += entry.estimatedCost || 0;
+    existing.inputTokens += entry.inputTokens || 0;
+    existing.outputTokens += entry.outputTokens || 0;
+    existing.contextTokens = Math.max(
+      existing.contextTokens,
+      entry.contextTokens || entry.inputTokens || 0,
+    );
+    if (entry.durationMs !== undefined) {
+      existing.latencyTotal += entry.durationMs;
+      existing.latencyCount++;
+      existing.avgLatencyMs = Math.round(
+        existing.latencyTotal / existing.latencyCount,
+      );
+    }
+    if (!existing.lastUsedAt || entry.timestamp > existing.lastUsedAt) {
+      existing.lastUsedAt = entry.timestamp;
+    }
+    existing.successRate = Math.round(
+      ((existing.calls - existing.failures) / existing.calls) * 100,
+    );
+    byModel.set(key, existing);
+  }
+  return [...byModel.values()]
+    .map(
+      ({ latencyTotal: _latencyTotal, latencyCount: _latencyCount, ...item }) =>
+        item,
+    )
+    .sort((a, b) => b.totalCost - a.totalCost || b.calls - a.calls);
+}
+
 function scanProviderUsage(): {
   byProvider: ProviderSummary[];
+  modelMetrics: ModelMetricSummary[];
   dailyCosts: Map<string, number>;
   totalCost: number;
 } {
@@ -290,6 +386,7 @@ function scanProviderUsage(): {
     byProvider: Array.from(providerMap.values()).sort(
       (a, b) => b.totalCost - a.totalCost,
     ),
+    modelMetrics: summarizeModelMetrics(entries),
     dailyCosts,
     totalCost,
   };
@@ -320,6 +417,7 @@ router.get('/', async (_req: Request, res: Response) => {
         claudeCost: claude.totals.cost,
       },
       byProvider: providers.byProvider,
+      modelMetrics: providers.modelMetrics,
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to scan usage data' });

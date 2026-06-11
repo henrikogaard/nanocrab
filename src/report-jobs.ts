@@ -296,6 +296,7 @@ export async function approveReportOutline(id: string): Promise<ReportJob> {
       targetId: job.id,
       payload: { jobId: job.id },
     });
+    throw new Error(`Report outline approval required: ${id}`);
   }
   composeMarkdown(job);
   await exportArtifacts(job);
@@ -322,6 +323,22 @@ export async function approveReportOutline(id: string): Promise<ReportJob> {
 export function approveReportDelivery(id: string): ReportJob {
   const job = getReportJob(id);
   if (!job) throw new Error(`Report job not found: ${id}`);
+  if (
+    job.requireDeliveryApproval &&
+    !hasApprovedTarget('report-delivery', 'report-job', id)
+  ) {
+    createApproval({
+      kind: 'report-delivery',
+      title: `Approve report delivery: ${job.title}`,
+      summary: `Artifacts ready:\n${job.artifacts.map((artifact) => artifact.path).join('\n')}`,
+      risk: 'medium',
+      requester: job.requester,
+      targetType: 'report-job',
+      targetId: job.id,
+      payload: { jobId: job.id, artifacts: job.artifacts },
+    });
+    throw new Error(`Report delivery approval required: ${id}`);
+  }
   job.status = 'delivered';
   job.updatedAt = new Date().toISOString();
   upsertJob(job);

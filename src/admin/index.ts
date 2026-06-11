@@ -17,6 +17,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
 
+import { getChannelHealth } from '../channel-health.js';
 import { STORE_DIR } from '../config.js';
 import { logger } from '../logger.js';
 import { NanoCrabState, setState, getState } from './state.js';
@@ -46,10 +47,13 @@ import dockerRoutes from './routes/docker.js';
 import filesRoutes from './routes/files.js';
 import mcpRoutes from './routes/mcp.js';
 import providersRoutes from './routes/providers.js';
+import artifactsRoutes from './routes/artifacts.js';
 import memoryRoutes from './routes/memory.js';
 import journalRoutes from './routes/journal.js';
 import reportsRoutes from './routes/reports.js';
 import researchRoutes from './routes/research.js';
+import runbooksRoutes from './routes/runbooks.js';
+import operationsRoutes from './routes/operations.js';
 import usageRoutes from './routes/usage.js';
 import sessionsRoutes from './routes/sessions.js';
 import mountsRoutes from './routes/mounts.js';
@@ -60,6 +64,7 @@ import tokensRoutes from './routes/tokens.js';
 import agentsRoutes from './routes/agents.js';
 import marketplaceRoutes from './routes/marketplace.js';
 import pushRoutes from './routes/push.js';
+import connectorsRoutes from './routes/connectors.js';
 import { loadExternalPlugins } from './plugins/loader.js';
 import agentMessagesRoutes, {
   initAgentMessagesDb,
@@ -183,10 +188,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   // Public health endpoint (no auth required)
   app.get('/health', (_req, res) => {
     const state = getState();
-    const channels = state.channels.map((ch) => ({
-      name: ch.name,
-      connected: ch.isConnected(),
-    }));
+    const channels = state.channels.map(getChannelHealth);
     const allUp = channels.every((c) => c.connected);
     res.status(allUp ? 200 : 503).json({
       status: allUp ? 'healthy' : 'degraded',
@@ -212,10 +214,14 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/system', requireAuth, systemRoutes);
   app.use('/api/files', requireAuth, filesRoutes);
   app.use('/api/providers', requireAuth, providersRoutes);
+  app.use('/api/artifacts', requireAuth, artifactsRoutes);
+  app.use('/api/connectors', requireAuth, connectorsRoutes);
   app.use('/api/memory', requireAuth, memoryRoutes);
   app.use('/api/journal', requireAuth, journalRoutes);
   app.use('/api/reports', requireAuth, reportsRoutes);
   app.use('/api/research', requireAuth, researchRoutes);
+  app.use('/api/runbooks', requireAuth, runbooksRoutes);
+  app.use('/api/operations', requireAuth, operationsRoutes);
   app.use('/api/usage', requireAuth, usageRoutes);
   app.use('/api/sessions', requireAuth, sessionsRoutes);
   app.use('/api/mounts', requireAuth, mountsRoutes);

@@ -13,8 +13,10 @@ import {
   isValidAgentModel,
   providerApiKeyEnvKey,
 } from './agent-provider.js';
+import { hasApprovedTarget } from './approvals.js';
 import { STORE_DIR } from './config.js';
 import { readEnvFile } from './env.js';
+import { evaluateActionPolicy } from './action-policy.js';
 
 export const PROVIDER_PURPOSES = [
   'default_chat',
@@ -620,5 +622,26 @@ export function providerCanFallbackAutomatically(input: {
 }): boolean {
   if (!input.source.fallbackProfileId) return false;
   if (input.source.fallbackProfileId !== input.target.id) return false;
-  return input.action === 'read' && input.source.toolPolicy !== 'deny';
+  const approved = hasApprovedTarget(
+    'provider-fallback',
+    'provider-profile',
+    input.source.id,
+    {
+      sourceProfileId: input.source.id,
+      targetProfileId: input.target.id,
+    },
+  );
+  const decision = evaluateActionPolicy({
+    action: input.action === 'read' ? 'read' : 'provider-fallback',
+    toolPolicy: input.source.toolPolicy,
+    approved,
+    targetType: 'provider-profile',
+    targetId: input.source.id,
+    payload: {
+      sourceProfileId: input.source.id,
+      targetProfileId: input.target.id,
+      action: input.action,
+    },
+  });
+  return decision.decision === 'allow';
 }

@@ -5,16 +5,33 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 ## Current Implementation Status
 
 - Playwright is available in the agent image and uses system Chromium.
-- GitHub coding jobs are launched through short-lived dedicated coding containers with only the job workspace mounted. The Agents dashboard can register repos, pick issues, launch jobs, show output, and link PRs.
+- GitHub coding jobs are launched through short-lived dedicated coding containers with only the job workspace mounted. The Agents dashboard can register repos with coding rules/defaults/assignees, pick and claim issues, show the generated implementation plan before approval, launch jobs, show phase/output/timeline/test/CI metadata, link PRs, route implementation/PR approvals through the unified approval inbox, and persist the selected cockpit pane.
+- Owner-only dashboard terminal sessions persist transcript events with ownership metadata and searchable history.
 - Memory v1 foundation exists: structured memory proposals, dashboard approval/rejection, and generated `groups/global/MEMORY.md`.
-- Journal v1 foundation exists: notable-event recording, scoped event search, dashboard summary listing, and deterministic daily/weekly summary generation from stored message history.
+- Journal v1 foundation exists: notable-event recording, scoped event search, cited natural-language answers, dashboard summary listing, and deterministic daily/weekly summary generation from stored message history.
 - Skill Factory v1 foundation exists: `SKILL.md` draft validation, draft storage, dashboard review, owner/admin approval, and installation into `container/skills`.
-- Artifact basics exist: agents can create/list text artifacts in the group workspace and send generated files through channel tools.
-- Provider basics exist: Claude, Codex, OpenCode, Ollama, OpenRouter, and Google are selectable with preflight checks and credential-proxy support where needed. Provider profiles now route chat, coding, automations, memory, journal, skill factory, reports, docs, and vision defaults.
-- Report jobs support source scopes, outline approval, Markdown/HTML/DOCX/PDF deliverables, artifacts, and delivery approval.
+- Artifact basics exist: agents can create/list text artifacts in the group workspace and send generated files through channel tools. The Agents dashboard now includes an Artifact Vault that searches report deliverables and group artifacts with retention/expiry status and source links.
+- Provider basics exist: Claude, Codex, OpenCode, Ollama, OpenRouter, and Google are selectable with live/stored probe checks and credential-proxy support where needed. Provider profiles now route chat, coding, automations, memory, journal, skill factory, reports, docs, and vision defaults, and write-capable provider fallback is gated by approval.
+- System inference health summarizes local and remote provider profile readiness, probe freshness, and failed checks.
+- Usage model operations metrics summarize provider/model cost, latency, context usage, reliability, and last errors from provider usage logs.
+- Report jobs support source scopes, approval-gated outline export, Markdown/HTML/DOCX/PDF deliverables, artifacts, and approval-gated delivery from the Agents Report Studio.
+- Dry-run mode evaluates risky coding operations without launching implementation containers or opening PRs, audit replay normalizes admin/approval/coding events, and main-agent channel scopes can limit group visibility to all, registered, or explicitly allowed group folders.
+- Backup/migration UI now includes automatic backup configuration, decrypt flow, migration readiness checks, System install diagnostics/release checklist, and first-run readiness checks shared by the dashboard and `setup preflight`.
+- Connector catalog UX is present under Integrations, combining channel/MCP connector setup status, missing credentials, setup steps, skill links, permission scopes, and an approval/risk audit view. A bundled `connector-operator` skill provides the default safe connector workflow.
+- GitHub connector health is shown on the Webhooks page with token/secret/enabled/target checks, setup steps, and recent delivery state.
+- Channel health semantics are centralized across dashboard, websocket, alerts, and Bot Agents. Signal now reports heartbeat-backed active/degraded/offline state with last-active diagnostics.
+- WhatsApp setup can be started from the dashboard Channels panel with live QR/pairing-code state, refresh/cancel/reset controls, and no browser access to session credential files.
+- Settings now exposes a built-in avatar gallery with the NanoCrab default, uploaded-avatar state, and five original SVG choices under `static/avatars/`.
+- Assistant Profile settings now store personality and skill-family preferences separately from raw AGENTS.md editing, with marker-based propagation that preserves group-specific instruction content.
+- Email connector workflow templates are available in the connector catalog for inbox triage, reply drafting, and approval-gated sending through Gmail or Infomaniak MCP connectors.
+- Calendar connector workflow templates cover availability review, meeting preparation, and approval-gated event changes through Google Workspace or Infomaniak DAV connectors.
+- kDrive document workflow templates cover file search, document-backed reports, and approval-gated upload/share/move operations through Infomaniak kSuite.
+- Daily and weekly briefing presets configure the scheduled report pipeline for operations briefs/digests with source scopes, formats, and outline approval.
+- Mission runbooks are available under Missions with JSON-backed storage, owners, due dates, group context, step progress, blocker notes, mock-mode data, and archive controls.
+- Recurring operations reminders can be created from Missions as validated scheduled tasks for registered groups, with optional confirmation prompts.
 - Better terminal controls exist in the dashboard: named shell session id, reconnect, clear, copy transcript, and xterm output.
 - Standalone cleanup is implemented: NanoCrab is treated as its own product with NanoCrab-first code, plugins, skills, MCP names, container names, docs, and migration tooling.
-- Still future work: deeper per-model live capability probes, richer CI-status visualization, more MCP source connectors, and continued dashboard UX polish.
+- Still future work: deeper behavioral model probes, richer CI-log ingestion, more MCP source connectors, and continued dashboard UX polish.
 
 ---
 
@@ -25,7 +42,9 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 - **Supported and selectable:** `claude` through Claude Agent SDK, `codex` through OpenAI Codex CLI, and `opencode` through OpenCode CLI.
 - **OpenAI-compatible chat providers:** `ollama`, `openrouter`, and `google` are selectable with preconfigured base URLs, model suggestions, preflight checks, and container runner support through `/chat/completions`.
 - **Secret handling:** hosted OpenAI-compatible provider calls are routed through NanoCrab's credential proxy, so OpenRouter/Google keys remain on the host. Ollama uses its local/LAN endpoint without a secret by default.
-- **Remaining problem:** Provider profiles exist and tasks can store provider/profile/model/tool policy overrides, but live model probes, fallback policy enforcement, and profile usage across every workflow still need hardening.
+- **Health dashboard:** System shows inferred local/remote provider health from configured provider profiles and stored probe results.
+- **Model metrics:** Usage shows per-model cost, average latency, context-window usage, success rate, and last error when provider usage logs include those fields.
+- **Remaining problem:** Provider profiles exist and tasks can store provider/profile/model/tool policy overrides. Live probe persistence and write-fallback approval are in place; deeper per-model behavioral probes and profile usage across every workflow still need hardening.
 
 ### Provider Requirements
 
@@ -43,7 +62,7 @@ Any provider that powers all NanoCrab features must support, or be wrapped to su
 0. **Provider Router v1 hardening**
    - DONE: provider profiles and static capability matrix exist for chat, coding, automations, memory, journal, skill factory, reports, docs, and vision.
    - DONE: scheduled tasks can store provider profile, provider, model, and tool policy overrides.
-   - NEXT: add live per-model probes for tool calling, structured output, context length, streaming, and code-editing reliability before enabling models for write-capable tasks.
+   - PARTIAL: live provider probes run from the dashboard and persist status, timestamps, errors, and capability metadata. Deeper per-model behavior probes for tool calling, structured output, context length, streaming, and code-editing reliability remain.
    - Keep OpenCode/Codex/Claude Code as coding-agent runtimes; use API adapters for extraction, summaries, and report generation where tool calls are predictable.
 
 1. **OpenAI Responses API adapter (`openai-responses`)**
@@ -91,10 +110,10 @@ Build a single **Providers** admin surface with:
   - `default_vision`
 - Per-group overrides: each channel/group can override provider/profile/model for chat and automations.
 - DONE: Per-task and per-automation overrides: task creation can store provider/profile/model/tool policy.
-- PARTIAL: Preflight before save: credentials/base URL/static capability checks exist; live model behavior probes remain.
-- NEXT: Fallback policy:
+- PARTIAL: Preflight before save: credentials/base URL/static checks exist, and live provider probes persist dashboard-visible status. Deeper behavior probes remain.
+- DONE: Fallback policy:
   - Read-only tasks can fall back automatically if configured.
-  - Write-capable tasks, GitHub PR work, shell actions, and external messages require explicit approval before falling back to a different provider.
+  - Write-capable provider fallback requires an approved `provider-fallback` approval before it can run.
 
 ### Data Model Sketch
 
@@ -128,7 +147,7 @@ Add a structured memory store instead of treating markdown as the only source of
 - DONE: Agent proposes memories; dashboard approval controls what becomes active.
 - Generate `groups/global/MEMORY.md` from approved global memories.
 - Keep `MEMORY.md` gitignored and treated as runtime state.
-- DONE: Dashboard review queue exists for pending/approved memories with sensitivity, stale-review, and contradiction metadata.
+- DONE: Dashboard review queue exists for pending/approved memories with sensitivity, source links, stale/expiry review, contradiction metadata, reason filters, and related-memory context.
 
 ### Skill Factory v2
 
@@ -140,7 +159,9 @@ Let the agent create skills, but never install them silently.
 - DONE: Show draft content in dashboard.
 - DONE: Require owner/admin approval before installing into `container/skills`.
 - After approval, rebuild/sync skills so the skill becomes shared across all channels.
-- DONE: Draft metadata tracks proposer, validation state, installed version, review/install time, provenance, and diff review data.
+- DONE: Draft metadata tracks proposer, validation state, installed version, review/install time, provenance, diff review data, revision history, and rollback.
+- DONE: Suggested-skill queue persists repeated workflow candidates with recurrence counts, dismissal, and draft linkage.
+- DONE: Skill router matching explains blocked required-tool matches and avoids generic high-risk/tool-gated fallback injection.
 
 ### Journal v2
 
@@ -148,10 +169,11 @@ Build the "when did that happen?" layer before adding heavy vector systems.
 
 - DONE: Dashboard can generate daily/weekly summaries per registered group from stored message history.
 - DONE: Notable-event extraction/search APIs store cited event records with entities, tags, confidence, source message ids, and provenance.
+- DONE: Journal search can answer natural-language questions with citations to matching event and summary records.
 - Tables:
   - `journal_entries`: date, scope, summary, notable_events_json, source_message_ids, provider_profile_id.
   - `journal_events`: timestamp, title, entities, location/context, confidence, source ids, tags.
-- DONE: Search APIs support natural questions like "when was that big fleet crash?" or "when did we decide to change provider?"
+- DONE: Search APIs support cited natural questions like "when was that big fleet crash?" or "when did we decide to change provider?"
 - Use provider profile `default_journal`; require structured output.
 
 ---
@@ -162,20 +184,23 @@ Goal: work with GitHub repos and produce PRs while the owner is on the go.
 
 - GitHub connector:
   - DONE: repo registration/allowlist for coding jobs
-  - DONE: issue listing and issue picking through dashboard/API
+  - DONE: issue listing, issue picking, and configured assignee claiming through dashboard/API
   - DONE: branch creation inside dedicated coding containers
+  - PARTIAL: repo preference memory exists for default provider/model, labels, assignee, milestone, trusted PR flow, and coding rules
   - commit signing policy
   - DONE: PR creation when `createPr` is enabled
-  - PR status and CI tracking
+  - DONE: PR status and CI tracking through commit combined status and check-run refresh
 - Mobile-safe workflow:
-  - PARTIAL: dashboard can start one-off coding jobs or pick issues from registered repos.
-  - NEXT: "Investigate" creates a read-only branch/worktree and returns plan.
-  - NEXT: "Implement" requires approval and creates commits.
-  - NEXT: "Open PR" requires approval unless the repo/profile is marked trusted.
+  - DONE: dashboard and mobile chat commands can start one-off coding jobs or pick issues from registered repos.
+  - DONE: issue jobs prepare an implementation plan artifact before approval and code mutation.
+  - PARTIAL: issue-based implementation pauses in `await_approval` and resumes through coding-job or unified approval controls.
+  - PARTIAL: "Open PR" requires approval unless the registered repo is marked trusted.
 - Dashboard views:
   - DONE: active/recent coding jobs and output logs
-  - PARTIAL: PR links when jobs create PRs
-  - NEXT: diffs, structured test output, CI status, and approval controls
+  - DONE: PR links when jobs create PRs
+  - DONE: persisted multi-pane Agents cockpit with overview, timeline, approvals, provider probe health, changed files, test summary, CI state, and approval controls
+  - DONE: task progress stream is backed by normalized coding timeline events
+  - DONE: terminal sessions persist owner-labeled transcript events and expose transcript history/search
   - revert/close controls
 - Security:
   - repository mounts must be explicit and validated through mount allowlist.
@@ -189,12 +214,14 @@ Goal: work with GitHub repos and produce PRs while the owner is on the go.
 Goal: ask NanoCrab for reports, documents, design notes, and generated assets from chat or dashboard.
 
 - Document/report pipeline:
-  - PARTIAL: report pipeline configuration exists for schedule, target, provider profile, source scopes, output formats, deliverables directory, and outline approval.
+  - DONE: report pipeline configuration exists for schedule, target, provider profile, source scopes, output formats, deliverables directory, and outline approval.
+  - DONE: Agents Report Studio creates report jobs, previews outlines, shows exported artifacts, and sends outline/delivery gates through the unified approval inbox.
   - NEXT: request intake
   - NEXT: source collection through MCP servers and mounted data sources
-  - NEXT: outline approval workflow
-  - draft generation
-  - export to Markdown, DOCX, PDF, or dashboard artifact
+  - DONE: outline approval workflow gates artifact export
+  - PARTIAL: draft generation is deterministic from journal and approved memory sources
+  - DONE: export to Markdown, HTML, DOCX, PDF, or dashboard artifact
+  - DONE: Artifact Vault indexes report deliverables and group artifacts with search, retention/expiry status, and report/source links.
 - MCP sources:
   - kDrive
   - mail archives
@@ -210,6 +237,21 @@ Goal: ask NanoCrab for reports, documents, design notes, and generated assets fr
   - external sources need read/write scopes.
   - generated documents should preserve source citations and provenance.
   - publishing or uploading generated files requires approval.
+
+---
+
+## Personal Operations
+
+Goal: turn ongoing personal and team work into durable operational state that agents can brief, update, and help execute.
+
+- DONE: daily and weekly briefing presets configure scheduled reports with journal, memory, approval, connector, and GitHub context.
+- DONE: Missions dashboard stores runbooks with owners, group context, due dates, links, step statuses, blocker notes, progress summaries, and archive controls.
+- DONE: Missions dashboard creates recurring operations reminders/orders as scheduled tasks for registered groups.
+- NEXT: chat intake for creating and updating runbooks from natural messages.
+- NEXT: automatic reminder extraction from runbook due dates and blocked steps.
+- Security:
+  - external writes, messages, uploads, publishing, and repo changes still flow through unified approvals.
+  - runbooks store operational state only; private runtime memories remain excluded from commits.
 
 ---
 
@@ -273,6 +315,8 @@ These rules are non-negotiable:
 - Skills require approval before installation.
 - Journal extraction is read-only.
 - GitHub PR creation, file publishing, external messages, and document uploads require clear policy gates.
+- Dry-run mode and audit replay provide preflight/review paths for risky operations.
+- Main-agent channel scopes can restrict cross-channel visibility and group registration.
 
 ---
 

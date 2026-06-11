@@ -20,7 +20,11 @@ async function renderAgents(el) {
       approvals,
       reportJobs,
       researchJobs,
+      artifactVault,
       terminals,
+      providerProfileInfo,
+      codingSummary,
+      codingTimeline,
     ] = await Promise.all([
       api('/groups').catch(() => []),
       api('/containers').catch(() => []),
@@ -36,9 +40,61 @@ async function renderAgents(el) {
       api('/approvals').catch(() => []),
       api('/reports/jobs').catch(() => []),
       api('/research/jobs').catch(() => []),
+      api('/artifacts?limit=12&includeExpired=true').catch(() => ({
+        artifacts: [],
+      })),
       api('/sessions/terminal/active').catch(() => []),
+      api('/system/provider/profiles').catch(() => ({
+        profiles: [],
+        probes: [],
+      })),
+      api('/agents/coding/summary').catch(() => null),
+      api('/agents/coding/timeline?limit=40').catch(() => []),
     ]);
     const groups = Array.isArray(groupsRaw) ? groupsRaw : [];
+    const pendingApprovals = approvals.filter((a) => a.status === 'pending');
+    const cockpitMode =
+      localStorage.getItem('nanocrab-agents-cockpit-mode') || 'overview';
+    const providerProfiles = providerProfileInfo.profiles || [];
+    const providerProbes = providerProfileInfo.probes || [];
+    const providerProbeById = providerProbes.reduce((acc, probe) => {
+      if (probe.profileId) acc[probe.profileId] = probe;
+      return acc;
+    }, {});
+    const codingStatusClass = (status, ciStatus) =>
+      status === 'completed' || ciStatus === 'success'
+        ? 'badge-success'
+        : status === 'failed' || ciStatus === 'failure'
+          ? 'badge-error'
+          : status === 'await_approval' || status === 'await_pr_approval'
+            ? 'badge-warning'
+            : 'badge-info';
+    const artifactRows = (artifactVault.artifacts || [])
+      .map(
+        (artifact) => `<div class="channel-card" style="padding:9px 0">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <span class="badge ${artifact.expired ? 'badge-warning' : 'badge-success'}" style="font-size:9px">${artifact.expired ? 'expired' : 'retained'}</span>
+              <span class="badge badge-muted" style="font-size:9px">${esc(artifact.kind)}</span>
+              <strong style="font-size:13px;color:var(--text)">${esc(artifact.name)}</strong>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(artifact.relativePath)} · ${Math.max(1, Math.round(artifact.size / 1024))} KB · updated ${timeAgo(artifact.updatedAt)}</div>
+            ${
+              artifact.sourceLinks?.length
+                ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:5px">${artifact.sourceLinks
+                    .slice(0, 4)
+                    .map(
+                      (link) =>
+                        `<span class="badge badge-info" title="${esc(link.source)}">${esc(link.label.slice(0, 42))}</span>`,
+                    )
+                    .join('')}</div>`
+                : ''
+            }
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);text-align:right">${artifact.expiresAt ? `expires ${timeAgo(artifact.expiresAt)}` : 'no expiry'}</div>
+        </div>`,
+      )
+      .join('');
 
     const agentCards = groups
       .map((g) => {
@@ -57,6 +113,11 @@ async function renderAgents(el) {
         const isEnabled = g.enabled !== false;
         const isPrimary = g.isPrimary === true;
         const recentLogs = recent.filter((r) => r.group === g.folder);
+        const channelHealth = g.channelHealth || null;
+        const channelStatus =
+          channelHealth?.status ||
+          (channelHealth?.connected ? 'active' : 'offline');
+        const channelConnected = channelStatus === 'active';
 
         let statusBadge, statusColor;
         if (!isEnabled) {
@@ -68,20 +129,39 @@ async function renderAgents(el) {
         } else if (isActive && isIdle) {
           statusBadge = 'Idle';
           statusColor = 'badge-warning';
+        } else if (channelConnected) {
+          statusBadge = 'Active';
+          statusColor = 'badge-success';
+        } else if (channelStatus === 'degraded') {
+          statusBadge = 'Degraded';
+          statusColor = 'badge-warning';
         } else {
           statusBadge = 'Offline';
           statusColor = 'badge-error';
         }
+        const dotStatus = !isEnabled
+          ? ''
+          : isActive
+            ? isIdle
+              ? 'idle'
+              : 'online'
+            : channelStatus === 'active'
+              ? 'online'
+              : channelStatus === 'degraded'
+                ? 'idle'
+                : 'offline';
+        const lastActivity =
+          g.lastActivity || channelHealth?.lastActiveAt || null;
 
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);${!isEnabled ? 'opacity:.62' : ''}">
         <div style="display:flex;align-items:center;gap:10px">
-          <span class="status-dot ${!isEnabled ? '' : isActive ? (isIdle ? 'idle' : 'online') : 'offline'}" style="width:8px;height:8px"></span>
+          <span class="status-dot ${dotStatus}" style="width:8px;height:8px"></span>
           <div>
             <strong>${esc(g.name)}</strong>
             <span class="badge badge-muted" style="margin-left:6px;font-size:9px">${ch}</span>
             ${g.isMain ? '<span class="badge badge-success" style="font-size:9px;margin-left:3px">Persistent</span>' : ''}
             ${isPrimary ? '<span class="badge badge-accent" style="font-size:9px;margin-left:3px">Primary</span>' : ''}
-            <div style="font-size:11px;color:var(--text-muted)">${g.lastActivity ? 'Active ' + timeAgo(g.lastActivity) : 'No activity'}</div>
+            <div style="font-size:11px;color:var(--text-muted)">${lastActivity ? 'Active ' + timeAgo(lastActivity) : 'No activity'}${channelHealth?.detail ? ' · ' + esc(channelHealth.detail) : ''}</div>
           </div>
         </div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
@@ -149,26 +229,28 @@ async function renderAgents(el) {
       .join('');
     const codingJobRows = codingJobs
       .map((job) => {
-        const statusBadge =
-          job.status === 'completed'
-            ? 'badge-success'
-            : job.status === 'running'
-              ? 'badge-warning'
-              : job.status === 'queued'
-                ? 'badge-info'
-                : 'badge-error';
+        const statusBadge = codingStatusClass(job.status, job.ciStatus);
+        const changedFiles = Array.isArray(job.changedFiles)
+          ? job.changedFiles
+          : [];
+        const needsImplementApproval = job.status === 'await_approval';
+        const needsPrApproval = job.status === 'await_pr_approval';
         return `<div class="channel-card" style="padding:8px 0">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <span class="badge badge-muted" style="font-size:9px">${esc(job.repo)}</span>
             <span class="badge badge-accent" style="font-size:9px">${esc(job.provider)}/${esc(job.model)}</span>
             ${job.issueNumber ? `<span class="badge badge-info" style="font-size:9px">#${job.issueNumber}</span>` : ''}
+            ${job.ciStatus && job.ciStatus !== 'unknown' ? `<span class="badge badge-muted" style="font-size:9px">CI ${esc(job.ciStatus)}</span>` : ''}
             <span style="font-size:12px;font-weight:500">${esc((job.issueTitle || job.prompt || job.id).slice(0, 100))}</span>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(job.branch)} \u2022 ${timeAgo(job.createdAt)}${job.prUrl ? ` \u2022 <a href="${esc(job.prUrl)}" target="_blank" style="color:var(--accent)">PR</a>` : ''}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(job.branch)} \u2022 ${timeAgo(job.createdAt)}${job.prUrl ? ` \u2022 <a href="${esc(job.prUrl)}" target="_blank" style="color:var(--accent)">PR</a>` : ''}${changedFiles.length ? ` \u2022 ${changedFiles.length} changed file${changedFiles.length === 1 ? '' : 's'}` : ''}</div>
+          ${job.testSummary ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(job.testSummary)}</div>` : ''}
         </div>
         <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
           <span class="badge ${statusBadge}" style="font-size:10px">${esc(job.status)}</span>
+          ${needsImplementApproval ? `<button class="btn btn-sm btn-primary" onclick="controlCodingJob('${esc(job.id)}','approve')">Approve</button>` : ''}
+          ${needsPrApproval ? `<button class="btn btn-sm btn-primary" onclick="controlCodingJob('${esc(job.id)}','open-pr')">Approve PR</button>` : ''}
           <button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','open-pr')">PR</button>
           <button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','retry')">Retry</button>
           <button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','cancel')">Cancel</button>
@@ -177,11 +259,62 @@ async function renderAgents(el) {
       </div>`;
       })
       .join('');
+    const reportJobRows = reportJobs
+      .map((job) => {
+        const statusBadge =
+          job.status === 'delivered' || job.status === 'draft_ready'
+            ? 'badge-success'
+            : job.status?.includes('approval')
+              ? 'badge-warning'
+              : job.status === 'failed'
+                ? 'badge-error'
+                : 'badge-info';
+        const artifacts = Array.isArray(job.artifacts) ? job.artifacts : [];
+        return `<div class="channel-card" style="padding:10px 0">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <span class="badge ${statusBadge}" style="font-size:9px">${esc(job.status)}</span>
+              <span class="badge badge-muted" style="font-size:9px">${esc((job.outputFormats || []).join(', ') || 'markdown')}</span>
+              <strong style="font-size:13px;color:var(--text)">${esc(job.title)}</strong>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(job.request)} · ${timeAgo(job.createdAt)}</div>
+            ${
+              job.outline
+                ? `<details style="margin-top:6px"><summary style="font-size:12px;color:var(--accent);cursor:pointer">Outline</summary><pre style="white-space:pre-wrap;font-size:11px;color:var(--text-muted);margin:6px 0 0;max-height:140px;overflow:auto">${esc(job.outline)}</pre></details>`
+                : ''
+            }
+            ${
+              artifacts.length
+                ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">${artifacts
+                    .map(
+                      (artifact) =>
+                        `<span class="badge badge-success" title="${esc(artifact.path)}">${esc(artifact.format)}</span>`,
+                    )
+                    .join('')}</div>`
+                : ''
+            }
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
+            ${
+              job.status === 'awaiting_outline_approval' ||
+              job.status === 'awaiting_delivery_approval'
+                ? `<button class="btn btn-sm btn-primary" onclick="openReportApproval('${esc(job.id)}')">Approve</button>`
+                : ''
+            }
+          </div>
+        </div>`;
+      })
+      .join('');
     const cockpitRows = [
       {
         label: 'Approvals',
-        count: approvals.filter((a) => a.status === 'pending').length,
-        detail: approvals[0]?.title || 'No pending approvals',
+        count: pendingApprovals.length,
+        detail: pendingApprovals[0]?.title || 'No pending approvals',
+      },
+      {
+        label: 'Coding',
+        count: codingSummary?.total || codingJobs.length,
+        detail: `${codingSummary?.active || 0} active, ${codingSummary?.waitingApproval || 0} waiting`,
       },
       {
         label: 'Reports',
@@ -199,6 +332,67 @@ async function renderAgents(el) {
         detail: terminals[0]?.name || 'No active terminal sessions',
       },
     ];
+    const codingTimelineRows = (
+      Array.isArray(codingTimeline) ? codingTimeline : []
+    )
+      .slice(0, 24)
+      .map(
+        (
+          event,
+        ) => `<div style="display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)">
+          <span class="badge badge-muted" style="font-size:9px">${esc(event.kind)}</span>
+          <div style="min-width:0;flex:1">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <strong style="font-size:12px;color:var(--text)">${esc(event.title)}</strong>
+              <span class="badge badge-muted" style="font-size:9px">${esc(event.repo)}</span>
+              ${event.issueNumber ? `<span class="badge badge-info" style="font-size:9px">#${event.issueNumber}</span>` : ''}
+              <span class="badge badge-muted" style="font-size:9px">${esc(event.status)}</span>
+            </div>
+            ${event.detail ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(String(event.detail).slice(0, 220))}${String(event.detail).length > 220 ? '...' : ''}</div>` : ''}
+            <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${timeAgo(event.at)}${event.prUrl ? ` · <a href="${esc(event.prUrl)}" target="_blank" style="color:var(--accent)">PR</a>` : ''}</div>
+          </div>
+          <button class="btn btn-sm btn-ghost" onclick="viewCodingJob('${esc(event.jobId)}')">View</button>
+        </div>`,
+      )
+      .join('');
+    const providerProbeRows = providerProfiles
+      .map((profile) => {
+        const probe = providerProbeById[profile.id];
+        const ok = probe ? probe.ok : false;
+        const failed = probe?.checks?.find((check) => !check.ok);
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="min-width:0">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <strong style="font-size:12px">${esc(profile.label || profile.id)}</strong>
+              <span class="badge badge-muted" style="font-size:9px">${esc(profile.provider)}/${esc(profile.model)}</span>
+              <span class="badge ${ok ? 'badge-success' : 'badge-warning'}" style="font-size:9px">${ok ? 'Probe OK' : 'Needs check'}</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(failed?.detail || probe?.lastProbeAt || profile.toolPolicy)}</div>
+          </div>
+          <button class="btn btn-sm btn-ghost" onclick="navigate('settings')">Settings</button>
+        </div>`;
+      })
+      .join('');
+    const pendingApprovalRows = pendingApprovals
+      .slice(0, 8)
+      .map(
+        (
+          approval,
+        ) => `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+          <div style="min-width:0;flex:1">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <span class="badge badge-warning" style="font-size:9px">${esc(approval.kind)}</span>
+              <span style="font-size:12px;font-weight:600">${esc(approval.title)}</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(approval.summary.slice(0, 180))}${approval.summary.length > 180 ? '...' : ''}</div>
+          </div>
+          <div style="display:flex;gap:4px;flex-shrink:0">
+            <button class="btn btn-sm btn-primary" onclick="reviewApproval('${esc(approval.id)}','approve')">Approve</button>
+            <button class="btn btn-sm btn-ghost" onclick="reviewApproval('${esc(approval.id)}','deny')">Deny</button>
+          </div>
+        </div>`,
+      )
+      .join('');
 
     el.innerHTML = `
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -239,11 +433,23 @@ async function renderAgents(el) {
       <div id="task-output-panel" style="display:none;margin-bottom:16px"></div>
 
       <div class="card" style="margin-bottom:16px">
-        <div class="card-title">Agent Cockpit</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px">
+          <div class="card-title" style="margin:0">Agent Cockpit</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${['overview', 'timeline', 'approvals', 'providers']
+              .map(
+                (mode) =>
+                  `<button class="btn btn-sm ${cockpitMode === mode ? 'btn-primary' : 'btn-ghost'}" onclick="setAgentsCockpitMode('${mode}')">${mode}</button>`,
+              )
+              .join('')}
+          </div>
+        </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
           ${cockpitRows
             .map(
-              (row) => `<div style="border:1px solid var(--border);border-radius:8px;padding:12px;min-height:82px">
+              (
+                row,
+              ) => `<div style="border:1px solid var(--border);border-radius:8px;padding:12px;min-height:82px">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
                   <span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">${esc(row.label)}</span>
                   <span class="badge badge-muted" style="font-size:10px">${row.count}</span>
@@ -253,6 +459,92 @@ async function renderAgents(el) {
             )
             .join('')}
         </div>
+        ${
+          cockpitMode === 'timeline'
+            ? `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:8px">
+              <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Task Progress Stream</div>
+              ${codingTimelineRows || '<div class="empty" style="padding:12px">No coding timeline events yet</div>'}
+            </div>`
+            : ''
+        }
+        ${
+          cockpitMode === 'approvals'
+            ? `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:8px">
+              ${pendingApprovalRows || '<div class="empty" style="padding:12px">No pending approvals</div>'}
+            </div>`
+            : ''
+        }
+        ${
+          cockpitMode === 'providers'
+            ? `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:8px">
+              ${providerProbeRows || '<div class="empty" style="padding:12px">No provider profiles configured</div>'}
+            </div>`
+            : ''
+        }
+      </div>
+
+      ${
+        pendingApprovals.length > 0
+          ? `<div class="card" style="margin-bottom:16px;border-left:3px solid var(--warning)">
+        <div class="card-title">Pending Approvals <span class="badge badge-warning" style="font-size:10px">${pendingApprovals.length}</span></div>
+        ${pendingApprovalRows}
+      </div>`
+          : ''
+      }
+
+      ${
+        providerProfiles.length > 0
+          ? `<div class="card" style="margin-bottom:16px">
+        <div class="card-title">Provider Probe Health <span class="badge badge-muted" style="font-size:10px">${providerProfiles.length}</span></div>
+        ${providerProbeRows}
+      </div>`
+          : ''
+      }
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">Report Studio <span class="badge badge-muted" style="font-size:10px">${reportJobs.length}</span></div>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.6fr);gap:12px;margin-bottom:14px">
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">New report</div>
+            <input class="search-input" id="report-title" placeholder="Report title" style="width:100%;margin-bottom:6px">
+            <textarea class="search-input" id="report-request" rows="3" placeholder="What should the report cover?" style="width:100%;resize:vertical;font-family:var(--font);margin-bottom:6px"></textarea>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--text-muted)">
+              <label><input type="checkbox" class="report-format" value="markdown" checked> Markdown</label>
+              <label><input type="checkbox" class="report-format" value="html"> HTML</label>
+              <label><input type="checkbox" class="report-format" value="docx"> DOCX</label>
+              <label><input type="checkbox" class="report-format" value="pdf"> PDF</label>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Approval gates</div>
+            <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-muted);margin-bottom:6px"><input type="checkbox" id="report-require-outline" checked> require outline approval</label>
+            <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-muted);margin-bottom:10px"><input type="checkbox" id="report-require-delivery" checked> require delivery approval</label>
+            <button class="btn btn-sm btn-primary" onclick="createReportJobFromStudio()">Create Report</button>
+          </div>
+        </div>
+        ${
+          reportJobs.length === 0
+            ? '<div class="empty" style="padding:12px">No report jobs yet</div>'
+            : reportJobRows
+        }
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">Artifact Vault <span class="badge badge-muted" style="font-size:10px">${(artifactVault.artifacts || []).length}</span></div>
+        <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:12px">
+          <input class="search-input" id="artifact-query" placeholder="Search artifacts" style="min-width:220px;flex:1">
+          <select class="search-input" id="artifact-kind" style="min-width:130px">
+            <option value="">All kinds</option>
+            <option value="deliverable">Deliverables</option>
+            <option value="group">Group artifacts</option>
+          </select>
+          <input class="search-input" id="artifact-retention" type="number" min="0" max="3650" value="90" style="width:100px">
+          <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-muted)"><input type="checkbox" id="artifact-expired" checked> expired</label>
+          <button class="btn btn-sm btn-ghost" onclick="searchArtifactVault()">Search</button>
+        </div>
+        <div id="artifact-vault-results">
+          ${artifactRows || '<div class="empty" style="padding:12px">No artifacts found</div>'}
+        </div>
       </div>
 
       <div class="card" style="margin-bottom:16px">
@@ -260,9 +552,18 @@ async function renderAgents(el) {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
           <div>
             <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Register repo</div>
-            <div style="display:flex;gap:6px">
+            <div style="display:flex;gap:6px;margin-bottom:6px">
               <input class="search-input" id="coding-repo-new" placeholder="owner/repo" style="flex:1">
               <button class="btn btn-sm btn-ghost" onclick="registerCodingRepo()">Add</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+              <select class="search-input" id="coding-repo-provider">${codingProviderOptions || '<option value="">Default provider</option>'}</select>
+              <input class="search-input" id="coding-repo-model" placeholder="default model">
+              <input class="search-input" id="coding-repo-assignee" placeholder="assignee login">
+              <input class="search-input" id="coding-repo-milestone" placeholder="milestone">
+              <input class="search-input" id="coding-repo-labels" placeholder="default labels" style="grid-column:1/-1">
+              <textarea class="search-input" id="coding-repo-rules" rows="2" placeholder="repo coding rules" style="grid-column:1/-1;resize:vertical"></textarea>
+              <label style="font-size:12px;color:var(--text-muted);display:flex;gap:6px;align-items:center"><input type="checkbox" id="coding-repo-trusted-pr"> trusted for PR flow</label>
             </div>
           </div>
           <div>
@@ -486,6 +787,96 @@ window.updateTaskModels = function () {
     .join('');
 };
 
+window.setAgentsCockpitMode = function (mode) {
+  localStorage.setItem('nanocrab-agents-cockpit-mode', mode);
+  if (currentPage === 'agents') navigate('agents');
+};
+
+window.createReportJobFromStudio = async function () {
+  const title = document.getElementById('report-title')?.value?.trim();
+  const request = document.getElementById('report-request')?.value?.trim();
+  const outputFormats = [...document.querySelectorAll('.report-format:checked')]
+    .map((item) => item.value)
+    .filter(Boolean);
+  if (!request) {
+    toast('Enter a report request', 'warning');
+    return;
+  }
+  try {
+    const r = await api('/reports/jobs', {
+      method: 'POST',
+      body: JSON.stringify({
+        title,
+        request,
+        outputFormats: outputFormats.length ? outputFormats : ['markdown'],
+        requireOutlineApproval:
+          document.getElementById('report-require-outline')?.checked !== false,
+        requireDeliveryApproval:
+          document.getElementById('report-require-delivery')?.checked !== false,
+      }),
+    });
+    if (r.ok) {
+      toast('Report job created', 'success');
+      localStorage.setItem('nanocrab-agents-cockpit-mode', 'approvals');
+      navigate('agents');
+    } else {
+      toast(r.error || 'Failed to create report job', 'error');
+    }
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
+window.openReportApproval = function (jobId) {
+  localStorage.setItem('nanocrab-agents-cockpit-mode', 'approvals');
+  toast(`Review report approval for ${jobId}`, 'info');
+  navigate('agents');
+};
+
+window.searchArtifactVault = async function () {
+  const query = document.getElementById('artifact-query')?.value?.trim() || '';
+  const kind = document.getElementById('artifact-kind')?.value || '';
+  const retentionDays =
+    document.getElementById('artifact-retention')?.value || '90';
+  const includeExpired =
+    document.getElementById('artifact-expired')?.checked === true;
+  const target = document.getElementById('artifact-vault-results');
+  if (!target) return;
+  target.innerHTML = '<div class="loading">Searching artifacts</div>';
+  const result = await api(
+    `/artifacts?limit=50&retentionDays=${encodeURIComponent(retentionDays)}&includeExpired=${includeExpired ? 'true' : 'false'}${query ? `&query=${encodeURIComponent(query)}` : ''}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`,
+  );
+  const artifacts = result.artifacts || [];
+  target.innerHTML = artifacts.length
+    ? artifacts
+        .map(
+          (artifact) => `<div class="channel-card" style="padding:9px 0">
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                <span class="badge ${artifact.expired ? 'badge-warning' : 'badge-success'}" style="font-size:9px">${artifact.expired ? 'expired' : 'retained'}</span>
+                <span class="badge badge-muted" style="font-size:9px">${esc(artifact.kind)}</span>
+                <strong style="font-size:13px;color:var(--text)">${esc(artifact.name)}</strong>
+              </div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(artifact.relativePath)} · ${Math.max(1, Math.round(artifact.size / 1024))} KB · updated ${timeAgo(artifact.updatedAt)}</div>
+              ${
+                artifact.sourceLinks?.length
+                  ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:5px">${artifact.sourceLinks
+                      .slice(0, 4)
+                      .map(
+                        (link) =>
+                          `<span class="badge badge-info" title="${esc(link.source)}">${esc(link.label.slice(0, 42))}</span>`,
+                      )
+                      .join('')}</div>`
+                  : ''
+              }
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);text-align:right">${artifact.expiresAt ? `expires ${timeAgo(artifact.expiresAt)}` : 'no expiry'}</div>
+          </div>`,
+        )
+        .join('')
+    : '<div class="empty" style="padding:12px">No artifacts found</div>';
+};
+
 window.launchAgentTask = async function () {
   const tool = document.getElementById('task-tool').value;
   const model = document.getElementById('task-model').value;
@@ -529,6 +920,26 @@ window.launchAgentTask = async function () {
 
 window.registerCodingRepo = async function () {
   const repo = document.getElementById('coding-repo-new')?.value?.trim();
+  const defaultProvider = document
+    .getElementById('coding-repo-provider')
+    ?.value?.trim();
+  const defaultModel = document
+    .getElementById('coding-repo-model')
+    ?.value?.trim();
+  const labels = document
+    .getElementById('coding-repo-labels')
+    ?.value?.split(',')
+    .map((label) => label.trim())
+    .filter(Boolean);
+  const assignee = document
+    .getElementById('coding-repo-assignee')
+    ?.value?.trim();
+  const milestone = document
+    .getElementById('coding-repo-milestone')
+    ?.value?.trim();
+  const codingRules = document.getElementById('coding-repo-rules')?.value || '';
+  const trustedForPr =
+    document.getElementById('coding-repo-trusted-pr')?.checked === true;
   if (!repo) {
     toast('Enter owner/repo', 'warning');
     return;
@@ -536,7 +947,16 @@ window.registerCodingRepo = async function () {
   try {
     const r = await api('/agents/coding/repos', {
       method: 'POST',
-      body: JSON.stringify({ repo }),
+      body: JSON.stringify({
+        repo,
+        labels,
+        assignee: assignee || undefined,
+        milestone: milestone || undefined,
+        defaultProvider: defaultProvider || undefined,
+        defaultModel: defaultModel || undefined,
+        codingRules: codingRules.trim() || undefined,
+        trustedForPr,
+      }),
     });
     if (r.ok) {
       toast('Coding repo registered', 'success');
@@ -594,31 +1014,84 @@ window.viewCodingJob = async function (id) {
   try {
     const job = await api('/agents/coding/jobs/' + encodeURIComponent(id));
     const statusBadge =
-      job.status === 'completed'
+      job.status === 'completed' || job.ciStatus === 'success'
         ? 'badge-success'
-        : job.status === 'running'
-          ? 'badge-warning'
-          : job.status === 'queued'
-            ? 'badge-info'
-            : 'badge-error';
+        : job.status === 'failed' || job.ciStatus === 'failure'
+          ? 'badge-error'
+          : job.status === 'await_approval' ||
+              job.status === 'await_pr_approval'
+            ? 'badge-warning'
+            : 'badge-info';
+    const changedFiles = Array.isArray(job.changedFiles)
+      ? job.changedFiles
+      : [];
     panel.innerHTML = `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <span class="badge badge-muted">${esc(job.repo)}</span>
           <span class="badge badge-accent">${esc(job.provider)}/${esc(job.model)}</span>
           <span class="badge ${statusBadge}">${esc(job.status)}</span>
+          ${job.ciStatus && job.ciStatus !== 'unknown' ? `<span class="badge badge-muted">CI ${esc(job.ciStatus)}</span>` : ''}
           ${job.issueNumber ? `<span class="badge badge-info">#${job.issueNumber}</span>` : ''}
           ${job.prUrl ? `<a href="${esc(job.prUrl)}" target="_blank" style="color:var(--accent);font-size:12px">Pull request</a>` : ''}
         </div>
         <div style="display:flex;gap:6px">
+          ${job.status === 'await_approval' ? `<button class="btn btn-sm btn-primary" onclick="controlCodingJob('${esc(id)}','approve')">Approve</button>` : ''}
+          ${job.status === 'await_pr_approval' ? `<button class="btn btn-sm btn-primary" onclick="controlCodingJob('${esc(id)}','open-pr')">Approve PR</button>` : ''}
+          ${job.commitSha ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(id)}','refresh-ci')">Refresh CI</button>` : ''}
           <button class="btn btn-sm btn-ghost" onclick="viewCodingJob('${esc(id)}')">Refresh</button>
           <button class="btn btn-sm btn-ghost" onclick="document.getElementById('task-output-panel').style.display='none'">Close</button>
         </div>
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
         <strong>Branch:</strong> ${esc(job.branch)}<br>
-        <strong>Workspace:</strong> ${esc(job.workspace)}
+        <strong>Workspace:</strong> ${esc(job.workspace)}<br>
+        <strong>Tests:</strong> ${esc(job.testSummary || 'No structured test summary yet')}
       </div>
+      ${
+        job.investigationSummary || job.implementationPlan
+          ? `<div style="margin-bottom:10px;border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--bg)">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Implementation Plan</div>
+        ${job.investigationSummary ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${esc(job.investigationSummary)}</div>` : ''}
+        ${job.implementationPlan ? `<pre class="log-viewer" style="max-height:180px;white-space:pre-wrap;margin:0">${esc(job.implementationPlan)}</pre>` : ''}
+      </div>`
+          : ''
+      }
+      ${
+        changedFiles.length > 0
+          ? `<div style="margin-bottom:10px">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Changed Files</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">${changedFiles
+          .map(
+            (file) =>
+              `<span class="badge badge-muted" style="font-size:10px">${esc(file)}</span>`,
+          )
+          .join('')}</div>
+      </div>`
+          : ''
+      }
+      ${
+        Array.isArray(job.timeline) && job.timeline.length > 0
+          ? `<div style="margin-bottom:10px">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Timeline</div>
+        <div style="display:grid;gap:6px">${job.timeline
+          .slice()
+          .reverse()
+          .slice(0, 12)
+          .map(
+            (event) =>
+              `<div style="display:flex;gap:8px;align-items:flex-start;font-size:11px;color:var(--text-muted)">
+                <span class="badge badge-muted" style="font-size:9px">${esc(event.kind)}</span>
+                <div style="min-width:0">
+                  <div style="color:var(--text);font-weight:600">${esc(event.title)}</div>
+                  ${event.detail ? `<div>${esc(event.detail.slice(0, 180))}${event.detail.length > 180 ? '...' : ''}</div>` : ''}
+                </div>
+              </div>`,
+          )
+          .join('')}</div>
+      </div>`
+          : ''
+      }
       <pre style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;font-size:11px;max-height:440px;overflow:auto;white-space:pre-wrap;word-break:break-word;color:var(--text)">${esc(job.output || '(no output yet)')}</pre>
     </div>`;
     if (job.status === 'running' || job.status === 'queued') {
@@ -783,6 +1256,26 @@ window.controlCodingJob = async function (id, action) {
       if (currentPage === 'agents') navigate('agents');
     } else {
       toast(r.error || 'Coding job action failed', 'error');
+    }
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
+window.reviewApproval = async function (id, action) {
+  try {
+    const r = await api('/approvals/' + encodeURIComponent(id) + '/' + action, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    if (r.ok) {
+      toast(
+        `Approval ${action === 'approve' ? 'approved' : 'denied'}`,
+        'success',
+      );
+      if (currentPage === 'agents') navigate('agents');
+    } else {
+      toast(r.error || 'Approval review failed', 'error');
     }
   } catch (e) {
     toast('Failed: ' + e.message, 'error');

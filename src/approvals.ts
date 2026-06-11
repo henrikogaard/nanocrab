@@ -63,6 +63,28 @@ function writeApprovals(approvals: ApprovalRequest[]): void {
   fs.writeFileSync(APPROVALS_PATH, `${JSON.stringify(approvals, null, 2)}\n`);
 }
 
+function stableJson(value: unknown): string {
+  if (!value || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  return `{${Object.keys(value as Record<string, unknown>)
+    .sort()
+    .map(
+      (key) =>
+        `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`,
+    )
+    .join(',')}}`;
+}
+
+function payloadMatches(
+  payload: Record<string, unknown>,
+  expected?: Record<string, unknown>,
+): boolean {
+  if (!expected) return true;
+  return Object.entries(expected).every(
+    ([key, value]) => stableJson(payload[key]) === stableJson(value),
+  );
+}
+
 export function listApprovals(
   filters: {
     status?: ApprovalStatus;
@@ -91,6 +113,17 @@ export function getApproval(id: string): ApprovalRequest | undefined {
 }
 
 export function createApproval(input: CreateApprovalInput): ApprovalRequest {
+  const approvals = readApprovals();
+  const existing = approvals.find(
+    (approval) =>
+      approval.status === 'pending' &&
+      approval.kind === input.kind &&
+      approval.targetType === input.targetType &&
+      approval.targetId === input.targetId &&
+      stableJson(approval.payload) === stableJson(input.payload || {}),
+  );
+  if (existing) return existing;
+
   const now = new Date().toISOString();
   const approval: ApprovalRequest = {
     id: `approval-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
@@ -108,7 +141,6 @@ export function createApproval(input: CreateApprovalInput): ApprovalRequest {
     reviewedBy: null,
     decisionNote: null,
   };
-  const approvals = readApprovals();
   approvals.push(approval);
   writeApprovals(approvals);
   return approval;
@@ -138,12 +170,14 @@ export function hasApprovedTarget(
   kind: ApprovalKind,
   targetType: string,
   targetId: string,
+  payload?: Record<string, unknown>,
 ): boolean {
   return readApprovals().some(
     (approval) =>
       approval.kind === kind &&
       approval.targetType === targetType &&
       approval.targetId === targetId &&
-      approval.status === 'approved',
+      approval.status === 'approved' &&
+      payloadMatches(approval.payload, payload),
   );
 }

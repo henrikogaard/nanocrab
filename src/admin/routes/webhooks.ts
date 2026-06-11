@@ -88,6 +88,66 @@ router.get('/events', (_req: Request, res: Response) => {
   }
 });
 
+router.get('/github-health', (_req: Request, res: Response) => {
+  const config = loadConfig();
+  const env = readEnvFile(['GITHUB_TOKEN', 'GITHUB_WEBHOOK_SECRET']);
+  const tokenConfigured = !!(process.env.GITHUB_TOKEN || env.GITHUB_TOKEN);
+  const secretConfigured = !!(
+    config.secret ||
+    process.env.GITHUB_WEBHOOK_SECRET ||
+    env.GITHUB_WEBHOOK_SECRET
+  );
+  let recentEvents = 0;
+  let lastEvent: Record<string, unknown> | null = null;
+  try {
+    const lines = fs
+      .readFileSync(EVENTS_PATH, 'utf-8')
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+    recentEvents = lines.length;
+    lastEvent = lines.length ? JSON.parse(lines[lines.length - 1]) : null;
+  } catch {
+    recentEvents = 0;
+  }
+  const checks = [
+    {
+      label: 'GitHub token',
+      ok: tokenConfigured,
+      detail: 'Required for issue, PR, CI, and coding-job API calls.',
+    },
+    {
+      label: 'Webhook enabled',
+      ok: config.enabled,
+      detail: 'Incoming GitHub webhook delivery is accepted only when enabled.',
+    },
+    {
+      label: 'Webhook secret',
+      ok: secretConfigured,
+      detail: 'Required for HMAC signature validation.',
+    },
+    {
+      label: 'Target group',
+      ok: !!config.targetJid,
+      detail: 'Webhook summaries need a destination group for notifications.',
+    },
+  ];
+  res.json({
+    ok: checks.every((check) => check.ok),
+    webhookUrl: '/api/webhooks/github',
+    recentEvents,
+    lastEvent,
+    checks,
+    setupSteps: [
+      'Set GITHUB_TOKEN in Credentials.',
+      'Choose a webhook secret and store it in Webhooks or GITHUB_WEBHOOK_SECRET.',
+      'Add the webhook URL to the GitHub repository with application/json content type.',
+      'Subscribe to push, pull_request, and issues events as needed.',
+      'Send a GitHub test delivery and confirm it appears in Recent Events.',
+    ],
+  });
+});
+
 router.delete('/events', (req: Request, res: Response) => {
   try {
     fs.writeFileSync(EVENTS_PATH, '');

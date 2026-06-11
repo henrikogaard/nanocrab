@@ -11,6 +11,8 @@ import path from 'path';
 import { logger } from '../logger.js';
 import { getState } from './state.js';
 import { validateSession, getSessionUser, AdminUser } from './auth.js';
+import { appendTerminalTranscript } from '../terminal-transcripts.js';
+import { getChannelHealth } from '../channel-health.js';
 
 interface WsMessage {
   type: string;
@@ -77,7 +79,14 @@ export function initWebSocket(server: HttpServer): void {
         if (msg.type === 'terminal_input' && msg.sessionId) {
           const term = terminals.get(msg.sessionId);
           if (term && term.clients.has(ws)) {
-            term.process.stdin?.write(msg.data as string);
+            const input = msg.data as string;
+            term.process.stdin?.write(input);
+            appendTerminalTranscript({
+              sessionId: msg.sessionId,
+              owner: term.owner,
+              type: 'input',
+              data: input,
+            });
             // Reset idle timer
             clearTimeout(term.idleTimer);
             term.idleTimer = setTimeout(() => {
@@ -131,10 +140,7 @@ function sendStatus(ws: WebSocket): void {
 function getStatusData(): object {
   const state = getState();
   return {
-    channels: state.channels.map((ch) => ({
-      name: ch.name,
-      connected: ch.isConnected(),
-    })),
+    channels: state.channels.map(getChannelHealth),
     containers: state.queue.getActiveContainers(),
     uptime: Date.now() - state.startTime,
   };
@@ -243,6 +249,12 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
     idleTimer,
     owner,
   });
+  appendTerminalTranscript({
+    sessionId,
+    owner,
+    type: 'spawn',
+    data: `Terminal session spawned in ${process.cwd()}`,
+  });
 
   proc.stdout?.on('data', (data: Buffer) => {
     broadcastTerminal(sessionId, data.toString());
@@ -252,6 +264,12 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
   });
   proc.on('close', () => {
     broadcastTerminal(sessionId, '\r\n[Process exited]\r\n');
+    appendTerminalTranscript({
+      sessionId,
+      owner,
+      type: 'close',
+      data: 'Process exited',
+    });
     terminals.delete(sessionId);
   });
 
@@ -262,6 +280,12 @@ function broadcastTerminal(sessionId: string, data: string): void {
   const term = terminals.get(sessionId);
   if (!term) return;
   term.transcript = `${term.transcript}${data}`.slice(-200000);
+  appendTerminalTranscript({
+    sessionId,
+    owner: term.owner,
+    type: 'output',
+    data,
+  });
   for (const client of term.clients) {
     send(client, { type: 'terminal_output', data, sessionId });
   }

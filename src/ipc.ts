@@ -8,6 +8,7 @@ import {
   approveCodingJob,
   cancelCodingJob,
   openCodingJobPr,
+  refreshCodingJobCi,
   retryCodingJob,
   revertCodingJob,
   listGitHubIssues,
@@ -53,7 +54,7 @@ export interface IpcDeps {
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
-  getAvailableGroups: () => AvailableGroup[];
+  getAvailableGroups: (sourceGroup?: RegisteredGroup) => AvailableGroup[];
   writeGroupsSnapshot: (
     groupFolder: string,
     isMain: boolean,
@@ -297,7 +298,12 @@ export async function processTaskIpc(
     requestId?: string;
     repo?: string;
     labels?: string[];
+    defaultProvider?: string;
+    defaultModel?: string;
+    codingRules?: string;
+    trustedForPr?: boolean;
     assignee?: string;
+    milestone?: string;
     limit?: number;
     issueNumber?: number;
     provider?: string;
@@ -603,6 +609,15 @@ export async function processTaskIpc(
         const repo = await registerCodingRepo({
           repo: data.repo,
           labels: Array.isArray(data.labels) ? data.labels : undefined,
+          assignee:
+            typeof data.assignee === 'string' ? data.assignee : undefined,
+          milestone:
+            typeof data.milestone === 'string' ? data.milestone : undefined,
+          defaultProvider: data.defaultProvider,
+          defaultModel: data.defaultModel,
+          codingRules:
+            typeof data.codingRules === 'string' ? data.codingRules : undefined,
+          trustedForPr: data.trustedForPr === true,
         });
         writeIpcOk(sourceGroup, data.requestId, repo);
         logger.info(
@@ -774,11 +789,13 @@ export async function processTaskIpc(
           job = await retryCodingJob(data.jobId, actor);
         else if (data.action === 'open-pr')
           job = await openCodingJobPr(data.jobId, actor);
+        else if (data.action === 'refresh-ci')
+          job = await refreshCodingJobCi(data.jobId);
         else if (data.action === 'revert')
           job = await revertCodingJob(data.jobId, actor);
         else
           throw new Error(
-            'action must be approve, cancel, retry, open-pr, or revert',
+            'action must be approve, cancel, retry, open-pr, refresh-ci, or revert',
           );
         writeIpcOk(sourceGroup, data.requestId, job);
       } catch (err) {
@@ -1071,7 +1088,8 @@ export async function processTaskIpc(
         );
         await deps.syncGroups(true);
         // Write updated snapshot immediately
-        const availableGroups = deps.getAvailableGroups();
+        const sourceRegisteredGroup = registeredGroups[sourceGroup];
+        const availableGroups = deps.getAvailableGroups(sourceRegisteredGroup);
         deps.writeGroupsSnapshot(
           sourceGroup,
           true,
@@ -1100,6 +1118,29 @@ export async function processTaskIpc(
           logger.warn(
             { sourceGroup, folder: data.folder },
             'Invalid register_group request - unsafe folder name',
+          );
+          break;
+        }
+        const sourceRegisteredGroup = registeredGroups[sourceGroup];
+        const channelScope =
+          sourceRegisteredGroup?.containerConfig?.channelScope || 'all';
+        const allowedFolders = new Set(
+          sourceRegisteredGroup?.containerConfig?.allowedGroupFolders || [],
+        );
+        if (
+          channelScope === 'registered' &&
+          !registeredGroups[data.jid as string]
+        ) {
+          logger.warn(
+            { sourceGroup, jid: data.jid },
+            'register_group blocked by registered-only channel scope',
+          );
+          break;
+        }
+        if (channelScope === 'allowed' && !allowedFolders.has(data.folder)) {
+          logger.warn(
+            { sourceGroup, folder: data.folder },
+            'register_group blocked by allowed channel scope',
           );
           break;
         }

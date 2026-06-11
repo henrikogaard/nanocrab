@@ -26,6 +26,20 @@ describe('skill registry', () => {
     expect(matches[0]?.score).toBeGreaterThan(0);
   });
 
+  it('can expose blocked skill matches for missing required tools', () => {
+    const blocked = scoreSkillsForRequest('Plan an attack operation', {
+      availableTools: ['Bash(git:*)'],
+      includeBlocked: true,
+    }).find((skill) => skill.path === 'ops-commander');
+
+    expect(blocked?.blockedReasons?.join(',')).toContain('missing-tools');
+
+    const allowed = scoreSkillsForRequest('Plan an attack operation', {
+      availableTools: ['Bash(git:*)'],
+    });
+    expect(allowed.map((skill) => skill.path)).not.toContain('ops-commander');
+  });
+
   it('enforces private and scoped visibility', () => {
     expect(
       isSkillVisibleForGroup(

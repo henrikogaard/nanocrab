@@ -85,6 +85,10 @@ NanoCrab is a standalone product. Keep changes NanoCrab-first: normal code chang
 
 After roadmap-sized work, update README, docs, roadmap status, security notes, and operator instructions before calling the work complete.
 
+## GitHub Issue Workflow
+
+When starting work on a GitHub issue, move it to `In progress` in the NanoCrab project. When the implementation is complete and ready for review, move it to `In review`. If an issue is only partially advanced by a slice, leave it `In progress` and call out the remaining scope.
+
 ## Container Build Cache
 
 The container buildkit caches aggressively. `--no-cache` alone does NOT invalidate COPY steps. To force a clean rebuild, prune the builder then re-run `./container/build.sh`.

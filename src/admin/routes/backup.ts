@@ -342,6 +342,59 @@ router.get('/restore-guide', (_req: Request, res: Response) => {
   });
 });
 
+router.get('/migration-check', (_req: Request, res: Response) => {
+  const checks = [
+    {
+      label: 'Package manifest',
+      ok: fs.existsSync(path.join(PROJECT_ROOT, 'package.json')),
+      detail: 'Required for npm install on the target host.',
+    },
+    {
+      label: 'Lockfile',
+      ok: fs.existsSync(path.join(PROJECT_ROOT, 'package-lock.json')),
+      detail: 'Keeps dependency versions reproducible during migration.',
+    },
+    {
+      label: 'Container build script',
+      ok: fs.existsSync(path.join(PROJECT_ROOT, 'container', 'build.sh')),
+      detail: 'Required to rebuild the agent image after restore.',
+    },
+    {
+      label: 'Essential backup data',
+      ok: getBackupPaths()
+        .filter((item) => item.critical)
+        .some((item) => fs.existsSync(item.path)),
+      detail: 'At least one critical path exists for backup.',
+    },
+    {
+      label: 'Environment file',
+      ok: fs.existsSync(path.join(PROJECT_ROOT, '.env')),
+      detail: 'Credentials and service settings are available to back up.',
+    },
+    {
+      label: 'Systemd user service',
+      ok: fs.existsSync(
+        path.join(
+          process.env.HOME || '/root',
+          '.config',
+          'systemd',
+          'user',
+          'nanocrab.service',
+        ),
+      ),
+      detail:
+        'Optional: target host can also run via npm start or another supervisor.',
+      optional: true,
+    },
+  ];
+
+  res.json({
+    ok: checks.every((check) => check.ok || check.optional),
+    generatedAt: new Date().toISOString(),
+    checks,
+  });
+});
+
 // --- Auto-backup configuration ---
 
 const AUTO_BACKUP_CONFIG_PATH = path.join(STORE_DIR, 'backup-auto.json');

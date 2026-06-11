@@ -265,6 +265,8 @@ const navIconPaths = {
     '<path d="M8 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M16 10a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"/><path d="M3.5 18.5c.4-3 2-5 4.5-5s4.1 2 4.5 5"/><path d="M13.2 14c2.9-.4 4.7 1.2 5.3 4.5"/>',
   tasks:
     '<path d="M7 4.5h10A1.5 1.5 0 0 1 18.5 6v12A1.5 1.5 0 0 1 17 19.5H7A1.5 1.5 0 0 1 5.5 18V6A1.5 1.5 0 0 1 7 4.5Z"/><path d="m8.5 10 1.5 1.5L13 8.5"/><path d="M14.5 10h1.5"/><path d="m8.5 15 1.5 1.5L13 13.5"/><path d="M14.5 15h1.5"/>',
+  missions:
+    '<path d="M5 5.5h14v4.5H5z"/><path d="M7 10v8.5h10V10"/><path d="M9 14h6"/><path d="M9 16.5h4"/><path d="M8.5 3.5v2"/><path d="M15.5 3.5v2"/>',
   memory:
     '<path d="M7.5 5.5h9A1.5 1.5 0 0 1 18 7v10.5l-2.5-1-2 2-2-2-2 2-2-2-2.5 1V7a1.5 1.5 0 0 1 1.5-1.5Z"/><path d="M8.5 9.5h7"/><path d="M8.5 12.5h5"/>',
   skills:
@@ -331,6 +333,7 @@ function showShell(page) {
     { id: 'chat', icon: 'chat', label: 'Chat' },
     { id: 'groups', icon: 'groups', label: 'Groups', section: 'Workspace' },
     { id: 'tasks', icon: 'tasks', label: 'Tasks' },
+    { id: 'missions', icon: 'missions', label: 'Missions' },
     { id: 'memory', icon: 'memory', label: 'Memory' },
     { id: 'skills', icon: 'skills', label: 'Skills' },
     { id: 'timeline', icon: 'timeline', label: 'Timeline' },
@@ -559,6 +562,7 @@ const _pageMap = {
   sessions: 'renderSessions',
   groups: 'renderGroups',
   tasks: 'renderTasks',
+  missions: 'renderMissions',
   workflows: 'renderWorkflows',
   credentials: 'renderCredentials',
   integrations: 'renderIntegrationsConsolidated',
@@ -687,7 +691,9 @@ async function renderMemoryConsolidated(el) {
     embedded: true,
     returnPage: 'memory',
   });
-  await renderMemoryKnowledgeTimeline(document.getElementById('mem-tabs-timeline'));
+  await renderMemoryKnowledgeTimeline(
+    document.getElementById('mem-tabs-timeline'),
+  );
   await renderWiki(document.getElementById('mem-tabs-wiki'));
 }
 
@@ -696,11 +702,13 @@ async function renderIntegrationsConsolidated(el) {
     <div id="int-tabs">${renderTabs(
       'int-tabs',
       [
+        { id: 'catalog', label: 'Catalog' },
         { id: 'mcp', label: 'MCP Servers' },
         { id: 'providers', label: 'AI Providers' },
       ],
-      'mcp',
+      'catalog',
     )}</div>`;
+  await renderConnectorCatalog(document.getElementById('int-tabs-catalog'));
   await renderMcp(document.getElementById('int-tabs-mcp'));
   await renderProviders(document.getElementById('int-tabs-providers'));
 }
@@ -1148,7 +1156,10 @@ async function renderChat(el) {
 
 // Channels
 async function renderChannels(el) {
-  const data = await api('/channels');
+  const [data, whatsappPairing] = await Promise.all([
+    api('/channels'),
+    api('/channels/whatsapp/pairing').catch(() => null),
+  ]);
 
   const activeHtml = data.active
     .map(
@@ -1163,10 +1174,11 @@ async function renderChannels(el) {
           </div>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
-          <span class="badge ${ch.connected ? 'badge-success' : 'badge-error'}">${ch.connected ? 'Connected' : 'Disconnected'}</span>
+          <span class="badge ${ch.status === 'active' ? 'badge-success' : ch.status === 'degraded' ? 'badge-warning' : 'badge-error'}">${esc(ch.status || (ch.connected ? 'active' : 'offline'))}</span>
           <button class="btn btn-sm btn-ghost" onclick="restartChannel('${esc(ch.id)}',this)">Restart</button>
         </div>
       </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">${esc(ch.healthDetail || '')}${ch.lastActiveAt ? ` · last active ${timeAgo(ch.lastActiveAt)}` : ''}</div>
       <table>
         ${ch.envVars
           .map(
@@ -1211,11 +1223,94 @@ async function renderChannels(el) {
         .join('')}
     </div>`;
 
+  const pairingState = whatsappPairing?.state || 'not_configured';
+  const pairingBadge =
+    pairingState === 'connected' || pairingState === 'paired'
+      ? 'badge-success'
+      : pairingState === 'error' || pairingState === 'expired_qr'
+        ? 'badge-error'
+        : pairingState === 'not_configured'
+          ? 'badge-muted'
+          : 'badge-warning';
+  const whatsappPairingHtml = whatsappPairing
+    ? `<div class="card" style="margin-bottom:16px">
+      <div class="card-title">WhatsApp Pairing <span class="badge ${pairingBadge}">${esc(pairingState)}</span></div>
+      <div style="display:grid;grid-template-columns:minmax(240px,340px) 1fr;gap:18px;align-items:start">
+        <div style="min-height:240px;display:flex;align-items:center;justify-content:center;background:var(--surface2);border-radius:var(--radius-sm);padding:14px">
+          ${
+            whatsappPairing.qrCodeDataUrl
+              ? `<img src="${esc(whatsappPairing.qrCodeDataUrl)}" alt="WhatsApp pairing QR code" style="width:100%;max-width:320px;border-radius:8px;background:#fff;padding:8px">`
+              : whatsappPairing.pairingCode
+                ? `<div style="text-align:center"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Pairing Code</div><div style="font-family:var(--mono);font-size:28px;font-weight:700;color:var(--text);letter-spacing:2px">${esc(whatsappPairing.pairingCode)}</div></div>`
+                : `<div style="text-align:center;color:var(--text-muted);font-size:13px">${pairingState === 'connected' ? 'WhatsApp is connected' : pairingState === 'paired' ? 'WhatsApp is paired; restart or reconnect the channel if needed' : pairingState === 'expired_qr' ? 'QR expired. Refresh to request a new code.' : 'Start pairing to show a live QR code here.'}</div>`
+          }
+        </div>
+        <div>
+          <table style="margin-bottom:12px">
+            <tr><td>State</td><td style="color:var(--text)">${esc(pairingState)}</td></tr>
+            <tr><td>Method</td><td style="color:var(--text)">${esc(whatsappPairing.method || 'none')}</td></tr>
+            <tr><td>Started</td><td style="color:var(--text)">${whatsappPairing.startedAt ? formatTime(whatsappPairing.startedAt) : 'not running'}</td></tr>
+            <tr><td>QR expires</td><td style="color:var(--text)">${whatsappPairing.qrExpiresAt ? formatTime(whatsappPairing.qrExpiresAt) : 'n/a'}</td></tr>
+            <tr><td>Phone</td><td style="color:var(--text)">${esc(whatsappPairing.phone || 'not paired')}</td></tr>
+            ${whatsappPairing.error ? `<tr><td>Error</td><td style="color:var(--error)">${esc(whatsappPairing.error)}</td></tr>` : ''}
+          </table>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:10px">
+            <input class="search-input" id="wa-pairing-phone" placeholder="Phone for pairing code, e.g. 4712345678">
+            <button class="btn btn-sm btn-ghost" onclick="startWhatsAppPairing('pairing-code')">Code</button>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-primary" onclick="startWhatsAppPairing('qr')">Start QR</button>
+            <button class="btn btn-sm btn-ghost" onclick="startWhatsAppPairing('qr')">Refresh QR</button>
+            <button class="btn btn-sm btn-ghost" onclick="cancelWhatsAppPairing()">Cancel</button>
+            <button class="btn btn-sm btn-danger" onclick="resetWhatsAppPairing(this)">Reset Session</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:10px">Only QR images, pairing codes, and minimal state are exposed here. Session files remain on the server in <code>store/auth</code>.</div>
+        </div>
+      </div>
+    </div>`
+    : '';
+
   el.innerHTML = `
     <div class="page-header"><h2>Channels</h2></div>
+    ${whatsappPairingHtml}
     <div class="grid grid-2">${activeHtml}</div>
     ${availableHtml}`;
 }
+
+window.startWhatsAppPairing = async function (method) {
+  const phone = document.getElementById('wa-pairing-phone')?.value || '';
+  try {
+    const payload = { method };
+    if (method === 'pairing-code') payload.phone = phone;
+    await api('/channels/whatsapp/pairing/start', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    toast(
+      method === 'pairing-code'
+        ? 'Pairing code requested'
+        : 'QR pairing started',
+      'success',
+    );
+    navigate('monitoring');
+  } catch (e) {
+    toast('WhatsApp pairing failed: ' + e.message, 'error');
+  }
+};
+
+window.cancelWhatsAppPairing = async function () {
+  await api('/channels/whatsapp/pairing/cancel', { method: 'POST' });
+  toast('WhatsApp pairing cancelled', 'info');
+  navigate('monitoring');
+};
+
+window.resetWhatsAppPairing = function (btn) {
+  inlineConfirm(btn, 'Reset?', async () => {
+    await api('/channels/whatsapp/pairing/reset', { method: 'POST' });
+    toast('WhatsApp session reset', 'success');
+    navigate('monitoring');
+  });
+};
 
 // Dashboard, agents, settings, coding, plugins, marketplace, and help.
 // are loaded from pages/*.js
@@ -1705,6 +1800,190 @@ window.applyTaskTemplate = (idx) => {
   formEl?.scrollIntoView({ behavior: 'smooth' });
 };
 
+// Missions
+async function renderMissions(el) {
+  const data = await api('/runbooks');
+  const groups = await api('/groups').catch(() => []);
+  const runbooks = data.runbooks || [];
+  const progress = (runbook) => {
+    const total = runbook.steps.length || 1;
+    const done = runbook.steps.filter((step) => step.status === 'done').length;
+    const blocked = runbook.steps.filter(
+      (step) => step.status === 'blocked',
+    ).length;
+    return { done, blocked, percent: Math.round((done / total) * 100) };
+  };
+  const statusBadge = (status) =>
+    status === 'completed'
+      ? 'badge-success'
+      : status === 'blocked'
+        ? 'badge-warning'
+        : status === 'active'
+          ? 'badge-info'
+          : 'badge-muted';
+
+  el.innerHTML = `
+    <div class="page-header"><h2>Missions</h2><button class="btn btn-primary btn-sm" onclick="document.getElementById('new-runbook-form').style.display=document.getElementById('new-runbook-form').style.display==='none'?'block':'none'">New Runbook</button></div>
+    <div class="grid grid-4">
+      <div class="card"><div style="font-size:11px;color:var(--text-muted)">Active</div><div style="font-size:22px;font-weight:600">${runbooks.filter((r) => r.status === 'active').length}</div></div>
+      <div class="card"><div style="font-size:11px;color:var(--text-muted)">Blocked</div><div style="font-size:22px;font-weight:600;color:var(--warning)">${runbooks.filter((r) => r.status === 'blocked').length}</div></div>
+      <div class="card"><div style="font-size:11px;color:var(--text-muted)">Completed</div><div style="font-size:22px;font-weight:600;color:var(--success)">${runbooks.filter((r) => r.status === 'completed').length}</div></div>
+      <div class="card"><div style="font-size:11px;color:var(--text-muted)">Open Steps</div><div style="font-size:22px;font-weight:600">${runbooks.reduce((sum, r) => sum + r.steps.filter((s) => !['done', 'skipped'].includes(s.status)).length, 0)}</div></div>
+    </div>
+    <div class="card" id="new-runbook-form" style="display:none">
+      <div class="card-title">Create Runbook</div>
+      <form id="runbook-create-form">
+        <div class="grid grid-2">
+          <div class="form-group"><label>Title</label><input id="runbook-title" placeholder="Release readiness"></div>
+          <div class="form-group"><label>Group</label><select id="runbook-group"><option value="">Unassigned</option>${groups.map((g) => `<option value="${esc(g.folder)}">${esc(g.name)}</option>`).join('')}</select></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Owner</label><input id="runbook-owner" placeholder="operator"></div>
+          <div class="form-group"><label>Due</label><input id="runbook-due" type="datetime-local"></div>
+        </div>
+        <div class="form-group"><label>Mission</label><textarea id="runbook-mission" style="width:100%;min-height:64px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:13px;resize:vertical" placeholder="What outcome should this runbook drive?"></textarea></div>
+        <div class="form-group"><label>Steps</label><textarea id="runbook-steps" style="width:100%;min-height:92px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:13px;resize:vertical" placeholder="One step per line"></textarea></div>
+        <button type="submit" class="btn btn-primary">Create Runbook</button>
+      </form>
+    </div>
+    <div class="card">
+      <div class="card-title">Recurring Operations Reminder</div>
+      <form id="operation-reminder-form">
+        <div class="grid grid-2">
+          <div class="form-group"><label>Title</label><input id="operation-reminder-title" placeholder="Rally check"></div>
+          <div class="form-group"><label>Group</label><select id="operation-reminder-group">${groups.map((g) => `<option value="${esc(g.folder)}">${esc(g.name)}</option>`).join('')}</select></div>
+        </div>
+        <div class="form-group"><label>Order</label><textarea id="operation-reminder-order" style="width:100%;min-height:70px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:13px;resize:vertical" placeholder="What should be repeated?"></textarea></div>
+        <div class="grid grid-3">
+          <div class="form-group"><label>Schedule Type</label><select id="operation-reminder-type"><option value="cron">Cron</option><option value="interval">Interval</option><option value="once">Once</option></select></div>
+          <div class="form-group"><label>Schedule Value</label><input id="operation-reminder-schedule" placeholder="0 8 * * *"></div>
+          <div class="form-group"><label>Audience</label><input id="operation-reminder-audience" placeholder="Operations team"></div>
+        </div>
+        <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-muted);margin-bottom:12px"><input type="checkbox" id="operation-reminder-confirm"> ask for confirmation</label>
+        <button type="submit" class="btn btn-primary btn-sm">Create Reminder</button>
+      </form>
+    </div>
+    ${
+      runbooks.length === 0
+        ? '<div class="card empty">No missions yet</div>'
+        : `<div style="display:grid;gap:12px">${runbooks
+            .map((runbook) => {
+              const p = progress(runbook);
+              return `<div class="card">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+                  <div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                      <h3 style="font-size:16px;margin:0;color:var(--text)">${esc(runbook.title)}</h3>
+                      <span class="badge ${statusBadge(runbook.status)}">${esc(runbook.status)}</span>
+                      ${runbook.groupFolder ? `<span class="badge badge-muted">${esc(runbook.groupFolder)}</span>` : ''}
+                    </div>
+                    <p style="margin:6px 0 0;color:var(--text-secondary);font-size:13px">${esc(runbook.mission)}</p>
+                  </div>
+                  <div style="text-align:right;font-size:12px;color:var(--text-muted)">
+                    <div>${esc(runbook.owner)}</div>
+                    <div>${runbook.dueAt ? formatTime(runbook.dueAt) : 'No due date'}</div>
+                  </div>
+                </div>
+                <div style="margin:12px 0;height:8px;background:var(--surface2);border-radius:999px;overflow:hidden"><div style="height:100%;width:${p.percent}%;background:${p.blocked ? 'var(--warning)' : 'var(--success)'}"></div></div>
+                <div style="display:grid;gap:8px">
+                  ${runbook.steps
+                    .map(
+                      (
+                        step,
+                      ) => `<div style="display:grid;grid-template-columns: minmax(0,1fr) auto;gap:10px;align-items:center;border-top:1px solid var(--border);padding-top:8px">
+                        <div>
+                          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                            <strong style="font-size:13px;color:var(--text)">${esc(step.title)}</strong>
+                            <span class="badge ${statusBadge(step.status)}">${esc(step.status)}</span>
+                          </div>
+                          ${step.notes ? `<div style="font-size:12px;color:var(--text-muted);margin-top:3px">${esc(step.notes)}</div>` : ''}
+                        </div>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+                          <button class="btn btn-sm btn-ghost" onclick="updateRunbookStep('${runbook.id}','${step.id}','in_progress')">Start</button>
+                          <button class="btn btn-sm btn-success" onclick="updateRunbookStep('${runbook.id}','${step.id}','done')">Done</button>
+                          <button class="btn btn-sm btn-ghost" onclick="updateRunbookStep('${runbook.id}','${step.id}','blocked')">Block</button>
+                          <button class="btn btn-sm btn-ghost" onclick="updateRunbookStep('${runbook.id}','${step.id}','skipped')">Skip</button>
+                        </div>
+                      </div>`,
+                    )
+                    .join('')}
+                </div>
+                <div style="margin-top:12px;text-align:right"><button class="btn btn-sm btn-ghost" onclick="archiveRunbook('${runbook.id}')">Archive</button></div>
+              </div>`;
+            })
+            .join('')}</div>`
+    }`;
+
+  const form = document.getElementById('runbook-create-form');
+  if (form)
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const steps = document
+        .getElementById('runbook-steps')
+        .value.split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const dueValue = document.getElementById('runbook-due').value;
+      const r = await api('/runbooks', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: document.getElementById('runbook-title').value,
+          mission: document.getElementById('runbook-mission').value,
+          owner: document.getElementById('runbook-owner').value,
+          groupFolder: document.getElementById('runbook-group').value,
+          dueAt: dueValue ? new Date(dueValue).toISOString() : undefined,
+          steps,
+        }),
+      });
+      if (r.ok) navigate('missions');
+      else toast(r.error || 'Failed to create runbook', 'error');
+    };
+  const reminderForm = document.getElementById('operation-reminder-form');
+  if (reminderForm)
+    reminderForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const r = await api('/operations/reminders', {
+        method: 'POST',
+        body: JSON.stringify({
+          groupFolder: document.getElementById('operation-reminder-group')
+            .value,
+          title: document.getElementById('operation-reminder-title').value,
+          order: document.getElementById('operation-reminder-order').value,
+          scheduleType: document.getElementById('operation-reminder-type')
+            .value,
+          scheduleValue: document.getElementById('operation-reminder-schedule')
+            .value,
+          audience: document.getElementById('operation-reminder-audience')
+            .value,
+          requireConfirmation: document.getElementById(
+            'operation-reminder-confirm',
+          ).checked,
+        }),
+      });
+      if (r.ok) {
+        toast('Reminder created', 'success');
+        navigate('tasks');
+      } else toast(r.error || 'Failed to create reminder', 'error');
+    };
+}
+
+window.updateRunbookStep = async (runbookId, stepId, status) => {
+  const notes =
+    status === 'blocked' ? prompt('Blocker note?', '') || undefined : undefined;
+  const r = await api(`/runbooks/${runbookId}/steps/${stepId}`, {
+    method: 'POST',
+    body: JSON.stringify({ status, notes }),
+  });
+  if (r.ok) navigate('missions');
+  else toast(r.error || 'Failed to update step', 'error');
+};
+
+window.archiveRunbook = async (runbookId) => {
+  const r = await api(`/runbooks/${runbookId}/archive`, { method: 'POST' });
+  if (r.ok) navigate('missions');
+  else toast(r.error || 'Failed to archive runbook', 'error');
+};
+
 // Credentials
 async function renderCredentials(el) {
   const data = await api('/credentials');
@@ -1766,6 +2045,180 @@ window.deleteCredential = async (key, btnEl) => {
 };
 
 // MCP Servers
+async function renderConnectorCatalog(el) {
+  const [data, emailWorkflows, calendarWorkflows, documentWorkflows] =
+    await Promise.all([
+      api('/connectors'),
+      api('/connectors/workflows?domain=email').catch(() => ({
+        workflows: [],
+      })),
+      api('/connectors/workflows?domain=calendar').catch(() => ({
+        workflows: [],
+      })),
+      api('/connectors/workflows?domain=documents').catch(() => ({
+        workflows: [],
+      })),
+    ]);
+  const statusBadge = (status) =>
+    status === 'ready'
+      ? 'badge-success'
+      : status === 'configured'
+        ? 'badge-info'
+        : 'badge-warning';
+  const highRisk = data.connectors.filter(
+    (connector) => connector.risk === 'high',
+  );
+  const approvalRequired = data.connectors.filter(
+    (connector) => connector.approvalRequired,
+  );
+  el.innerHTML = `
+    <div class="page-header"><h2>Connector Catalog</h2></div>
+    <div class="card">
+      <div class="card-title">Setup Overview</div>
+      <div class="grid grid-4">
+        <div><div style="font-size:11px;color:var(--text-muted)">Connectors</div><div style="font-size:20px;font-weight:600">${data.summary.total}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Ready</div><div style="font-size:20px;font-weight:600;color:var(--success)">${data.summary.ready}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Configured</div><div style="font-size:20px;font-weight:600;color:var(--info)">${data.summary.configured}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Needs Setup</div><div style="font-size:20px;font-weight:600;color:var(--warning)">${data.summary.needsSetup}</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Permission Audit</div>
+      <div class="grid grid-3">
+        <div><div style="font-size:11px;color:var(--text-muted)">High Risk</div><div style="font-size:20px;font-weight:600;color:var(--warning)">${highRisk.length}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Approval-Gated</div><div style="font-size:20px;font-weight:600;color:var(--success)">${approvalRequired.length}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Write Scopes</div><div style="font-size:20px;font-weight:600">${data.connectors.reduce((sum, connector) => sum + connector.permissions.filter((permission) => permission.access === 'write').length, 0)}</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Email Workflows <span class="badge badge-muted">${emailWorkflows.workflows.length}</span></div>
+      <div style="display:grid;gap:8px">
+        ${emailWorkflows.workflows
+          .map(
+            (
+              workflow,
+            ) => `<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-bottom:1px solid var(--border);padding-bottom:8px">
+              <div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <strong style="font-size:13px;color:var(--text)">${esc(workflow.title)}</strong>
+                  <span class="badge ${workflow.risk === 'high' ? 'badge-warning' : 'badge-muted'}">${esc(workflow.risk)}</span>
+                  ${workflow.approvalRequired ? '<span class="badge badge-success">approval required</span>' : '<span class="badge badge-muted">read/draft</span>'}
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:3px">${esc(workflow.description)}</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Connectors: ${workflow.connectors.map((item) => `<code>${esc(item)}</code>`).join(' ')}</div>
+              </div>
+              <code style="font-size:11px;color:var(--text-muted)">${esc(workflow.id)}</code>
+            </div>`,
+          )
+          .join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Calendar Workflows <span class="badge badge-muted">${calendarWorkflows.workflows.length}</span></div>
+      <div style="display:grid;gap:8px">
+        ${calendarWorkflows.workflows
+          .map(
+            (
+              workflow,
+            ) => `<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-bottom:1px solid var(--border);padding-bottom:8px">
+              <div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <strong style="font-size:13px;color:var(--text)">${esc(workflow.title)}</strong>
+                  <span class="badge ${workflow.risk === 'high' ? 'badge-warning' : 'badge-muted'}">${esc(workflow.risk)}</span>
+                  ${workflow.approvalRequired ? '<span class="badge badge-success">approval required</span>' : '<span class="badge badge-muted">read/brief</span>'}
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:3px">${esc(workflow.description)}</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Connectors: ${workflow.connectors.map((item) => `<code>${esc(item)}</code>`).join(' ')}</div>
+              </div>
+              <code style="font-size:11px;color:var(--text-muted)">${esc(workflow.id)}</code>
+            </div>`,
+          )
+          .join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">kDrive Workflows <span class="badge badge-muted">${documentWorkflows.workflows.length}</span></div>
+      <div style="display:grid;gap:8px">
+        ${documentWorkflows.workflows
+          .map(
+            (
+              workflow,
+            ) => `<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-bottom:1px solid var(--border);padding-bottom:8px">
+              <div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                  <strong style="font-size:13px;color:var(--text)">${esc(workflow.title)}</strong>
+                  <span class="badge ${workflow.risk === 'high' ? 'badge-warning' : 'badge-muted'}">${esc(workflow.risk)}</span>
+                  ${workflow.approvalRequired ? '<span class="badge badge-success">approval required</span>' : '<span class="badge badge-muted">read/report</span>'}
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:3px">${esc(workflow.description)}</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Connectors: ${workflow.connectors.map((item) => `<code>${esc(item)}</code>`).join(' ')}</div>
+              </div>
+              <code style="font-size:11px;color:var(--text-muted)">${esc(workflow.id)}</code>
+            </div>`,
+          )
+          .join('')}
+      </div>
+    </div>
+    <div class="grid grid-2">
+      ${data.connectors
+        .map(
+          (connector) => `
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px">
+            <div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <strong style="font-size:15px;color:var(--text)">${esc(connector.name)}</strong>
+                <span class="badge badge-muted">${esc(connector.category)}</span>
+                <span class="badge ${statusBadge(connector.status)}">${esc(connector.status)}</span>
+                <span class="badge ${connector.risk === 'high' ? 'badge-warning' : 'badge-muted'}">${esc(connector.risk)} risk</span>
+              </div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${esc(connector.description)}</div>
+            </div>
+            <span class="badge ${connector.installed ? 'badge-success' : 'badge-muted'}">${connector.installed ? 'Installed' : 'Available'}</span>
+          </div>
+          <div style="display:grid;gap:8px">
+            <div style="font-size:12px;color:var(--text-muted)">Setup: <code style="color:var(--accent)">${esc(connector.installAction)}</code></div>
+            ${
+              connector.skill
+                ? `<div style="font-size:12px;color:var(--text-muted)">Skill: <code>${esc(connector.skill)}</code></div>`
+                : ''
+            }
+            ${
+              connector.envVars.length
+                ? `<div style="display:flex;gap:4px;flex-wrap:wrap">${connector.envVars
+                    .map(
+                      (key) =>
+                        `<span class="badge ${connector.missingEnvVars.includes(key) ? 'badge-error' : 'badge-success'}">${esc(key)}</span>`,
+                    )
+                    .join('')}</div>`
+                : '<div style="font-size:12px;color:var(--text-muted)">No environment variables required.</div>'
+            }
+            <ol style="font-size:12px;color:var(--text-secondary);line-height:1.8;padding-left:18px;margin:0">
+              ${connector.setupSteps.map((step) => `<li>${esc(step)}</li>`).join('')}
+            </ol>
+            <div style="display:flex;gap:4px;flex-wrap:wrap">
+              ${connector.permissions
+                .map(
+                  (permission) =>
+                    `<span class="badge ${permission.access === 'write' || permission.access === 'admin' ? 'badge-warning' : 'badge-muted'}">${esc(permission.scope)}:${esc(permission.access)}${permission.approvalRequired ? ':approval' : ''}</span>`,
+                )
+                .join('')}
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-sm btn-ghost" onclick="navigate('credentials')">Credentials</button>
+              ${
+                connector.category === 'mcp'
+                  ? `<button class="btn btn-sm btn-ghost" onclick="navigate('integrations')">MCP</button>`
+                  : `<button class="btn btn-sm btn-ghost" onclick="navigate('monitoring')">Channels</button>`
+              }
+            </div>
+          </div>
+        </div>`,
+        )
+        .join('')}
+    </div>`;
+}
+
 async function renderMcp(el) {
   const [health, presets] = await Promise.all([
     api('/mcp/health'),
@@ -2145,12 +2598,14 @@ async function renderSkills(el, options = {}) {
               <span style="font-weight:600;color:var(--text)">${esc(suggestion.name)}</span>
               <span class="badge badge-info">${Math.round((suggestion.confidence || 0) * 100)}%</span>
               <span class="badge badge-muted">${esc(String(suggestion.evidenceCount || 0))} signals</span>
+              <span class="badge badge-muted">${esc(String(suggestion.occurrenceCount || 1))} seen</span>
             </div>
             <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${esc(suggestion.description)}</div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(suggestion.reason || '')}</div>
           </div>
           <div style="display:flex;gap:5px;flex-wrap:wrap">
             <button class="btn btn-sm btn-primary" onclick="createSkillDraftFromSuggestion(${index})">Create Draft</button>
+            <button class="btn btn-sm btn-ghost" onclick="dismissSkillSuggestion('${esc(suggestion.id)}')">Dismiss</button>
           </div>
         </div>`,
               )
@@ -2331,6 +2786,7 @@ window.createSkillDraftFromSuggestion = async (index) => {
         description: suggestion.description,
         instructions: suggestion.instructions,
         createdBy: 'dashboard-suggestion',
+        suggestionId: suggestion.id,
         provenance: suggestion.provenance || [
           'source:dashboard-suggestion',
           'kind:history-suggestion',
@@ -2346,8 +2802,28 @@ window.createSkillDraftFromSuggestion = async (index) => {
   }
 };
 
+window.dismissSkillSuggestion = async (id) => {
+  try {
+    const r = await api(
+      `/skills/suggestions/${encodeURIComponent(id)}/dismiss`,
+      {
+        method: 'POST',
+      },
+    );
+    if (r.ok) {
+      toast('Skill suggestion dismissed', 'success');
+      navigate('skills');
+    } else toast(r.error || 'Failed', 'error');
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
 window.viewSkillDraft = async (id) => {
-  const data = await api(`/skills/drafts/${encodeURIComponent(id)}`);
+  const [data, revisions] = await Promise.all([
+    api(`/skills/drafts/${encodeURIComponent(id)}`),
+    api(`/skills/drafts/${encodeURIComponent(id)}/revisions`).catch(() => []),
+  ]);
   const viewer = document.getElementById('skill-draft-viewer');
   viewer.style.display = 'block';
   viewer.innerHTML = `
@@ -2356,13 +2832,76 @@ window.viewSkillDraft = async (id) => {
         <div class="card-title" style="margin:0">Draft: ${esc(data.draft.name)}</div>
         <button class="btn btn-sm btn-ghost" onclick="document.getElementById('skill-draft-viewer').style.display='none'">Close</button>
       </div>
-      <pre class="log-viewer" style="max-height:420px;white-space:pre-wrap">${esc(data.content)}</pre>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <span class="badge badge-muted">version ${esc(String(data.draft.version || 1))}</span>
+        <span class="badge ${data.draft.syncStatus === 'installed' ? 'badge-success' : data.draft.syncStatus === 'stale' ? 'badge-warning' : 'badge-muted'}">${esc(data.draft.syncStatus || 'draft')}</span>
+        ${
+          Array.isArray(data.draft.provenance)
+            ? data.draft.provenance
+                .slice(0, 4)
+                .map(
+                  (item) =>
+                    `<span class="badge badge-info">${esc(item)}</span>`,
+                )
+                .join('')
+            : ''
+        }
+      </div>
+      <textarea id="skill-draft-edit-content" style="width:100%;min-height:320px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical;line-height:1.6">${esc(data.content)}</textarea>
+      ${
+        revisions.length
+          ? `<div style="margin-top:12px">
+              <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Revision History</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                ${revisions
+                  .map(
+                    (rev) =>
+                      `<button class="btn btn-sm btn-ghost" onclick="rollbackSkillDraft('${esc(id)}',${Number(rev.version)})">v${esc(String(rev.version))} ${esc(rev.reason || 'updated')}</button>`,
+                  )
+                  .join('')}
+              </div>
+            </div>`
+          : ''
+      }
       <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-sm btn-ghost" onclick="saveSkillDraftRevision('${esc(id)}')">Save Revision</button>
         <button class="btn btn-sm btn-primary" onclick="reviewSkillDraft('${esc(id)}','approve')">Approve</button>
         <button class="btn btn-sm btn-ghost" onclick="reviewSkillDraft('${esc(id)}','reject')">Reject</button>
       </div>
     </div>`;
   viewer.scrollIntoView({ behavior: 'smooth' });
+};
+
+window.saveSkillDraftRevision = async (id) => {
+  const content = document.getElementById('skill-draft-edit-content')?.value;
+  if (!content) return;
+  try {
+    const r = await api(`/skills/drafts/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ skillMd: content, updatedBy: 'dashboard' }),
+    });
+    if (r.ok) {
+      toast('Skill draft revision saved', 'success');
+      await viewSkillDraft(id);
+    } else toast(r.error || 'Failed', 'error');
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
+window.rollbackSkillDraft = async (id, version) => {
+  try {
+    const r = await api(`/skills/drafts/${encodeURIComponent(id)}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ version, rolledBackBy: 'dashboard' }),
+    });
+    if (r.ok) {
+      toast(`Rolled back into new draft revision`, 'success');
+      await viewSkillDraft(id);
+    } else toast(r.error || 'Failed', 'error');
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
 };
 
 window.reviewSkillDraft = async (id, action) => {
@@ -2689,7 +3228,12 @@ window.viewConversation = async (folder, filename) => {
   }
 };
 
-function memoryKnowledgeTimelineItems({ auditData, memories, drafts, limit = 25 }) {
+function memoryKnowledgeTimelineItems({
+  auditData,
+  memories,
+  drafts,
+  limit = 25,
+}) {
   const items = [];
   const seen = new Set();
   const addItem = (item) => {
@@ -2854,16 +3398,62 @@ async function renderMemoryKnowledgeTimeline(el) {
 }
 
 // Memory
+function renderMemoryReviewRows(memories) {
+  if (!Array.isArray(memories) || memories.length === 0) {
+    return '<div class="empty" style="padding:12px">No pending memory proposals</div>';
+  }
+  return memories
+    .map(
+      (m) => `
+          <div class="channel-card" style="align-items:flex-start">
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:5px">
+                <span class="badge badge-accent">${esc(m.scope)}</span>
+                <span class="badge badge-muted">${esc(m.type)}</span>
+                <span class="badge badge-info">${Math.round((m.confidence || 0) * 100)}%</span>
+                <span class="badge badge-muted">${esc(m.visibility)}</span>
+                ${(m.review_reasons || [m.status]).map((reason) => `<span class="badge ${reason === 'secret-note' || reason === 'contradiction' ? 'badge-warning' : 'badge-muted'}">${esc(reason)}</span>`).join('')}
+              </div>
+              <div style="font-size:13px;color:var(--text);line-height:1.45">${esc(m.content)}</div>
+              ${
+                m.related_memory
+                  ? `<div style="font-size:11px;color:var(--warning);margin-top:5px">Conflicts with: ${esc(m.related_memory.content)}</div>`
+                  : ''
+              }
+              ${
+                Array.isArray(m.source_links) && m.source_links.length
+                  ? `<div style="font-size:11px;color:var(--text-muted);margin-top:5px">${m.source_links.map((link) => `<a style="color:var(--accent)" href="${esc(link)}" target="_blank" rel="noreferrer">${esc(link)}</a>`).join(' · ')}</div>`
+                  : ''
+              }
+              <div style="font-size:11px;color:var(--text-muted);margin-top:5px">${esc(m.source || 'agent proposal')} &middot; ${formatTime(m.created_at)}</div>
+            </div>
+            <div style="display:flex;gap:5px">
+              ${m.status === 'pending' ? `<button class="btn btn-sm btn-primary" onclick="reviewMemoryRecord('${esc(m.id)}','approve')">Approve</button><button class="btn btn-sm btn-ghost" onclick="reviewMemoryRecord('${esc(m.id)}','reject')">Reject</button>` : ''}
+              ${m.status === 'approved' ? `<button class="btn btn-sm btn-ghost" onclick="reviewMemoryRecord('${esc(m.id)}','stale')">Mark stale</button><button class="btn btn-sm btn-ghost" onclick="reviewMemoryRecord('${esc(m.id)}','contradicted')">Contradict</button>` : ''}
+            </div>
+          </div>`,
+    )
+    .join('');
+}
+
 async function renderMemory(el) {
-  const [memData, groups, auditData, structuredMemories, journalEntries, drafts] =
-    await Promise.all([
-      api('/files/memory'),
-      api('/groups'),
-      api('/audit?limit=50').catch(() => []),
-      api('/memory?limit=100').catch(() => []),
-      api('/journal/entries?limit=10').catch(() => []),
-      api('/skills/drafts').catch(() => []),
-    ]);
+  const [
+    memData,
+    groups,
+    auditData,
+    structuredMemories,
+    reviewMemories,
+    journalEntries,
+    drafts,
+  ] = await Promise.all([
+    api('/files/memory'),
+    api('/groups'),
+    api('/audit?limit=50').catch(() => []),
+    api('/memory?limit=100').catch(() => []),
+    api('/memory?review=true&limit=100').catch(() => []),
+    api('/journal/entries?limit=10').catch(() => []),
+    api('/skills/drafts').catch(() => []),
+  ]);
 
   const timelineItems = memoryKnowledgeTimelineItems({
     auditData,
@@ -2886,9 +3476,9 @@ async function renderMemory(el) {
       };
     }),
   );
-  const pendingMemories = structuredMemories.filter(
-    (m) => m.status === 'pending',
-  );
+  const pendingMemories = reviewMemories.length
+    ? reviewMemories
+    : structuredMemories.filter((m) => m.status === 'pending');
   const approvedMemories = structuredMemories
     .filter((m) => m.status === 'approved')
     .slice(0, 8);
@@ -2898,31 +3488,26 @@ async function renderMemory(el) {
     <div class="grid grid-2">
       <div class="card">
         <div class="card-title">Structured Memory Review <span class="badge badge-muted">${pendingMemories.length} pending</span></div>
-        ${
-          pendingMemories.length === 0
-            ? '<div class="empty" style="padding:12px">No pending memory proposals</div>'
-            : pendingMemories
-                .map(
-                  (m) => `
-          <div class="channel-card" style="align-items:flex-start">
-            <div style="flex:1;min-width:0">
-              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:5px">
-                <span class="badge badge-accent">${esc(m.scope)}</span>
-                <span class="badge badge-muted">${esc(m.type)}</span>
-                <span class="badge badge-info">${Math.round((m.confidence || 0) * 100)}%</span>
-                <span class="badge badge-muted">${esc(m.visibility)}</span>
-              </div>
-              <div style="font-size:13px;color:var(--text);line-height:1.45">${esc(m.content)}</div>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:5px">${esc(m.source || 'agent proposal')} &middot; ${formatTime(m.created_at)}</div>
-            </div>
-            <div style="display:flex;gap:5px">
-              <button class="btn btn-sm btn-primary" onclick="reviewMemoryRecord('${esc(m.id)}','approve')">Approve</button>
-              <button class="btn btn-sm btn-ghost" onclick="reviewMemoryRecord('${esc(m.id)}','reject')">Reject</button>
-            </div>
-          </div>`,
-                )
-                .join('')
-        }
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <select class="input-sm" id="memory-review-reason-filter" onchange="filterMemoryReviewQueue()" style="min-width:135px">
+            <option value="">All reasons</option>
+            <option value="pending">Pending</option>
+            <option value="sensitive">Sensitive</option>
+            <option value="secret-note">Secret note</option>
+            <option value="stale">Stale</option>
+            <option value="expired">Expired</option>
+            <option value="contradiction">Contradiction</option>
+          </select>
+          <select class="input-sm" id="memory-review-sensitivity-filter" onchange="filterMemoryReviewQueue()" style="min-width:135px">
+            <option value="">All sensitivity</option>
+            <option value="normal">Normal</option>
+            <option value="sensitive">Sensitive</option>
+            <option value="secret-note">Secret note</option>
+          </select>
+        </div>
+        <div id="memory-review-queue">
+        ${renderMemoryReviewRows(pendingMemories)}
+        </div>
         ${
           approvedMemories.length
             ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
@@ -2939,6 +3524,16 @@ async function renderMemory(el) {
       </div>
       <div class="card">
         <div class="card-title">Journal Summaries</div>
+        <div style="border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:12px">
+          <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
+            <div class="form-group" style="margin:0;flex:1;min-width:220px">
+              <label style="font-size:12px;color:var(--text-muted)">Ask Journal</label>
+              <input class="search-input" id="journal-question" placeholder="When was the fleet crash?">
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="askJournalQuestion()">Ask</button>
+          </div>
+          <div id="journal-answer" style="margin-top:10px;font-size:12px;color:var(--text-secondary)"></div>
+        </div>
         <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:12px">
           <div class="form-group" style="margin:0">
             <label style="font-size:12px;color:var(--text-muted)">Group</label>
@@ -3052,6 +3647,24 @@ window.reviewMemoryRecord = async (id, action) => {
   }
 };
 
+window.filterMemoryReviewQueue = async () => {
+  const reason = document.getElementById('memory-review-reason-filter')?.value;
+  const sensitivity = document.getElementById(
+    'memory-review-sensitivity-filter',
+  )?.value;
+  const params = new URLSearchParams({ review: 'true', limit: '100' });
+  if (reason) params.set('reason', reason);
+  if (sensitivity) params.set('sensitivity', sensitivity);
+  const target = document.getElementById('memory-review-queue');
+  if (!target) return;
+  try {
+    const memories = await api(`/memory?${params.toString()}`);
+    target.innerHTML = renderMemoryReviewRows(memories);
+  } catch (e) {
+    target.innerHTML = `<div class="empty" style="padding:12px;color:var(--error)">Failed: ${esc(e.message)}</div>`;
+  }
+};
+
 window.createJournalSummary = async () => {
   const msg = document.getElementById('journal-summary-msg');
   const groupFolder = document.getElementById('journal-summary-group')?.value;
@@ -3075,6 +3688,33 @@ window.createJournalSummary = async () => {
   } catch (e) {
     toast('Failed: ' + e.message, 'error');
     if (msg) msg.textContent = e.message;
+  }
+};
+
+window.askJournalQuestion = async () => {
+  const question = document.getElementById('journal-question')?.value.trim();
+  const groupFolder = document.getElementById('journal-summary-group')?.value;
+  const target = document.getElementById('journal-answer');
+  if (!target || !question) return;
+  target.innerHTML = '<span class="badge badge-muted">Searching</span>';
+  try {
+    const result = await api(
+      `/journal/search?query=${encodeURIComponent(question)}${groupFolder ? `&group=${encodeURIComponent(groupFolder)}` : ''}`,
+    );
+    target.innerHTML = `
+      <div style="white-space:pre-wrap;color:var(--text);line-height:1.5">${esc(result.answer || 'No answer available.')}</div>
+      ${
+        result.citations?.length
+          ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${result.citations
+              .map(
+                (citation, index) =>
+                  `<span class="badge badge-muted" title="${esc(citation.source)}">${index + 1}. ${esc(citation.type)} ${citation.timestamp ? esc(citation.timestamp.slice(0, 10)) : ''}</span>`,
+              )
+              .join('')}</div>`
+          : ''
+      }`;
+  } catch (err) {
+    target.innerHTML = `<span style="color:var(--error)">${esc(err.message || String(err))}</span>`;
   }
 };
 
@@ -3224,10 +3864,11 @@ window.validatePath = async () => {
 
 // Webhooks
 async function renderWebhooks(el) {
-  const [config, events, groups] = await Promise.all([
+  const [config, events, groups, health] = await Promise.all([
     api('/webhooks/config'),
     api('/webhooks/events'),
     api('/groups'),
+    api('/webhooks/github-health'),
   ]);
   const webhookUrl = `${window.location.origin}/api/webhooks/github`;
 
@@ -3270,6 +3911,39 @@ async function renderWebhooks(el) {
           <li>Select events: Push, Pull requests</li>
           <li>Save and enable the webhook here</li>
         </ol>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">GitHub Connector Health <span class="badge ${health.ok ? 'badge-success' : 'badge-warning'}">${health.ok ? 'Ready' : 'Review'}</span></div>
+      <div class="grid grid-2">
+        <div>
+          <div style="display:grid;gap:6px">
+            ${health.checks
+              .map(
+                (
+                  check,
+                ) => `<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+                  <div>
+                    <div style="font-size:12px;color:var(--text)">${esc(check.label)}</div>
+                    <div style="font-size:11px;color:var(--text-muted)">${esc(check.detail)}</div>
+                  </div>
+                  <span class="badge ${check.ok ? 'badge-success' : 'badge-warning'}">${check.ok ? 'OK' : 'Missing'}</span>
+                </div>`,
+              )
+              .join('')}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Recent deliveries: <strong style="color:var(--text)">${health.recentEvents}</strong></div>
+          ${
+            health.lastEvent
+              ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Last: <span class="badge badge-accent">${esc(health.lastEvent.event || 'event')}</span> ${esc(health.lastEvent.repo || '')} ${health.lastEvent.timestamp ? formatTime(health.lastEvent.timestamp) : ''}</div>`
+              : '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">No deliveries recorded yet.</div>'
+          }
+          <ol style="font-size:12px;color:var(--text-secondary);line-height:1.7;padding-left:18px;margin:0">
+            ${health.setupSteps.map((step) => `<li>${esc(step)}</li>`).join('')}
+          </ol>
+        </div>
       </div>
     </div>
     <div class="card">
@@ -3333,6 +4007,15 @@ async function renderTerminal(el) {
         <span style="font-size:11px;color:var(--text-muted)">Owner-only shell in the NanoCrab process working directory</span>
       </div>
       <div id="terminal-container" style="height:500px;background:#09090b"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Transcript Search</div>
+      <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:12px">
+        <input class="search-input" id="terminal-search-query" placeholder="Search terminal transcripts" style="min-width:240px;flex:1">
+        <button class="btn btn-sm btn-ghost" onclick="searchTerminalTranscripts()">Search</button>
+        <button class="btn btn-sm btn-ghost" onclick="loadTerminalHistory()">History</button>
+      </div>
+      <div id="terminal-search-results" style="font-size:12px;color:var(--text-muted)"></div>
     </div>`;
 
   // Load xterm.js from CDN
@@ -3420,6 +4103,51 @@ window.copyTerminalTranscript = async function () {
   } catch {
     toast('Clipboard access failed', 'error');
   }
+};
+
+window.loadTerminalHistory = async function () {
+  const target = document.getElementById('terminal-search-results');
+  if (!target) return;
+  const result = await api('/sessions/terminal/history');
+  const sessions = result.sessions || [];
+  target.innerHTML = sessions.length
+    ? sessions
+        .map(
+          (
+            session,
+          ) => `<div style="padding:8px 0;border-top:1px solid var(--border);display:flex;justify-content:space-between;gap:12px">
+            <div><strong style="color:var(--text)">${esc(session.sessionId)}</strong><div>${esc(session.owner)} · ${session.eventCount} events · ${Math.max(1, Math.round(session.transcriptBytes / 1024))} KB</div></div>
+            <div style="text-align:right">${timeAgo(session.lastActivity)}</div>
+          </div>`,
+        )
+        .join('')
+    : '<div class="empty" style="padding:12px">No persisted terminal transcripts</div>';
+};
+
+window.searchTerminalTranscripts = async function () {
+  const target = document.getElementById('terminal-search-results');
+  const query = document.getElementById('terminal-search-query')?.value.trim();
+  if (!target || !query) return;
+  const result = await api(
+    `/sessions/terminal/search?query=${encodeURIComponent(query)}&limit=25`,
+  );
+  const hits = result.hits || [];
+  target.innerHTML = hits.length
+    ? hits
+        .map(
+          (
+            hit,
+          ) => `<div style="padding:8px 0;border-top:1px solid var(--border)">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
+              <span class="badge badge-muted">${esc(hit.sessionId)}</span>
+              <span class="badge badge-info">${esc(hit.type)}</span>
+              <span>${esc(hit.owner)} · ${timeAgo(hit.timestamp)}</span>
+            </div>
+            <pre style="white-space:pre-wrap;margin:0;color:var(--text);font-size:11px">${esc(hit.snippet)}</pre>
+          </div>`,
+        )
+        .join('')
+    : '<div class="empty" style="padding:12px">No transcript matches</div>';
 };
 
 // Editor
@@ -3567,9 +4295,32 @@ function colorizeLog(lines) {
 
 // System
 async function renderSystem(el) {
-  const [sys, health] = await Promise.all([
+  const [sys, health, diagnostics, firstRun, inference] = await Promise.all([
     api('/system'),
     api('/system/health'),
+    api('/system/install-diagnostics'),
+    api('/system/first-run-readiness').catch(() => ({
+      overall: 'warn',
+      failed: 0,
+      warnings: 0,
+      productName: 'NanoCrab',
+      headline: 'First-run readiness unavailable',
+      checks: [],
+      setupSteps: [],
+      secretPolicy:
+        'Credential values are never returned through setup readiness APIs.',
+    })),
+    api('/system/inference-health').catch(() => ({
+      summary: {
+        total: 0,
+        healthy: 0,
+        degraded: 0,
+        local: 0,
+        remote: 0,
+        stale: 0,
+      },
+      items: [],
+    })),
   ]);
   const memPct = ((sys.memory.heapUsed / sys.memory.heapTotal) * 100).toFixed(
     1,
@@ -3606,6 +4357,127 @@ async function renderSystem(el) {
         <tr><td>Load</td><td style="color:var(--text)">${sys.system.loadAvg.map((l) => l.toFixed(2)).join(', ')}</td></tr>
         ${sys.system.disk ? `<tr><td>Disk</td><td style="color:var(--text)">${formatBytes(sys.system.disk.free)} free / ${formatBytes(sys.system.disk.total)} (${sys.system.disk.percent}% used)</td></tr>` : ''}
       </table></div>
+    </div>
+    <div class="card">
+      <div class="card-title">First-Run Setup <span class="badge ${firstRun.overall === 'pass' ? 'badge-success' : firstRun.overall === 'warn' ? 'badge-warning' : 'badge-error'}">${firstRun.overall}</span></div>
+      <div style="display:grid;grid-template-columns:minmax(180px,260px) 1fr;gap:16px;align-items:start">
+        <div>
+          <div style="font-family:monospace;white-space:pre;font-size:10px;line-height:1.15;color:var(--accent);overflow:auto">${esc((firstRun.asciiArt || []).join('\n'))}</div>
+          <div style="font-size:12px;color:var(--text);margin-top:8px">${esc(firstRun.productName || 'NanoCrab')}</div>
+          <div style="font-size:11px;color:var(--text-muted)">${esc(firstRun.headline || '')}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:8px">${esc(firstRun.secretPolicy || '')}</div>
+        </div>
+        <div style="display:grid;gap:14px">
+          <div>
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Readiness Checks</div>
+            <div style="display:grid;gap:6px">
+              ${(firstRun.checks || [])
+                .map(
+                  (
+                    item,
+                  ) => `<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-top:1px solid var(--border);padding-top:6px">
+                    <div>
+                      <div style="font-size:12px;color:var(--text)">${esc(item.label)} ${item.required ? '<span class="badge badge-muted">Required</span>' : ''}</div>
+                      <div style="font-size:11px;color:var(--text-muted)">${esc(item.detail)}</div>
+                      ${item.status === 'pass' || !item.remediation ? '' : `<div style="font-size:11px;color:var(--warning);margin-top:2px">${esc(item.remediation)}</div>`}
+                      ${item.status === 'pass' || !item.resumeNote ? '' : `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Resume: ${esc(item.resumeNote)}</div>`}
+                    </div>
+                    <span class="badge ${item.status === 'pass' ? 'badge-success' : item.status === 'warn' ? 'badge-warning' : 'badge-error'}">${item.status}</span>
+                  </div>`,
+                )
+                .join('')}
+            </div>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Clean VPS Path</div>
+            <div style="display:grid;gap:6px">
+              ${(firstRun.setupSteps || [])
+                .map(
+                  (
+                    step,
+                  ) => `<div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+                    <div>
+                      <div style="font-size:12px;color:var(--text)">${esc(step.label)}</div>
+                      <code style="font-size:11px;color:var(--text-muted)">${esc(step.command)}</code>
+                    </div>
+                    <span class="badge ${step.required ? 'badge-info' : 'badge-muted'}">${step.required ? 'Required' : 'Optional'}</span>
+                  </div>`,
+                )
+                .join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Install Diagnostics <span class="badge ${diagnostics.overall === 'pass' ? 'badge-success' : diagnostics.overall === 'warn' ? 'badge-warning' : 'badge-error'}">${diagnostics.overall}</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Runtime Checks</div>
+          <div style="display:grid;gap:6px">
+            ${diagnostics.diagnostics
+              .map(
+                (
+                  item,
+                ) => `<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+                  <div>
+                    <div style="font-size:12px;color:var(--text)">${esc(item.label)}</div>
+                    <div style="font-size:11px;color:var(--text-muted)">${esc(item.detail)}</div>
+                    ${item.status === 'pass' || !item.remediation ? '' : `<div style="font-size:11px;color:var(--warning);margin-top:2px">${esc(item.remediation)}</div>`}
+                  </div>
+                  <span class="badge ${item.status === 'pass' ? 'badge-success' : item.status === 'warn' ? 'badge-warning' : 'badge-error'}">${item.status}</span>
+                </div>`,
+              )
+              .join('')}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Release Checklist</div>
+          <div style="display:grid;gap:8px">
+            ${diagnostics.releaseChecklist
+              .map(
+                (
+                  item,
+                ) => `<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
+                  <div>
+                    <div style="font-size:12px;color:var(--text)">${esc(item.label)}</div>
+                    <code style="font-size:11px;color:var(--text-muted)">${esc(item.command)}</code>
+                  </div>
+                  <span class="badge ${item.ok ? 'badge-success' : 'badge-warning'}">${item.ok ? 'Done' : 'Needed'}</span>
+                </div>`,
+              )
+              .join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Inference Health <span class="badge ${inference.summary.degraded ? 'badge-warning' : 'badge-success'}">${inference.summary.healthy}/${inference.summary.total} healthy</span></div>
+      <div class="grid grid-4" style="margin-bottom:12px">
+        <div><div style="font-size:11px;color:var(--text-muted)">Local</div><div style="font-size:20px;font-weight:600">${inference.summary.local}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Remote</div><div style="font-size:20px;font-weight:600">${inference.summary.remote}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Stale</div><div style="font-size:20px;font-weight:600;color:var(--warning)">${inference.summary.stale}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Degraded</div><div style="font-size:20px;font-weight:600;color:var(--warning)">${inference.summary.degraded}</div></div>
+      </div>
+      <div style="display:grid;gap:8px">
+        ${(inference.items || [])
+          .map(
+            (
+              item,
+            ) => `<div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;border-top:1px solid var(--border);padding-top:8px">
+              <div>
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                  <strong style="font-size:12px;color:var(--text)">${esc(item.label)}</strong>
+                  <span class="badge badge-muted">${esc(item.provider)}/${esc(item.model)}</span>
+                  <span class="badge badge-info">${esc(item.locality)}</span>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc((item.failedChecks || [])[0] || item.toolPolicy || 'Ready')}</div>
+              </div>
+              <span class="badge ${item.status === 'healthy' ? 'badge-success' : item.status === 'unconfigured' ? 'badge-error' : 'badge-warning'}">${esc(item.status)}</span>
+            </div>`,
+          )
+          .join('')}
+      </div>
     </div>
     <div class="card"><div class="card-title">Channel Health</div>
       ${health.channels.map((ch) => `<div class="channel-card"><div class="channel-info"><span class="status-dot ${ch.connected ? 'online' : 'offline'}"></span><span class="channel-name">${ch.name}</span></div><span class="badge ${ch.status === 'healthy' ? 'badge-success' : 'badge-error'}">${ch.status}</span></div>`).join('')}
@@ -4108,6 +4980,31 @@ async function renderUsage(el) {
           : ''
       }
 
+      ${
+        data.modelMetrics && data.modelMetrics.length > 0
+          ? `<div class="card">
+        <div class="card-title">Model Operations</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Model</th><th>Calls</th><th>Success</th><th>Avg Latency</th><th>Context</th><th>Cost Tier</th><th>Est. Cost</th><th>Last Error</th></tr></thead>
+          <tbody>${data.modelMetrics
+            .map(
+              (m) => `<tr>
+                <td style="color:var(--text);font-weight:500">${esc(m.provider)} / ${esc(m.model)}</td>
+                <td>${m.calls}</td>
+                <td><span class="badge ${m.successRate >= 95 ? 'badge-success' : m.successRate >= 80 ? 'badge-warning' : 'badge-error'}">${m.successRate}%</span></td>
+                <td>${m.avgLatencyMs == null ? '-' : `${m.avgLatencyMs} ms`}</td>
+                <td>${fmtTokens(m.contextTokens)} / ${fmtTokens(m.contextWindow)}</td>
+                <td><span class="badge badge-muted">${esc(m.costTier)}</span></td>
+                <td style="color:var(--success);font-weight:600">${fmtCostBig(m.totalCost)}</td>
+                <td style="max-width:220px;color:var(--text-muted)">${esc(m.lastError || '-')}</td>
+              </tr>`,
+            )
+            .join('')}</tbody>
+        </table></div>
+      </div>`
+          : ''
+      }
+
       <div class="grid grid-2">
         <div class="card">
           <div class="card-title">Monthly Breakdown</div>
@@ -4440,9 +5337,11 @@ window.viewSession = async function (group, sessionId) {
 
 // Backup
 async function renderBackup(el) {
-  const [data, guide] = await Promise.all([
+  const [data, guide, autoConfig, migration] = await Promise.all([
     api('/backup'),
     api('/backup/restore-guide'),
+    api('/backup/auto-config'),
+    api('/backup/migration-check'),
   ]);
 
   el.innerHTML = `
@@ -4480,6 +5379,59 @@ async function renderBackup(el) {
           <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Notes</div>
           ${guide.notes.map((n) => `<div style="font-size:12px;color:var(--text-muted);padding:4px 0">\u2022 ${esc(n)}</div>`).join('')}
         </div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card">
+        <div class="card-title">Automatic Backups</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 100px auto;gap:8px;align-items:end">
+          <label style="font-size:12px;color:var(--text-muted)">Enabled<br>
+            <select id="backup-auto-enabled" class="input" style="margin-top:4px">
+              <option value="false" ${autoConfig.enabled ? '' : 'selected'}>Off</option>
+              <option value="true" ${autoConfig.enabled ? 'selected' : ''}>On</option>
+            </select>
+          </label>
+          <label style="font-size:12px;color:var(--text-muted)">Schedule<br>
+            <select id="backup-auto-schedule" class="input" style="margin-top:4px">
+              <option value="weekly" ${autoConfig.schedule === 'weekly' ? 'selected' : ''}>Weekly</option>
+              <option value="daily" ${autoConfig.schedule === 'daily' ? 'selected' : ''}>Daily</option>
+            </select>
+          </label>
+          <label style="font-size:12px;color:var(--text-muted)">Keep<br>
+            <input id="backup-auto-keep" class="input" type="number" min="1" max="20" value="${autoConfig.keepCount || 4}" style="margin-top:4px">
+          </label>
+          <button class="btn btn-primary btn-sm" onclick="saveAutoBackupConfig(this)">Save</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Migration Readiness <span class="badge ${migration.ok ? 'badge-success' : 'badge-warning'}">${migration.ok ? 'Ready' : 'Review'}</span></div>
+        <div style="display:grid;gap:6px">
+          ${migration.checks
+            .map(
+              (
+                check,
+              ) => `<div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+                <div>
+                  <div style="font-size:12px;color:var(--text)">${esc(check.label)}</div>
+                  <div style="font-size:11px;color:var(--text-muted)">${esc(check.detail)}</div>
+                </div>
+                <span class="badge ${check.ok ? 'badge-success' : check.optional ? 'badge-muted' : 'badge-warning'}">${check.ok ? 'OK' : check.optional ? 'Optional' : 'Missing'}</span>
+              </div>`,
+            )
+            .join('')}
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Decrypt Encrypted Backup</div>
+      <div style="display:grid;grid-template-columns:1fr 220px auto;gap:8px;align-items:end">
+        <label style="font-size:12px;color:var(--text-muted)">Encrypted file<br>
+          <input id="backup-decrypt-file" class="input" type="file" accept=".enc,application/octet-stream" style="margin-top:4px">
+        </label>
+        <label style="font-size:12px;color:var(--text-muted)">Passphrase<br>
+          <input id="backup-decrypt-passphrase" class="input" type="password" autocomplete="off" style="margin-top:4px">
+        </label>
+        <button class="btn btn-sm btn-ghost" onclick="decryptBackupUpload(this)">Decrypt</button>
       </div>
     </div>
     <div class="card">
@@ -4536,8 +5488,8 @@ window.createBackup = async (includeAll, btnEl) => {
 window.downloadEncryptedBackup = async (filename) => {
   const passphrase = prompt('Enter a passphrase for encryption:');
   if (!passphrase) return;
-  if (passphrase.length < 4) {
-    toast('Passphrase too short (min 4 characters)', 'warning');
+  if (passphrase.length < 8) {
+    toast('Passphrase too short (min 8 characters)', 'warning');
     return;
   }
   try {
@@ -4566,6 +5518,75 @@ window.downloadEncryptedBackup = async (filename) => {
     toast('Encrypted backup downloaded', 'success');
   } catch (e) {
     toast('Download failed: ' + e.message, 'error');
+  }
+};
+
+window.saveAutoBackupConfig = async (btnEl) => {
+  const origText = btnEl.textContent;
+  btnEl.disabled = true;
+  btnEl.textContent = 'Saving...';
+  try {
+    await api('/backup/auto-config', {
+      method: 'PUT',
+      body: JSON.stringify({
+        enabled:
+          document.getElementById('backup-auto-enabled').value === 'true',
+        schedule: document.getElementById('backup-auto-schedule').value,
+        keepCount: document.getElementById('backup-auto-keep').value,
+      }),
+    });
+    toast('Automatic backup settings saved', 'success');
+    navigate('backup');
+  } catch (e) {
+    toast('Could not save automatic backup settings', 'error');
+    btnEl.disabled = false;
+    btnEl.textContent = origText;
+  }
+};
+
+window.decryptBackupUpload = async (btnEl) => {
+  const file = document.getElementById('backup-decrypt-file').files?.[0];
+  const passphrase = document.getElementById('backup-decrypt-passphrase').value;
+  if (!file) {
+    toast('Choose an encrypted backup file', 'warning');
+    return;
+  }
+  if (!passphrase) {
+    toast('Enter the backup passphrase', 'warning');
+    return;
+  }
+  const origText = btnEl.textContent;
+  btnEl.disabled = true;
+  btnEl.textContent = 'Decrypting...';
+  try {
+    const res = await fetch('/api/backup/decrypt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Passphrase': passphrase,
+      },
+      body: await file.arrayBuffer(),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Decrypt failed' }));
+      toast(err.error || 'Decrypt failed', 'error');
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name.replace(/\\.enc$/i, '') || 'nanocrab-backup.tar.gz';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('Backup decrypted', 'success');
+  } catch (e) {
+    toast('Decrypt failed: ' + e.message, 'error');
+  } finally {
+    btnEl.disabled = false;
+    btnEl.textContent = origText;
   }
 };
 

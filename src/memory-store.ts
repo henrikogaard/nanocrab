@@ -55,6 +55,20 @@ export interface ProposeMemoryInput {
   staleAfter?: string | null;
 }
 
+export type MemoryReviewReason =
+  | 'pending'
+  | 'sensitive'
+  | 'secret-note'
+  | 'stale'
+  | 'expired'
+  | 'contradiction';
+
+export interface MemoryReviewRecord extends MemoryRecord {
+  review_reasons: MemoryReviewReason[];
+  source_links: string[];
+  related_memory?: MemoryRecord;
+}
+
 function assertChoice<T extends string>(
   name: string,
   value: string,
@@ -87,6 +101,9 @@ function detectSensitivity(
 function findContradiction(content: string): string | null {
   const normalized = content.toLowerCase().replace(/\s+/g, ' ').trim();
   const candidates = listMemories({ status: 'approved', limit: 200 });
+  const hasNegation = /\b(not|never|no longer|does not|is not)\b/.test(
+    normalized,
+  );
   const negated = normalized
     .replace(/\bis not\b/g, ' is ')
     .replace(/\bdoes not\b/g, ' does ')
@@ -97,13 +114,33 @@ function findContradiction(content: string): string | null {
     const other = memory.content.toLowerCase().replace(/\s+/g, ' ').trim();
     if (other === normalized) continue;
     if (
-      (normalized.includes(' not ') ||
-        normalized.includes('never') ||
-        normalized.includes('no longer')) &&
+      hasNegation &&
       (other.includes(negated.slice(0, 80)) ||
         negated.includes(other.slice(0, 80)))
     ) {
       return memory.id;
+    }
+    if (hasNegation) {
+      const tokens = new Set(
+        negated
+          .replace(/[^a-z0-9\s-]/g, ' ')
+          .split(/\s+/)
+          .filter(
+            (token) =>
+              token.length >= 5 &&
+              !['longer', 'prefers', 'prefer'].includes(token),
+          ),
+      );
+      const otherTokens = new Set(
+        other
+          .replace(/[^a-z0-9\s-]/g, ' ')
+          .split(/\s+/)
+          .filter((token) => token.length >= 5),
+      );
+      const overlap = Array.from(tokens).filter((token) =>
+        otherTokens.has(token),
+      );
+      if (overlap.length >= 2) return memory.id;
     }
   }
   return null;
@@ -150,9 +187,23 @@ export function listMemoryRecords(filters: {
   status?: MemoryStatus;
   scope?: string;
   visibility?: string;
+  sensitivity?: 'normal' | 'sensitive' | 'secret-note';
+  reviewReason?: MemoryReviewReason;
   limit?: number;
 }): MemoryRecord[] {
-  return listMemories(filters);
+  const memories = listMemories(filters);
+  return memories.filter((memory) => {
+    if (filters.sensitivity && memory.sensitivity !== filters.sensitivity) {
+      return false;
+    }
+    if (
+      filters.reviewReason &&
+      !memoryReviewReasons(memory).includes(filters.reviewReason)
+    ) {
+      return false;
+    }
+    return true;
+  });
 }
 
 export function approveMemory(id: string): MemoryRecord {
@@ -187,9 +238,55 @@ export function markMemoryContradicted(id: string): MemoryRecord {
   return memory;
 }
 
-export function listMemoryReviewQueue(): MemoryRecord[] {
+function parseSourceLinks(memory: MemoryRecord): string[] {
+  try {
+    const links = JSON.parse(memory.source_links_json || '[]') as unknown;
+    return Array.isArray(links)
+      ? links.filter((link): link is string => typeof link === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function memoryReviewReasons(
+  memory: MemoryRecord,
+  now = new Date().toISOString(),
+): MemoryReviewReason[] {
+  const reasons: MemoryReviewReason[] = [];
+  if (memory.status === 'pending') reasons.push('pending');
+  if (memory.sensitivity === 'sensitive') reasons.push('sensitive');
+  if (memory.sensitivity === 'secret-note') reasons.push('secret-note');
+  if (memory.contradicts_memory_id) reasons.push('contradiction');
+  if (memory.stale_after && memory.stale_after < now) reasons.push('stale');
+  if (memory.expires_at && memory.expires_at < now) reasons.push('expired');
+  return reasons;
+}
+
+function decorateMemoryReviewRecord(
+  memory: MemoryRecord,
+  now: string,
+): MemoryReviewRecord {
+  const related = memory.contradicts_memory_id
+    ? getMemoryById(memory.contradicts_memory_id)
+    : undefined;
+  return {
+    ...memory,
+    review_reasons: memoryReviewReasons(memory, now),
+    source_links: parseSourceLinks(memory),
+    related_memory: related,
+  };
+}
+
+export function listMemoryReviewQueue(
+  filters: {
+    reason?: MemoryReviewReason;
+    sensitivity?: 'normal' | 'sensitive' | 'secret-note';
+    limit?: number;
+  } = {},
+): MemoryReviewRecord[] {
   const now = new Date().toISOString();
-  return [
+  const queue = [
     ...listMemories({ status: 'pending', limit: 200 }),
     ...listMemories({ status: 'approved', limit: 200 }).filter(
       (memory) =>
@@ -197,7 +294,36 @@ export function listMemoryReviewQueue(): MemoryRecord[] {
         memory.sensitivity !== 'normal' ||
         (memory.stale_after && memory.stale_after < now),
     ),
-  ];
+  ]
+    .map((memory) => decorateMemoryReviewRecord(memory, now))
+    .filter((memory) => {
+      if (filters.sensitivity && memory.sensitivity !== filters.sensitivity) {
+        return false;
+      }
+      if (filters.reason && !memory.review_reasons.includes(filters.reason)) {
+        return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      const priority = (memory: MemoryReviewRecord) =>
+        memory.review_reasons.includes('secret-note')
+          ? 0
+          : memory.review_reasons.includes('contradiction')
+            ? 1
+            : memory.review_reasons.includes('stale') ||
+                memory.review_reasons.includes('expired')
+              ? 2
+              : memory.review_reasons.includes('sensitive')
+                ? 3
+                : 4;
+      return (
+        priority(a) - priority(b) ||
+        b.updated_at.localeCompare(a.updated_at) ||
+        b.created_at.localeCompare(a.created_at)
+      );
+    });
+  return queue.slice(0, Math.min(Math.max(filters.limit || 200, 1), 200));
 }
 
 export function getMemory(id: string): MemoryRecord | undefined {

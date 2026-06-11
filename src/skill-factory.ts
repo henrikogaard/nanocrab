@@ -24,6 +24,15 @@ export interface SkillDraft {
   syncStatus: 'draft' | 'installed' | 'rejected' | 'stale';
 }
 
+export interface SkillDraftRevision {
+  version: number;
+  createdAt: string;
+  createdBy: string;
+  reason: 'created' | 'updated' | 'approved' | 'rollback';
+  contentPath: string;
+  description: string;
+}
+
 export interface ProposeSkillDraftInput {
   skillMd: string;
   createdBy: string;
@@ -50,6 +59,24 @@ function metadataPath(id: string): string {
 
 function skillPath(id: string): string {
   return path.join(draftDir(id), 'SKILL.md');
+}
+
+function revisionsDir(id: string): string {
+  return path.join(draftDir(id), 'revisions');
+}
+
+function revisionPath(id: string, version: number): string {
+  return path.join(
+    revisionsDir(id),
+    `${String(version).padStart(4, '0')}.json`,
+  );
+}
+
+function revisionContentPath(id: string, version: number): string {
+  return path.join(
+    revisionsDir(id),
+    `${String(version).padStart(4, '0')}.SKILL.md`,
+  );
 }
 
 function parseFrontmatter(skillMd: string): {
@@ -112,6 +139,26 @@ function writeDraft(draft: SkillDraft): void {
   );
 }
 
+function recordRevision(
+  draft: SkillDraft,
+  content: string,
+  revision: Omit<SkillDraftRevision, 'contentPath' | 'description'>,
+): SkillDraftRevision {
+  fs.mkdirSync(revisionsDir(draft.id), { recursive: true });
+  const contentPath = revisionContentPath(draft.id, revision.version);
+  fs.writeFileSync(contentPath, content.trimEnd() + '\n');
+  const fullRevision: SkillDraftRevision = {
+    ...revision,
+    contentPath,
+    description: draft.description,
+  };
+  fs.writeFileSync(
+    revisionPath(draft.id, revision.version),
+    `${JSON.stringify(fullRevision, null, 2)}\n`,
+  );
+  return fullRevision;
+}
+
 export function proposeSkillDraft(input: ProposeSkillDraftInput): SkillDraft {
   const parsed = parseFrontmatter(input.skillMd);
   const id = `skill-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
@@ -135,6 +182,12 @@ export function proposeSkillDraft(input: ProposeSkillDraftInput): SkillDraft {
   };
   fs.mkdirSync(draft.draftDir, { recursive: true });
   fs.writeFileSync(skillPath(id), input.skillMd.trimEnd() + '\n');
+  recordRevision(draft, input.skillMd, {
+    version: draft.version,
+    createdAt: now,
+    createdBy: input.createdBy,
+    reason: 'created',
+  });
   writeDraft(draft);
   return draft;
 }
@@ -157,6 +210,87 @@ export function getSkillDraftContent(id: string): string | undefined {
   const draft = readDraft(id);
   if (!draft) return undefined;
   return fs.readFileSync(skillPath(id), 'utf-8');
+}
+
+export function updateSkillDraft(
+  id: string,
+  input: { skillMd: string; updatedBy: string },
+): SkillDraft {
+  const draft = readDraft(id);
+  if (!draft) throw new Error(`Skill draft not found: ${id}`);
+  if (draft.status === 'rejected') {
+    throw new Error('Rejected skill drafts cannot be updated');
+  }
+  const parsed = parseFrontmatter(input.skillMd);
+  if (parsed.name !== draft.name) {
+    throw new Error('Skill draft name cannot be changed');
+  }
+  draft.description = parsed.description;
+  draft.version += 1;
+  draft.status = 'pending';
+  draft.reviewedAt = null;
+  draft.syncStatus = draft.installedVersion ? 'stale' : 'draft';
+  fs.writeFileSync(skillPath(id), input.skillMd.trimEnd() + '\n');
+  recordRevision(draft, input.skillMd, {
+    version: draft.version,
+    createdAt: new Date().toISOString(),
+    createdBy: input.updatedBy,
+    reason: 'updated',
+  });
+  writeDraft(draft);
+  return draft;
+}
+
+export function listSkillDraftRevisions(id: string): SkillDraftRevision[] {
+  const draft = readDraft(id);
+  if (!draft) throw new Error(`Skill draft not found: ${id}`);
+  if (!fs.existsSync(revisionsDir(id))) return [];
+  return fs
+    .readdirSync(revisionsDir(id))
+    .filter((file) => file.endsWith('.json'))
+    .map(
+      (file) =>
+        JSON.parse(
+          fs.readFileSync(path.join(revisionsDir(id), file), 'utf-8'),
+        ) as SkillDraftRevision,
+    )
+    .sort((a, b) => b.version - a.version);
+}
+
+export function rollbackSkillDraft(
+  id: string,
+  version: number,
+  rolledBackBy: string,
+): SkillDraft {
+  const draft = readDraft(id);
+  if (!draft) throw new Error(`Skill draft not found: ${id}`);
+  const revision = listSkillDraftRevisions(id).find(
+    (item) => item.version === version,
+  );
+  if (!revision || !fs.existsSync(revision.contentPath)) {
+    throw new Error(`Skill draft revision not found: ${version}`);
+  }
+  const content = fs.readFileSync(revision.contentPath, 'utf-8');
+  const parsed = parseFrontmatter(content);
+  if (parsed.name !== draft.name) {
+    throw new Error(
+      'Cannot roll back to a revision with a different skill name',
+    );
+  }
+  draft.description = parsed.description;
+  draft.version += 1;
+  draft.status = 'pending';
+  draft.reviewedAt = null;
+  draft.syncStatus = draft.installedVersion ? 'stale' : 'draft';
+  fs.writeFileSync(skillPath(id), content.trimEnd() + '\n');
+  recordRevision(draft, content, {
+    version: draft.version,
+    createdAt: new Date().toISOString(),
+    createdBy: rolledBackBy,
+    reason: 'rollback',
+  });
+  writeDraft(draft);
+  return draft;
 }
 
 export function approveSkillDraft(id: string): SkillDraft {

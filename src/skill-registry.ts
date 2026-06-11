@@ -30,6 +30,7 @@ export interface SkillRegistryEntry {
 export interface SkillMatch extends SkillRegistryEntry {
   score: number;
   reasons: string[];
+  blockedReasons?: string[];
 }
 
 const SKILL_STATE_PATH = path.join(STORE_DIR, 'skill-state.json');
@@ -236,7 +237,12 @@ export function isSkillVisibleForGroup(
 
 export function scoreSkillsForRequest(
   request: string,
-  options: { isMain?: boolean; limit?: number } = {},
+  options: {
+    isMain?: boolean;
+    limit?: number;
+    availableTools?: string[];
+    includeBlocked?: boolean;
+  } = {},
 ): SkillMatch[] {
   const text = request.toLowerCase();
   const terms = new Set(
@@ -245,10 +251,14 @@ export function scoreSkillsForRequest(
       .split(/\s+/)
       .filter((token) => token.length >= 3),
   );
+  const availableTools = new Set(
+    (options.availableTools || []).map((tool) => tool.toLowerCase()),
+  );
   return listSkillRegistry()
     .filter((skill) => isSkillVisibleForGroup(skill, options.isMain ?? true))
     .map((skill) => {
       const reasons: string[] = [];
+      const blockedReasons: string[] = [];
       let score = 0;
       for (const trigger of skill.triggers) {
         const normalized = trigger.toLowerCase();
@@ -276,9 +286,21 @@ export function scoreSkillsForRequest(
         score += 20;
         reasons.push('name-match');
       }
-      return { ...skill, score, reasons };
+      if (skill.riskLevel === 'high' && reasons.length === 0) {
+        blockedReasons.push('high-risk-needs-explicit-match');
+      }
+      if (skill.requiredTools.length && availableTools.size > 0) {
+        const missing = skill.requiredTools.filter(
+          (tool) => !availableTools.has(tool.toLowerCase()),
+        );
+        if (missing.length) {
+          blockedReasons.push(`missing-tools:${missing.join(',')}`);
+        }
+      }
+      return { ...skill, score, reasons, blockedReasons };
     })
     .filter((skill) => skill.score > 0)
+    .filter((skill) => options.includeBlocked || !skill.blockedReasons?.length)
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
     .slice(0, options.limit ?? 8);
 }
@@ -294,7 +316,10 @@ export function prepareActiveSkillsDirectory(options: {
   );
   fs.rmSync(destination, { recursive: true, force: true });
   fs.mkdirSync(destination, { recursive: true });
-  for (const skill of listSkillRegistry()) {
+  const visibleSkills = listSkillRegistry().filter((skill) =>
+    isSkillVisibleForGroup(skill, options.isMain),
+  );
+  for (const skill of visibleSkills) {
     if (!isSkillVisibleForGroup(skill, options.isMain)) continue;
     const source = path.join(CONTAINER_SKILLS_DIR, skill.path);
     const target = path.join(destination, skill.path);
@@ -302,13 +327,7 @@ export function prepareActiveSkillsDirectory(options: {
   }
   fs.writeFileSync(
     path.join(destination, 'registry.json'),
-    `${JSON.stringify(
-      listSkillRegistry().filter((skill) =>
-        isSkillVisibleForGroup(skill, options.isMain),
-      ),
-      null,
-      2,
-    )}\n`,
+    `${JSON.stringify(visibleSkills, null, 2)}\n`,
   );
   return destination;
 }

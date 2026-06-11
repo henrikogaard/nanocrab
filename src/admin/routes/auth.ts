@@ -25,6 +25,10 @@ import {
   setAllowlist,
 } from '../security.js';
 import { STORE_DIR } from '../../config.js';
+import {
+  buildAuditReplay,
+  type AuditReplaySource,
+} from '../../audit-replay.js';
 
 const TOTP_PATH = path.join(STORE_DIR, 'totp.json');
 
@@ -244,6 +248,17 @@ router.post(
 );
 
 // Audit log
+router.get('/audit/replay', requireAuth, (req: Request, res: Response) => {
+  const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+  const sources = (req.query.sources as string | undefined)
+    ?.split(',')
+    .map((item) => item.trim())
+    .filter(Boolean) as AuditReplaySource[] | undefined;
+  res.json(
+    buildAuditReplay({ adminEvents: getAuditLog(limit), limit, sources }),
+  );
+});
+
 router.get('/audit', requireAuth, (req: Request, res: Response) => {
   const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
   res.json(getAuditLog(limit));

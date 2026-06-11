@@ -7,6 +7,7 @@ import {
   markMemoryContradicted,
   markMemoryStale,
   rejectMemory,
+  MemoryReviewReason,
 } from '../../memory-store.js';
 import { MemoryStatus } from '../../types.js';
 import { requireRole } from '../middleware.js';
@@ -15,8 +16,33 @@ import { auditLog } from '../security.js';
 const router = Router();
 
 router.get('/', (req: Request, res: Response) => {
+  const sensitivity =
+    req.query.sensitivity === 'normal' ||
+    req.query.sensitivity === 'sensitive' ||
+    req.query.sensitivity === 'secret-note'
+      ? req.query.sensitivity
+      : undefined;
+  const reviewReason =
+    typeof req.query.reason === 'string' &&
+    [
+      'pending',
+      'sensitive',
+      'secret-note',
+      'stale',
+      'expired',
+      'contradiction',
+    ].includes(req.query.reason)
+      ? (req.query.reason as MemoryReviewReason)
+      : undefined;
+  const limit = Math.min(parseInt(req.query.limit as string) || 100, 200);
   if (req.query.review === 'true') {
-    res.json(listMemoryReviewQueue());
+    res.json(
+      listMemoryReviewQueue({
+        sensitivity,
+        reason: reviewReason,
+        limit,
+      }),
+    );
     return;
   }
   const status =
@@ -34,7 +60,9 @@ router.get('/', (req: Request, res: Response) => {
         typeof req.query.visibility === 'string'
           ? req.query.visibility
           : undefined,
-      limit: Math.min(parseInt(req.query.limit as string) || 100, 200),
+      sensitivity,
+      reviewReason,
+      limit,
     }),
   );
 });

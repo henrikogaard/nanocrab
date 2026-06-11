@@ -638,6 +638,32 @@ server.tool(
       .array(z.string())
       .optional()
       .describe('Default labels to use when picking issues, e.g. ["autofix"]'),
+    assignee: z
+      .string()
+      .optional()
+      .describe('Optional GitHub login to assign when NanoCrab picks an issue'),
+    milestone: z
+      .string()
+      .optional()
+      .describe('Optional milestone preference for this repo'),
+    default_provider: z
+      .string()
+      .optional()
+      .describe('Optional default coding provider for this repo'),
+    default_model: z
+      .string()
+      .optional()
+      .describe('Optional default coding model for this repo'),
+    coding_rules: z
+      .string()
+      .optional()
+      .describe('Repo-specific coding rules to inject into coding jobs'),
+    trusted_for_pr: z
+      .boolean()
+      .optional()
+      .describe(
+        'Whether PR opening may proceed without a separate PR approval',
+      ),
   },
   async (args) => {
     if (!isMain)
@@ -647,6 +673,12 @@ server.tool(
         await requestHostTask('register_coding_repo', {
           repo: args.repo,
           labels: args.labels || [],
+          assignee: args.assignee,
+          milestone: args.milestone,
+          defaultProvider: args.default_provider,
+          defaultModel: args.default_model,
+          codingRules: args.coding_rules,
+          trustedForPr: args.trusted_for_pr === true,
         }),
       );
     } catch (err) {
@@ -855,10 +887,17 @@ server.tool(
 
 server.tool(
   'control_coding_job',
-  'Main group only. Approve, cancel, retry, open a PR for, or request revert of a host-managed coding job.',
+  'Main group only. Approve, cancel, retry, open a PR for, refresh CI for, or request revert of a host-managed coding job.',
   {
     job_id: z.string(),
-    action: z.enum(['approve', 'cancel', 'retry', 'open-pr', 'revert']),
+    action: z.enum([
+      'approve',
+      'cancel',
+      'retry',
+      'open-pr',
+      'refresh-ci',
+      'revert',
+    ]),
   },
   async (args) => {
     if (!isMain)
