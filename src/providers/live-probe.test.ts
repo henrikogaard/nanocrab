@@ -283,10 +283,16 @@ describe('LiveProbeService', () => {
 
       const history = service.getProbeHistory();
       expect(history.length).toBeGreaterThanOrEqual(1);
-      expect(history[0].providerId).toBe('openai-responses');
+      expect(history[0].provider).toBe('openai-responses');
       expect(history[0].model).toBe('gpt-5.4');
-      expect(history[0].result.ok).toBe(true);
-      expect(history[0].result.validated).toBe(true);
+      expect(history[0].ok).toBe(true);
+      expect(history[0].latencyMs).toEqual(expect.any(Number));
+      expect(history[0].toolSupport).toBe(true);
+      expect(history[0].schemaSupport).toBe(true);
+      expect(history[0].streamingSupport).toBe(true);
+      expect(history[0].visionSupport).toBe(true);
+      expect(history[0].contextWindow).toBe(200000);
+      expect(history[0]).not.toHaveProperty('result');
       expect(history[0].timestamp).toBeDefined();
       expect(
         fs.existsSync(
@@ -307,8 +313,8 @@ describe('LiveProbeService', () => {
 
       const history = service.getProbeHistory('unknown');
       expect(history.length).toBeGreaterThanOrEqual(1);
-      expect(history[0].result.ok).toBe(false);
-      expect(history[0].result.errorMessage).toContain('not found');
+      expect(history[0].ok).toBe(false);
+      expect(history[0].errorDetail).toContain('not found');
     });
 
     it('filters history by providerId', async () => {
@@ -325,7 +331,7 @@ describe('LiveProbeService', () => {
 
       const history = service.getProbeHistory('openai-responses');
       expect(history.length).toBeGreaterThanOrEqual(2);
-      expect(history.every((e) => e.providerId === 'openai-responses')).toBe(
+      expect(history.every((e) => e.provider === 'openai-responses')).toBe(
         true,
       );
     });
@@ -346,7 +352,7 @@ describe('LiveProbeService', () => {
       expect(history.length).toBeGreaterThanOrEqual(1);
       expect(
         history.every(
-          (e) => e.providerId === 'openai-responses' && e.model === 'gpt-5.4',
+          (e) => e.provider === 'openai-responses' && e.model === 'gpt-5.4',
         ),
       ).toBe(true);
     });
@@ -385,9 +391,10 @@ describe('LiveProbeService', () => {
         50,
       );
       expect(history).toHaveLength(20);
-      expect(history.every((e) => e.providerId === 'openai-responses')).toBe(
+      expect(history.every((e) => e.provider === 'openai-responses')).toBe(
         true,
       );
+      expect(history.every((e) => !('result' in e))).toBe(true);
     });
   });
 

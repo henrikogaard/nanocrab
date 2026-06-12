@@ -303,7 +303,7 @@ function readProbeStore(): ProviderProbeStore {
           ProviderProbeResult
         >,
         history: Array.isArray(parsed.history)
-          ? (parsed.history as ProviderProbeHistoryEntry[])
+          ? parsed.history.map(normalizeProviderProbeHistoryEntry)
           : [],
       };
     }
@@ -316,8 +316,9 @@ function readProbeStore(): ProviderProbeStore {
       return {
         latestByProfile,
         history: Array.isArray((parsed as Record<string, unknown>).__history)
-          ? ((parsed as Record<string, unknown>)
-              .__history as ProviderProbeHistoryEntry[])
+          ? ((parsed as Record<string, unknown>).__history as unknown[]).map(
+              normalizeProviderProbeHistoryEntry,
+            )
           : [],
       };
     }
@@ -325,6 +326,43 @@ function readProbeStore(): ProviderProbeStore {
   } catch {
     return { latestByProfile: {}, history: [] };
   }
+}
+
+function normalizeProviderProbeHistoryEntry(
+  entry: unknown,
+): ProviderProbeHistoryEntry {
+  const raw = entry as Partial<
+    ProviderProbeHistoryEntry & {
+      providerId?: string;
+      result?: {
+        ok?: boolean;
+        latencyMs?: number;
+        errorMessage?: string;
+        capabilities?: ProviderCapabilitiesResult;
+        timestamp?: Date | string;
+      };
+    }
+  >;
+  const caps = raw.result?.capabilities;
+  return {
+    profileId: raw.profileId,
+    provider: (raw.provider || raw.providerId || 'unknown') as AgentProvider,
+    model: String(raw.model || ''),
+    ok: Boolean(raw.ok ?? raw.result?.ok),
+    latencyMs: raw.latencyMs ?? raw.result?.latencyMs,
+    streaming: Boolean(raw.streaming ?? caps?.streaming),
+    streamingSupport: Boolean(
+      raw.streamingSupport ?? raw.streaming ?? caps?.streaming,
+    ),
+    toolSupport: Boolean(raw.toolSupport ?? caps?.toolCalls),
+    schemaSupport: Boolean(raw.schemaSupport ?? caps?.structuredOutput),
+    visionSupport: Boolean(raw.visionSupport ?? caps?.vision),
+    contextWindow: Number(raw.contextWindow ?? caps?.contextWindow ?? 0),
+    errorDetail: raw.errorDetail || raw.result?.errorMessage,
+    timestamp: String(
+      raw.timestamp || raw.result?.timestamp || new Date(0).toISOString(),
+    ),
+  };
 }
 
 function writeStoredProbes(probes: Record<string, ProviderProbeResult>): void {
@@ -376,6 +414,17 @@ function appendProbeHistory(result: ProviderProbeResult): void {
     latestByProfile: store.latestByProfile,
     history: [...other, ...same, entry],
   });
+}
+
+function failedCheckErrorDetail(
+  checks: ProviderProbeCheck[],
+): string | undefined {
+  const failed = checks.filter((check) => !check.ok);
+  if (failed.length === 0) return undefined;
+  return failed
+    .map((check) => check.detail || check.label)
+    .filter(Boolean)
+    .join('; ');
 }
 
 function providerApiKey(provider: AgentProvider): string {
@@ -703,6 +752,8 @@ export async function runLiveProviderProbe(
     // Live capability probe is non-critical; fall through with static capabilities
   }
 
+  const errorDetail =
+    errors.length > 0 ? errors.join('; ') : failedCheckErrorDetail(checks);
   const result: ProviderProbeResult = {
     ...staticProbe,
     ok: checks.every((check) => check.ok),
@@ -712,7 +763,7 @@ export async function runLiveProviderProbe(
     latencyMs: Date.now() - startedAt,
     capabilities,
     errors,
-    errorDetail: errors.length ? errors.join('; ') : undefined,
+    errorDetail,
     recommendedPurposes: recommendedPurposes(capabilities),
   };
   const probes = readStoredProbes();

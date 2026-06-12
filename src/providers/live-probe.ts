@@ -11,6 +11,7 @@ export interface LiveProbeResult {
   validated: boolean;
   ok: boolean;
   status: 'success' | 'failed' | 'timeout';
+  latencyMs?: number;
   errorMessage?: string;
   timestamp: Date;
 }
@@ -31,10 +32,18 @@ export interface LiveProbeStatus {
 }
 
 export interface ProbeHistoryEntry {
-  providerId: string;
   provider: string;
   model: string;
-  result: LiveProbeResult;
+  profileId?: string;
+  ok: boolean;
+  latencyMs?: number;
+  streaming?: boolean;
+  streamingSupport: boolean;
+  toolSupport: boolean;
+  schemaSupport: boolean;
+  visionSupport: boolean;
+  contextWindow: number;
+  errorDetail?: string;
   timestamp: string;
 }
 
@@ -56,18 +65,52 @@ function readProbeHistory(): ProbeHistoryEntry[] {
   try {
     const raw = fs.readFileSync(PROBE_HISTORY_PATH, 'utf-8');
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed)) return parsed.map(normalizeProbeHistoryEntry);
     if (
       parsed &&
       typeof parsed === 'object' &&
       Array.isArray((parsed as ProbeHistoryStore).history)
     ) {
-      return (parsed as ProbeHistoryStore).history;
+      return (parsed as ProbeHistoryStore).history.map(
+        normalizeProbeHistoryEntry,
+      );
     }
     return [];
   } catch {
     return [];
   }
+}
+
+function normalizeProbeHistoryEntry(entry: unknown): ProbeHistoryEntry {
+  const raw = entry as Partial<
+    ProbeHistoryEntry & {
+      providerId?: string;
+      result?: LiveProbeResult;
+    }
+  >;
+  const result = raw.result;
+  const capabilities = result?.capabilities;
+  return {
+    provider: String(raw.provider || raw.providerId || ''),
+    model: String(raw.model || result?.model || ''),
+    profileId: raw.profileId,
+    ok: Boolean(raw.ok ?? result?.ok),
+    latencyMs: raw.latencyMs ?? result?.latencyMs,
+    streaming: Boolean(raw.streaming ?? capabilities?.streaming),
+    streamingSupport: Boolean(
+      raw.streamingSupport ?? raw.streaming ?? capabilities?.streaming,
+    ),
+    toolSupport: Boolean(raw.toolSupport ?? capabilities?.toolCalls),
+    schemaSupport: Boolean(raw.schemaSupport ?? capabilities?.structuredOutput),
+    visionSupport: Boolean(raw.visionSupport ?? capabilities?.vision),
+    contextWindow: Number(
+      raw.contextWindow ?? capabilities?.contextWindow ?? 0,
+    ),
+    errorDetail: raw.errorDetail || result?.errorMessage,
+    timestamp: String(
+      raw.timestamp || result?.timestamp || new Date(0).toISOString(),
+    ),
+  };
 }
 
 function writeProbeHistory(entries: ProbeHistoryEntry[]): void {
@@ -97,10 +140,10 @@ function pruneHistory(
   model: string,
 ): ProbeHistoryEntry[] {
   const other = entries.filter(
-    (e) => e.providerId !== providerId || e.model !== model,
+    (e) => e.provider !== providerId || e.model !== model,
   );
   const self = entries
-    .filter((e) => e.providerId === providerId && e.model === model)
+    .filter((e) => e.provider === providerId && e.model === model)
     .slice(-(MAX_HISTORY_PER_MODEL - 1));
   return [...other, ...self];
 }
@@ -144,10 +187,17 @@ export class LiveProbeService {
   ): void {
     const entries = readProbeHistory();
     const entry: ProbeHistoryEntry = {
-      providerId,
       provider: providerId,
       model,
-      result,
+      ok: result.ok,
+      latencyMs: result.latencyMs,
+      streaming: result.capabilities.streaming,
+      streamingSupport: result.capabilities.streaming,
+      toolSupport: result.capabilities.toolCalls,
+      schemaSupport: result.capabilities.structuredOutput,
+      visionSupport: result.capabilities.vision,
+      contextWindow: result.capabilities.contextWindow,
+      errorDetail: result.errorMessage,
       timestamp: new Date().toISOString(),
     };
     const pruned = pruneHistory(entries, providerId, model);
@@ -167,7 +217,7 @@ export class LiveProbeService {
     const entries = readProbeHistory();
     let filtered = entries;
     if (providerId) {
-      filtered = filtered.filter((e) => e.providerId === providerId);
+      filtered = filtered.filter((e) => e.provider === providerId);
     }
     if (model) {
       filtered = filtered.filter((e) => e.model === model);
@@ -193,11 +243,13 @@ export class LiveProbeService {
     providerId: string,
     model: string,
   ): Promise<LiveProbeResult> {
+    const startedAt = Date.now();
     const cached = this.getCached(providerId, model);
     if (cached) return cached;
 
     const provider = getProviderById(providerId);
     if (!provider) {
+      const timestamp = new Date();
       const result: LiveProbeResult = {
         model,
         capabilities: {
@@ -215,7 +267,8 @@ export class LiveProbeService {
         ok: false,
         status: 'failed',
         errorMessage: `Provider '${providerId}' not found in registry`,
-        timestamp: new Date(),
+        timestamp,
+        latencyMs: Date.now() - startedAt,
       };
       this.setCache(providerId, model, result);
       this.appendHistory(providerId, model, result);
@@ -235,12 +288,14 @@ export class LiveProbeService {
         ok: validated,
         status: 'success',
         timestamp: new Date(),
+        latencyMs: Date.now() - startedAt,
       };
       this.setCache(providerId, model, result);
       this.appendHistory(providerId, model, result);
       return result;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
+      const timestamp = new Date();
       const result: LiveProbeResult = {
         model,
         capabilities: {
@@ -258,7 +313,8 @@ export class LiveProbeService {
         ok: false,
         status: 'failed',
         errorMessage,
-        timestamp: new Date(),
+        timestamp,
+        latencyMs: Date.now() - startedAt,
       };
       this.appendHistory(providerId, model, result);
       const key = this.cacheKey(providerId, model);
