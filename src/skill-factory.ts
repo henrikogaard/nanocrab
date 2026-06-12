@@ -180,6 +180,16 @@ function suggestionDescription(intent: string): string {
   return `Reusable workflow for ${intent}.`;
 }
 
+function assertSuggestionDecision(
+  decision: string,
+): asserts decision is SkillSuggestionOwnerDecision {
+  if (!['create-draft', 'reject', 'defer'].includes(decision)) {
+    throw new Error(
+      'suggestion decision must be create-draft, reject, or defer',
+    );
+  }
+}
+
 function looksSkillWorthySuggestion(text: string): boolean {
   return /\b(always|never|when i ask|please|workflow|use this|default)\b/i.test(
     text,
@@ -217,7 +227,7 @@ function listAllSuggestions(): SkillSuggestion[] {
 function buildSuggestionDraftMarkdown(suggestion: SkillSuggestion): string {
   const examples = suggestion.sourceExamples
     .slice(0, 5)
-    .map((example) => `- ${example}`)
+    .map((example) => example.replace(/```/g, "'''"))
     .join('\n');
   return `---
 name: ${suggestion.proposedSkillName}
@@ -237,7 +247,9 @@ ${suggestion.description}
 
 ## Source Examples
 
+~~~text
 ${examples}
+~~~
 `;
 }
 
@@ -361,6 +373,10 @@ export function approveSkillSuggestion(
   const suggestion = readSuggestion(id);
   if (!suggestion) throw new Error(`Skill suggestion not found: ${id}`);
   const decision = input.decision || 'create-draft';
+  assertSuggestionDecision(decision);
+  if (suggestion.status !== 'pending') {
+    throw new Error('Skill suggestion must be pending before review');
+  }
   suggestion.ownerDecision = decision;
   suggestion.reviewedAt = new Date().toISOString();
   if (decision === 'reject') {

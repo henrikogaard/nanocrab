@@ -135,6 +135,49 @@ describe('skill factory', () => {
     expect(listSkillSuggestions({ status: 'approved' })).toHaveLength(1);
   });
 
+  it('rejects invalid suggestion decisions without creating a draft', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      messages: [
+        'When I ask for release notes, summarize commits and risks.',
+        'Please summarize commits and risks for release notes.',
+        'Always summarize commits and risks in release notes.',
+      ],
+      createdBy: 'test',
+    });
+
+    expect(() =>
+      approveSkillSuggestion(suggestions[0].id, {
+        decidedBy: 'owner',
+        decision: 'ship-it' as any,
+      }),
+    ).toThrow('decision');
+    expect(listSkillDrafts()).toHaveLength(0);
+    expect(listSkillSuggestions({ status: 'pending' })).toHaveLength(1);
+  });
+
+  it('rejects duplicate suggestion approval without creating another draft', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      messages: [
+        'When I ask for release notes, summarize commits and risks.',
+        'Please summarize commits and risks for release notes.',
+        'Always summarize commits and risks in release notes.',
+      ],
+      createdBy: 'test',
+    });
+    approveSkillSuggestion(suggestions[0].id, {
+      decidedBy: 'owner',
+      decision: 'create-draft',
+    });
+
+    expect(() =>
+      approveSkillSuggestion(suggestions[0].id, {
+        decidedBy: 'owner',
+        decision: 'create-draft',
+      }),
+    ).toThrow('pending');
+    expect(listSkillDrafts('pending')).toHaveLength(1);
+  });
+
   it('does not lower the skill suggestion threshold below three examples', () => {
     const suggestions = detectAndQueueSkillSuggestions({
       messages: [

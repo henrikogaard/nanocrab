@@ -138,6 +138,16 @@ function refreshSkillSuggestionQueue(): void {
   });
 }
 
+function parseSuggestionDecision(value: unknown) {
+  if (value === undefined || value === null || value === '') {
+    return 'create-draft';
+  }
+  if (value === 'create-draft' || value === 'reject' || value === 'defer') {
+    return value;
+  }
+  throw new Error('suggestion decision must be create-draft, reject, or defer');
+}
+
 router.get('/', (_req: Request, res: Response) => {
   res.json({ installed: listSkillRegistry(), available: [] });
 });
@@ -181,13 +191,15 @@ router.post('/suggestions/:id/approve', (req: Request, res: Response) => {
   try {
     const suggestion = approveSkillSuggestion(req.params.id as string, {
       decidedBy: String(req.body?.decidedBy || 'dashboard'),
-      decision: req.body?.decision || 'create-draft',
+      decision: parseSuggestionDecision(req.body?.decision),
     });
     auditLog(req, 'skill_suggestion_approved', suggestion.proposedSkillName);
     res.json({ ok: true, suggestion });
   } catch (err) {
-    res.status(404).json({
-      error: err instanceof Error ? err.message : String(err),
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message.includes('not found') ? 404 : 400;
+    res.status(status).json({
+      error: message,
     });
   }
 });
