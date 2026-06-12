@@ -18,7 +18,7 @@ import { readEnvFile } from './env.js';
 import {
   createApproval,
   findPendingApprovalForTarget,
-  hasApprovedTarget,
+  listApprovals,
 } from './approvals.js';
 import { liveProbeService } from './providers/live-probe.js';
 import type { ProviderCapabilitiesResult } from './providers/openai-responses/provider.js';
@@ -974,7 +974,12 @@ function profileUnavailabilityReason(profile: ProviderProfile): string | null {
     return `invalid model ${profile.provider}/${profile.model}`;
   }
   const storedProbe = readStoredProbes()[profile.id];
-  if (storedProbe?.live && storedProbe.ok === false) {
+  if (
+    storedProbe?.live &&
+    storedProbe.provider === profile.provider &&
+    storedProbe.model === profile.model &&
+    storedProbe.ok === false
+  ) {
     const detail =
       storedProbe.errorDetail ||
       storedProbe.errors?.join('; ') ||
@@ -985,11 +990,46 @@ function profileUnavailabilityReason(profile: ProviderProfile): string | null {
   return null;
 }
 
+function providerFallbackTargetId(input: {
+  source: ProviderProfile;
+  target: ProviderProfile;
+  action: FallbackAction;
+}): string {
+  return `${input.source.id}:${input.source.provider}/${input.source.model}->${input.target.id}:${input.target.provider}/${input.target.model}:${input.action}`;
+}
+
+function hasApprovedProviderFallback(input: {
+  source: ProviderProfile;
+  target: ProviderProfile;
+  action: FallbackAction;
+  targetId: string;
+}): boolean {
+  return listApprovals({
+    kind: 'provider-fallback',
+    status: 'approved',
+    targetType: 'provider-profile',
+    targetId: input.targetId,
+  }).some((approval) => {
+    const payload = approval.payload || {};
+    return (
+      payload.sourceProfileId === input.source.id &&
+      payload.targetProfileId === input.target.id &&
+      payload.sourceProvider === input.source.provider &&
+      payload.sourceModel === input.source.model &&
+      payload.targetProvider === input.target.provider &&
+      payload.targetModel === input.target.model &&
+      payload.action === input.action
+    );
+  });
+}
+
 export function resolveProviderFallbackForAction(input: {
   purpose: ProviderPurpose;
   action: FallbackAction;
   requester: string;
   correlationId?: string | null;
+  sourceProvider?: AgentProvider;
+  sourceModel?: string;
 }):
   | {
       approved: true;
@@ -1006,28 +1046,38 @@ export function resolveProviderFallbackForAction(input: {
     };
   }
 
-  const sourceUnavailableReason = profileUnavailabilityReason(source);
+  const requestedSource: ProviderProfile = {
+    ...source,
+    provider: input.sourceProvider || source.provider,
+    model:
+      input.sourceModel ||
+      (input.sourceProvider
+        ? DEFAULT_AGENT_MODELS[input.sourceProvider]
+        : source.model),
+  };
+
+  const sourceUnavailableReason = profileUnavailabilityReason(requestedSource);
   if (!sourceUnavailableReason) {
     return {
       approved: true,
-      profile: source,
-      provider: source.provider,
-      model: source.model,
+      profile: requestedSource,
+      provider: requestedSource.provider,
+      model: requestedSource.model,
     };
   }
 
-  if (!source.fallbackProfileId) {
+  if (!requestedSource.fallbackProfileId) {
     return {
       approved: false,
       reason: `${sourceUnavailableReason} and no fallback profile is configured`,
     };
   }
 
-  const target = getProviderProfile(source.fallbackProfileId);
+  const target = getProviderProfile(requestedSource.fallbackProfileId);
   if (!target) {
     return {
       approved: false,
-      reason: `fallback profile not found: ${source.fallbackProfileId}`,
+      reason: `fallback profile not found: ${requestedSource.fallbackProfileId}`,
     };
   }
   const targetUnavailableReason = profileUnavailabilityReason(target);
@@ -1039,7 +1089,7 @@ export function resolveProviderFallbackForAction(input: {
   }
 
   const decision = providerCanFallback({
-    source,
+    source: requestedSource,
     target,
     action: input.action,
     capabilities: getProviderCapabilities(target.provider),
@@ -1061,8 +1111,19 @@ export function resolveProviderFallbackForAction(input: {
     };
   }
 
-  const targetId = `${source.id}->${target.id}:${input.action}`;
-  if (hasApprovedTarget('provider-fallback', 'provider-profile', targetId)) {
+  const targetId = providerFallbackTargetId({
+    source: requestedSource,
+    target,
+    action: input.action,
+  });
+  if (
+    hasApprovedProviderFallback({
+      source: requestedSource,
+      target,
+      action: input.action,
+      targetId,
+    })
+  ) {
     return {
       approved: true,
       profile: target,
@@ -1087,20 +1148,20 @@ export function resolveProviderFallbackForAction(input: {
   const approval = createApproval({
     kind: 'provider-fallback',
     title: 'Approve provider fallback',
-    summary: `Allow ${source.label} to fall back from ${source.provider}/${source.model} to ${target.provider}/${target.model} for ${input.action}.`,
+    summary: `Allow ${requestedSource.label} to fall back from ${requestedSource.provider}/${requestedSource.model} to ${target.provider}/${target.model} for ${input.action}.`,
     risk: input.action === 'read' ? 'medium' : 'high',
     requester: input.requester,
     targetType: 'provider-profile',
     targetId,
     source: 'provider-router',
     correlationId: input.correlationId || null,
-    actionPreview: `${source.provider}/${source.model} -> ${target.provider}/${target.model}`,
+    actionPreview: `${requestedSource.provider}/${requestedSource.model} -> ${target.provider}/${target.model}`,
     resourceSummary: `${input.purpose} provider fallback`,
     payload: {
-      sourceProfileId: source.id,
+      sourceProfileId: requestedSource.id,
       targetProfileId: target.id,
-      sourceProvider: source.provider,
-      sourceModel: source.model,
+      sourceProvider: requestedSource.provider,
+      sourceModel: requestedSource.model,
       targetProvider: target.provider,
       targetModel: target.model,
       action: input.action,

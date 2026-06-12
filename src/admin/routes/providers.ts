@@ -15,6 +15,7 @@ import {
   getStoredProviderProbes,
   getProviderProbeHistory,
 } from '../../provider-router.js';
+import { isFallbackAction } from '../../providers/fallback-policy.js';
 import {
   runAllProbes,
   getProbeHealth,
@@ -444,17 +445,40 @@ router.post('/fallback-approval', (req: Request, res: Response) => {
       .json({ error: 'sourceProfileId and targetProfileId required' });
     return;
   }
-  const targetId = `${sourceProfileId}->${targetProfileId}:${action}`;
+  if (!isFallbackAction(action)) {
+    res.status(400).json({ error: 'action must be a known fallback action' });
+    return;
+  }
+  const profiles = loadProviderProfiles();
+  const sourceProfile = profiles.find(
+    (profile) => profile.id === sourceProfileId,
+  );
+  const targetProfile = profiles.find(
+    (profile) => profile.id === targetProfileId,
+  );
+  if (!sourceProfile || !targetProfile) {
+    res.status(400).json({ error: 'source and target profiles must exist' });
+    return;
+  }
+  const targetId = `${sourceProfile.id}:${sourceProfile.provider}/${sourceProfile.model}->${targetProfile.id}:${targetProfile.provider}/${targetProfile.model}:${action}`;
   const approval = createApproval({
     kind: 'provider-fallback',
     title: 'Approve provider fallback',
-    summary: `Allow ${sourceProfileId} to fall back to ${targetProfileId} for ${action} work.`,
+    summary: `Allow ${sourceProfile.label} to fall back from ${sourceProfile.provider}/${sourceProfile.model} to ${targetProfile.provider}/${targetProfile.model} for ${action} work.`,
     risk: action === 'read' ? 'low' : 'high',
     requester: req.user?.username || 'dashboard',
     targetType: 'provider-profile',
     targetId,
     source: 'dashboard',
-    payload: { sourceProfileId, targetProfileId, action },
+    payload: {
+      sourceProfileId: sourceProfile.id,
+      targetProfileId: targetProfile.id,
+      sourceProvider: sourceProfile.provider,
+      sourceModel: sourceProfile.model,
+      targetProvider: targetProfile.provider,
+      targetModel: targetProfile.model,
+      action,
+    },
   });
   auditLog(req, 'provider_fallback_approval_requested', approval.id);
   res.json({ ok: true, approval });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { FallbackPolicyManager } from './fallback-policy.js';
+import { FallbackPolicyManager, isFallbackAction } from './fallback-policy.js';
 import type { FallbackAction, FallbackDecision } from './fallback-policy.js';
 
 function makePolicy(
@@ -350,5 +350,14 @@ describe('FallbackPolicyManager', () => {
       expect(result.allowed).toBe(false);
       expect(result.requiresApproval).toBe(true);
     });
+  });
+});
+
+describe('isFallbackAction', () => {
+  it('accepts known fallback actions and rejects arbitrary route input', () => {
+    expect(isFallbackAction('pr-creation')).toBe(true);
+    expect(isFallbackAction('external-message')).toBe(true);
+    expect(isFallbackAction('delete-everything')).toBe(false);
+    expect(isFallbackAction(null)).toBe(false);
   });
 });

@@ -264,6 +264,8 @@ describe('container-runner provider fallback metadata', () => {
       testGroup,
       {
         ...testInput,
+        provider: 'openrouter',
+        model: 'openrouter/auto',
         providerFallbackPurpose: 'default_chat',
         providerFallbackAction: 'external-message',
       },
@@ -281,6 +283,8 @@ describe('container-runner provider fallback metadata', () => {
       action: 'external-message',
       requester: 'test-group',
       correlationId: null,
+      sourceProvider: 'openrouter',
+      sourceModel: 'openrouter/auto',
     });
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       '/tmp/nanocrab-env-test/env',

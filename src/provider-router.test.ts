@@ -312,10 +312,12 @@ describe('provider-router persistence', () => {
       throw new Error('write-capable fallback should require approval');
     }
     expect(decision.approvalId).toEqual(expect.any(String));
+    const targetId =
+      'default_coding:codex/gpt-5.4->default_chat:openrouter/openrouter/auto:coding-implementation';
     const approvals = listApprovals({
       kind: 'provider-fallback',
       targetType: 'provider-profile',
-      targetId: 'default_coding->default_chat:coding-implementation',
+      targetId,
     });
     expect(approvals).toHaveLength(1);
     expect(approvals[0]).toMatchObject({
@@ -324,7 +326,7 @@ describe('provider-router persistence', () => {
       requester: 'provider-router-test',
       correlationId: 'job-123',
       targetType: 'provider-profile',
-      targetId: 'default_coding->default_chat:coding-implementation',
+      targetId,
     });
     expect(approvals[0].payload).toMatchObject({
       sourceProfileId: 'default_coding',
@@ -385,7 +387,8 @@ describe('provider-router persistence', () => {
       listApprovals({
         kind: 'provider-fallback',
         targetType: 'provider-profile',
-        targetId: 'default_coding->default_chat:coding-implementation',
+        targetId:
+          'default_coding:codex/not-a-codex-model->default_chat:openrouter/openrouter/auto:coding-implementation',
       }),
     ).toHaveLength(1);
   });
@@ -444,7 +447,8 @@ describe('provider-router persistence', () => {
       listApprovals({
         kind: 'provider-fallback',
         targetType: 'provider-profile',
-        targetId: 'default_chat->default_reports:external-message',
+        targetId:
+          'default_chat:openrouter/openrouter/auto->default_reports:google/gemini-2.5-flash:external-message',
       }),
     ).toHaveLength(1);
   });
@@ -505,9 +509,135 @@ describe('provider-router persistence', () => {
       listApprovals({
         kind: 'provider-fallback',
         targetType: 'provider-profile',
-        targetId: 'default_chat->default_reports:read',
+        targetId:
+          'default_chat:ollama/gemma4:e2b->default_reports:google/gemini-2.5-flash:read',
       }),
     ).toHaveLength(1);
+  });
+
+  it('preserves an explicitly requested provider and model when no fallback is needed', async () => {
+    const {
+      loadProviderProfiles,
+      resolveProviderFallbackForAction,
+      saveProviderProfile,
+    } = await import('./provider-router.js');
+    const chat = loadProviderProfiles().find(
+      (item) => item.id === 'default_chat',
+    )!;
+    const reports = loadProviderProfiles().find(
+      (item) => item.id === 'default_reports',
+    )!;
+    saveProviderProfile({
+      ...chat,
+      provider: 'codex',
+      model: 'not-a-codex-model',
+      fallbackProfileId: 'default_reports',
+    });
+    saveProviderProfile({
+      ...reports,
+      provider: 'google',
+      model: 'gemini-2.5-flash',
+      fallbackProfileId: null,
+    });
+
+    const decision = resolveProviderFallbackForAction({
+      purpose: 'default_chat',
+      action: 'external-message',
+      requester: 'provider-router-test',
+      sourceProvider: 'openrouter',
+      sourceModel: 'openrouter/auto',
+    });
+
+    expect(decision).toMatchObject({
+      approved: true,
+      provider: 'openrouter',
+      model: 'openrouter/auto',
+    });
+  });
+
+  it('requires a new approval when a previously approved fallback changes provider or model', async () => {
+    const agentProvider = await import('./agent-provider.js');
+    vi.mocked(agentProvider.getProviderAvailability).mockReturnValue({
+      claude: true,
+      codex: false,
+      opencode: true,
+      ollama: true,
+      openrouter: true,
+      google: true,
+      'openai-responses': true,
+      'anthropic-messages': true,
+      gemini: true,
+      mistral: true,
+      'openai-compatible': true,
+    } as never);
+    const {
+      loadProviderProfiles,
+      resolveProviderFallbackForAction,
+      saveProviderProfile,
+    } = await import('./provider-router.js');
+    const { listApprovals, reviewApproval } = await import('./approvals.js');
+    const chat = loadProviderProfiles().find(
+      (item) => item.id === 'default_chat',
+    )!;
+    const coding = loadProviderProfiles().find(
+      (item) => item.id === 'default_coding',
+    )!;
+    saveProviderProfile({
+      ...chat,
+      provider: 'openrouter',
+      model: 'openrouter/auto',
+      toolPolicy: 'read-only',
+      fallbackProfileId: null,
+    });
+    saveProviderProfile({
+      ...coding,
+      provider: 'codex',
+      model: 'gpt-5.4',
+      toolPolicy: 'approval-required',
+      fallbackProfileId: 'default_chat',
+    });
+
+    const first = resolveProviderFallbackForAction({
+      purpose: 'default_coding',
+      action: 'coding-implementation',
+      requester: 'provider-router-test',
+    });
+    if (first.approved || !first.approvalId) {
+      throw new Error('first fallback should request approval');
+    }
+    reviewApproval(first.approvalId, 'approved', 'provider-router-test');
+    expect(
+      resolveProviderFallbackForAction({
+        purpose: 'default_coding',
+        action: 'coding-implementation',
+        requester: 'provider-router-test',
+      }),
+    ).toMatchObject({ approved: true, provider: 'openrouter' });
+
+    saveProviderProfile({
+      ...chat,
+      provider: 'google',
+      model: 'gemini-2.5-flash',
+      toolPolicy: 'read-only',
+      fallbackProfileId: null,
+    });
+
+    const second = resolveProviderFallbackForAction({
+      purpose: 'default_coding',
+      action: 'coding-implementation',
+      requester: 'provider-router-test',
+    });
+
+    if (second.approved) {
+      throw new Error('changed fallback target should require new approval');
+    }
+    expect(second.approvalId).toEqual(expect.any(String));
+    expect(
+      listApprovals({
+        kind: 'provider-fallback',
+        targetType: 'provider-profile',
+      }),
+    ).toHaveLength(2);
   });
 
   it('classifies provider purposes into fallback actions', async () => {

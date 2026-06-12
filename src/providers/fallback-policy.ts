@@ -52,6 +52,18 @@ const DANGEROUS_ACTIONS: Set<FallbackAction> = new Set([
   'automation-execution',
   'skill-installation',
 ]);
+const FALLBACK_ACTIONS: Set<FallbackAction> = new Set([
+  ...READ_ACTIONS,
+  ...WRITE_ACTIONS,
+  ...DANGEROUS_ACTIONS,
+  'provider-fallback',
+]);
+
+export function isFallbackAction(value: unknown): value is FallbackAction {
+  return (
+    typeof value === 'string' && FALLBACK_ACTIONS.has(value as FallbackAction)
+  );
+}
 
 export class FallbackPolicyManager {
   private approvalCache: Map<string, { approved: boolean; expiresAt: number }>;

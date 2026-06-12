@@ -586,6 +586,8 @@ export async function runContainerAgent(
       action: input.providerFallbackAction,
       requester: input.groupFolder,
       correlationId: input.sessionId || null,
+      sourceProvider: effectiveProvider,
+      sourceModel: effectiveModel,
     });
     if (!fallback.approved) {
       return {

@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('./container-runner.js', () => ({
+  runContainerAgent: vi.fn(async () => ({ status: 'success', result: null })),
+  writeTasksSnapshot: vi.fn(),
+}));
+
 import { _initTestDatabase, createTask, getTaskById } from './db.js';
 import {
   _resetSchedulerLoopForTests,
   computeNextRun,
   startSchedulerLoop,
 } from './task-scheduler.js';
+import { runContainerAgent } from './container-runner.js';
 
 describe('task scheduler', () => {
   beforeEach(() => {
@@ -50,6 +56,58 @@ describe('task scheduler', () => {
 
     const task = getTaskById('task-invalid-folder');
     expect(task?.status).toBe('paused');
+  });
+
+  it('classifies scheduled task provider fallback as automation execution even for read-default profiles', async () => {
+    createTask({
+      id: 'task-report-profile',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      prompt: 'send the scheduled summary',
+      provider_profile_id: 'default_reports',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+    const enqueueTask = vi.fn(
+      (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+        void fn();
+      },
+    );
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask,
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(runContainerAgent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        providerFallbackPurpose: 'default_reports',
+        providerFallbackAction: 'automation-execution',
+      }),
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it('computeNextRun anchors interval tasks to scheduled time to prevent drift', () => {
