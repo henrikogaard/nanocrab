@@ -3113,3 +3113,60 @@ tr {
   letter-spacing: 0.5px;
   margin-bottom: 4px;
 }
+
+/* Chat workflow — approve/deny cards */
+.chat-approval-card {
+  margin: 6px 12px;
+  border: 1px solid #f59e0b;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  font-size: 12px;
+  background: var(--surface);
+}
+
+.chat-approval-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(245, 158, 11, 0.08);
+  font-weight: 500;
+}
+
+.chat-approval-body {
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-approval-body .approval-detail {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.chat-approval-body .approval-input {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg);
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin: 6px 0;
+  max-height: 100px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.chat-approval-actions {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  justify-content: flex-end;
+}
+
+.chat-approval-actions .btn-deny {
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid #ef4444;
+}

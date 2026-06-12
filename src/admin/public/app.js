@@ -250,6 +250,32 @@ let handleWsMessage = function (msg) {
       }
     }
   }
+  if (msg.type === 'approval_request') {
+    const activeGroup = document.getElementById('chat-group-select')?.value;
+    if (msg.data.groupJid !== activeGroup) return;
+
+    const container = document.getElementById('chat-messages-area');
+    if (!container) return;
+    if (document.getElementById('approval-card-' + msg.data.id)) return;
+
+    const card = document.createElement('div');
+    card.id = 'approval-card-' + msg.data.id;
+    card.className = 'chat-approval-card';
+    card.innerHTML = `
+      <div class="chat-approval-header">&#x26A0;&#xFE0F; Approval Required</div>
+      <div class="chat-approval-body">
+        <div class="approval-detail">Tool: <strong>${esc(msg.data.tool)}</strong></div>
+        <div class="approval-detail">Reason: ${esc(msg.data.reason)}</div>
+        <div class="approval-input">${esc(prettyPrint(msg.data.input))}</div>
+      </div>
+      <div class="chat-approval-actions">
+        <button class="btn btn-sm btn-deny" onclick="denyApproval('${esc(msg.data.id)}', '${esc(msg.data.groupJid)}')">Deny</button>
+        <button class="btn btn-sm btn-primary" onclick="approveApproval('${esc(msg.data.id)}', '${esc(msg.data.groupJid)}')">Approve</button>
+      </div>
+    `;
+    container.appendChild(card);
+    container.scrollTop = container.scrollHeight;
+  }
 };
 
 // --- Auth ---
@@ -1416,6 +1442,42 @@ window.saveProvider = async function () {
 window.toggleProgressHistory = function () {
   const history = document.getElementById('chat-progress-history');
   if (history) history.classList.toggle('visible');
+};
+
+window.approveApproval = async function (id, groupJid) {
+  try {
+    await api('/chat/approve', {
+      method: 'POST',
+      body: JSON.stringify({ approvalId: id, groupJid, approved: true }),
+    });
+    const card = document.getElementById('approval-card-' + id);
+    if (card) {
+      card.querySelector('.chat-approval-header').textContent = '\u2713 Approved';
+      card.querySelector('.chat-approval-actions')?.remove();
+      card.style.borderColor = 'var(--success, #22c55e)';
+    }
+    toast('Approval granted', 'success');
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
+window.denyApproval = async function (id, groupJid) {
+  try {
+    await api('/chat/approve', {
+      method: 'POST',
+      body: JSON.stringify({ approvalId: id, groupJid, approved: false }),
+    });
+    const card = document.getElementById('approval-card-' + id);
+    if (card) {
+      card.querySelector('.chat-approval-header').textContent = '\u2717 Denied';
+      card.querySelector('.chat-approval-actions')?.remove();
+      card.style.borderColor = 'var(--error, #ef4444)';
+    }
+    toast('Approval denied', 'info');
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
 };
 
 // Channels

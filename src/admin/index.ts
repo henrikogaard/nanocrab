@@ -67,6 +67,7 @@ import agentMessagesRoutes, {
 } from './routes/agent-messages.js';
 import questionsRoutes, { initQuestionsDb } from './routes/questions.js';
 import approvalsRoutes from './routes/approvals.js';
+import chatRoutes from './routes/chat.js';
 import developerRoutes, {
   recordMonitoringSnapshot,
 } from './routes/developer.js';
@@ -231,6 +232,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/agents', requireAuth, agentMessagesRoutes);
   app.use('/api/questions', requireAuth, questionsRoutes);
   app.use('/api/approvals', requireAuth, approvalsRoutes);
+  app.use('/api/chat', requireAuth, chatRoutes);
 
   // Admin role required
   app.use('/api/mcp', requireAuth, requireRole('admin'), mcpRoutes);
