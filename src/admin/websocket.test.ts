@@ -3,13 +3,11 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-const TEST_DIR = vi.hoisted(
-  () => {
-    const os = require('os');
-    const p = require('path');
-    return p.join(os.tmpdir(), `nanocrab-term-test-${Date.now()}`);
-  },
-);
+const TEST_DIR = vi.hoisted(() => {
+  const os = require('os');
+  const p = require('path');
+  return p.join(os.tmpdir(), `nanocrab-term-test-${Date.now()}`);
+});
 
 vi.mock('../config.js', () => ({
   SESSIONS_DIR: TEST_DIR,
@@ -17,10 +15,23 @@ vi.mock('../config.js', () => ({
 }));
 
 vi.mock('../logger.js', () => ({
-  logger: { info: vi.fn(), debug: vi.fn(), error: vi.fn(), warn: vi.fn(), fatal: vi.fn() },
+  logger: {
+    info: vi.fn(),
+    debug: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    fatal: vi.fn(),
+  },
 }));
 
-import { createSessionFile, appendToSessionLog, readSessionLog, finalizeSessionFile, loadHistoricalSessions } from './websocket.js';
+import {
+  createSessionFile,
+  appendToSessionLog,
+  readSessionLog,
+  finalizeSessionFile,
+  loadHistoricalSessions,
+  broadcastCockpitSessionUpdate,
+} from './websocket.js';
 
 describe('file-backed terminal sessions', () => {
   beforeEach(() => {
@@ -33,7 +44,9 @@ describe('file-backed terminal sessions', () => {
 
   it('createSessionFile creates index entry', () => {
     createSessionFile('term-test-1');
-    const index: Array<{ id: string; endedAt: string | null }> = JSON.parse(fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8'));
+    const index: Array<{ id: string; endedAt: string | null }> = JSON.parse(
+      fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8'),
+    );
     expect(index).toHaveLength(1);
     expect(index[0].id).toBe('term-test-1');
     expect(index[0].endedAt).toBeNull();
@@ -49,8 +62,9 @@ describe('file-backed terminal sessions', () => {
     createSessionFile('term-finalize');
     appendToSessionLog('term-finalize', 'some data');
     finalizeSessionFile('term-finalize');
-    const index: Array<{ id: string; endedAt: string | null; bytes: number }> = JSON.parse(fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8'));
-    const entry = index.find(e => e.id === 'term-finalize')!;
+    const index: Array<{ id: string; endedAt: string | null; bytes: number }> =
+      JSON.parse(fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8'));
+    const entry = index.find((e) => e.id === 'term-finalize')!;
     expect(entry.endedAt).toBeTruthy();
     expect(entry.bytes).toBeGreaterThan(0);
   });
@@ -73,5 +87,18 @@ describe('file-backed terminal sessions', () => {
     appendToSessionLog('term-multi', 'line3\n');
     const content = readSessionLog('term-multi');
     expect(content).toBe('line1\nline2\nline3\n');
+  });
+
+  it('allows cockpit session updates before websocket server starts', () => {
+    expect(() =>
+      broadcastCockpitSessionUpdate({
+        id: 'run-1',
+        group: 'main',
+        status: 'running',
+        updatedAt: '2026-06-01T12:00:00Z',
+        lastEventAt: '2026-06-01T12:00:00Z',
+        currentStep: 'Running focused tests',
+      }),
+    ).not.toThrow();
   });
 });

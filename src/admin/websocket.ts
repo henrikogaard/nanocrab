@@ -61,7 +61,7 @@ function saveSessionIndex(index: SessionMetadata[]): void {
 
 export function createSessionFile(sessionId: string): void {
   let index = loadSessionIndex();
-  index = index.filter(e => e.id !== sessionId);
+  index = index.filter((e) => e.id !== sessionId);
   index.push({
     id: sessionId,
     name: sessionId,
@@ -75,7 +75,7 @@ export function createSessionFile(sessionId: string): void {
 
 export function finalizeSessionFile(sessionId: string): void {
   const index = loadSessionIndex();
-  const entry = index.find(e => e.id === sessionId);
+  const entry = index.find((e) => e.id === sessionId);
   if (entry) {
     entry.endedAt = new Date().toISOString();
     const logPath = path.join(SESSIONS_DIR, `${sessionId}.log`);
@@ -109,7 +109,9 @@ export function readSessionLog(sessionId: string): string {
 export function loadHistoricalSessions(): number {
   try {
     if (!fs.existsSync(SESSIONS_DIR)) return 0;
-    const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.log'));
+    const files = fs
+      .readdirSync(SESSIONS_DIR)
+      .filter((f) => f.endsWith('.log'));
     let count = 0;
     for (const file of files) {
       const sessionId = file.replace('.log', '');
@@ -333,7 +335,10 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
   });
 
   createSessionFile(sessionId);
-  appendToSessionLog(sessionId, `[Session started at ${new Date().toISOString()}]\r\n`);
+  appendToSessionLog(
+    sessionId,
+    `[Session started at ${new Date().toISOString()}]\r\n`,
+  );
 
   const idleTimer = setTimeout(() => {
     broadcastTerminal(
@@ -393,13 +398,15 @@ export function listTerminalSessions(): Array<{
     transcriptBytes: Buffer.byteLength(term.transcript),
     active: true,
   }));
-  const historical = [...historicalSessions.entries()].map(([id, transcript]) => ({
-    id,
-    name: id,
-    owner: 'unknown',
-    transcriptBytes: Buffer.byteLength(transcript),
-    active: false,
-  }));
+  const historical = [...historicalSessions.entries()].map(
+    ([id, transcript]) => ({
+      id,
+      name: id,
+      owner: 'unknown',
+      transcriptBytes: Buffer.byteLength(transcript),
+      active: false,
+    }),
+  );
   return [...active, ...historical];
 }
 
@@ -468,6 +475,19 @@ export function broadcastTaskProgress(data: {
   groupJid: string;
 }): void {
   broadcast({ type: 'task_progress', data });
+}
+
+export function broadcastCockpitSessionUpdate(data: {
+  id: string;
+  group: string;
+  provider?: string;
+  model?: string;
+  status: string;
+  updatedAt: string;
+  lastEventAt?: string;
+  currentStep?: string;
+}): void {
+  broadcast({ type: 'cockpit_session_update', data });
 }
 
 export function broadcastApprovalResult(data: {

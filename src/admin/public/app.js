@@ -77,7 +77,9 @@ function connectWs() {
     console.log('WS connected');
     const savedSessionId = localStorage.getItem('terminal_session_id');
     if (savedSessionId) {
-      ws.send(JSON.stringify({ type: 'terminal_attach', sessionId: savedSessionId }));
+      ws.send(
+        JSON.stringify({ type: 'terminal_attach', sessionId: savedSessionId }),
+      );
       ws.send(JSON.stringify({ type: 'terminal_spawn', data: savedSessionId }));
     }
   };
@@ -150,6 +152,9 @@ let handleWsMessage = function (msg) {
       if (feed.children.length > 20) feed.lastChild.remove();
       setTimeout(() => div.classList.remove('message-new'), 3000);
     }
+  }
+  if (msg.type === 'cockpit_session_update' && currentPage === 'dashboard') {
+    if (window.refreshCockpitDashboard) window.refreshCockpitDashboard();
   }
   if (msg.type === 'agent_question') {
     toast(
@@ -245,7 +250,10 @@ let handleWsMessage = function (msg) {
       const body = card.querySelector('.chat-tool-call-body');
       if (body) {
         const resultDiv = document.createElement('div');
-        resultDiv.innerHTML = '<div class="section-label" style="margin-top:8px">Result</div><pre>' + esc(prettyPrint(msg.data.output)) + '</pre>';
+        resultDiv.innerHTML =
+          '<div class="section-label" style="margin-top:8px">Result</div><pre>' +
+          esc(prettyPrint(msg.data.output)) +
+          '</pre>';
         body.appendChild(resultDiv);
       }
     }
@@ -793,7 +801,9 @@ async function renderMemoryConsolidated(el) {
     embedded: true,
     returnPage: 'memory',
   });
-  await renderMemoryKnowledgeTimeline(document.getElementById('mem-tabs-timeline'));
+  await renderMemoryKnowledgeTimeline(
+    document.getElementById('mem-tabs-timeline'),
+  );
   await renderWiki(document.getElementById('mem-tabs-wiki'));
 }
 
@@ -1279,8 +1289,13 @@ async function renderChat(el) {
       const history = document.getElementById('chat-progress-history');
       if (history) {
         const entry = document.createElement('div');
-        entry.className = 'phase-entry' + (msg.data.pct >= 100 ? ' done' : ' active');
-        entry.innerHTML = '<span style="font-size:10px">' + (msg.data.pct >= 100 ? '\u2713' : '\u25CF') + '</span> ' + esc(msg.data.message || msg.data.phase);
+        entry.className =
+          'phase-entry' + (msg.data.pct >= 100 ? ' done' : ' active');
+        entry.innerHTML =
+          '<span style="font-size:10px">' +
+          (msg.data.pct >= 100 ? '\u2713' : '\u25CF') +
+          '</span> ' +
+          esc(msg.data.message || msg.data.phase);
         history.appendChild(entry);
         history.classList.add('visible');
       }
@@ -1358,7 +1373,10 @@ function updateProviderBadge(groupJid) {
 
 window.toggleProviderPopover = function () {
   const existing = document.getElementById('chat-provider-popover');
-  if (existing) { existing.remove(); return; }
+  if (existing) {
+    existing.remove();
+    return;
+  }
 
   const groupJid = document.getElementById('chat-group-select')?.value;
   if (!groupJid) return;
@@ -1426,13 +1444,22 @@ window.saveProvider = async function () {
   if (!groupJid || !provider) return;
 
   try {
-    const group = window._chatGroups?.find(g => g.jid === groupJid);
+    const group = window._chatGroups?.find((g) => g.jid === groupJid);
     const existingConfig = group?.containerConfig || {};
     await api('/groups/' + encodeURIComponent(groupJid), {
       method: 'PUT',
-      body: JSON.stringify({ containerConfig: { ...existingConfig, provider, model: model || undefined } }),
+      body: JSON.stringify({
+        containerConfig: {
+          ...existingConfig,
+          provider,
+          model: model || undefined,
+        },
+      }),
     });
-    toast('Provider updated to ' + provider + '/' + (model || 'auto'), 'success');
+    toast(
+      'Provider updated to ' + provider + '/' + (model || 'auto'),
+      'success',
+    );
     document.getElementById('chat-provider-popover')?.remove();
     updateProviderBadge(groupJid);
   } catch (e) {
@@ -1453,7 +1480,8 @@ window.approveApproval = async function (id, groupJid) {
     });
     const card = document.getElementById('approval-card-' + id);
     if (card) {
-      card.querySelector('.chat-approval-header').textContent = '\u2713 Approved';
+      card.querySelector('.chat-approval-header').textContent =
+        '\u2713 Approved';
       card.querySelector('.chat-approval-actions')?.remove();
       card.style.borderColor = 'var(--success, #22c55e)';
     }
@@ -1893,7 +1921,14 @@ async function renderTasks(el) {
       'claude-sonnet-4-6',
       'claude-haiku-4-5-20251001',
     ],
-    codex: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2', 'o4-mini', 'o3-mini', 'gpt-4.1'],
+    codex: [
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.2',
+      'o4-mini',
+      'o3-mini',
+      'gpt-4.1',
+    ],
     opencode: ['opencode/grok-code-fast-1'],
     ollama: ['llama3', 'llama3.1', 'mistral', 'codestral', 'gemma4:e2b'],
     openrouter: [
@@ -2033,7 +2068,7 @@ async function renderTasks(el) {
 
   const form = document.getElementById('task-create-form');
   if (form)
-      form.onsubmit = async (e) => {
+    form.onsubmit = async (e) => {
       e.preventDefault();
       const [groupFolder, chatJid] = document
         .getElementById('task-group')
@@ -3067,7 +3102,12 @@ window.viewConversation = async (folder, filename) => {
   }
 };
 
-function memoryKnowledgeTimelineItems({ auditData, memories, drafts, limit = 25 }) {
+function memoryKnowledgeTimelineItems({
+  auditData,
+  memories,
+  drafts,
+  limit = 25,
+}) {
   const items = [];
   const seen = new Set();
   const addItem = (item) => {
@@ -3233,15 +3273,21 @@ async function renderMemoryKnowledgeTimeline(el) {
 
 // Memory
 async function renderMemory(el) {
-  const [memData, groups, auditData, structuredMemories, journalEntries, drafts] =
-    await Promise.all([
-      api('/files/memory'),
-      api('/groups'),
-      api('/audit?limit=50').catch(() => []),
-      api('/memory?limit=100').catch(() => []),
-      api('/journal/entries?limit=10').catch(() => []),
-      api('/skills/drafts').catch(() => []),
-    ]);
+  const [
+    memData,
+    groups,
+    auditData,
+    structuredMemories,
+    journalEntries,
+    drafts,
+  ] = await Promise.all([
+    api('/files/memory'),
+    api('/groups'),
+    api('/audit?limit=50').catch(() => []),
+    api('/memory?limit=100').catch(() => []),
+    api('/journal/entries?limit=10').catch(() => []),
+    api('/skills/drafts').catch(() => []),
+  ]);
 
   const timelineItems = memoryKnowledgeTimelineItems({
     auditData,
@@ -3696,7 +3742,8 @@ window.clearWebhookEvents = async () => {
 // Terminal
 async function renderTerminal(el) {
   if ((window._userRole || 'owner') !== 'owner') {
-    el.innerHTML = '<div class="card"><div class="empty">Terminal access requires owner role.</div></div>';
+    el.innerHTML =
+      '<div class="card"><div class="empty">Terminal access requires owner role.</div></div>';
     return;
   }
 
@@ -3804,10 +3851,18 @@ async function renderTerminal(el) {
   }
 
   // --- Load xterm.js ---
-  await loadCss('https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css');
-  await loadScript('https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js');
-  await loadScript('https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js');
-  await loadScript('https://cdn.jsdelivr.net/npm/@xterm/addon-search@0.16.0/lib/addon-search.min.js');
+  await loadCss(
+    'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css',
+  );
+  await loadScript(
+    'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js',
+  );
+  await loadScript(
+    'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js',
+  );
+  await loadScript(
+    'https://cdn.jsdelivr.net/npm/@xterm/addon-search@0.16.0/lib/addon-search.min.js',
+  );
 
   const term = new window.Terminal({
     cursorBlink: true,
@@ -3826,7 +3881,11 @@ async function renderTerminal(el) {
 
   // Ctrl+Shift+F inline search
   term.onKey((e) => {
-    if (e.key === 'F' && (e.domEvent.ctrlKey || e.domEvent.metaKey) && e.domEvent.shiftKey) {
+    if (
+      e.key === 'F' &&
+      (e.domEvent.ctrlKey || e.domEvent.metaKey) &&
+      e.domEvent.shiftKey
+    ) {
       const query = prompt('Search terminal (Ctrl+G next, Shift+Ctrl+G prev):');
       if (query) searchAddon.findNext(query);
     }
@@ -3881,13 +3940,17 @@ async function renderTerminal(el) {
 window.switchTermPane = function (side, tabId) {
   const tabs = document.getElementById(`pane-${side}-tabs`);
   if (!tabs) return;
-  tabs.querySelectorAll('.pane-tab').forEach(t => t.classList.remove('active'));
+  tabs
+    .querySelectorAll('.pane-tab')
+    .forEach((t) => t.classList.remove('active'));
   const tab = tabs.querySelector(`[data-tab="${tabId}"]`);
   if (tab) tab.classList.add('active');
 
   const contents = document.getElementById(`pane-${side}-content`);
   if (!contents) return;
-  contents.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+  contents
+    .querySelectorAll('.tab-content')
+    .forEach((c) => (c.style.display = 'none'));
   const target = document.getElementById(`${side}-${tabId}`);
   if (target) {
     target.style.display = '';
@@ -3902,26 +3965,30 @@ async function loadTerminalFileTree() {
   try {
     const repos = await api('/files/repos');
     if (repos.length === 0) {
-      el.innerHTML = '<div style="padding:8px;color:var(--text-muted)">No repos mounted</div>';
+      el.innerHTML =
+        '<div style="padding:8px;color:var(--text-muted)">No repos mounted</div>';
       return;
     }
     const repo = repos[0].name;
     const tree = await api(`/files/repos/${encodeURIComponent(repo)}/tree`);
     el.innerHTML = `<div class="repo-header">${esc(repo)}</div>${renderTermTree(tree, '', repo)}`;
   } catch {
-    el.innerHTML = '<div style="padding:8px;color:var(--text-muted)">Failed to load</div>';
+    el.innerHTML =
+      '<div style="padding:8px;color:var(--text-muted)">Failed to load</div>';
   }
 }
 
 function renderTermTree(items, prefix, repo) {
   if (!items || !Array.isArray(items)) return '';
-  return items.map(item => {
-    const fullPath = prefix ? `${prefix}/${item.name}` : item.name;
-    if (item.type === 'dir') {
-      return `<details style="padding-left:10px"><summary style="cursor:pointer;padding:2px 0;font-size:12px;color:var(--text-secondary);list-style:none">${esc(item.name)}/</summary>${renderTermTree(item.children || [], fullPath, repo)}</details>`;
-    }
-    return `<div class="tree-item" onclick="openTermFile('${esc(repo)}','${esc(fullPath)}')">${esc(item.name)}</div>`;
-  }).join('');
+  return items
+    .map((item) => {
+      const fullPath = prefix ? `${prefix}/${item.name}` : item.name;
+      if (item.type === 'dir') {
+        return `<details style="padding-left:10px"><summary style="cursor:pointer;padding:2px 0;font-size:12px;color:var(--text-secondary);list-style:none">${esc(item.name)}/</summary>${renderTermTree(item.children || [], fullPath, repo)}</details>`;
+      }
+      return `<div class="tree-item" onclick="openTermFile('${esc(repo)}','${esc(fullPath)}')">${esc(item.name)}</div>`;
+    })
+    .join('');
 }
 
 window.openTermFile = function (repo, path) {
@@ -3939,9 +4006,10 @@ async function loadTerminalLogs() {
   if (!el) return;
   try {
     const logs = await api('/logs/system?lines=100');
-    el.innerHTML = logs.lines && logs.lines.length
-      ? logs.lines.map(l => colorizeLog([l])).join('\n')
-      : 'No log entries';
+    el.innerHTML =
+      logs.lines && logs.lines.length
+        ? logs.lines.map((l) => colorizeLog([l])).join('\n')
+        : 'No log entries';
     el.scrollTop = el.scrollHeight;
   } catch {
     el.innerHTML = 'Failed to load logs';
@@ -5016,7 +5084,8 @@ window.viewSession = async function (group, sessionId) {
 window.renderSessionDetail = async function (el) {
   const params = window._sessionDetailParams;
   if (!params || !params.group || !params.sessionId) {
-    el.innerHTML = '<div class="card"><div class="empty">No session specified</div></div>';
+    el.innerHTML =
+      '<div class="card"><div class="empty">No session specified</div></div>';
     return;
   }
 
@@ -5036,7 +5105,9 @@ window.renderSessionDetail = async function (el) {
   `;
 
   try {
-    const data = await api(`/sessions/${encodeURIComponent(params.group)}/${encodeURIComponent(params.sessionId)}/detail`);
+    const data = await api(
+      `/sessions/${encodeURIComponent(params.group)}/${encodeURIComponent(params.sessionId)}/detail`,
+    );
     const transcriptEl = document.getElementById('session-transcript');
     if (transcriptEl) transcriptEl.dataset.stats = JSON.stringify(data.stats);
     renderSessionStats(data.stats);
@@ -5062,7 +5133,9 @@ const DEFAULT_STATS_VISIBILITY = {
 function getStatVisibility() {
   try {
     const saved = localStorage.getItem('session_stat_visibility');
-    return saved ? { ...DEFAULT_STATS_VISIBILITY, ...JSON.parse(saved) } : DEFAULT_STATS_VISIBILITY;
+    return saved
+      ? { ...DEFAULT_STATS_VISIBILITY, ...JSON.parse(saved) }
+      : DEFAULT_STATS_VISIBILITY;
   } catch {
     return DEFAULT_STATS_VISIBILITY;
   }
@@ -5082,16 +5155,31 @@ function renderSessionStats(stats) {
     duration: { label: 'Duration', value: formatDuration(stats.duration) },
     tools: { label: 'Tools', value: stats.toolCount },
     model: { label: 'Model', value: stats.model },
-    tokens: { label: 'Tokens', value: stats.tokenCount ? stats.tokenCount.toLocaleString() : null },
-    cost: { label: 'Cost', value: stats.cost ? '$' + stats.cost.toFixed(2) : null },
+    tokens: {
+      label: 'Tokens',
+      value: stats.tokenCount ? stats.tokenCount.toLocaleString() : null,
+    },
+    cost: {
+      label: 'Cost',
+      value: stats.cost ? '$' + stats.cost.toFixed(2) : null,
+    },
     errors: { label: 'Errors', value: stats.errorCount || null },
-    sessionId: { label: 'Session', value: stats.id ? stats.id.slice(0, 8) + '...' : null },
-    created: { label: 'Created', value: stats.createdAt ? formatTime(stats.createdAt) : null },
+    sessionId: {
+      label: 'Session',
+      value: stats.id ? stats.id.slice(0, 8) + '...' : null,
+    },
+    created: {
+      label: 'Created',
+      value: stats.createdAt ? formatTime(stats.createdAt) : null,
+    },
   };
 
   const visibleStats = Object.entries(statDefs)
     .filter(([key, def]) => visibility[key] && def.value !== null)
-    .map(([key, def]) => `<span class="session-stat"><span class="session-stat-label">${def.label}:</span><span class="session-stat-value">${esc(String(def.value))}</span></span>`)
+    .map(
+      ([key, def]) =>
+        `<span class="session-stat"><span class="session-stat-label">${def.label}:</span><span class="session-stat-value">${esc(String(def.value))}</span></span>`,
+    )
     .join('');
 
   el.innerHTML = `
@@ -5112,17 +5200,24 @@ function formatDuration(seconds) {
 
 window.toggleStatsMenu = function () {
   const existing = document.getElementById('session-stats-menu');
-  if (existing) { existing.remove(); return; }
+  if (existing) {
+    existing.remove();
+    return;
+  }
 
   const visibility = getStatVisibility();
   const menu = document.createElement('div');
   menu.id = 'session-stats-menu';
   menu.className = 'session-stats-menu';
-  menu.innerHTML = Object.keys(DEFAULT_STATS_VISIBILITY).map(key =>
-    `<label><input type="checkbox" ${visibility[key] ? 'checked' : ''} data-key="${key}"> ${key.charAt(0).toUpperCase() + key.slice(1)}</label>`
-  ).join('') +
-  '<div style="padding:4px 8px 0;display:flex;gap:6px;justify-content:flex-end;border-top:1px solid var(--border);margin-top:4px;padding-top:6px">' +
-  '<button class="btn btn-sm btn-primary" onclick="saveStatsMenu()">Done</button></div>';
+  menu.innerHTML =
+    Object.keys(DEFAULT_STATS_VISIBILITY)
+      .map(
+        (key) =>
+          `<label><input type="checkbox" ${visibility[key] ? 'checked' : ''} data-key="${key}"> ${key.charAt(0).toUpperCase() + key.slice(1)}</label>`,
+      )
+      .join('') +
+    '<div style="padding:4px 8px 0;display:flex;gap:6px;justify-content:flex-end;border-top:1px solid var(--border);margin-top:4px;padding-top:6px">' +
+    '<button class="btn btn-sm btn-primary" onclick="saveStatsMenu()">Done</button></div>';
 
   const bar = document.getElementById('session-stats-bar-inner');
   if (bar) bar.appendChild(menu);
@@ -5130,9 +5225,11 @@ window.toggleStatsMenu = function () {
 
 window.saveStatsMenu = function () {
   const v = {};
-  document.querySelectorAll('#session-stats-menu input[type="checkbox"]').forEach(cb => {
-    v[cb.dataset.key] = cb.checked;
-  });
+  document
+    .querySelectorAll('#session-stats-menu input[type="checkbox"]')
+    .forEach((cb) => {
+      v[cb.dataset.key] = cb.checked;
+    });
   saveStatVisibility(v);
   const menu = document.getElementById('session-stats-menu');
   if (menu) menu.remove();
@@ -5151,9 +5248,12 @@ function renderSessionTranscript(messages, stats) {
     return;
   }
 
-  el.innerHTML = '<div class="session-transcript">' + messages.map((m, idx) => {
-    if (m.role === 'user') {
-      return `
+  el.innerHTML =
+    '<div class="session-transcript">' +
+    messages
+      .map((m, idx) => {
+        if (m.role === 'user') {
+          return `
         <div class="session-msg session-msg-user">
           <div class="session-msg-header" style="justify-content:flex-end;padding-right:4px">
             ${m.timestamp ? `<span style="font-size:11px;color:var(--text-muted)">${formatTime(m.timestamp)}</span>` : ''}
@@ -5161,8 +5261,10 @@ function renderSessionTranscript(messages, stats) {
           </div>
           <div class="session-msg-content">${esc(m.content)}</div>
         </div>`;
-    } else if (m.role === 'assistant') {
-      const toolCards = (m.toolCalls || []).map(tc => `
+        } else if (m.role === 'assistant') {
+          const toolCards = (m.toolCalls || [])
+            .map(
+              (tc) => `
         <div class="chat-tool-call" style="margin:6px 0" onclick="this.querySelector('.chat-tool-call-body').classList.toggle('expanded')">
           <div class="chat-tool-call-header">
             <span class="tool-icon">&#x1F527;</span>
@@ -5175,9 +5277,11 @@ function renderSessionTranscript(messages, stats) {
             ${tc.output ? `<div class="section-label" style="margin-top:8px">Result</div><pre>${esc(prettyPrint(tc.output))}</pre>` : ''}
           </div>
         </div>
-      `).join('');
+      `,
+            )
+            .join('');
 
-      return `
+          return `
         <div class="session-msg session-msg-assistant">
           <div class="session-msg-header">
             <span class="session-msg-role">Assistant</span>
@@ -5187,13 +5291,15 @@ function renderSessionTranscript(messages, stats) {
           <div class="session-msg-content">${m.content ? esc(m.content) : ''}</div>
           ${toolCards}
         </div>`;
-    } else {
-      return `
+        } else {
+          return `
         <div class="session-msg session-msg-system">
           <div class="session-msg-content" style="font-size:11px;color:var(--text-muted);text-align:center;padding:4px 14px;border:1px solid var(--border);border-radius:12px;display:inline-block;background:var(--surface)">${esc(m.content || m.type || '')}</div>
         </div>`;
-    }
-  }).join('') + '</div>';
+        }
+      })
+      .join('') +
+    '</div>';
 }
 
 // Backup
@@ -5417,7 +5523,10 @@ window.editTask = async (id) => {
   const models = window._taskProviderModels || {};
   const providerOptions = Object.values(defs)
     .filter((p) => p && p.selectable !== false)
-    .map((p) => `<option value="${esc(p.id)}" ${task.provider === p.id ? 'selected' : ''}>${esc(p.name || p.id)}</option>`)
+    .map(
+      (p) =>
+        `<option value="${esc(p.id)}" ${task.provider === p.id ? 'selected' : ''}>${esc(p.name || p.id)}</option>`,
+    )
     .join('');
   const modelsForProvider = models[task.provider || ''] || [];
   const modelOptions = `<option value="">Inherit</option>${modelsForProvider.map((m) => `<option value="${esc(m)}" ${task.model === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}`;
@@ -6578,7 +6687,9 @@ async function renderMonitoring(el) {
               </div>
               <div class="table-wrap"><table>
                 <thead><tr><th>Profile</th><th>Provider</th><th>Model</th><th>Status</th><th>Last Probe</th><th>Capabilities</th></tr></thead>
-                <tbody>${health.entries.map((e) => `
+                <tbody>${health.entries
+                  .map(
+                    (e) => `
                   <tr>
                     <td style="font-weight:500;color:var(--text)">${esc(e.purpose)}</td>
                     <td><span class="badge badge-accent">${esc(e.provider)}</span></td>
@@ -6586,12 +6697,16 @@ async function renderMonitoring(el) {
                     <td><span class="status-dot ${e.ok ? 'online' : 'offline'}" style="margin-right:4px"></span><span class="badge ${e.ok ? 'badge-success' : 'badge-error'}" style="font-size:10px">${e.ok ? 'Ready' : 'Failed'}</span>${e.errorMessage ? `<div style="font-size:10px;color:var(--error);margin-top:2px">${esc(e.errorMessage)}</div>` : ''}</td>
                     <td style="font-size:11px;color:var(--text-muted)">${e.lastProbeAt ? formatTime(e.lastProbeAt) : '-'}</td>
                     <td>${e.capabilities.length > 0 ? e.capabilities.map((c) => `<span class="badge badge-info" style="font-size:9px">${esc(c)}</span>`).join(' ') : '<span class="badge badge-muted" style="font-size:9px">unprobed</span>'}</td>
-                  </tr>`).join('')}
+                  </tr>`,
+                  )
+                  .join('')}
                 </tbody>
               </table></div>
             </div>`;
         }
-      } catch { /* provider health not available */ }
+      } catch {
+        /* provider health not available */
+      }
     } catch {}
 
     // Load history
@@ -7236,11 +7351,15 @@ window.runTerminalSearch = async function () {
   const query = input?.value?.trim();
 
   if (!query) {
-    if (resultsEl) resultsEl.innerHTML = '<div style="color:var(--text-muted);padding:12px;text-align:center;font-size:12px">Enter a query to search</div>';
+    if (resultsEl)
+      resultsEl.innerHTML =
+        '<div style="color:var(--text-muted);padding:12px;text-align:center;font-size:12px">Enter a query to search</div>';
     return;
   }
 
-  if (resultsEl) resultsEl.innerHTML = '<div style="padding:12px;text-align:center;font-size:12px;color:var(--text-muted)">Searching...</div>';
+  if (resultsEl)
+    resultsEl.innerHTML =
+      '<div style="padding:12px;text-align:center;font-size:12px;color:var(--text-muted)">Searching...</div>';
 
   try {
     const body = { query };
@@ -7257,11 +7376,17 @@ window.runTerminalSearch = async function () {
     if (!resultsEl) return;
 
     if (results.length === 0) {
-      resultsEl.innerHTML = '<div style="color:var(--text-muted);padding:16px;text-align:center;font-size:12px">No results found for <strong>' + esc(query) + '</strong></div>';
+      resultsEl.innerHTML =
+        '<div style="color:var(--text-muted);padding:16px;text-align:center;font-size:12px">No results found for <strong>' +
+        esc(query) +
+        '</strong></div>';
       return;
     }
 
-    resultsEl.innerHTML = results.map((r, i) => `
+    resultsEl.innerHTML =
+      results
+        .map(
+          (r, i) => `
       <div class="search-result-item" onclick="viewTerminalTranscript('${esc(r.sessionId)}')">
         <div class="search-result-line">${esc(truncate(r.text, 100))}</div>
         <div class="search-result-meta">
@@ -7269,23 +7394,37 @@ window.runTerminalSearch = async function () {
         </div>
         <div class="search-result-context">${esc(truncate(r.context, 200))}</div>
       </div>
-    `).join('') +
-    '<div style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted)">' + results.length + ' result' + (results.length !== 1 ? 's' : '') + '</div>';
+    `,
+        )
+        .join('') +
+      '<div style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted)">' +
+      results.length +
+      ' result' +
+      (results.length !== 1 ? 's' : '') +
+      '</div>';
   } catch (e) {
-    if (resultsEl) resultsEl.innerHTML = '<div style="color:var(--error);padding:12px;text-align:center;font-size:12px">Search failed: ' + esc(e.message) + '</div>';
+    if (resultsEl)
+      resultsEl.innerHTML =
+        '<div style="color:var(--error);padding:12px;text-align:center;font-size:12px">Search failed: ' +
+        esc(e.message) +
+        '</div>';
   }
 };
 
 window.viewTerminalTranscript = async function (sessionId) {
   try {
-    const data = await api('/sessions/terminal/' + encodeURIComponent(sessionId) + '/transcript');
+    const data = await api(
+      '/sessions/terminal/' + encodeURIComponent(sessionId) + '/transcript',
+    );
     // Switch to left pane terminal tab
     window.switchTermPane('left', 'terminal');
     const container = document.getElementById('terminal-container');
     if (activeTerminal && activeTerminal.term) {
       activeTerminal.term.reset();
       activeTerminal.term.write((data.content || '').slice(-50000));
-      activeTerminal.term.write('\r\n\r\n[END OF SESSION — ' + esc(sessionId) + ']\r\n');
+      activeTerminal.term.write(
+        '\r\n\r\n[END OF SESSION — ' + esc(sessionId) + ']\r\n',
+      );
     }
     toast('Loaded session: ' + sessionId, 'info');
   } catch (e) {
@@ -7295,7 +7434,10 @@ window.viewTerminalTranscript = async function (sessionId) {
 
 // Enter key to search from search input
 document.addEventListener('keydown', function (e) {
-  if (e.key === 'Enter' && document.activeElement === document.getElementById('term-search-input')) {
+  if (
+    e.key === 'Enter' &&
+    document.activeElement === document.getElementById('term-search-input')
+  ) {
     window.runTerminalSearch();
   }
 });

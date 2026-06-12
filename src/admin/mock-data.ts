@@ -83,6 +83,7 @@ const containers = [
     isTask: false,
     idleWaiting: false,
     status: 'running',
+    currentStep: 'Summarizing latest operation requests',
   },
   {
     id: 'mock-coding-job',
@@ -93,6 +94,87 @@ const containers = [
     isTask: true,
     idleWaiting: true,
     status: 'running',
+    currentStep: 'Waiting for operator approval before opening PR',
+  },
+];
+
+const cockpitSessions = [
+  {
+    id: 'cockpit-running-001',
+    sessionId: 'cockpit-running-001',
+    group: 'main',
+    provider: 'codex',
+    model: 'gpt-5.4',
+    status: 'running',
+    startedAt: iso(18),
+    updatedAt: iso(1),
+    lastEventAt: iso(1),
+    lastActivity: iso(1),
+    messageCount: 42,
+    approvalCount: 0,
+    artifactCount: 2,
+    changedFiles: [
+      'src/admin/routes/sessions.ts',
+      'src/admin/public/pages/dashboard.js',
+    ],
+    currentStep:
+      'Parsing transcript metadata and building cockpit session summaries.',
+    filePath: 'cockpit-running-001.jsonl',
+  },
+  {
+    id: 'cockpit-approval-002',
+    sessionId: 'cockpit-approval-002',
+    group: 'operations',
+    provider: 'claude',
+    model: 'claude-sonnet-4-6',
+    status: 'waiting_approval',
+    startedAt: iso(54),
+    updatedAt: iso(7),
+    lastEventAt: iso(7),
+    lastActivity: iso(7),
+    messageCount: 27,
+    approvalCount: 2,
+    artifactCount: 1,
+    changedFiles: ['docs/ops/nightfall-orders.md'],
+    currentStep: 'Waiting for approval to publish revised operation orders.',
+    filePath: 'cockpit-approval-002.jsonl',
+  },
+  {
+    id: 'cockpit-failed-003',
+    sessionId: 'cockpit-failed-003',
+    group: 'scouts',
+    provider: 'openrouter',
+    model: 'openrouter/auto',
+    status: 'failed',
+    startedAt: iso(148),
+    updatedAt: iso(132),
+    lastEventAt: iso(132),
+    lastActivity: iso(132),
+    messageCount: 13,
+    approvalCount: 0,
+    artifactCount: 0,
+    changedFiles: [],
+    currentStep:
+      'Provider request failed after retrying scout report extraction.',
+    filePath: 'cockpit-failed-003.jsonl',
+  },
+  {
+    id: 'cockpit-complete-004',
+    sessionId: 'cockpit-complete-004',
+    group: 'HenrikOrg/nanocrab',
+    provider: 'codex',
+    model: 'gpt-5.4',
+    status: 'completed',
+    startedAt: iso(360),
+    updatedAt: iso(295),
+    lastEventAt: iso(295),
+    lastActivity: iso(295),
+    messageCount: 58,
+    approvalCount: 1,
+    artifactCount: 3,
+    changedFiles: ['src/admin/routes/containers.ts', 'src/admin/websocket.ts'],
+    currentStep: 'Completed implementation and recorded focused test results.',
+    filePath: '',
   },
 ];
 
@@ -879,22 +961,49 @@ function usage(): JsonValue {
 }
 
 function sessions(): JsonValue[] {
-  return [
-    {
-      group: 'main',
-      sessionId: 'sess-main-001',
-      startedAt: iso(85),
-      lastActivity: iso(5),
-      messageCount: 18,
-    },
-    {
-      group: 'operations',
-      sessionId: 'sess-ops-002',
-      startedAt: iso(280),
-      lastActivity: iso(18),
-      messageCount: 31,
-    },
-  ];
+  return cockpitSessions;
+}
+
+function cockpitDetail(id: string): JsonValue | undefined {
+  const session = cockpitSessions.find((item) => item.id === id);
+  if (!session) return undefined;
+  return {
+    ...session,
+    timeline: [
+      {
+        id: `${id}-start`,
+        timestamp: session.startedAt,
+        type: 'started',
+        title: 'Session started',
+        detail: `${session.provider}/${session.model} run started for ${session.group}.`,
+      },
+      {
+        id: `${id}-step`,
+        timestamp: session.lastEventAt,
+        type: session.status,
+        title: session.status.replace(/_/g, ' '),
+        detail: session.currentStep,
+      },
+    ],
+    artifacts: session.changedFiles.map((file, index) => ({
+      id: `${id}-artifact-${index}`,
+      name: file.split('/').pop(),
+      path: file,
+      kind: 'changed-file',
+    })),
+    approvals:
+      session.approvalCount > 0
+        ? Array.from({ length: session.approvalCount }, (_, index) => ({
+            id: `${id}-approval-${index + 1}`,
+            title:
+              index === 0 ? 'Approve file changes' : 'Approve outbound message',
+            status:
+              session.status === 'waiting_approval' ? 'pending' : 'approved',
+            risk: index === 0 ? 'medium' : 'low',
+            createdAt: iso(12 + index),
+          }))
+        : [],
+  };
 }
 
 function routeJson(pathname: string, req: Request): JsonValue | undefined {
@@ -1026,7 +1135,8 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           purpose: 'Reports',
           ok: false,
           lastProbeAt: new Date(Date.now() - 1800000).toISOString(),
-          errorMessage: 'API reached max capacity: this model is temporarily unavailable',
+          errorMessage:
+            'API reached max capacity: this model is temporarily unavailable',
           capabilities: ['tools', 'json', 'stream'],
         },
       ],
@@ -1059,7 +1169,12 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         {
           providerId: 'gemini',
           model: 'gemini-2.5-flash',
-          result: { ok: false, validated: false, status: 'failed', errorMessage: 'API rate limited' },
+          result: {
+            ok: false,
+            validated: false,
+            status: 'failed',
+            errorMessage: 'API rate limited',
+          },
           timestamp: hrs(4),
         },
         {
@@ -1077,7 +1192,12 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         {
           providerId: 'openai-compatible',
           model: 'model-id',
-          result: { ok: false, validated: false, status: 'failed', errorMessage: 'Base URL not configured' },
+          result: {
+            ok: false,
+            validated: false,
+            status: 'failed',
+            errorMessage: 'Base URL not configured',
+          },
           timestamp: hrs(8),
         },
       ],
@@ -1853,6 +1973,10 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   }
   if (pathname === '/usage') return usage();
   if (pathname === '/sessions') return sessions();
+  if (pathname === '/sessions/cockpit') return sessions();
+  if (pathname.startsWith('/sessions/cockpit/')) {
+    return cockpitDetail(decodeURIComponent(pathname.split('/').pop() || ''));
+  }
   if (pathname.match(/^\/sessions\/[^/]+\/[^/]+$/)) {
     return [
       {
@@ -2466,8 +2590,7 @@ function writeResponse(pathname: string): JsonValue {
     return ok({ message: 'Mock rebuild queued' });
   if (pathname.includes('/preflight'))
     return ok({ message: 'Mock preflight passed' });
-  if (pathname === '/providers/probe-all')
-    return { version: 2, entries: [] };
+  if (pathname === '/providers/probe-all') return { version: 2, entries: [] };
   return ok({ message: 'Mock write accepted. No live data changed.' });
 }
 
