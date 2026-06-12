@@ -224,13 +224,21 @@ async function renderDashboard(el) {
         )
         .join('');
 
+      const selectedCockpitId =
+        window._selectedCockpitSessionId ||
+        (cockpitSessions[0] ? cockpitSessions[0].id : '');
       const cockpitRows =
         cockpitSessions
           .slice(0, 9)
-          .map((session, index) => renderCockpitSessionRow(session, index))
+          .map((session, index) =>
+            renderCockpitSessionRow(session, index, selectedCockpitId),
+          )
           .join('') ||
         '<div class="dash-empty">No agent runs captured yet.</div>';
-      const selectedCockpit = cockpitSessions[0] || null;
+      const selectedCockpit =
+        cockpitSessions.find((session) => session.id === selectedCockpitId) ||
+        cockpitSessions[0] ||
+        null;
       const cockpitCounts = cockpitSessions.reduce(
         (acc, session) => {
           const status = session.status || 'completed';
@@ -408,6 +416,7 @@ async function renderDashboard(el) {
         </div>`;
 
       window._cockpitSessions = cockpitSessions;
+      window._selectedCockpitSessionId = selectedCockpit?.id || '';
       if (selectedCockpit) loadCockpitDetail(selectedCockpit.id);
       loadDashboardWeather();
     } catch (e) {
@@ -453,13 +462,14 @@ function cockpitStatusClass(status) {
   return 'is-idle';
 }
 
-function renderCockpitSessionRow(session, index) {
+function renderCockpitSessionRow(session, index, selectedId) {
   const status = session.status || 'completed';
+  const isActive = selectedId ? session.id === selectedId : index === 0;
   const changed = Array.isArray(session.changedFiles)
     ? session.changedFiles.length
     : 0;
   return `
-    <button class="cockpit-session-row dash-reveal ${index === 0 ? 'active' : ''}" style="--i:${index}" data-session-id="${esc(session.id)}" onclick="selectCockpitSession('${esc(session.id)}')">
+    <button class="cockpit-session-row dash-reveal ${isActive ? 'active' : ''}" style="--i:${index}" data-session-id="${esc(session.id)}" onclick="selectCockpitSession('${esc(session.id)}')">
       <span class="cockpit-status-dot ${status}"></span>
       <span class="cockpit-row-main">
         <strong>${esc(session.group || session.id)}</strong>
@@ -496,6 +506,7 @@ function renderCockpitDetailShell(session) {
 }
 
 window.selectCockpitSession = function (id) {
+  window._selectedCockpitSessionId = id;
   document
     .querySelectorAll('.cockpit-session-row')
     .forEach((row) =>
@@ -575,11 +586,20 @@ window.refreshCockpitDashboard = async function () {
   if (!list) return;
   const sessions = await api('/sessions/cockpit').catch(() => []);
   window._cockpitSessions = Array.isArray(sessions) ? sessions : [];
+  const selectedId =
+    window._selectedCockpitSessionId ||
+    (window._cockpitSessions[0] ? window._cockpitSessions[0].id : '');
   list.innerHTML =
     window._cockpitSessions
       .slice(0, 9)
-      .map((session, index) => renderCockpitSessionRow(session, index))
+      .map((session, index) =>
+        renderCockpitSessionRow(session, index, selectedId),
+      )
       .join('') || '<div class="dash-empty">No agent runs captured yet.</div>';
+  if (selectedId) {
+    window._selectedCockpitSessionId = selectedId;
+    loadCockpitDetail(selectedId);
+  }
 };
 
 async function loadDashboardWeather() {

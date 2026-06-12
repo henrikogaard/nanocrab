@@ -15,6 +15,9 @@ const router = Router();
 interface SessionInfo {
   id: string;
   sessionId: string;
+  source: 'transcript' | 'coding-job' | 'active-container';
+  approvalTargetType: string;
+  approvalTargetId: string;
   group: string;
   provider: string;
   model: string;
@@ -64,9 +67,24 @@ const TRANSCRIPT_PROJECT_DIRS = [
   ['.agents', 'projects', '-workspace-group'],
   ['.claude', 'projects', '-workspace-group'],
 ];
+const transcriptSummaryCache = new Map<
+  string,
+  { mtimeMs: number; size: number; summary: SessionInfo }
+>();
 
 function activeContainerId(group: string, taskId?: string | null): string {
   return taskId || `active-${group.replace(/[^A-Za-z0-9_.-]+/g, '-')}`;
+}
+
+function transcriptCockpitId(group: string, sessionId: string): string {
+  return `transcript:${encodeURIComponent(group)}:${encodeURIComponent(sessionId)}`;
+}
+
+function activeContainerCockpitId(
+  group: string,
+  taskId?: string | null,
+): string {
+  return `container:${encodeURIComponent(activeContainerId(group, taskId))}`;
 }
 
 function readJsonLines(filePath: string): unknown[] {
@@ -130,6 +148,7 @@ function transcriptSummary(input: {
   group: string;
   sessionId: string;
   filePath: string;
+  stat: fs.Stats;
   isActive?: boolean;
 }): SessionInfo {
   const providerConfig = getAgentProviderConfig();
@@ -151,17 +170,25 @@ function transcriptSummary(input: {
     if (typeof obj.provider === 'string') provider = obj.provider;
     if (typeof obj.model === 'string') model = obj.model;
     if (typeof obj.message?.model === 'string') model = obj.message.model;
-    if (typeof obj.error === 'string' || obj.type === 'error') failed = true;
+    if (
+      obj.type === 'error' ||
+      typeof obj.error === 'string' ||
+      obj.status === 'failed' ||
+      obj.status === 'error'
+    ) {
+      failed = true;
+    }
+    if (
+      obj.type === 'approval_request' ||
+      obj.status === 'waiting_approval' ||
+      obj.status === 'pending_approval'
+    ) {
+      approvalCount++;
+    }
 
     const text = extractText(obj);
     if (text)
       currentStep = compactStep(text, currentStep || 'Transcript event');
-    if (
-      /approval required|requires approval|waiting for approval/i.test(text)
-    ) {
-      approvalCount++;
-    }
-    if (/failed|error|exception/i.test(text)) failed = true;
 
     for (const block of contentBlocks(obj)) {
       if (block.type !== 'tool_use') continue;
@@ -192,8 +219,11 @@ function transcriptSummary(input: {
   });
 
   return {
-    id: input.sessionId,
+    id: transcriptCockpitId(input.group, input.sessionId),
     sessionId: input.sessionId,
+    source: 'transcript',
+    approvalTargetType: 'transcript-session',
+    approvalTargetId: transcriptCockpitId(input.group, input.sessionId),
     group: input.group,
     provider,
     model,
@@ -209,6 +239,32 @@ function transcriptSummary(input: {
     currentStep,
     filePath: path.basename(input.filePath),
   };
+}
+
+function cachedTranscriptSummary(input: {
+  group: string;
+  sessionId: string;
+  filePath: string;
+  stat: fs.Stats;
+}): SessionInfo {
+  const cached = transcriptSummaryCache.get(input.filePath);
+  if (
+    cached &&
+    cached.mtimeMs === input.stat.mtimeMs &&
+    cached.size === input.stat.size
+  ) {
+    return {
+      ...cached.summary,
+      changedFiles: [...cached.summary.changedFiles],
+    };
+  }
+  const summary = transcriptSummary(input);
+  transcriptSummaryCache.set(input.filePath, {
+    mtimeMs: input.stat.mtimeMs,
+    size: input.stat.size,
+    summary,
+  });
+  return { ...summary, changedFiles: [...summary.changedFiles] };
 }
 
 function transcriptPath(group: string, sessionId: string): string | null {
@@ -252,7 +308,9 @@ export function listCockpitSessions(): SessionInfo[] {
           const key = `${group}:${sessionId}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          sessions.push(transcriptSummary({ group, sessionId, filePath }));
+          sessions.push(
+            cachedTranscriptSummary({ group, sessionId, filePath, stat }),
+          );
         }
       }
     }
@@ -276,6 +334,9 @@ export function listCockpitSessions(): SessionInfo[] {
     sessions.push({
       id: job.id,
       sessionId: job.id,
+      source: 'coding-job',
+      approvalTargetType: 'coding-job',
+      approvalTargetId: job.id,
       group: job.repo,
       provider: job.provider,
       model: job.model,
@@ -302,19 +363,22 @@ export function listCockpitSessions(): SessionInfo[] {
     const providerConfig = getAgentProviderConfig();
     for (const container of getState().queue.getActiveContainers()) {
       const group = container.groupFolder || container.groupJid;
-      const id = activeContainerId(group, container.taskId);
+      const id = activeContainerCockpitId(group, container.taskId);
       if (sessions.some((session) => session.id === id)) continue;
       sessions.push({
         id,
-        sessionId: id,
+        sessionId: activeContainerId(group, container.taskId),
+        source: 'active-container',
+        approvalTargetType: 'container-session',
+        approvalTargetId: id,
         group,
         provider: providerConfig.provider,
         model: providerConfig.model,
         status: container.idleWaiting ? 'idle' : 'running',
-        startedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        lastEventAt: new Date().toISOString(),
-        lastActivity: new Date().toISOString(),
+        startedAt: '',
+        updatedAt: '',
+        lastEventAt: '',
+        lastActivity: '',
         messageCount: 0,
         approvalCount: 0,
         artifactCount: 0,
@@ -338,20 +402,19 @@ export function listCockpitSessions(): SessionInfo[] {
 }
 
 export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
-  const summary = listCockpitSessions().find(
-    (session) => session.id === id || session.sessionId === id,
-  );
+  const summary = listCockpitSessions().find((session) => session.id === id);
   if (!summary) return null;
 
-  const persistedApprovals = listApprovals({ targetId: summary.id }).map(
-    (approval) => ({
-      id: approval.id,
-      title: approval.title,
-      status: approval.status,
-      risk: approval.risk,
-      createdAt: approval.createdAt,
-    }),
-  );
+  const persistedApprovals = listApprovals({
+    targetType: summary.approvalTargetType,
+    targetId: summary.approvalTargetId,
+  }).map((approval) => ({
+    id: approval.id,
+    title: approval.title,
+    status: approval.status,
+    risk: approval.risk,
+    createdAt: approval.createdAt,
+  }));
   const codingJob = loadCodingJobs().find((job) => job.id === summary.id);
   const jobApprovals =
     codingJob?.approvalHistory?.map((approval, index) => ({

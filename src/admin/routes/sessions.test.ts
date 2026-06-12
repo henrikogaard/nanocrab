@@ -33,6 +33,30 @@ const STORE_DIR = config.STORE_DIR as string;
 const { default: sessionsRouter, listCockpitSessions } =
   await import('./sessions.js');
 
+function transcriptId(group: string, sessionId: string): string {
+  return `transcript:${encodeURIComponent(group)}:${encodeURIComponent(sessionId)}`;
+}
+
+function writeTranscript(
+  group: string,
+  sessionId: string,
+  events: Array<Record<string, unknown>>,
+): void {
+  const transcriptDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group,
+    '.agents',
+    'projects',
+    '-workspace-group',
+  );
+  fs.mkdirSync(transcriptDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(transcriptDir, `${sessionId}.jsonl`),
+    events.map((event) => JSON.stringify(event)).join('\n') + '\n',
+  );
+}
+
 describe('terminal session API', () => {
   beforeEach(() => {
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
@@ -145,46 +169,37 @@ describe('terminal session API', () => {
   });
 
   it('lists cockpit session summaries with stable fields from transcripts', () => {
-    const transcriptDir = path.join(
-      DATA_DIR,
-      'sessions',
-      'main',
-      '.agents',
-      'projects',
-      '-workspace-group',
-    );
-    fs.mkdirSync(transcriptDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(transcriptDir, 'run-1.jsonl'),
-      [
-        JSON.stringify({
-          type: 'user',
-          timestamp: '2026-06-01T12:00:00Z',
-          content: 'Implement cockpit dashboard',
-        }),
-        JSON.stringify({
-          type: 'assistant',
-          timestamp: '2026-06-01T12:02:00Z',
-          message: {
-            model: 'gpt-5.4',
-            content: [
-              { type: 'text', text: 'Editing dashboard files' },
-              {
-                type: 'tool_use',
-                name: 'edit',
-                input: { file_path: 'src/admin/public/pages/dashboard.js' },
-              },
-            ],
-          },
-        }),
-      ].join('\n') + '\n',
-    );
+    writeTranscript('main', 'run-1', [
+      {
+        type: 'user',
+        timestamp: '2026-06-01T12:00:00Z',
+        content: 'Implement cockpit dashboard',
+      },
+      {
+        type: 'assistant',
+        timestamp: '2026-06-01T12:02:00Z',
+        message: {
+          model: 'gpt-5.4',
+          content: [
+            { type: 'text', text: 'Editing dashboard files' },
+            {
+              type: 'tool_use',
+              name: 'edit',
+              input: { file_path: 'src/admin/public/pages/dashboard.js' },
+            },
+          ],
+        },
+      },
+    ]);
 
     const sessions = listCockpitSessions();
-    const session = sessions.find((item) => item.id === 'run-1');
+    const session = sessions.find(
+      (item) => item.id === transcriptId('main', 'run-1'),
+    );
     expect(session).toMatchObject({
-      id: 'run-1',
+      id: transcriptId('main', 'run-1'),
       sessionId: 'run-1',
+      source: 'transcript',
       group: 'main',
       model: 'gpt-5.4',
       status: 'completed',
@@ -198,6 +213,69 @@ describe('terminal session API', () => {
     expect(session?.changedFiles).toEqual([
       'src/admin/public/pages/dashboard.js',
     ]);
+  });
+
+  it('keeps duplicate transcript session ids globally unique by group', async () => {
+    const event = {
+      type: 'assistant',
+      timestamp: '2026-06-01T12:00:00Z',
+      content: 'Shared upstream session id',
+    };
+    writeTranscript('main', 'shared-id', [event]);
+    writeTranscript('operations', 'shared-id', [event]);
+
+    const sessions = listCockpitSessions().filter(
+      (item) => item.sessionId === 'shared-id',
+    );
+    expect(sessions).toHaveLength(2);
+    expect(new Set(sessions.map((item) => item.id))).toEqual(
+      new Set([
+        transcriptId('main', 'shared-id'),
+        transcriptId('operations', 'shared-id'),
+      ]),
+    );
+
+    const app = express();
+    app.use('/api/sessions', sessionsRouter);
+    const server = app.listen(0);
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        throw new Error('test server did not bind to a port');
+      }
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/sessions/cockpit/${encodeURIComponent(transcriptId('operations', 'shared-id'))}`,
+      );
+      const detail = (await response.json()) as { group: string; id: string };
+
+      expect(response.status).toBe(200);
+      expect(detail).toMatchObject({
+        id: transcriptId('operations', 'shared-id'),
+        group: 'operations',
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+  });
+
+  it('does not mark transcript text about fixed errors as failed', () => {
+    writeTranscript('main', 'error-discussion', [
+      {
+        type: 'assistant',
+        timestamp: '2026-06-01T12:00:00Z',
+        content: 'Fixed error handling and approval wording in the dashboard.',
+      },
+    ]);
+
+    const session = listCockpitSessions().find(
+      (item) => item.id === transcriptId('main', 'error-discussion'),
+    );
+    expect(session).toMatchObject({
+      status: 'completed',
+      approvalCount: 0,
+    });
   });
 
   it('includes persisted coding jobs in cockpit summaries', () => {
@@ -305,6 +383,22 @@ describe('terminal session API', () => {
           reviewedBy: null,
           decisionNote: null,
         },
+        {
+          id: 'approval-unrelated',
+          kind: 'publish',
+          title: 'Unrelated publish approval',
+          summary: 'Same target id but wrong subsystem',
+          risk: 'high',
+          requester: 'system',
+          targetType: 'publish',
+          targetId: 'job-detail',
+          payload: {},
+          status: 'pending',
+          createdAt: '2026-06-01T12:04:00Z',
+          reviewedAt: null,
+          reviewedBy: null,
+          decisionNote: null,
+        },
       ]),
     );
 
@@ -335,6 +429,11 @@ describe('terminal session API', () => {
         expect.arrayContaining([
           expect.objectContaining({ id: 'job-detail-approval-history-1' }),
           expect.objectContaining({ id: 'approval-persisted' }),
+        ]),
+      );
+      expect(detail.approvals).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'approval-unrelated' }),
         ]),
       );
       expect(detail.artifacts).toEqual(
