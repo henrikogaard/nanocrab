@@ -31,7 +31,7 @@ export interface ProgressMarker {
 
 export type ParsedMarker = ToolCallMarker | ToolResultMarker | ApprovalRequestMarker | ProgressMarker;
 
-const MARKER_RE = /<(tool_call|tool_result|approval_request|progress)\s+([^>]*?)\s*\/?>/g;
+const MARKER_RE = /<(tool_call|tool_result|approval_request|progress)\s+([^>]*?)(?:\/>|(>)([\s\S]*?)<\/\1>)/g;
 const ATTR_RE = /(\w+)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g;
 
 function parseAttributes(attrsStr: string): Record<string, string> {
@@ -49,6 +49,7 @@ export function extractStructuredMarkers(text: string): ParsedMarker[] {
   while ((m = MARKER_RE.exec(text)) !== null) {
     const tagName = m[1];
     const attrs = parseAttributes(m[2]);
+    const innerText = m[4] || '';
     try {
       switch (tagName) {
         case 'tool_call':
@@ -61,7 +62,7 @@ export function extractStructuredMarkers(text: string): ParsedMarker[] {
           markers.push({ type: 'approval_request', id: attrs.id, tool: attrs.tool, reason: attrs.reason || '', input: attrs.input || '{}' });
           break;
         case 'progress':
-          markers.push({ type: 'progress', phase: attrs.phase, pct: parseInt(attrs.pct || '0', 10), message: attrs.message || '' });
+          markers.push({ type: 'progress', phase: attrs.phase, pct: parseInt(attrs.pct || '0', 10), message: innerText || attrs.message || '' });
           break;
       }
     } catch (err) {

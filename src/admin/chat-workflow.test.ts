@@ -32,12 +32,21 @@ describe('extractStructuredMarkers', () => {
     }
   });
 
-  it('extracts progress marker', () => {
+  it('extracts progress marker with inner text as message', () => {
     const markers = extractStructuredMarkers('<progress phase="researching" pct="15">Researching codebase...</progress>');
     expect(markers).toHaveLength(1);
     if (markers[0].type === 'progress') {
       expect(markers[0].phase).toBe('researching');
       expect(markers[0].pct).toBe(15);
+      expect(markers[0].message).toBe('Researching codebase...');
+    }
+  });
+
+  it('extracts progress marker with message attribute as fallback', () => {
+    const markers = extractStructuredMarkers('<progress phase="writing" pct="50" message="Writing..." />');
+    expect(markers).toHaveLength(1);
+    if (markers[0].type === 'progress') {
+      expect(markers[0].message).toBe('Writing...');
     }
   });
 
@@ -53,6 +62,18 @@ describe('extractStructuredMarkers', () => {
 
   it('returns empty for text without markers', () => {
     expect(extractStructuredMarkers('Hello world')).toEqual([]);
+  });
+
+  it('returns empty for non-matching tags', () => {
+    expect(extractStructuredMarkers('<not_a_marker id="x" />')).toEqual([]);
+  });
+
+  it('handles self-closing marker with no attributes', () => {
+    const markers = extractStructuredMarkers('<tool_call />');
+    expect(markers).toHaveLength(1);
+    if (markers[0].type === 'tool_call') {
+      expect(markers[0].name).toBeUndefined();
+    }
   });
 });
 
