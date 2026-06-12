@@ -268,8 +268,11 @@ export function listCockpitSessions(): SessionInfo[] {
       cancelled: 'cancelled',
     };
     const approvalCount =
-      job.approvalHistory?.length ||
+      (job.approvalHistory?.length || 0) +
       listApprovals({ targetType: 'coding-job', targetId: job.id }).length;
+    const artifactCount =
+      (job.changedFiles?.length || 0) +
+      [job.prUrl, job.commitSha, job.testSummary].filter(Boolean).length;
     sessions.push({
       id: job.id,
       sessionId: job.id,
@@ -285,8 +288,7 @@ export function listCockpitSessions(): SessionInfo[] {
         ? job.output.split('\n').filter(Boolean).length
         : 1,
       approvalCount,
-      artifactCount: [job.prUrl, job.commitSha, job.testSummary].filter(Boolean)
-        .length,
+      artifactCount,
       changedFiles: job.changedFiles || [],
       currentStep:
         job.testSummary ||
@@ -335,19 +337,35 @@ export function listCockpitSessions(): SessionInfo[] {
   return sessions;
 }
 
-function buildCockpitDetail(id: string): CockpitSessionDetail | null {
+export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
   const summary = listCockpitSessions().find(
     (session) => session.id === id || session.sessionId === id,
   );
   if (!summary) return null;
 
-  const approvals = listApprovals({ targetId: summary.id }).map((approval) => ({
-    id: approval.id,
-    title: approval.title,
-    status: approval.status,
-    risk: approval.risk,
-    createdAt: approval.createdAt,
-  }));
+  const persistedApprovals = listApprovals({ targetId: summary.id }).map(
+    (approval) => ({
+      id: approval.id,
+      title: approval.title,
+      status: approval.status,
+      risk: approval.risk,
+      createdAt: approval.createdAt,
+    }),
+  );
+  const codingJob = loadCodingJobs().find((job) => job.id === summary.id);
+  const jobApprovals =
+    codingJob?.approvalHistory?.map((approval, index) => ({
+      id: `${codingJob.id}-approval-history-${index + 1}`,
+      title: approval.action || 'Coding job approval',
+      status: approval.action.includes('den')
+        ? 'denied'
+        : approval.action.includes('approve')
+          ? 'approved'
+          : 'pending',
+      risk: 'medium',
+      createdAt: approval.at,
+    })) || [];
+  const approvals = [...jobApprovals, ...persistedApprovals];
 
   const timeline: CockpitTimelineEvent[] = [];
   const artifacts: CockpitSessionDetail['artifacts'] = [];
@@ -389,6 +407,41 @@ function buildCockpitDetail(id: string): CockpitSessionDetail | null {
           }
         }
       });
+  }
+
+  if (codingJob) {
+    for (const file of codingJob.changedFiles || []) {
+      artifacts.push({
+        id: `${codingJob.id}-changed-file-${artifacts.length}`,
+        name: path.basename(file),
+        path: file,
+        kind: 'changed-file',
+      });
+    }
+    if (codingJob.prUrl) {
+      artifacts.push({
+        id: `${codingJob.id}-pull-request`,
+        name: 'Pull request',
+        path: codingJob.prUrl,
+        kind: 'pull-request',
+      });
+    }
+    if (codingJob.commitSha) {
+      artifacts.push({
+        id: `${codingJob.id}-commit`,
+        name: codingJob.commitSha.slice(0, 12),
+        path: codingJob.commitSha,
+        kind: 'commit',
+      });
+    }
+    if (codingJob.testSummary) {
+      artifacts.push({
+        id: `${codingJob.id}-test-summary`,
+        name: 'Test summary',
+        path: codingJob.testSummary,
+        kind: 'test-summary',
+      });
+    }
   }
 
   if (timeline.length === 0) {

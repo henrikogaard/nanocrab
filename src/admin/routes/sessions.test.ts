@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import express from 'express';
 
 const TEST_DIR = path.join(os.tmpdir(), `nanocrab-sessions-test-${Date.now()}`);
 
@@ -29,7 +30,8 @@ const config = vi.mocked(await import('../../config.js'));
 const SESSIONS_DIR = config.SESSIONS_DIR as string;
 const DATA_DIR = config.DATA_DIR as string;
 const STORE_DIR = config.STORE_DIR as string;
-const { listCockpitSessions } = await import('./sessions.js');
+const { default: sessionsRouter, listCockpitSessions } =
+  await import('./sessions.js');
 
 describe('terminal session API', () => {
   beforeEach(() => {
@@ -242,8 +244,119 @@ describe('terminal session API', () => {
       model: 'gpt-5.4',
       status: 'waiting_approval',
       approvalCount: 1,
+      artifactCount: 1,
       changedFiles: ['src/admin/routes/sessions.ts'],
       currentStep: 'Cockpit Foundation',
     });
+  });
+
+  it('GET /cockpit/:id returns coding-job detail approvals and artifacts', async () => {
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'coding-jobs.json'),
+      JSON.stringify([
+        {
+          id: 'job-detail',
+          repo: 'owner/repo',
+          type: 'issue',
+          prompt: 'Fix issue #8',
+          issueNumber: 8,
+          issueTitle: 'Cockpit Foundation',
+          provider: 'codex',
+          model: 'gpt-5.4',
+          status: 'await_pr_approval',
+          branch: 'feature/cockpit',
+          workspace: '/tmp/workspace',
+          createPr: true,
+          prUrl: 'https://github.com/owner/repo/pull/8',
+          commitSha: null,
+          changedFiles: [
+            'src/admin/routes/sessions.ts',
+            'src/admin/public/pages/dashboard.js',
+          ],
+          testSummary: null,
+          ciStatus: 'unknown',
+          approvalHistory: [
+            { action: 'requested', at: '2026-06-01T12:00:00Z', by: 'system' },
+          ],
+          output: 'Waiting for PR approval',
+          requestedBy: 'owner',
+          createdAt: '2026-06-01T11:59:00Z',
+          completedAt: null,
+        },
+      ]),
+    );
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'approvals.json'),
+      JSON.stringify([
+        {
+          id: 'approval-persisted',
+          kind: 'coding-open-pr',
+          title: 'Open PR',
+          summary: 'Approve opening the PR',
+          risk: 'medium',
+          requester: 'system',
+          targetType: 'coding-job',
+          targetId: 'job-detail',
+          payload: {},
+          status: 'pending',
+          createdAt: '2026-06-01T12:03:00Z',
+          reviewedAt: null,
+          reviewedBy: null,
+          decisionNote: null,
+        },
+      ]),
+    );
+
+    const app = express();
+    app.use('/api/sessions', sessionsRouter);
+    const server = app.listen(0);
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        throw new Error('test server did not bind to a port');
+      }
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/sessions/cockpit/job-detail`,
+      );
+      const detail = (await response.json()) as {
+        approvals: unknown[];
+        artifacts: unknown[];
+      };
+
+      expect(response.status).toBe(200);
+      expect(detail).toMatchObject({
+        id: 'job-detail',
+        status: 'waiting_approval',
+        approvalCount: 2,
+        artifactCount: 3,
+      });
+      expect(detail.approvals).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'job-detail-approval-history-1' }),
+          expect.objectContaining({ id: 'approval-persisted' }),
+        ]),
+      );
+      expect(detail.artifacts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: 'src/admin/routes/sessions.ts',
+            kind: 'changed-file',
+          }),
+          expect.objectContaining({
+            path: 'src/admin/public/pages/dashboard.js',
+            kind: 'changed-file',
+          }),
+          expect.objectContaining({
+            path: 'https://github.com/owner/repo/pull/8',
+            kind: 'pull-request',
+          }),
+        ]),
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
   });
 });
