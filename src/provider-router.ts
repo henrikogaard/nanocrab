@@ -502,9 +502,6 @@ function validateProfile(input: ProviderProfile): ProviderProfile {
   if (!isAgentProvider(input.provider)) {
     throw new Error(`provider must be one of: ${AGENT_PROVIDERS.join(', ')}`);
   }
-  if (!isValidAgentModel(input.provider, input.model)) {
-    throw new Error(`model is not valid for ${input.provider}`);
-  }
   if (
     input.fallbackProfileId &&
     !PROVIDER_PURPOSES.includes(input.fallbackProfileId)
@@ -917,6 +914,14 @@ export function providerModels(provider: AgentProvider): string[] {
   return AGENT_PROVIDER_MODELS[provider] || [];
 }
 
+export function fallbackActionForProviderPurpose(
+  purpose: ProviderPurpose,
+): FallbackAction {
+  if (purpose === 'default_automation') return 'automation-execution';
+  if (purpose === 'default_skill_factory') return 'skill-installation';
+  return 'read';
+}
+
 export function providerCanFallbackAutomatically(input: {
   source: ProviderProfile;
   target: ProviderProfile;
@@ -961,6 +966,25 @@ export function providerCanFallback(input: {
   );
 }
 
+function profileUnavailabilityReason(profile: ProviderProfile): string | null {
+  if (!getProviderAvailability()[profile.provider]) {
+    return `provider ${profile.provider}/${profile.model} is unavailable`;
+  }
+  if (!isValidAgentModel(profile.provider, profile.model)) {
+    return `invalid model ${profile.provider}/${profile.model}`;
+  }
+  const storedProbe = readStoredProbes()[profile.id];
+  if (storedProbe?.live && storedProbe.ok === false) {
+    const detail =
+      storedProbe.errorDetail ||
+      storedProbe.errors?.join('; ') ||
+      storedProbe.checks.find((check) => !check.ok)?.detail ||
+      'probe failed';
+    return `failed stored probe for ${profile.provider}/${profile.model}: ${detail}`;
+  }
+  return null;
+}
+
 export function resolveProviderFallbackForAction(input: {
   purpose: ProviderPurpose;
   action: FallbackAction;
@@ -982,8 +1006,8 @@ export function resolveProviderFallbackForAction(input: {
     };
   }
 
-  const sourceAvailability = getProviderAvailability()[source.provider];
-  if (sourceAvailability) {
+  const sourceUnavailableReason = profileUnavailabilityReason(source);
+  if (!sourceUnavailableReason) {
     return {
       approved: true,
       profile: source,
@@ -995,7 +1019,7 @@ export function resolveProviderFallbackForAction(input: {
   if (!source.fallbackProfileId) {
     return {
       approved: false,
-      reason: `provider ${source.provider}/${source.model} is unavailable and no fallback profile is configured`,
+      reason: `${sourceUnavailableReason} and no fallback profile is configured`,
     };
   }
 
@@ -1006,10 +1030,11 @@ export function resolveProviderFallbackForAction(input: {
       reason: `fallback profile not found: ${source.fallbackProfileId}`,
     };
   }
-  if (!getProviderAvailability()[target.provider]) {
+  const targetUnavailableReason = profileUnavailabilityReason(target);
+  if (targetUnavailableReason) {
     return {
       approved: false,
-      reason: `fallback provider ${target.provider}/${target.model} is unavailable`,
+      reason: `fallback ${targetUnavailableReason}`,
     };
   }
 
@@ -1030,7 +1055,10 @@ export function resolveProviderFallbackForAction(input: {
   }
 
   if (!decision.requiresApproval) {
-    return { approved: false, reason: decision.reason };
+    return {
+      approved: false,
+      reason: `${sourceUnavailableReason}; ${decision.reason}`,
+    };
   }
 
   const targetId = `${source.id}->${target.id}:${input.action}`;
@@ -1052,7 +1080,7 @@ export function resolveProviderFallbackForAction(input: {
     return {
       approved: false,
       approvalId: pending.id,
-      reason: decision.reason,
+      reason: `${sourceUnavailableReason}; ${decision.reason}`,
     };
   }
 
@@ -1076,13 +1104,13 @@ export function resolveProviderFallbackForAction(input: {
       targetProvider: target.provider,
       targetModel: target.model,
       action: input.action,
-      reason: decision.reason,
+      reason: `${sourceUnavailableReason}; ${decision.reason}`,
     },
   });
 
   return {
     approved: false,
     approvalId: approval.id,
-    reason: decision.reason,
+    reason: `${sourceUnavailableReason}; ${decision.reason}`,
   };
 }

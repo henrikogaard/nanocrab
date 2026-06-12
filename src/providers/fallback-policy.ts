@@ -94,10 +94,7 @@ export class FallbackPolicyManager {
       };
     }
 
-    if (
-      action === 'provider-fallback' &&
-      this.crossesLocalPrivateBoundary(sourceProfile, targetProfile)
-    ) {
+    if (this.crossesLocalPrivateBoundary(sourceProfile, targetProfile)) {
       return {
         allowed: false,
         requiresApproval: true,

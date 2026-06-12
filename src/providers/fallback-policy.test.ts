@@ -80,6 +80,20 @@ describe('FallbackPolicyManager', () => {
         expect(result.reason).toContain('read fallback');
       });
 
+      it('requires approval when read fallback crosses local/private to hosted boundary', () => {
+        const result = manager.evaluateFallback(
+          'read',
+          { ...readSource, providerId: 'ollama', privacyTier: 'local' },
+          { ...target, providerId: 'openrouter', privacyTier: 'third-party' },
+          fullCapabilities,
+          true,
+        );
+
+        expect(result.allowed).toBe(false);
+        expect(result.requiresApproval).toBe(true);
+        expect(result.reason).toContain('local/private');
+      });
+
       it('returns allowed=false when toolPolicy is deny', () => {
         const result = manager.evaluateFallback(
           'read',

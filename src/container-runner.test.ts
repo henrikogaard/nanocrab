@@ -74,6 +74,14 @@ vi.mock('./env.js', () => ({
   readEnvFile: vi.fn(() => ({})),
 }));
 
+vi.mock('./provider-router.js', () => ({
+  resolveProviderFallbackForAction: vi.fn(() => ({
+    approved: true,
+    provider: 'codex',
+    model: 'gpt-5.4',
+  })),
+}));
+
 // Create a controllable fake ChildProcess
 function createFakeProcess() {
   const proc = new EventEmitter() as EventEmitter & {
@@ -112,6 +120,7 @@ vi.mock('child_process', async () => {
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import { spawn } from 'child_process';
 import { readEnvFile } from './env.js';
+import { resolveProviderFallbackForAction } from './provider-router.js';
 import type { RegisteredGroup } from './types.js';
 
 const mockedReadEnvFile = vi.mocked(readEnvFile);
@@ -143,6 +152,7 @@ describe('container-runner timeout behavior', () => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
     mockedReadEnvFile.mockReturnValue({});
+    vi.mocked(resolveProviderFallbackForAction).mockClear();
   });
 
   afterEach(() => {
@@ -234,6 +244,54 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('container-runner provider fallback metadata', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    mockedReadEnvFile.mockReturnValue({});
+    vi.mocked(resolveProviderFallbackForAction).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('resolves fallback before spawning when workflow metadata is supplied', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        providerFallbackPurpose: 'default_chat',
+        providerFallbackAction: 'read',
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(resolveProviderFallbackForAction).toHaveBeenCalledWith({
+      purpose: 'default_chat',
+      action: 'read',
+      requester: 'test-group',
+      correlationId: null,
+    });
+    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
+      '/tmp/nanocrab-env-test/env',
+      expect.stringContaining('AGENT_PROVIDER=codex'),
+      { mode: 0o600 },
+    );
+    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
+      '/tmp/nanocrab-env-test/env',
+      expect.stringContaining('DEFAULT_MODEL=gpt-5.4'),
+      { mode: 0o600 },
+    );
   });
 });
 

@@ -21,6 +21,7 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { getAgentProviderConfig, isAgentProvider } from './agent-provider.js';
 import { logger } from './logger.js';
 import {
+  fallbackActionForProviderPurpose,
   getProviderProfile,
   ProviderPurpose,
   PROVIDER_PURPOSES,
@@ -178,6 +179,8 @@ async function runTask(
     taskProfile?.model ||
     group.containerConfig?.model ||
     group.containerConfig?.models?.[effectiveProvider];
+  const fallbackPurpose = (taskProfile?.id ||
+    'default_automation') as ProviderPurpose;
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
@@ -208,6 +211,9 @@ async function runTask(
         allowedMcpServers: group.containerConfig?.allowedMcpServers,
         provider: effectiveProvider,
         model: effectiveModel,
+        providerFallbackPurpose: fallbackPurpose,
+        providerFallbackAction:
+          fallbackActionForProviderPurpose(fallbackPurpose),
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

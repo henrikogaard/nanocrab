@@ -600,6 +600,8 @@ async function runAgent(
         allowedMcpServers: group.containerConfig?.allowedMcpServers,
         provider: group.containerConfig?.provider,
         model: effectiveModel,
+        providerFallbackPurpose: 'default_chat',
+        providerFallbackAction: 'read',
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
