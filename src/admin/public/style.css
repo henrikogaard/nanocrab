@@ -3036,3 +3036,80 @@ tr {
 .chat-progress-history .phase-entry.active {
   color: var(--text);
 }
+
+/* Chat workflow — tool-call cards */
+.chat-tool-call {
+  margin: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.chat-tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--surface);
+  cursor: pointer;
+  user-select: none;
+}
+
+.chat-tool-call-header:hover {
+  background: var(--surface2);
+}
+
+.chat-tool-call-header .tool-icon {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.chat-tool-call-header .tool-name {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.chat-tool-call-header .tool-status {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.chat-tool-call-header .tool-status.running {
+  color: var(--accent);
+}
+
+.chat-tool-call-header .tool-status.done {
+  color: var(--success);
+}
+
+.chat-tool-call-body {
+  display: none;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  max-height: 200px;
+  overflow: auto;
+}
+
+.chat-tool-call-body.expanded {
+  display: block;
+}
+
+.chat-tool-call-body pre {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.chat-tool-call-body .section-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}

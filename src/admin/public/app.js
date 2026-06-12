@@ -184,6 +184,72 @@ let handleWsMessage = function (msg) {
       termLog.scrollTop = termLog.scrollHeight;
     }
   }
+  if (msg.type === 'tool_call') {
+    const activeGroup = document.getElementById('chat-group-select')?.value;
+    if (msg.data.groupJid !== activeGroup) return;
+
+    const container = document.getElementById('chat-messages-area');
+    if (!container) return;
+
+    // Don't duplicate
+    if (document.getElementById('tool-card-' + msg.data.id)) return;
+
+    const card = document.createElement('div');
+    card.id = 'tool-card-' + msg.data.id;
+    card.className = 'chat-tool-call';
+    card.innerHTML = `
+      <div class="chat-tool-call-header" onclick="this.nextElementSibling.classList.toggle('expanded')">
+        <span class="tool-icon">&#x1F527;</span>
+        <span class="tool-name">${esc(msg.data.name)}</span>
+        <span class="tool-status running">&#x25CF; Running...</span>
+      </div>
+      <div class="chat-tool-call-body">
+        <div class="section-label">Input</div>
+        <pre>${esc(prettyPrint(msg.data.input))}</pre>
+      </div>
+    `;
+    container.appendChild(card);
+    container.scrollTop = container.scrollHeight;
+  }
+  if (msg.type === 'tool_result') {
+    const activeGroup = document.getElementById('chat-group-select')?.value;
+    if (msg.data.groupJid !== activeGroup) return;
+
+    let card = document.getElementById('tool-card-' + msg.data.id);
+    if (!card) {
+      // Result without a preceding tool_call — create minimal card
+      card = document.createElement('div');
+      card.id = 'tool-card-' + msg.data.id;
+      card.className = 'chat-tool-call';
+      card.innerHTML = `
+        <div class="chat-tool-call-header" onclick="this.nextElementSibling.classList.toggle('expanded')">
+          <span class="tool-icon">&#x1F527;</span>
+          <span class="tool-name">tool</span>
+          <span class="tool-status done">&#x2713; ${esc(msg.data.duration)}s</span>
+        </div>
+        <div class="chat-tool-call-body">
+          <div class="section-label">Result</div>
+          <pre>${esc(prettyPrint(msg.data.output))}</pre>
+        </div>
+      `;
+      const container = document.getElementById('chat-messages-area');
+      if (container) container.appendChild(card);
+    } else {
+      // Update existing card
+      const header = card.querySelector('.chat-tool-call-header');
+      const status = header?.querySelector('.tool-status');
+      if (status) {
+        status.className = 'tool-status done';
+        status.textContent = '\u2713 ' + (msg.data.duration || '') + 's';
+      }
+      const body = card.querySelector('.chat-tool-call-body');
+      if (body) {
+        const resultDiv = document.createElement('div');
+        resultDiv.innerHTML = '<div class="section-label" style="margin-top:8px">Result</div><pre>' + esc(prettyPrint(msg.data.output)) + '</pre>';
+        body.appendChild(resultDiv);
+      }
+    }
+  }
 };
 
 // --- Auth ---
@@ -5210,6 +5276,14 @@ async function loadBotName() {
     window._username = me.username || 'admin';
   } catch {
     window._userRole = 'owner'; // fallback for single-user mode
+  }
+}
+function prettyPrint(jsonStr) {
+  try {
+    const obj = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+    return JSON.stringify(obj, null, 2);
+  } catch {
+    return jsonStr || '';
   }
 }
 function esc(s) {
