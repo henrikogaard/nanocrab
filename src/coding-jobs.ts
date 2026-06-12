@@ -26,6 +26,7 @@ import {
 import { detectAuthMode } from './credential-proxy.js';
 import { logger } from './logger.js';
 import { createApproval, hasApprovedTarget } from './approvals.js';
+import { resolveProviderFallbackForAction } from './provider-router.js';
 
 const CODING_REPOS_PATH = path.join(STORE_DIR, 'coding-repos.json');
 const CODING_JOBS_PATH = path.join(STORE_DIR, 'coding-jobs.json');
@@ -660,6 +661,34 @@ async function runCodingJob(job: CodingJob): Promise<void> {
 
   const repo = getCodingRepo(job.repo);
   if (!repo?.enabled) throw new Error(`Repo ${job.repo} is not registered`);
+
+  const fallback = resolveProviderFallbackForAction({
+    purpose: 'default_coding',
+    action: 'coding-implementation',
+    requester: job.requestedBy,
+    correlationId: job.id,
+  });
+  if (!fallback.approved) {
+    job.status = 'await_approval';
+    updateJobOutput(
+      job,
+      `\n\nProvider fallback is awaiting approval: ${fallback.reason}${fallback.approvalId ? ` (${fallback.approvalId})` : ''}\n`,
+    );
+    upsertCodingJob(job);
+    return;
+  }
+  if (fallback.provider && fallback.provider !== job.provider) {
+    if (!isCodingProvider(fallback.provider)) {
+      throw new Error(`${fallback.provider} is not a coding-job runtime`);
+    }
+    updateJobOutput(
+      job,
+      `\n\nUsing approved provider fallback ${job.provider}/${job.model} -> ${fallback.provider}/${fallback.model}\n`,
+    );
+    job.provider = fallback.provider;
+    job.model = fallback.model;
+    upsertCodingJob(job);
+  }
 
   job.status = 'implement';
   upsertCodingJob(job);

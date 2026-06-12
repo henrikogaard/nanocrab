@@ -15,6 +15,11 @@ import {
 } from './agent-provider.js';
 import { STORE_DIR } from './config.js';
 import { readEnvFile } from './env.js';
+import {
+  createApproval,
+  findPendingApprovalForTarget,
+  hasApprovedTarget,
+} from './approvals.js';
 import { liveProbeService } from './providers/live-probe.js';
 import type { ProviderCapabilitiesResult } from './providers/openai-responses/provider.js';
 import {
@@ -82,9 +87,32 @@ export interface ProviderProbeResult {
   checks: ProviderProbeCheck[];
   live?: boolean;
   lastProbeAt?: string;
+  latencyMs?: number;
   capabilities?: ProviderCapabilities;
   errors?: string[];
+  errorDetail?: string;
   recommendedPurposes?: ProviderPurpose[];
+}
+
+export interface ProviderProbeHistoryEntry {
+  profileId?: ProviderPurpose;
+  provider: AgentProvider;
+  model: string;
+  ok: boolean;
+  latencyMs?: number;
+  streaming?: boolean;
+  streamingSupport: boolean;
+  toolSupport: boolean;
+  schemaSupport: boolean;
+  visionSupport: boolean;
+  contextWindow: number;
+  errorDetail?: string;
+  timestamp: string;
+}
+
+interface ProviderProbeStore {
+  latestByProfile: Record<string, ProviderProbeResult>;
+  history: ProviderProbeHistoryEntry[];
 }
 
 const PROFILE_PATH = path.join(STORE_DIR, 'provider-profiles.json');
@@ -257,20 +285,97 @@ function writeStoredProfiles(
   fs.writeFileSync(PROFILE_PATH, `${JSON.stringify(profiles, null, 2)}\n`);
 }
 
-function readStoredProbes(): Record<string, ProviderProbeResult> {
+const MAX_PROBE_HISTORY_PER_MODEL = 20;
+
+function readProbeStore(): ProviderProbeStore {
   try {
-    return JSON.parse(fs.readFileSync(PROBE_PATH, 'utf-8')) as Record<
-      string,
-      ProviderProbeResult
-    >;
+    const parsed = JSON.parse(fs.readFileSync(PROBE_PATH, 'utf-8'));
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      parsed.latestByProfile &&
+      typeof parsed.latestByProfile === 'object'
+    ) {
+      return {
+        latestByProfile: parsed.latestByProfile as Record<
+          string,
+          ProviderProbeResult
+        >,
+        history: Array.isArray(parsed.history)
+          ? (parsed.history as ProviderProbeHistoryEntry[])
+          : [],
+      };
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const latestByProfile = {
+        ...(parsed as Record<string, ProviderProbeResult>),
+      };
+      delete (latestByProfile as Record<string, unknown>).history;
+      delete (latestByProfile as Record<string, unknown>).__history;
+      return {
+        latestByProfile,
+        history: Array.isArray((parsed as Record<string, unknown>).__history)
+          ? ((parsed as Record<string, unknown>)
+              .__history as ProviderProbeHistoryEntry[])
+          : [],
+      };
+    }
+    return { latestByProfile: {}, history: [] };
   } catch {
-    return {};
+    return { latestByProfile: {}, history: [] };
   }
 }
 
 function writeStoredProbes(probes: Record<string, ProviderProbeResult>): void {
   fs.mkdirSync(path.dirname(PROBE_PATH), { recursive: true });
-  fs.writeFileSync(PROBE_PATH, `${JSON.stringify(probes, null, 2)}\n`);
+  const store = readProbeStore();
+  fs.writeFileSync(
+    PROBE_PATH,
+    `${JSON.stringify({ ...store, latestByProfile: probes }, null, 2)}\n`,
+  );
+}
+
+function readStoredProbes(): Record<string, ProviderProbeResult> {
+  return readProbeStore().latestByProfile;
+}
+
+function writeProbeStore(store: ProviderProbeStore): void {
+  fs.mkdirSync(path.dirname(PROBE_PATH), { recursive: true });
+  fs.writeFileSync(PROBE_PATH, `${JSON.stringify(store, null, 2)}\n`);
+}
+
+function appendProbeHistory(result: ProviderProbeResult): void {
+  const timestamp = result.lastProbeAt || new Date().toISOString();
+  const capabilities = result.capabilities;
+  const entry: ProviderProbeHistoryEntry = {
+    profileId: result.profileId,
+    provider: result.provider,
+    model: result.model,
+    ok: result.ok,
+    latencyMs: result.latencyMs,
+    streaming: capabilities?.streaming ?? false,
+    streamingSupport: capabilities?.streaming ?? false,
+    toolSupport: capabilities?.tool_calls ?? false,
+    schemaSupport: capabilities?.structured_output ?? false,
+    visionSupport: capabilities?.vision ?? false,
+    contextWindow: capabilities?.context_window ?? 0,
+    errorDetail: result.errorDetail || result.errors?.join('; '),
+    timestamp,
+  };
+  const store = readProbeStore();
+  const other = store.history.filter(
+    (item) => item.provider !== entry.provider || item.model !== entry.model,
+  );
+  const same = store.history
+    .filter(
+      (item) => item.provider === entry.provider && item.model === entry.model,
+    )
+    .slice(-(MAX_PROBE_HISTORY_PER_MODEL - 1));
+  writeProbeStore({
+    latestByProfile: store.latestByProfile,
+    history: [...other, ...same, entry],
+  });
 }
 
 function providerApiKey(provider: AgentProvider): string {
@@ -516,6 +621,7 @@ export function probeProviderProfile(
 export async function runLiveProviderProbe(
   profile: ProviderProfile,
 ): Promise<ProviderProbeResult> {
+  const startedAt = Date.now();
   const staticProbe = probeProviderProfile(profile);
   const capabilities = { ...getProviderCapabilities(profile.provider) };
   const checks = [...staticProbe.checks];
@@ -603,13 +709,16 @@ export async function runLiveProviderProbe(
     checks,
     live: true,
     lastProbeAt: new Date().toISOString(),
+    latencyMs: Date.now() - startedAt,
     capabilities,
     errors,
+    errorDetail: errors.length ? errors.join('; ') : undefined,
     recommendedPurposes: recommendedPurposes(capabilities),
   };
   const probes = readStoredProbes();
   probes[profile.id] = result;
   writeStoredProbes(probes);
+  appendProbeHistory(result);
   return result;
 }
 
@@ -621,8 +730,7 @@ function probeCapabilitiesToRouter(
     structured_output: caps.structuredOutput,
     streaming: caps.streaming,
     vision: caps.vision,
-    code_strength:
-      caps.codeStrength === 'high' ? 'agentic' : 'basic',
+    code_strength: caps.codeStrength === 'high' ? 'agentic' : 'basic',
     context_window: caps.contextWindow,
     cost_tier: caps.costTier === 'low' ? 'local' : caps.costTier,
     privacy_tier:
@@ -631,9 +739,7 @@ function probeCapabilitiesToRouter(
         : caps.privacyTier === 'low'
           ? 'local'
           : 'hosted',
-    supports_mcp_strategy: caps.supportsMcpStrategy
-      ? 'container-loop'
-      : 'none',
+    supports_mcp_strategy: caps.supportsMcpStrategy ? 'container-loop' : 'none',
   };
 }
 
@@ -728,6 +834,27 @@ export function getStoredProviderProbes(): Record<string, ProviderProbeResult> {
   return readStoredProbes();
 }
 
+export function getProviderProbeHistory(
+  provider?: AgentProvider | string,
+  model?: string,
+  limit?: number,
+): ProviderProbeHistoryEntry[] {
+  let history = readProbeStore().history;
+  if (provider) {
+    history = history.filter(
+      (entry) =>
+        entry.provider === provider ||
+        (entry as ProviderProbeHistoryEntry & { providerId?: string })
+          .providerId === provider,
+    );
+  }
+  if (model) {
+    history = history.filter((entry) => entry.model === model);
+  }
+  const cap = Math.min(Math.max(limit || MAX_PROBE_HISTORY_PER_MODEL, 1), 200);
+  return history.slice(-cap);
+}
+
 export function probeAllProviderProfiles(): ProviderProbeResult[] {
   const stored = readStoredProbes();
   return loadProviderProfiles().map(
@@ -767,10 +894,12 @@ export function providerCanFallback(input: {
       providerId: input.source.provider,
       model: input.source.model,
       toolPolicy: input.source.toolPolicy,
+      privacyTier: getProviderCapabilities(input.source.provider).privacy_tier,
     },
     {
       providerId: input.target.provider,
       model: input.target.model,
+      privacyTier: getProviderCapabilities(input.target.provider).privacy_tier,
     },
     {
       toolCalls: input.capabilities?.tool_calls ?? false,
@@ -779,4 +908,130 @@ export function providerCanFallback(input: {
     },
     hasFallbackConfigured,
   );
+}
+
+export function resolveProviderFallbackForAction(input: {
+  purpose: ProviderPurpose;
+  action: FallbackAction;
+  requester: string;
+  correlationId?: string | null;
+}):
+  | {
+      approved: true;
+      profile: ProviderProfile;
+      provider: AgentProvider;
+      model: string;
+    }
+  | { approved: false; approvalId?: string; reason: string } {
+  const source = getProviderProfile(input.purpose);
+  if (!source) {
+    return {
+      approved: false,
+      reason: `provider profile not found: ${input.purpose}`,
+    };
+  }
+
+  const sourceAvailability = getProviderAvailability()[source.provider];
+  if (sourceAvailability) {
+    return {
+      approved: true,
+      profile: source,
+      provider: source.provider,
+      model: source.model,
+    };
+  }
+
+  if (!source.fallbackProfileId) {
+    return {
+      approved: false,
+      reason: `provider ${source.provider}/${source.model} is unavailable and no fallback profile is configured`,
+    };
+  }
+
+  const target = getProviderProfile(source.fallbackProfileId);
+  if (!target) {
+    return {
+      approved: false,
+      reason: `fallback profile not found: ${source.fallbackProfileId}`,
+    };
+  }
+  if (!getProviderAvailability()[target.provider]) {
+    return {
+      approved: false,
+      reason: `fallback provider ${target.provider}/${target.model} is unavailable`,
+    };
+  }
+
+  const decision = providerCanFallback({
+    source,
+    target,
+    action: input.action,
+    capabilities: getProviderCapabilities(target.provider),
+  });
+
+  if (decision.allowed && !decision.requiresApproval) {
+    return {
+      approved: true,
+      profile: target,
+      provider: target.provider,
+      model: target.model,
+    };
+  }
+
+  if (!decision.requiresApproval) {
+    return { approved: false, reason: decision.reason };
+  }
+
+  const targetId = `${source.id}->${target.id}:${input.action}`;
+  if (hasApprovedTarget('provider-fallback', 'provider-profile', targetId)) {
+    return {
+      approved: true,
+      profile: target,
+      provider: target.provider,
+      model: target.model,
+    };
+  }
+
+  const pending = findPendingApprovalForTarget(
+    'provider-fallback',
+    'provider-profile',
+    targetId,
+  );
+  if (pending) {
+    return {
+      approved: false,
+      approvalId: pending.id,
+      reason: decision.reason,
+    };
+  }
+
+  const approval = createApproval({
+    kind: 'provider-fallback',
+    title: 'Approve provider fallback',
+    summary: `Allow ${source.label} to fall back from ${source.provider}/${source.model} to ${target.provider}/${target.model} for ${input.action}.`,
+    risk: input.action === 'read' ? 'medium' : 'high',
+    requester: input.requester,
+    targetType: 'provider-profile',
+    targetId,
+    source: 'provider-router',
+    correlationId: input.correlationId || null,
+    actionPreview: `${source.provider}/${source.model} -> ${target.provider}/${target.model}`,
+    resourceSummary: `${input.purpose} provider fallback`,
+    payload: {
+      sourceProfileId: source.id,
+      targetProfileId: target.id,
+      sourceProvider: source.provider,
+      sourceModel: source.model,
+      targetProvider: target.provider,
+      targetModel: target.model,
+      action: input.action,
+      reason: decision.reason,
+    },
+  });
+
+  return {
+    approved: false,
+    approvalId: approval.id,
+    reason: decision.reason,
+  };
 }

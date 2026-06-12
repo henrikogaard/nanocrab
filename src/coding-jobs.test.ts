@@ -39,6 +39,14 @@ vi.mock('./credential-proxy.js', () => ({
   detectAuthMode: vi.fn(() => 'api-key'),
 }));
 
+vi.mock('./provider-router.js', () => ({
+  resolveProviderFallbackForAction: vi.fn(() => ({
+    approved: true,
+    provider: 'claude',
+    model: 'claude-sonnet-4-6',
+  })),
+}));
+
 vi.mock('child_process', () => ({
   spawn: vi.fn(() => {
     throw new Error('spawn should not run while coding jobs are queued');
@@ -53,6 +61,7 @@ import {
   registerCodingRepo,
   startCodingJob,
 } from './coding-jobs.js';
+import { resolveProviderFallbackForAction } from './provider-router.js';
 
 const TEST_ROOT = '/tmp/nanocrab-coding-jobs-test';
 
@@ -171,6 +180,30 @@ describe('coding jobs', () => {
     expect(job.status).toBe('queued');
     expect(job.workspace).toContain('/data/coding-workspaces/jobs/');
     expect(loadCodingJobs()).toHaveLength(1);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('blocks write-capable provider fallback before spawning a coding container', async () => {
+    vi.mocked(resolveProviderFallbackForAction).mockReturnValueOnce({
+      approved: false,
+      approvalId: 'approval-provider-fallback',
+      reason: 'provider fallback requires approval',
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+    });
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    expect(getCodingJob(job.id)?.output).toContain(
+      'provider fallback requires approval',
+    );
     expect(spawn).not.toHaveBeenCalled();
   });
 

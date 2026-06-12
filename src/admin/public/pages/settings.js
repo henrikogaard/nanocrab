@@ -160,6 +160,15 @@ async function renderSettings(el) {
     },
     {},
   );
+  const profileHistoryById = (providerInfo.probeHistory || []).reduce(
+    (acc, entry) => {
+      if (!entry.profileId) return acc;
+      if (!acc[entry.profileId]) acc[entry.profileId] = [];
+      acc[entry.profileId].push(entry);
+      return acc;
+    },
+    {},
+  );
   const profileOptions = Object.values(providerDefinitions)
     .filter((p) => p && p.selectable !== false)
     .map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`)
@@ -170,14 +179,36 @@ async function renderSettings(el) {
       <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Choose the default provider/model for each NanoCrab capability. Write-capable work still follows approval and container isolation rules.</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Purpose</th><th>Provider</th><th>Model</th><th>Tool Policy</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Purpose</th><th>Provider</th><th>Model</th><th>Tool Policy</th><th>Fallback</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             ${providerProfiles
               .map((profile) => {
                 const probe = profileProbeById[profile.id];
+                const history = profileHistoryById[profile.id] || [];
+                const recentOk = history.filter((entry) => entry.ok).length;
+                const reliability = history.length
+                  ? `${recentOk}/${history.length} recent`
+                  : 'No live history';
+                const lastError =
+                  probe?.errorDetail ||
+                  probe?.errors?.[0] ||
+                  history
+                    .slice()
+                    .reverse()
+                    .find((entry) => entry.errorDetail)?.errorDetail ||
+                  '';
                 const models = providerModels[profile.provider] || [
                   profile.model,
                 ];
+                const fallbackOptions = [
+                  '<option value="">None</option>',
+                  ...providerProfiles
+                    .filter((item) => item.id !== profile.id)
+                    .map(
+                      (item) =>
+                        `<option value="${esc(item.id)}" ${profile.fallbackProfileId === item.id ? 'selected' : ''}>${esc(providerPurposeLabels[item.id] || item.label || item.id)}</option>`,
+                    ),
+                ].join('');
                 return `<tr>
                   <td style="color:var(--text);font-weight:600">${esc(providerPurposeLabels[profile.id] || profile.label || profile.id)}</td>
                   <td>
@@ -202,12 +233,19 @@ async function renderSettings(el) {
                     </select>
                   </td>
                   <td>
+                    <select class="search-input" id="profile-fallback-${esc(profile.id)}" style="min-width:145px;padding:5px 8px;font-size:12px">
+                      ${fallbackOptions}
+                    </select>
+                  </td>
+                  <td>
                     ${
                       probe?.ok
                         ? '<span class="badge badge-success">Ready</span>'
                         : '<span class="badge badge-warning">Needs review</span>'
                     }
                     <div id="profile-probe-${esc(profile.id)}" style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(probe?.checks?.find((c) => !c.ok)?.detail || profile.provider + '/' + profile.model)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${esc(reliability)}${probe?.lastProbeAt ? ` · ${esc(timeAgo(probe.lastProbeAt))}` : ''}</div>
+                    ${lastError ? `<div style="font-size:10px;color:var(--error);margin-top:3px">${esc(lastError)}</div>` : ''}
                   </td>
                   <td style="white-space:nowrap">
                     <button class="btn btn-sm btn-primary" onclick="saveProviderProfile('${esc(profile.id)}')">Save</button>
@@ -659,12 +697,15 @@ window.saveProviderProfile = async function (profileId) {
   const toolPolicy = document.getElementById(
     `profile-policy-${profileId}`,
   )?.value;
+  const fallbackProfileId = document.getElementById(
+    `profile-fallback-${profileId}`,
+  )?.value;
   const target = document.getElementById(`profile-probe-${profileId}`);
   if (target) target.textContent = 'Saving...';
   try {
     const r = await api(`/system/provider/profiles/${profileId}`, {
       method: 'PUT',
-      body: JSON.stringify({ provider, model, toolPolicy }),
+      body: JSON.stringify({ provider, model, toolPolicy, fallbackProfileId }),
     });
     if (!r.ok) {
       toast(r.error || 'Failed', 'error');
@@ -690,12 +731,19 @@ window.probeProviderProfile = async function (profileId) {
   try {
     const r = await api(`/system/provider/profiles/${profileId}/probe`);
     if (!target) return;
+    if (r.error) {
+      target.innerHTML = `<span class="badge badge-error">Fail</span> ${esc(r.error)}`;
+      return;
+    }
     target.innerHTML = r.checks
       .map(
         (c) =>
           `<div>${c.ok ? '<span class="badge badge-success">OK</span>' : '<span class="badge badge-error">Fail</span>'} ${esc(c.label)}${c.detail ? ` <span style="color:var(--text-muted)">${esc(c.detail)}</span>` : ''}</div>`,
       )
       .join('');
+    if (r.errorDetail) {
+      target.innerHTML += `<div style="color:var(--error);margin-top:4px">${esc(r.errorDetail)}</div>`;
+    }
   } catch (e) {
     if (target) target.textContent = e.message;
   }

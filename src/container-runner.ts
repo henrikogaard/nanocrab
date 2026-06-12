@@ -39,6 +39,11 @@ import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { prepareActiveSkillsDirectory } from './skill-registry.js';
 import { RegisteredGroup } from './types.js';
+import {
+  resolveProviderFallbackForAction,
+  type ProviderPurpose,
+} from './provider-router.js';
+import type { FallbackAction } from './providers/fallback-policy.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCRAB_OUTPUT_START---';
@@ -56,6 +61,8 @@ export interface ContainerInput {
   allowedMcpServers?: string[];
   model?: string;
   provider?: AgentProvider;
+  providerFallbackPurpose?: ProviderPurpose;
+  providerFallbackAction?: FallbackAction;
 }
 
 export interface ContainerOutput {
@@ -569,12 +576,33 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanocrab-${safeName}-${Date.now()}`;
+  let effectiveProvider = isAgentProvider(input.provider)
+    ? input.provider
+    : undefined;
+  let effectiveModel = input.model;
+  if (input.providerFallbackPurpose && input.providerFallbackAction) {
+    const fallback = resolveProviderFallbackForAction({
+      purpose: input.providerFallbackPurpose,
+      action: input.providerFallbackAction,
+      requester: input.groupFolder,
+      correlationId: input.sessionId || null,
+    });
+    if (!fallback.approved) {
+      return {
+        status: 'error',
+        result: null,
+        error: `Provider fallback approval required: ${fallback.reason}`,
+      };
+    }
+    effectiveProvider = fallback.provider;
+    effectiveModel = fallback.model;
+  }
   const builtContainerArgs = buildContainerArgs(
     mounts,
     containerName,
     input.isMain ? undefined : input.allowedMcpServers,
-    isAgentProvider(input.provider) ? input.provider : undefined,
-    input.model,
+    effectiveProvider,
+    effectiveModel,
   );
   const containerArgs = builtContainerArgs.args;
 

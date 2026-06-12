@@ -144,6 +144,10 @@ describe('FallbackPolicyManager', () => {
         'upload',
         'shell',
         'pr',
+        'coding-implementation',
+        'pr-creation',
+        'automation-execution',
+        'skill-installation',
       ];
 
       for (const action of dangerous) {
@@ -244,6 +248,26 @@ describe('FallbackPolicyManager', () => {
 
         expect(result.allowed).toBe(false);
       });
+    });
+
+    it('requires approval when fallback moves local or private work to a hosted provider', () => {
+      const result = manager.evaluateFallback(
+        'provider-fallback',
+        {
+          ...writeSource,
+          privacyTier: 'local',
+        },
+        {
+          ...target,
+          privacyTier: 'third-party',
+        },
+        fullCapabilities,
+        true,
+      );
+
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.reason).toContain('local/private');
     });
   });
 

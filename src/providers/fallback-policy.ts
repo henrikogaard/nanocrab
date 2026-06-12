@@ -7,7 +7,12 @@ export type FallbackAction =
   | 'external-message'
   | 'upload'
   | 'shell'
-  | 'pr';
+  | 'pr'
+  | 'coding-implementation'
+  | 'pr-creation'
+  | 'automation-execution'
+  | 'skill-installation'
+  | 'provider-fallback';
 
 export interface FallbackDecision {
   allowed: boolean;
@@ -19,11 +24,13 @@ interface ProfileLike {
   providerId: string;
   model: string;
   toolPolicy: string;
+  privacyTier?: string;
 }
 
 interface TargetProfileLike {
   providerId: string;
   model: string;
+  privacyTier?: string;
 }
 
 interface CapabilitiesLike {
@@ -40,6 +47,10 @@ const DANGEROUS_ACTIONS: Set<FallbackAction> = new Set([
   'upload',
   'shell',
   'pr',
+  'coding-implementation',
+  'pr-creation',
+  'automation-execution',
+  'skill-installation',
 ]);
 
 export class FallbackPolicyManager {
@@ -83,6 +94,17 @@ export class FallbackPolicyManager {
       };
     }
 
+    if (
+      action === 'provider-fallback' &&
+      this.crossesLocalPrivateBoundary(sourceProfile, targetProfile)
+    ) {
+      return {
+        allowed: false,
+        requiresApproval: true,
+        reason: `provider fallback from local/private ${sourceProfile.providerId}/${sourceProfile.model} to hosted/third-party ${targetProfile.providerId}/${targetProfile.model} requires approval`,
+      };
+    }
+
     if (READ_ACTIONS.has(action)) {
       if (sourceProfile.toolPolicy === 'deny') {
         return {
@@ -95,6 +117,14 @@ export class FallbackPolicyManager {
         allowed: true,
         requiresApproval: false,
         reason: `read fallback from ${sourceProfile.providerId}/${sourceProfile.model} to ${targetProfile.providerId}/${targetProfile.model}`,
+      };
+    }
+
+    if (action === 'provider-fallback') {
+      return {
+        allowed: true,
+        requiresApproval: false,
+        reason: `provider fallback from ${sourceProfile.providerId}/${sourceProfile.model} to ${targetProfile.providerId}/${targetProfile.model}`,
       };
     }
 
@@ -159,6 +189,10 @@ export class FallbackPolicyManager {
       return { allowed: true, reason: '' };
     }
 
+    if (action === 'provider-fallback') {
+      return { allowed: true, reason: '' };
+    }
+
     if (WRITE_ACTIONS.has(action) || DANGEROUS_ACTIONS.has(action)) {
       if (!capabilities.toolCalls) {
         return {
@@ -166,7 +200,10 @@ export class FallbackPolicyManager {
           reason: `target provider lacks tool call support required for '${action}'`,
         };
       }
-      if (capabilities.codeStrength === 'none' || capabilities.codeStrength === 'low') {
+      if (
+        capabilities.codeStrength === 'none' ||
+        capabilities.codeStrength === 'low'
+      ) {
         return {
           allowed: false,
           reason: `target provider code strength '${capabilities.codeStrength}' insufficient for '${action}'`,
@@ -176,5 +213,17 @@ export class FallbackPolicyManager {
     }
 
     return { allowed: false, reason: `unknown action '${action}'` };
+  }
+
+  private crossesLocalPrivateBoundary(
+    sourceProfile: ProfileLike,
+    targetProfile: TargetProfileLike,
+  ): boolean {
+    const sourcePrivacy = sourceProfile.privacyTier || 'hosted';
+    const targetPrivacy = targetProfile.privacyTier || 'hosted';
+    return (
+      (sourcePrivacy === 'local' || sourcePrivacy === 'private') &&
+      (targetPrivacy === 'hosted' || targetPrivacy === 'third-party')
+    );
   }
 }

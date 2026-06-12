@@ -32,9 +32,15 @@ export interface LiveProbeStatus {
 
 export interface ProbeHistoryEntry {
   providerId: string;
+  provider: string;
   model: string;
   result: LiveProbeResult;
   timestamp: string;
+}
+
+interface ProbeHistoryStore {
+  latestByProfile?: Record<string, unknown>;
+  history: ProbeHistoryEntry[];
 }
 
 interface CacheEntry {
@@ -43,22 +49,46 @@ interface CacheEntry {
 }
 
 const DEFAULT_CACHE_TTL_MS = 60_000;
-const PROBE_HISTORY_PATH = path.join(STORE_DIR, 'provider-probe-history.json');
+const PROBE_HISTORY_PATH = path.join(STORE_DIR, 'provider-probes.json');
 const MAX_HISTORY_PER_MODEL = 20;
 
 function readProbeHistory(): ProbeHistoryEntry[] {
   try {
     const raw = fs.readFileSync(PROBE_HISTORY_PATH, 'utf-8');
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed)) return parsed;
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      Array.isArray((parsed as ProbeHistoryStore).history)
+    ) {
+      return (parsed as ProbeHistoryStore).history;
+    }
+    return [];
   } catch {
     return [];
   }
 }
 
 function writeProbeHistory(entries: ProbeHistoryEntry[]): void {
+  let latestByProfile: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(PROBE_HISTORY_PATH, 'utf-8'));
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      parsed.latestByProfile &&
+      typeof parsed.latestByProfile === 'object'
+    ) {
+      latestByProfile = parsed.latestByProfile as Record<string, unknown>;
+    }
+  } catch {}
   fs.mkdirSync(path.dirname(PROBE_HISTORY_PATH), { recursive: true });
-  fs.writeFileSync(PROBE_HISTORY_PATH, `${JSON.stringify(entries, null, 2)}\n`);
+  fs.writeFileSync(
+    PROBE_HISTORY_PATH,
+    `${JSON.stringify({ latestByProfile, history: entries }, null, 2)}\n`,
+  );
 }
 
 function pruneHistory(
@@ -98,7 +128,11 @@ export class LiveProbeService {
     return entry.result;
   }
 
-  private setCache(providerId: string, model: string, result: LiveProbeResult): void {
+  private setCache(
+    providerId: string,
+    model: string,
+    result: LiveProbeResult,
+  ): void {
     const key = this.cacheKey(providerId, model);
     this.cache.set(key, { result, expiresAt: Date.now() + this.cacheTtlMs });
   }
@@ -111,6 +145,7 @@ export class LiveProbeService {
     const entries = readProbeHistory();
     const entry: ProbeHistoryEntry = {
       providerId,
+      provider: providerId,
       model,
       result,
       timestamp: new Date().toISOString(),
@@ -251,7 +286,8 @@ export class LiveProbeService {
         validated: false,
         ok: false,
         status: 'failed' as const,
-        errorMessage: r.reason instanceof Error ? r.reason.message : String(r.reason),
+        errorMessage:
+          r.reason instanceof Error ? r.reason.message : String(r.reason),
         timestamp: new Date(),
       };
     });

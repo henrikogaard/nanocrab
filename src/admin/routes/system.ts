@@ -47,12 +47,14 @@ import {
 } from '../../agent-instructions.js';
 import {
   getProviderCapabilityMatrix,
+  getProviderProbeHistory,
   getProviderPurposeMetadata,
   loadProviderProfiles,
   probeAllProviderProfiles,
   probeProviderProfile,
   ProviderPurpose,
   PROVIDER_PURPOSES,
+  runLiveProviderProbe,
   saveProviderProfile,
 } from '../../provider-router.js';
 
@@ -560,6 +562,7 @@ router.get('/provider', (_req: Request, res: Response) => {
     purposes: getProviderPurposeMetadata(),
     capabilityMatrix: getProviderCapabilityMatrix(),
     profileProbes: probeAllProviderProfiles(),
+    probeHistory: getProviderProbeHistory(undefined, undefined, 100),
     auth: { codex: codexAuth },
   });
 });
@@ -690,21 +693,31 @@ router.put(
   },
 );
 
-router.get('/provider/profiles/:id/probe', (req: Request, res: Response) => {
-  const id = req.params.id as ProviderPurpose;
-  if (!PROVIDER_PURPOSES.includes(id)) {
-    res.status(400).json({
-      error: `profile id must be one of: ${PROVIDER_PURPOSES.join(', ')}`,
-    });
-    return;
-  }
-  const profile = loadProviderProfiles().find((item) => item.id === id);
-  if (!profile) {
-    res.status(404).json({ error: 'profile not found' });
-    return;
-  }
-  res.json(probeProviderProfile(profile));
-});
+router.get(
+  '/provider/profiles/:id/probe',
+  async (req: Request, res: Response) => {
+    const id = req.params.id as ProviderPurpose;
+    if (!PROVIDER_PURPOSES.includes(id)) {
+      res.status(400).json({
+        error: `profile id must be one of: ${PROVIDER_PURPOSES.join(', ')}`,
+      });
+      return;
+    }
+    const profile = loadProviderProfiles().find((item) => item.id === id);
+    if (!profile) {
+      res.status(404).json({ error: 'profile not found' });
+      return;
+    }
+    try {
+      const probe = await runLiveProviderProbe(profile);
+      res.json(probe);
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
 
 router.get(
   '/provider/preflight/:provider',

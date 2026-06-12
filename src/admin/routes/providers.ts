@@ -7,15 +7,19 @@ import { auditLog } from '../security.js';
 import { getCodexAuthStatus } from '../../codex-auth.js';
 import { isAgentProvider } from '../../agent-provider.js';
 import { createApproval } from '../../approvals.js';
-import { liveProbeService } from '../../providers/live-probe.js';
 import {
   getProviderProfile,
   loadProviderProfiles,
   providerModels,
   runLiveProviderProbe,
   getStoredProviderProbes,
+  getProviderProbeHistory,
 } from '../../provider-router.js';
-import { runAllProbes, getProbeHealth, refreshProbeHealth } from '../../probe-scheduler.js';
+import {
+  runAllProbes,
+  getProbeHealth,
+  refreshProbeHealth,
+} from '../../probe-scheduler.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -410,7 +414,7 @@ router.get('/probe-history', (req: Request, res: Response) => {
       typeof req.query.limit === 'string'
         ? parseInt(req.query.limit, 10) || undefined
         : undefined;
-    const history = liveProbeService.getProbeHistory(providerId, model, limit);
+    const history = getProviderProbeHistory(providerId, model, limit);
     res.json({ ok: true, history });
   } catch (err) {
     res.status(400).json({
@@ -440,6 +444,7 @@ router.post('/fallback-approval', (req: Request, res: Response) => {
       .json({ error: 'sourceProfileId and targetProfileId required' });
     return;
   }
+  const targetId = `${sourceProfileId}->${targetProfileId}:${action}`;
   const approval = createApproval({
     kind: 'provider-fallback',
     title: 'Approve provider fallback',
@@ -447,7 +452,8 @@ router.post('/fallback-approval', (req: Request, res: Response) => {
     risk: action === 'read' ? 'low' : 'high',
     requester: req.user?.username || 'dashboard',
     targetType: 'provider-profile',
-    targetId: sourceProfileId,
+    targetId,
+    source: 'dashboard',
     payload: { sourceProfileId, targetProfileId, action },
   });
   auditLog(req, 'provider_fallback_approval_requested', approval.id);
@@ -465,7 +471,11 @@ router.get('/health', (_req: Request, res: Response) => {
 router.post('/probe-all', async (_req: Request, res: Response) => {
   try {
     const data = await runAllProbes();
-    auditLog(_req, 'provider_probe_all', `${data.entries.length} profiles probed`);
+    auditLog(
+      _req,
+      'provider_probe_all',
+      `${data.entries.length} profiles probed`,
+    );
     res.json(data);
   } catch (err) {
     res.status(500).json({

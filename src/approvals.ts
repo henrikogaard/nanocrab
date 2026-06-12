@@ -268,3 +268,17 @@ export function hasApprovedTarget(
       !isPastDeadline(approval),
   );
 }
+
+export function findPendingApprovalForTarget(
+  kind: ApprovalKind,
+  targetType: string,
+  targetId: string,
+): ApprovalRequest | undefined {
+  return readApprovalsWithExpiredSweep().find(
+    (approval) =>
+      approval.kind === kind &&
+      approval.targetType === targetType &&
+      approval.targetId === targetId &&
+      approval.status === 'pending',
+  );
+}
