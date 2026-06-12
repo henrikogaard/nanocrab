@@ -43,34 +43,42 @@ Any provider that powers all NanoCrab features must support, or be wrapped to su
 0. **Provider Router v1 hardening**
    - DONE: provider profiles and static capability matrix exist for chat, coding, automations, memory, journal, skill factory, reports, docs, and vision.
    - DONE: scheduled tasks can store provider profile, provider, model, and tool policy overrides.
-   - NEXT: add live per-model probes for tool calling, structured output, context length, streaming, and code-editing reliability before enabling models for write-capable tasks.
+   - DONE: added live per-model probes for tool calling, structured output, context length, streaming, and code-editing reliability via `LiveProbeService`.
+   - DONE: enhanced fallback policy enforcement — read-only tasks fall back automatically; write-capable tasks require explicit approval.
    - Keep OpenCode/Codex/Claude Code as coding-agent runtimes; use API adapters for extraction, summaries, and report generation where tool calls are predictable.
 
 1. **OpenAI Responses API adapter (`openai-responses`)**
-   - Best first API-native provider to add because it supports tools, structured outputs, and remote MCP/connectors from the same family as Codex.
-   - Use for: chat, automations, memory/journal extraction, report generation, coding with NanoCrab's container tool loop.
-   - Keep Codex CLI separately for coding-agent workflows where its CLI behavior is useful.
+   - DONE: provider adapter implemented with `OpenAIResponsesProvider` class, 11 tests covering capabilities, model validation, and task execution.
+   - Endpoints: `GET /v1/models` for validation, `POST /v1/responses` for execution.
+   - Capabilities: toolCalls, structuredOutput, streaming, vision, codeStrength high.
    - Reference: [OpenAI tools and MCP docs](https://developers.openai.com/api/docs/guides/tools), [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
 
 2. **Anthropic Messages API adapter (`anthropic-messages`)**
-   - Separate this from Claude Agent SDK. Claude Code/Agent SDK remains a coding runtime; Messages API becomes a normal provider behind NanoCrab's own tool loop.
-   - Use for: chat, automations, memory/journal extraction, reports, and coding through container tools.
+   - DONE: provider adapter implemented with `AnthropicMessagesProvider` class, 13 tests.
+   - Uses `x-api-key` header auth, `anthropic-version: 2023-06-01` header.
+   - Endpoints: `GET /v1/models` for validation, `POST /v1/messages` for execution.
+   - All Claude models: toolCalls, structuredOutput, streaming, vision, codeStrength high.
    - Reference: [Anthropic tool use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview), [Anthropic Messages API](https://platform.claude.com/docs/en/build-with-claude/working-with-messages).
 
 3. **Google Gemini API adapter (`gemini`)**
-   - Good for long-context analysis, multimodal input, structured output, and report/document work.
-   - Use for: summaries, journal extraction, large-document reasoning, report generation, and some coding tasks after evaluation.
+   - DONE: provider adapter implemented with `GeminiProvider` class, 12 tests.
+   - Endpoints: `GET /v1beta/models` for validation, `POST /v1beta/models/{model}:generateContent` for execution.
+   - Maps Gemini `contents`/`parts` format to/from ProviderOutput.
+   - Models: gemini-3.5-flash (1M context), gemini-2.5-pro (1M context, high cost), gemini-2.5-flash (1M context).
    - Reference: [Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling), [Gemini structured output](https://ai.google.dev/gemini-api/docs/structured-output).
 
 4. **OpenAI-compatible gateway adapter (`openai-compatible`)**
-   - Covers OpenRouter, vLLM, LM Studio, compatible hosted endpoints, and eventually Ollama if its selected model passes capability probes.
-   - Do not treat every model behind a gateway as equal. Require per-model capability checks before allowing it for coding, automations, or tool-heavy features.
-   - Use for: model experimentation, fallback routing, local/private inference, and lower-cost summaries.
+   - DONE: provider adapter implemented with `OpenAICompatibleProvider` class, 14 tests.
+   - Flexible endpoint configuration for OpenRouter, vLLM, LM Studio, and compatible hosted endpoints.
+   - Conservative default capabilities (toolCalls=false, structuredOutput=false) — live probing determines actual capabilities.
+   - Falls back to `GET /models` for discovery, `POST /chat/completions` for execution.
    - Reference: [OpenRouter quickstart](https://openrouter.ai/docs/quickstart), [OpenRouter tool calling](https://openrouter.ai/docs/guides/features/tool-calling).
 
 5. **Mistral API adapter (`mistral`)**
-   - Useful as a second independent API provider with function calling and structured output.
-   - Use for: chat, summaries, extraction, and automations after capability tests.
+   - DONE: provider adapter implemented with `MistralProvider` class, 12 tests.
+   - OpenAI-compatible chat/completions format with Bearer token auth.
+   - Models: mistral-large-latest (128k), mistral-medium-latest (128k, low cost), codestral-latest (256k).
+   - Capabilities: toolCalls, structuredOutput, streaming; vision=false for most models.
    - Reference: [Mistral function calling](https://docs.mistral.ai/studio-api/conversations/function-calling), [Mistral structured output](https://docs.mistral.ai/studio-api/conversations/structured-output).
 
 ### Provider Settings Surface
@@ -91,8 +99,8 @@ Build a single **Providers** admin surface with:
   - `default_vision`
 - Per-group overrides: each channel/group can override provider/profile/model for chat and automations.
 - DONE: Per-task and per-automation overrides: task creation can store provider/profile/model/tool policy.
-- PARTIAL: Preflight before save: credentials/base URL/static capability checks exist; live model behavior probes remain.
-- NEXT: Fallback policy:
+- DONE: Preflight before save: credentials/base URL/static capability checks exist; live model behavior probes implemented via `LiveProbeService`.
+- DONE: Fallback policy:
   - Read-only tasks can fall back automatically if configured.
   - Write-capable tasks, GitHub PR work, shell actions, and external messages require explicit approval before falling back to a different provider.
 
@@ -293,4 +301,16 @@ These rules are non-negotiable:
 7. **Reports/Documents v1**
    - MCP-backed source collection, outlines, exports, and provenance.
 8. **Provider Expansion**
-   - OpenAI Responses API, Anthropic Messages API, Gemini, OpenAI-compatible gateway, then Mistral.
+   - DONE: OpenAI Responses API adapter with 11 tests
+   - DONE: Anthropic Messages API adapter with 13 tests
+   - DONE: Google Gemini API adapter with 12 tests
+   - DONE: OpenAI-compatible gateway adapter with 14 tests
+   - DONE: Mistral API adapter with 12 tests
+   - DONE: Live per-model capability probes via `LiveProbeService`
+   - DONE: Enhanced fallback policy enforcement for write-capable tasks
+   - DONE: Provider/model selectors in Scheduled Tasks UI (creation + edit forms)
+   - DONE: Model selector in GitHub coding issue picker
+   - DONE: Persistent probe history with dashboard API endpoint
+   - DONE: Periodic probe scheduler (5-min interval) with health dashboard display in Monitoring page
+   - DONE: `POST /providers/probe-all` for manual re-probe from dashboard
+   - DONE: 9 tests for probe scheduler (health data, version tracking, failure handling, scheduler lifecycle)

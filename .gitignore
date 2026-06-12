@@ -48,6 +48,9 @@ groups/global/*
 agents-sdk-docs
 backups/
 
+# Brainstorming/spec artifacts
+.superpowers/
+
 # Marketplace-installed plugins at the repository root
 /plugins/
 container/skills/sdk-scraper/

@@ -177,6 +177,7 @@ export class SignalChannel implements Channel {
       try {
         await this.rpc('version', {});
         logger.info('signal-cli daemon ready');
+        this.connected = true;
         this.daemonRestarts = 0;
         this.startMemoryWatchdog();
         return;

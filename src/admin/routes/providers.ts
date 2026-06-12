@@ -7,12 +7,15 @@ import { auditLog } from '../security.js';
 import { getCodexAuthStatus } from '../../codex-auth.js';
 import { isAgentProvider } from '../../agent-provider.js';
 import { createApproval } from '../../approvals.js';
+import { liveProbeService } from '../../providers/live-probe.js';
 import {
   getProviderProfile,
   loadProviderProfiles,
   providerModels,
   runLiveProviderProbe,
+  getStoredProviderProbes,
 } from '../../provider-router.js';
+import { runAllProbes, getProbeHealth, refreshProbeHealth } from '../../probe-scheduler.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -395,6 +398,27 @@ router.post('/probe', async (req: Request, res: Response) => {
   }
 });
 
+router.get('/probe-history', (req: Request, res: Response) => {
+  try {
+    const providerId =
+      typeof req.query.providerId === 'string'
+        ? req.query.providerId
+        : undefined;
+    const model =
+      typeof req.query.model === 'string' ? req.query.model : undefined;
+    const limit =
+      typeof req.query.limit === 'string'
+        ? parseInt(req.query.limit, 10) || undefined
+        : undefined;
+    const history = liveProbeService.getProbeHistory(providerId, model, limit);
+    res.json({ ok: true, history });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 router.post('/fallback-approval', (req: Request, res: Response) => {
   const sourceProfileId =
     typeof req.body.sourceProfileId === 'string'
@@ -428,6 +452,26 @@ router.post('/fallback-approval', (req: Request, res: Response) => {
   });
   auditLog(req, 'provider_fallback_approval_requested', approval.id);
   res.json({ ok: true, approval });
+});
+
+router.get('/health', (_req: Request, res: Response) => {
+  const health = getProbeHealth();
+  if (health.version === 0) {
+    refreshProbeHealth();
+  }
+  res.json(getProbeHealth());
+});
+
+router.post('/probe-all', async (_req: Request, res: Response) => {
+  try {
+    const data = await runAllProbes();
+    auditLog(_req, 'provider_probe_all', `${data.entries.length} profiles probed`);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : 'Probe all failed',
+    });
+  }
 });
 
 export default router;

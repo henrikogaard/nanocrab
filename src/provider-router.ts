@@ -15,6 +15,12 @@ import {
 } from './agent-provider.js';
 import { STORE_DIR } from './config.js';
 import { readEnvFile } from './env.js';
+import { liveProbeService } from './providers/live-probe.js';
+import type { ProviderCapabilitiesResult } from './providers/openai-responses/provider.js';
+import {
+  type FallbackAction,
+  FallbackPolicyManager,
+} from './providers/fallback-policy.js';
 
 export const PROVIDER_PURPOSES = [
   'default_chat',
@@ -575,6 +581,22 @@ export async function runLiveProviderProbe(
     });
   }
 
+  try {
+    const liveCapResult = await runLiveCapabilityProbe(
+      profile.provider,
+      profile.model,
+    );
+    if (liveCapResult.capabilities) {
+      const merged = { ...capabilities, ...liveCapResult.capabilities };
+      Object.assign(capabilities, merged);
+    }
+    if (liveCapResult.checks) {
+      checks.push(...liveCapResult.checks);
+    }
+  } catch {
+    // Live capability probe is non-critical; fall through with static capabilities
+  }
+
   const result: ProviderProbeResult = {
     ...staticProbe,
     ok: checks.every((check) => check.ok),
@@ -589,6 +611,117 @@ export async function runLiveProviderProbe(
   probes[profile.id] = result;
   writeStoredProbes(probes);
   return result;
+}
+
+function probeCapabilitiesToRouter(
+  caps: ProviderCapabilitiesResult,
+): ProviderCapabilities {
+  return {
+    tool_calls: caps.toolCalls,
+    structured_output: caps.structuredOutput,
+    streaming: caps.streaming,
+    vision: caps.vision,
+    code_strength:
+      caps.codeStrength === 'high' ? 'agentic' : 'basic',
+    context_window: caps.contextWindow,
+    cost_tier: caps.costTier === 'low' ? 'local' : caps.costTier,
+    privacy_tier:
+      caps.privacyTier === 'high'
+        ? 'third-party'
+        : caps.privacyTier === 'low'
+          ? 'local'
+          : 'hosted',
+    supports_mcp_strategy: caps.supportsMcpStrategy
+      ? 'container-loop'
+      : 'none',
+  };
+}
+
+export async function runLiveCapabilityProbe(
+  providerId: string,
+  model: string,
+): Promise<ProviderProbeResult> {
+  const probe = await liveProbeService.probeModel(providerId, model);
+  const capabilities = probeCapabilitiesToRouter(probe.capabilities);
+  const definition = AGENT_PROVIDER_DEFINITIONS[providerId as AgentProvider];
+
+  const checks: ProviderProbeCheck[] = [
+    {
+      id: 'live-model-validate',
+      label: `Model validation for ${model}`,
+      ok: probe.validated,
+      detail: probe.validated
+        ? 'Model is accessible via the provider API'
+        : 'Model not found in live models list',
+    },
+    {
+      id: 'live-capabilities',
+      label: 'Capabilities determined',
+      ok: probe.status === 'success',
+      detail:
+        probe.status === 'success'
+          ? `tool_calls=${capabilities.tool_calls}, structured_output=${capabilities.structured_output}, vision=${capabilities.vision}`
+          : probe.errorMessage || 'Unknown error',
+    },
+  ];
+
+  if (probe.errorMessage) {
+    checks.push({
+      id: 'live-probe-error',
+      label: 'Probe encountered an issue',
+      ok: false,
+      detail: probe.errorMessage,
+    });
+  }
+
+  return {
+    provider: (providerId as AgentProvider) || ('unknown' as AgentProvider),
+    model,
+    ok: probe.status === 'success' && probe.validated,
+    checks,
+    live: true,
+    lastProbeAt: probe.timestamp.toISOString(),
+    capabilities,
+    errors: probe.errorMessage ? [probe.errorMessage] : undefined,
+    recommendedPurposes: recommendedPurposes(capabilities),
+  };
+}
+
+export function getLiveCapabilityProbeResult(
+  providerId: string,
+  model: string,
+): ProviderProbeResult | null {
+  const cached = liveProbeService.getCachedProbe(providerId, model);
+  if (!cached) return null;
+  const capabilities = probeCapabilitiesToRouter(cached.capabilities);
+  const checks: ProviderProbeCheck[] = [
+    {
+      id: 'live-model-validate',
+      label: `Model validation for ${model}`,
+      ok: cached.validated,
+      detail: cached.validated
+        ? 'Model is accessible via the provider API'
+        : 'Model not found in live models list',
+    },
+    {
+      id: 'live-capabilities',
+      label: 'Capabilities determined',
+      ok: cached.status === 'success',
+      detail: cached.errorMessage || 'success',
+    },
+  ];
+
+  return {
+    provider: (providerId as AgentProvider) || ('unknown' as AgentProvider),
+    model,
+    ok: cached.status === 'success' && cached.validated,
+    checks,
+    live: true,
+    lastProbeAt: cached.timestamp.toISOString(),
+    capabilities,
+    errors: cached.errorMessage ? [cached.errorMessage] : undefined,
+    recommendedPurposes: recommendedPurposes(capabilities),
+  };
 }
 
 export function getStoredProviderProbes(): Record<string, ProviderProbeResult> {
@@ -609,16 +742,41 @@ export function providerModels(provider: AgentProvider): string[] {
 export function providerCanFallbackAutomatically(input: {
   source: ProviderProfile;
   target: ProviderProfile;
-  action:
-    | 'read'
-    | 'write'
-    | 'publish'
-    | 'external-message'
-    | 'upload'
-    | 'shell'
-    | 'pr';
+  action: FallbackAction;
 }): boolean {
   if (!input.source.fallbackProfileId) return false;
   if (input.source.fallbackProfileId !== input.target.id) return false;
   return input.action === 'read' && input.source.toolPolicy !== 'deny';
+}
+
+const _fpManager = new FallbackPolicyManager();
+
+export function providerCanFallback(input: {
+  source: ProviderProfile;
+  target: ProviderProfile;
+  action: FallbackAction;
+  capabilities?: ProviderCapabilities;
+}): ReturnType<FallbackPolicyManager['evaluateFallback']> {
+  const hasFallbackConfigured =
+    !!input.source.fallbackProfileId &&
+    input.source.fallbackProfileId === input.target.id;
+
+  return _fpManager.evaluateFallback(
+    input.action,
+    {
+      providerId: input.source.provider,
+      model: input.source.model,
+      toolPolicy: input.source.toolPolicy,
+    },
+    {
+      providerId: input.target.provider,
+      model: input.target.model,
+    },
+    {
+      toolCalls: input.capabilities?.tool_calls ?? false,
+      structuredOutput: input.capabilities?.structured_output ?? false,
+      codeStrength: input.capabilities?.code_strength ?? 'none',
+    },
+    hasFallbackConfigured,
+  );
 }

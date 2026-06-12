@@ -70,7 +70,7 @@ const groups = [
 const channels = [
   { name: 'whatsapp', connected: true, status: 'healthy', lastSeen: iso(1) },
   { name: 'telegram', connected: true, status: 'healthy', lastSeen: iso(3) },
-  { name: 'signal', connected: false, status: 'degraded', lastSeen: iso(47) },
+  { name: 'signal', connected: true, status: 'healthy', lastSeen: iso(1) },
 ];
 
 const containers = [
@@ -179,6 +179,8 @@ const tasks = [
     next_run: iso(-21),
     last_run: iso(9),
     status: 'active',
+    provider: 'claude',
+    model: 'claude-sonnet-4-6',
     context_mode: 'group',
     created_at: day(-3) + 'T18:00:00.000Z',
   },
@@ -192,6 +194,9 @@ const tasks = [
     next_run: day(6) + 'T09:00:00.000Z',
     last_run: day(-1) + 'T09:00:00.000Z',
     status: 'paused',
+    provider_profile_id: 'report',
+    provider: 'openrouter',
+    model: 'openrouter/auto',
     context_mode: 'isolated',
     created_at: day(-20) + 'T09:00:00.000Z',
   },
@@ -964,6 +969,120 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       models: providerInfo.models,
     };
   }
+  if (pathname === '/providers/health') {
+    return {
+      version: 1,
+      entries: [
+        {
+          profileId: 'default_chat',
+          provider: 'openrouter',
+          model: 'openrouter/auto',
+          purpose: 'Chat',
+          ok: true,
+          lastProbeAt: new Date(Date.now() - 60000).toISOString(),
+          capabilities: ['tools', 'json', 'stream', 'vision'],
+        },
+        {
+          profileId: 'default_coding',
+          provider: 'codex',
+          model: 'gpt-5.4',
+          purpose: 'Coding',
+          ok: true,
+          lastProbeAt: new Date(Date.now() - 120000).toISOString(),
+          capabilities: ['tools', 'json', 'stream', 'vision'],
+        },
+        {
+          profileId: 'default_automation',
+          provider: 'openrouter',
+          model: 'openrouter/auto',
+          purpose: 'Automations',
+          ok: false,
+          lastProbeAt: new Date(Date.now() - 300000).toISOString(),
+          errorMessage: 'Rate limit exceeded',
+          capabilities: ['tools', 'json', 'stream', 'vision'],
+        },
+        {
+          profileId: 'default_memory',
+          provider: 'openrouter',
+          model: 'openrouter/auto',
+          purpose: 'Memory',
+          ok: true,
+          lastProbeAt: new Date(Date.now() - 3600000).toISOString(),
+          capabilities: ['json'],
+        },
+        {
+          profileId: 'default_journal',
+          provider: 'gemini',
+          model: 'gemini-2.5-flash',
+          purpose: 'Journal',
+          ok: true,
+          lastProbeAt: new Date(Date.now() - 7200000).toISOString(),
+          capabilities: ['json'],
+        },
+        {
+          profileId: 'default_report',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+          purpose: 'Reports',
+          ok: false,
+          lastProbeAt: new Date(Date.now() - 1800000).toISOString(),
+          errorMessage: 'API reached max capacity: this model is temporarily unavailable',
+          capabilities: ['tools', 'json', 'stream'],
+        },
+      ],
+    };
+  }
+  if (pathname === '/providers/probe-history') {
+    const now = Date.now();
+    const hrs = (n: number) => new Date(now - n * 3600000).toISOString();
+    return {
+      ok: true,
+      history: [
+        {
+          providerId: 'openai-responses',
+          model: 'gpt-5.4',
+          result: { ok: true, validated: true, status: 'success' },
+          timestamp: hrs(1),
+        },
+        {
+          providerId: 'openai-responses',
+          model: 'gpt-5.4',
+          result: { ok: true, validated: true, status: 'success' },
+          timestamp: hrs(6),
+        },
+        {
+          providerId: 'anthropic-messages',
+          model: 'claude-sonnet-4-6',
+          result: { ok: true, validated: true, status: 'success' },
+          timestamp: hrs(2),
+        },
+        {
+          providerId: 'gemini',
+          model: 'gemini-2.5-flash',
+          result: { ok: false, validated: false, status: 'failed', errorMessage: 'API rate limited' },
+          timestamp: hrs(4),
+        },
+        {
+          providerId: 'gemini',
+          model: 'gemini-2.5-flash',
+          result: { ok: true, validated: true, status: 'success' },
+          timestamp: hrs(12),
+        },
+        {
+          providerId: 'mistral',
+          model: 'mistral-large-latest',
+          result: { ok: true, validated: true, status: 'success' },
+          timestamp: hrs(3),
+        },
+        {
+          providerId: 'openai-compatible',
+          model: 'model-id',
+          result: { ok: false, validated: false, status: 'failed', errorMessage: 'Base URL not configured' },
+          timestamp: hrs(8),
+        },
+      ],
+    };
+  }
   if (pathname === '/approvals') {
     return [
       {
@@ -1110,7 +1229,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           name: 'Signal',
           icon: 'SG',
           description: 'Scout desk and private alerts.',
-          connected: false,
+          connected: true,
           envVars: ['SIGNAL_PHONE_NUMBER'],
           config: { SIGNAL_PHONE_NUMBER: '+47 *** ** 107' },
         },
@@ -1665,7 +1784,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       lines: [
         '[INFO] Mock admin dashboard started',
         '[INFO] Sample WebSocket client connected',
-        '[WARN] Signal channel intentionally marked degraded in mock data',
+        '[INFO] Signal channel showing as connected — verified mock status',
       ],
     };
   }
@@ -2347,6 +2466,8 @@ function writeResponse(pathname: string): JsonValue {
     return ok({ message: 'Mock rebuild queued' });
   if (pathname.includes('/preflight'))
     return ok({ message: 'Mock preflight passed' });
+  if (pathname === '/providers/probe-all')
+    return { version: 2, entries: [] };
   return ok({ message: 'Mock write accepted. No live data changed.' });
 }
 

@@ -142,6 +142,10 @@ async function renderAgents(el) {
       .filter((p) => ['claude', 'codex', 'opencode'].includes(p.id))
       .map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`)
       .join('');
+    const codingModelsByProvider = {};
+    agentProviders.forEach((p) => {
+      codingModelsByProvider[p.id] = p.models || [];
+    });
     const codingRepoOptions = codingRepos
       .map(
         (r) => `<option value="${esc(r.fullName)}">${esc(r.fullName)}</option>`,
@@ -269,7 +273,8 @@ async function renderAgents(el) {
             <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Pick next issue</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
               <select class="search-input" id="coding-repo-select">${codingRepoOptions || '<option value="">No repos registered</option>'}</select>
-              <select class="search-input" id="coding-provider-select">${codingProviderOptions || '<option value="claude">Claude</option>'}</select>
+              <select class="search-input" id="coding-provider-select" onchange="updateCodingModels()">${codingProviderOptions || '<option value="claude">Claude</option>'}</select>
+              <select class="search-input" id="coding-model-select" style="grid-column:1/2"><option value="">Default model</option></select>
               <input class="search-input" id="coding-labels" placeholder="labels, comma-separated" style="grid-column:1/-1">
               <label style="font-size:12px;color:var(--text-muted);display:flex;gap:6px;align-items:center"><input type="checkbox" id="coding-create-pr" checked> create draft PR when changes are ready</label>
               <button class="btn btn-sm btn-primary" onclick="pickCodingIssue()">Pick Issue</button>
@@ -468,9 +473,11 @@ async function renderAgents(el) {
       </div>
     `;
 
-    // Init model dropdown
+    // Init model dropdowns
     window._toolModels = JSON.parse(modelOptionsJson);
     updateTaskModels();
+    window._codingModelsByProvider = codingModelsByProvider;
+    updateCodingModels();
   } catch (e) {
     el.innerHTML = `<div class="card empty">Failed to load agents: ${esc(e.message)}</div>`;
   }
@@ -549,9 +556,19 @@ window.registerCodingRepo = async function () {
   }
 };
 
+window.updateCodingModels = function () {
+  const providerEl = document.getElementById('coding-provider-select');
+  const modelEl = document.getElementById('coding-model-select');
+  if (!providerEl || !modelEl) return;
+  const modelsByProvider = window._codingModelsByProvider || {};
+  const models = modelsByProvider[providerEl.value] || [];
+  modelEl.innerHTML = `<option value="">Default model</option>${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
+};
+
 window.pickCodingIssue = async function () {
   const repo = document.getElementById('coding-repo-select')?.value;
   const provider = document.getElementById('coding-provider-select')?.value;
+  const model = document.getElementById('coding-model-select')?.value;
   const labels = document
     .getElementById('coding-labels')
     ?.value?.split(',')
@@ -566,7 +583,7 @@ window.pickCodingIssue = async function () {
   try {
     const r = await api('/agents/coding/pick-issue', {
       method: 'POST',
-      body: JSON.stringify({ repo, labels, provider, createPr }),
+      body: JSON.stringify({ repo, labels, provider, model: model || undefined, createPr }),
     });
     if (!r.ok) {
       toast(r.error || 'Failed', 'error');

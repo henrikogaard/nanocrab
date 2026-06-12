@@ -4,6 +4,7 @@
  */
 import { logger } from '../src/logger.js';
 import { emitStatus } from './status.js';
+import { printBanner } from './banner.js';
 
 const STEPS: Record<
   string,
@@ -29,9 +30,11 @@ async function main(): Promise<void> {
   const stepIdx = args.indexOf('--step');
 
   if (stepIdx === -1 || !args[stepIdx + 1]) {
+    printBanner();
     console.error(
       `Usage: npx tsx setup/index.ts --step <${Object.keys(STEPS).join('|')}> [args...]`,
     );
+    console.error(`Or:    npm run setup:full  (run all steps sequentially)`);
     process.exit(1);
   }
 
@@ -42,14 +45,24 @@ async function main(): Promise<void> {
 
   const loader = STEPS[stepName];
   if (!loader) {
+    printBanner();
     console.error(`Unknown step: ${stepName}`);
     console.error(`Available steps: ${Object.keys(STEPS).join(', ')}`);
     process.exit(1);
   }
 
+  printBanner();
+  console.log(`  Step: ${stepName}\n`);
+
   try {
     const mod = await loader();
+    const startTime = Date.now();
     await mod.run(stepArgs);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    emitStatus(stepName.toUpperCase(), {
+      STATUS: 'success',
+      DURATION_SECS: elapsed,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error({ err, step: stepName }, 'Setup step failed');
