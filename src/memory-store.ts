@@ -55,6 +55,23 @@ export interface ProposeMemoryInput {
   staleAfter?: string | null;
 }
 
+export interface MemoryReviewFilters {
+  status?: MemoryStatus;
+  scope?: string;
+  visibility?: string;
+  source?: string;
+  confidenceMin?: number;
+  confidenceMax?: number;
+  staleBefore?: string;
+  contradictionGroup?: string;
+  limit?: number;
+}
+
+export interface RefreshMemoryReviewOptions {
+  now?: string;
+  staleAfterDays?: number;
+}
+
 function assertChoice<T extends string>(
   name: string,
   value: string,
@@ -84,24 +101,41 @@ function detectSensitivity(
   return 'normal';
 }
 
-function findContradiction(content: string): string | null {
-  const normalized = content.toLowerCase().replace(/\s+/g, ' ').trim();
-  const candidates = listMemories({ status: 'approved', limit: 200 });
-  const negated = normalized
-    .replace(/\bis not\b/g, ' is ')
-    .replace(/\bdoes not\b/g, ' does ')
-    .replace(/\bnever\b/g, '')
-    .replace(/\bno longer\b/g, '')
+function normalizedMemorySubject(content: string): string {
+  return content
+    .toLowerCase()
+    .replace(/\bdoes not\b|\bdo not\b|\bis not\b|\bare not\b/g, ' ')
+    .replace(/\bno longer\b|\bnever\b|\bnot\b/g, ' ')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\b(prefers|preference)\b/g, 'prefer')
+    .replace(/\b(updates|summaries|notes|windows)\b/g, (match) =>
+      match.replace(/s$/, ''),
+    )
+    .replace(/\s+/g, ' ')
     .trim();
+}
+
+function hasMemoryNegation(content: string): boolean {
+  return /\b(does not|do not|is not|are not|no longer|never|not)\b/i.test(
+    content,
+  );
+}
+
+function memoriesConflict(a: MemoryRecord, b: MemoryRecord): boolean {
+  return (
+    normalizedMemorySubject(a.content) === normalizedMemorySubject(b.content) &&
+    hasMemoryNegation(a.content) !== hasMemoryNegation(b.content)
+  );
+}
+
+function findContradiction(content: string): string | null {
+  const normalizedSubject = normalizedMemorySubject(content);
+  const negated = hasMemoryNegation(content);
+  const candidates = listMemories({ status: 'approved', limit: 200 });
   for (const memory of candidates) {
-    const other = memory.content.toLowerCase().replace(/\s+/g, ' ').trim();
-    if (other === normalized) continue;
     if (
-      (normalized.includes(' not ') ||
-        normalized.includes('never') ||
-        normalized.includes('no longer')) &&
-      (other.includes(negated.slice(0, 80)) ||
-        negated.includes(other.slice(0, 80)))
+      normalizedMemorySubject(memory.content) === normalizedSubject &&
+      hasMemoryNegation(memory.content) !== negated
     ) {
       return memory.id;
     }
@@ -150,15 +184,21 @@ export function listMemoryRecords(filters: {
   status?: MemoryStatus;
   scope?: string;
   visibility?: string;
+  source?: string;
+  confidenceMin?: number;
+  confidenceMax?: number;
+  staleBefore?: string;
+  contradictionGroup?: string;
   limit?: number;
 }): MemoryRecord[] {
-  return listMemories(filters);
+  return applyMemoryReviewFilters(listMemories(filters), filters);
 }
 
 export function approveMemory(id: string): MemoryRecord {
   const reviewedAt = new Date().toISOString();
   const memory = reviewMemory(id, 'approved', reviewedAt);
   if (!memory) throw new Error(`Memory not found: ${id}`);
+  refreshMemoryReviewStatuses({ now: reviewedAt });
   renderGlobalMemoryMarkdown();
   return memory;
 }
@@ -187,9 +227,116 @@ export function markMemoryContradicted(id: string): MemoryRecord {
   return memory;
 }
 
-export function listMemoryReviewQueue(): MemoryRecord[] {
+function contradictionGroupIds(groupId: string): Set<string> {
+  const all = listMemories({ limit: 200 });
+  const ids = new Set<string>([groupId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const memory of all) {
+      if (
+        memory.contradicts_memory_id &&
+        (ids.has(memory.id) || ids.has(memory.contradicts_memory_id))
+      ) {
+        const before = ids.size;
+        ids.add(memory.id);
+        ids.add(memory.contradicts_memory_id);
+        changed ||= ids.size !== before;
+      }
+    }
+  }
+  return ids;
+}
+
+function applyMemoryReviewFilters(
+  records: MemoryRecord[],
+  filters: MemoryReviewFilters,
+): MemoryRecord[] {
+  let filtered = records;
+  if (filters.source) {
+    filtered = filtered.filter((memory) => memory.source === filters.source);
+  }
+  if (filters.confidenceMin !== undefined) {
+    filtered = filtered.filter(
+      (memory) => memory.confidence >= filters.confidenceMin!,
+    );
+  }
+  if (filters.confidenceMax !== undefined) {
+    filtered = filtered.filter(
+      (memory) => memory.confidence <= filters.confidenceMax!,
+    );
+  }
+  if (filters.staleBefore) {
+    filtered = filtered.filter(
+      (memory) =>
+        memory.stale_after && memory.stale_after < filters.staleBefore!,
+    );
+  }
+  if (filters.contradictionGroup) {
+    const ids = contradictionGroupIds(filters.contradictionGroup);
+    filtered = filtered
+      .filter((memory) => ids.has(memory.id))
+      .sort((a, b) => {
+        if (a.id === filters.contradictionGroup) return -1;
+        if (b.id === filters.contradictionGroup) return 1;
+        return (
+          a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id)
+        );
+      });
+  }
+  return filtered.slice(0, Math.min(Math.max(filters.limit || 200, 1), 200));
+}
+
+export function refreshMemoryReviewStatuses(
+  options: RefreshMemoryReviewOptions = {},
+): MemoryRecord[] {
+  const now = options.now || new Date().toISOString();
+  const approved = listMemories({ status: 'approved', limit: 200 });
+  const changed: MemoryRecord[] = [];
+  for (const memory of approved) {
+    const isStaleByDate = Boolean(
+      memory.stale_after && memory.stale_after < now,
+    );
+    const isStaleByAge =
+      options.staleAfterDays !== undefined &&
+      Date.parse(memory.created_at) <
+        Date.parse(now) - options.staleAfterDays * 24 * 60 * 60 * 1000;
+    if (isStaleByDate || isStaleByAge) {
+      const stale = reviewMemory(memory.id, 'stale', now);
+      if (stale) changed.push(stale);
+    }
+  }
+
+  const stillApproved = listMemories({ status: 'approved', limit: 200 });
+  for (const memory of stillApproved) {
+    if (memory.contradicts_memory_id) {
+      const contradicted = reviewMemory(
+        memory.contradicts_memory_id,
+        'contradicted',
+        now,
+      );
+      if (contradicted) changed.push(contradicted);
+    }
+  }
+
+  const active = listMemories({ status: 'approved', limit: 200 });
+  for (const newer of active) {
+    for (const older of active) {
+      if (newer.id === older.id) continue;
+      if (newer.created_at <= older.created_at) continue;
+      if (!memoriesConflict(newer, older)) continue;
+      const contradicted = reviewMemory(older.id, 'contradicted', now);
+      if (contradicted) changed.push(contradicted);
+    }
+  }
+  return changed;
+}
+
+export function listMemoryReviewQueue(
+  filters: MemoryReviewFilters = {},
+): MemoryRecord[] {
   const now = new Date().toISOString();
-  return [
+  const reviewRecords = [
     ...listMemories({ status: 'pending', limit: 200 }),
     ...listMemories({ status: 'approved', limit: 200 }).filter(
       (memory) =>
@@ -197,7 +344,20 @@ export function listMemoryReviewQueue(): MemoryRecord[] {
         memory.sensitivity !== 'normal' ||
         (memory.stale_after && memory.stale_after < now),
     ),
+    ...listMemories({ status: 'stale', limit: 200 }),
+    ...listMemories({ status: 'contradicted', limit: 200 }),
   ];
+  const unique = [
+    ...new Map(reviewRecords.map((memory) => [memory.id, memory])).values(),
+  ];
+  const statusFiltered = filters.status
+    ? unique.filter(
+        (memory) =>
+          memory.status === filters.status ||
+          (filters.status === 'contradicted' && memory.contradicts_memory_id),
+      )
+    : unique;
+  return applyMemoryReviewFilters(statusFiltered, filters);
 }
 
 export function getMemory(id: string): MemoryRecord | undefined {

@@ -5,6 +5,8 @@ import path from 'path';
 import { CONTAINER_SKILLS_DIR, STORE_DIR } from './config.js';
 
 export type SkillDraftStatus = 'pending' | 'approved' | 'rejected';
+export type SkillSuggestionStatus = 'pending' | 'approved' | 'rejected';
+export type SkillSuggestionOwnerDecision = 'create-draft' | 'reject' | 'defer';
 
 export interface SkillDraft {
   id: string;
@@ -30,7 +32,32 @@ export interface ProposeSkillDraftInput {
   provenance?: string[];
 }
 
+export interface SkillSuggestion {
+  id: string;
+  proposedSkillName: string;
+  description: string;
+  confidence: number;
+  status: SkillSuggestionStatus;
+  ownerDecision: SkillSuggestionOwnerDecision | null;
+  sourceExamples: string[];
+  provenance: string[];
+  createdBy: string;
+  createdAt: string;
+  reviewedAt: string | null;
+  draftId: string | null;
+}
+
+export interface DetectSkillSuggestionsInput {
+  messages?: string[];
+  tasks?: string[];
+  journal?: string[];
+  createdBy: string;
+  minExamples?: number;
+  existingSkillNames?: string[];
+}
+
 const SKILL_DRAFTS_DIR = path.join(STORE_DIR, 'skill-drafts');
+const SKILL_SUGGESTIONS_DIR = path.join(STORE_DIR, 'skill-suggestions');
 
 function safeSkillName(name: string): string {
   const normalized = name.trim().toLowerCase();
@@ -50,6 +77,10 @@ function metadataPath(id: string): string {
 
 function skillPath(id: string): string {
   return path.join(draftDir(id), 'SKILL.md');
+}
+
+function suggestionPath(id: string): string {
+  return path.join(SKILL_SUGGESTIONS_DIR, `${id}.json`);
 }
 
 function parseFrontmatter(skillMd: string): {
@@ -112,6 +143,100 @@ function writeDraft(draft: SkillDraft): void {
   );
 }
 
+function normalizeSuggestionIntent(text: string): string {
+  const lower = text.toLowerCase();
+  const requestedSubject = lower.match(/\bwhen i ask for ([a-z0-9\s-]+?),/i);
+  const subject = requestedSubject?.[1]?.trim() || '';
+  const actionText =
+    requestedSubject && lower.includes(',')
+      ? `${lower.slice(lower.indexOf(',') + 1)} ${subject}`
+      : lower;
+  return actionText
+    .toLowerCase()
+    .split(/\b(?:with|from|when|using|before|after)\b/)[0]
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(
+      /\b(always|please|when|i|ask|for|in|the|a|an|and|to|should|could|would|make|create|draft|write)\b/g,
+      ' ',
+    )
+    .replace(/\b(summarizes|summaries)\b/g, 'summarize')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function suggestionNameFromIntent(intent: string): string {
+  const name = intent
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63);
+  return safeSkillName(name || 'workflow-skill');
+}
+
+function suggestionDescription(intent: string): string {
+  return `Reusable workflow for ${intent}.`;
+}
+
+function looksSkillWorthySuggestion(text: string): boolean {
+  return /\b(always|never|when i ask|workflow|summarize|summary|digest|report|review|triage|prepare|release notes|use this|default)\b/i.test(
+    text,
+  );
+}
+
+function readSuggestion(id: string): SkillSuggestion | undefined {
+  try {
+    return JSON.parse(
+      fs.readFileSync(suggestionPath(id), 'utf-8'),
+    ) as SkillSuggestion;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeSuggestion(suggestion: SkillSuggestion): void {
+  fs.mkdirSync(SKILL_SUGGESTIONS_DIR, { recursive: true });
+  fs.writeFileSync(
+    suggestionPath(suggestion.id),
+    `${JSON.stringify(suggestion, null, 2)}\n`,
+  );
+}
+
+function listAllSuggestions(): SkillSuggestion[] {
+  if (!fs.existsSync(SKILL_SUGGESTIONS_DIR)) return [];
+  return fs
+    .readdirSync(SKILL_SUGGESTIONS_DIR)
+    .filter((file) => file.endsWith('.json'))
+    .map((file) => readSuggestion(path.basename(file, '.json')))
+    .filter((suggestion): suggestion is SkillSuggestion => Boolean(suggestion))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function buildSuggestionDraftMarkdown(suggestion: SkillSuggestion): string {
+  const examples = suggestion.sourceExamples
+    .slice(0, 5)
+    .map((example) => `- ${example}`)
+    .join('\n');
+  return `---
+name: ${suggestion.proposedSkillName}
+description: ${JSON.stringify(suggestion.description)}
+---
+
+# ${suggestion.proposedSkillName
+    .split('-')
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(' ')}
+
+Use this skill when the user repeats this workflow or instruction pattern.
+
+## Pattern
+
+${suggestion.description}
+
+## Source Examples
+
+${examples}
+`;
+}
+
 export function proposeSkillDraft(input: ProposeSkillDraftInput): SkillDraft {
   const parsed = parseFrontmatter(input.skillMd);
   const id = `skill-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
@@ -137,6 +262,122 @@ export function proposeSkillDraft(input: ProposeSkillDraftInput): SkillDraft {
   fs.writeFileSync(skillPath(id), input.skillMd.trimEnd() + '\n');
   writeDraft(draft);
   return draft;
+}
+
+export function detectAndQueueSkillSuggestions(
+  input: DetectSkillSuggestionsInput,
+): SkillSuggestion[] {
+  const minExamples = Math.max(input.minExamples || 3, 2);
+  const sources = [
+    ...(input.messages || []).map((text) => ({
+      text,
+      provenance: 'source:message-history',
+    })),
+    ...(input.tasks || []).map((text) => ({
+      text,
+      provenance: 'source:task-history',
+    })),
+    ...(input.journal || []).map((text) => ({
+      text,
+      provenance: 'source:journal-history',
+    })),
+  ];
+  const groups = new Map<
+    string,
+    { examples: string[]; provenance: Set<string>; skillWorthyExamples: number }
+  >();
+  for (const source of sources) {
+    const intent = normalizeSuggestionIntent(source.text);
+    if (!intent) continue;
+    const group = groups.get(intent) || {
+      examples: [],
+      provenance: new Set<string>(),
+      skillWorthyExamples: 0,
+    };
+    group.examples.push(source.text);
+    group.provenance.add(source.provenance);
+    if (looksSkillWorthySuggestion(source.text)) {
+      group.skillWorthyExamples += 1;
+    }
+    groups.set(intent, group);
+  }
+
+  const existingNames = new Set([
+    ...(input.existingSkillNames || []),
+    ...listSkillDrafts().map((draft) => draft.name),
+    ...listAllSuggestions().map((suggestion) => suggestion.proposedSkillName),
+  ]);
+  const queued: SkillSuggestion[] = [];
+  const now = new Date().toISOString();
+  for (const [intent, group] of groups) {
+    if (group.examples.length < minExamples) continue;
+    if (group.skillWorthyExamples === 0) continue;
+    const proposedSkillName = suggestionNameFromIntent(intent);
+    if (existingNames.has(proposedSkillName)) continue;
+    const suggestion: SkillSuggestion = {
+      id: `skill-suggestion-${Date.now()}-${crypto
+        .randomBytes(4)
+        .toString('hex')}`,
+      proposedSkillName,
+      description: suggestionDescription(intent),
+      confidence: Math.min(0.95, 0.65 + (group.examples.length - 3) * 0.05),
+      status: 'pending',
+      ownerDecision: null,
+      sourceExamples: group.examples.slice(0, 5),
+      provenance: [...group.provenance],
+      createdBy: input.createdBy,
+      createdAt: now,
+      reviewedAt: null,
+      draftId: null,
+    };
+    writeSuggestion(suggestion);
+    existingNames.add(proposedSkillName);
+    queued.push(suggestion);
+  }
+  return queued.sort((a, b) => b.confidence - a.confidence);
+}
+
+export function listSkillSuggestions(
+  filters: {
+    status?: SkillSuggestionStatus;
+  } = {},
+): SkillSuggestion[] {
+  return listAllSuggestions().filter(
+    (suggestion) => !filters.status || suggestion.status === filters.status,
+  );
+}
+
+export function approveSkillSuggestion(
+  id: string,
+  input: { decidedBy: string; decision?: SkillSuggestionOwnerDecision },
+): SkillSuggestion {
+  const suggestion = readSuggestion(id);
+  if (!suggestion) throw new Error(`Skill suggestion not found: ${id}`);
+  const decision = input.decision || 'create-draft';
+  suggestion.ownerDecision = decision;
+  suggestion.reviewedAt = new Date().toISOString();
+  if (decision === 'reject') {
+    suggestion.status = 'rejected';
+    writeSuggestion(suggestion);
+    return suggestion;
+  }
+  if (decision === 'defer') {
+    suggestion.status = 'pending';
+    writeSuggestion(suggestion);
+    return suggestion;
+  }
+  const draft = proposeSkillDraft({
+    skillMd: buildSuggestionDraftMarkdown(suggestion),
+    createdBy: input.decidedBy,
+    provenance: [
+      ...suggestion.provenance,
+      `source:skill-suggestion:${suggestion.id}`,
+    ],
+  });
+  suggestion.status = 'approved';
+  suggestion.draftId = draft.id;
+  writeSuggestion(suggestion);
+  return suggestion;
 }
 
 export function listSkillDrafts(status?: SkillDraftStatus): SkillDraft[] {

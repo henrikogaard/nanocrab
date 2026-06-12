@@ -29,6 +29,14 @@ export interface RecordJournalEntryInput {
   providerProfileId?: string | null;
 }
 
+export interface SkillWorthyJournalPattern {
+  normalizedIntent: string;
+  exampleCount: number;
+  examples: string[];
+  sources: string[];
+  confidence: number;
+}
+
 function normalizeConfidence(value: number | undefined): number {
   if (value === undefined || Number.isNaN(value)) return 0.5;
   return Math.min(Math.max(value, 0), 1);
@@ -36,6 +44,26 @@ function normalizeConfidence(value: number | undefined): number {
 
 function jsonArray(value: unknown[] | undefined): string {
   return JSON.stringify(Array.isArray(value) ? value : []);
+}
+
+function normalizeSkillIntent(text: string): string {
+  const firstClause = text
+    .toLowerCase()
+    .split(/\b(?:with|from|for|when|using|before|after)\b/)[0];
+  return firstClause
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(
+      /\b(always|please|can|could|would|should|make|create|draft|write|a|an|the|i|we|to|and|next|actions?)\b/g,
+      ' ',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function looksSkillWorthy(text: string): boolean {
+  return /\b(always|when i ask|workflow|prepare|summarize|summary|digest|report|review|triage|use this)\b/i.test(
+    text,
+  );
 }
 
 export function recordJournalEvent(
@@ -98,4 +126,64 @@ export function listJournalEntryRecords(input: {
   limit?: number;
 }): JournalEntryRecord[] {
   return listJournalEntries(input);
+}
+
+export function findSkillWorthyJournalPatterns(input: {
+  groupFolder?: string | null;
+  minExamples?: number;
+  limit?: number;
+}): SkillWorthyJournalPattern[] {
+  const minExamples = Math.max(input.minExamples || 3, 2);
+  const limit = Math.min(Math.max(input.limit || 100, 1), 200);
+  const entries = listJournalEntries({
+    groupFolder: input.groupFolder || null,
+    limit,
+  });
+  const events = searchJournalEvents({
+    query: '',
+    groupFolder: input.groupFolder || null,
+    limit,
+  });
+  const grouped = new Map<
+    string,
+    { examples: string[]; sources: string[]; confidenceTotal: number }
+  >();
+  for (const entry of entries) {
+    if (!looksSkillWorthy(entry.summary)) continue;
+    const normalizedIntent = normalizeSkillIntent(entry.summary);
+    if (!normalizedIntent) continue;
+    const group = grouped.get(normalizedIntent) || {
+      examples: [],
+      sources: [],
+      confidenceTotal: 0,
+    };
+    group.examples.push(entry.summary);
+    group.sources.push(entry.id);
+    group.confidenceTotal += 0.65;
+    grouped.set(normalizedIntent, group);
+  }
+  for (const event of events) {
+    if (!looksSkillWorthy(event.title)) continue;
+    const normalizedIntent = normalizeSkillIntent(event.title);
+    if (!normalizedIntent) continue;
+    const group = grouped.get(normalizedIntent) || {
+      examples: [],
+      sources: [],
+      confidenceTotal: 0,
+    };
+    group.examples.push(event.title);
+    group.sources.push(event.id);
+    group.confidenceTotal += event.confidence;
+    grouped.set(normalizedIntent, group);
+  }
+  return [...grouped.entries()]
+    .filter(([, group]) => group.examples.length >= minExamples)
+    .map(([normalizedIntent, group]) => ({
+      normalizedIntent,
+      exampleCount: group.examples.length,
+      examples: group.examples.slice(0, 5),
+      sources: group.sources.slice(0, 10),
+      confidence: Math.min(0.95, group.confidenceTotal / group.examples.length),
+    }))
+    .sort((a, b) => b.confidence - a.confidence);
 }

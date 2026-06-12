@@ -14,6 +14,7 @@ vi.mock('./config.js', () => ({
 import { _closeDatabase, _initTestDatabase } from './db.js';
 import {
   findJournalEvents,
+  findSkillWorthyJournalPatterns,
   recordJournalEntry,
   recordJournalEvent,
 } from './journal-store.js';
@@ -91,5 +92,42 @@ describe('journal store', () => {
       provider_profile_id: 'default_journal',
     });
     expect(JSON.parse(entry.source_message_ids_json)).toEqual(['m1', 'm2']);
+  });
+
+  it('groups repeated journal workflows as skill-worthy patterns after three examples', () => {
+    recordJournalEntry({
+      date: '2026-06-01',
+      scope: 'daily',
+      groupFolder: 'main',
+      summary:
+        'Always prepare a concise weekly alliance digest with next actions.',
+    });
+    recordJournalEvent({
+      title: 'Please prepare a concise weekly alliance digest for the team.',
+      groupFolder: 'main',
+      tags: ['workflow'],
+    });
+    recordJournalEvent({
+      title: 'Prepare a concise weekly alliance digest from journal notes.',
+      groupFolder: 'main',
+      tags: ['workflow'],
+    });
+    recordJournalEvent({
+      title: 'Prepare a concise weekly alliance digest for Monday.',
+      groupFolder: 'main',
+      tags: ['workflow'],
+    });
+
+    const patterns = findSkillWorthyJournalPatterns({
+      groupFolder: 'main',
+      minExamples: 3,
+    });
+
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0]).toMatchObject({
+      normalizedIntent: 'prepare concise weekly alliance digest',
+      exampleCount: 4,
+    });
+    expect(patterns[0].examples[0]).toContain('weekly alliance digest');
   });
 });

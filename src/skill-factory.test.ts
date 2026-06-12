@@ -11,7 +11,10 @@ vi.mock('./config.js', () => ({
 }));
 
 import {
+  approveSkillSuggestion,
   approveSkillDraft,
+  detectAndQueueSkillSuggestions,
+  listSkillSuggestions,
   listSkillDrafts,
   proposeSkillDraft,
   rejectSkillDraft,
@@ -95,5 +98,40 @@ describe('skill factory', () => {
     expect(fs.existsSync(path.join(TEST_ROOT, 'container', 'skills'))).toBe(
       false,
     );
+  });
+
+  it('queues repeated skill suggestions and approval creates an uninstalled draft', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      messages: [
+        'When I ask for release notes, summarize commits and risks.',
+        'Please summarize commits and risks for release notes.',
+        'Always summarize commits and risks in release notes.',
+      ],
+      createdBy: 'test',
+    });
+
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]).toMatchObject({
+      proposedSkillName: 'summarize-commits-risks-release-notes',
+      status: 'pending',
+      sourceExamples: expect.arrayContaining([
+        expect.stringContaining('release notes'),
+      ]),
+    });
+    expect(listSkillDrafts()).toHaveLength(0);
+
+    const approved = approveSkillSuggestion(suggestions[0].id, {
+      decidedBy: 'owner',
+      decision: 'create-draft',
+    });
+
+    expect(approved.status).toBe('approved');
+    expect(approved.ownerDecision).toBe('create-draft');
+    expect(approved.draftId).toBeTruthy();
+    expect(listSkillDrafts('pending')).toHaveLength(1);
+    expect(fs.existsSync(path.join(TEST_ROOT, 'container', 'skills'))).toBe(
+      false,
+    );
+    expect(listSkillSuggestions({ status: 'approved' })).toHaveLength(1);
   });
 });

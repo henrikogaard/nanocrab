@@ -1139,6 +1139,7 @@ async function loadReportConfig() {
     const sourceOptions = [
       'journal',
       'memory',
+      'skill-suggestions',
       'github',
       'wiki',
       'kdrive',

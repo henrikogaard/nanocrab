@@ -14,29 +14,25 @@ import {
   updateSkillState,
 } from '../../skill-registry.js';
 import {
+  approveSkillSuggestion,
   approveSkillDraft,
+  detectAndQueueSkillSuggestions,
   getSkillDraft,
   getSkillDraftContent,
   getSkillDraftDiff,
+  listSkillSuggestions,
   listSkillDrafts,
   proposeSkillDraft,
   rejectSkillDraft,
   SkillDraftStatus,
+  SkillSuggestionStatus,
 } from '../../skill-factory.js';
+import { getAllTasks } from '../../db.js';
+import { findSkillWorthyJournalPatterns } from '../../journal-store.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
 const MESSAGES_DB_PATH = path.join(STORE_DIR, 'messages.db');
-
-interface SuggestedSkill {
-  name: string;
-  description: string;
-  reason: string;
-  confidence: number;
-  evidenceCount: number;
-  instructions: string;
-  provenance: string[];
-}
 
 function sanitizeDraftName(name: string): string {
   return name
@@ -85,14 +81,6 @@ function listInstalledSkillNames(): Set<string> {
   return new Set(listSkillRegistry().map((skill) => skill.path));
 }
 
-function keywordCount(messages: string[], patterns: RegExp[]): number {
-  return messages.reduce(
-    (count, content) =>
-      count + (patterns.some((pattern) => pattern.test(content)) ? 1 : 0),
-    0,
-  );
-}
-
 function readRecentConversationText(limit = 400): string[] {
   if (!fs.existsSync(MESSAGES_DB_PATH)) return [];
   const db = new Database(MESSAGES_DB_PATH, { readonly: true });
@@ -116,94 +104,38 @@ function readRecentConversationText(limit = 400): string[] {
   }
 }
 
-function buildSkillSuggestions(): SuggestedSkill[] {
-  const installed = listInstalledSkillNames();
-  const drafted = new Set(listSkillDrafts().map((draft) => draft.name));
-  const messages = readRecentConversationText();
-  const candidates: Array<
-    Omit<SuggestedSkill, 'evidenceCount' | 'confidence'> & {
-      patterns: RegExp[];
-      baseConfidence: number;
-    }
-  > = [
-    {
-      name: 'operation-planning',
-      description:
-        'Plan recurring operations from chat requests, participant counts, orders, and journal context.',
-      reason:
-        'Recent conversation mentions operations, attacks, fleets, planets, or alliance planning.',
-      patterns: [
-        /\b(operation|attack|fleet|planet|alliance|orders?|soldiers?)\b/i,
-      ],
-      baseConfidence: 0.74,
-      instructions:
-        'Use this skill when users coordinate recurring operations, attacks, fleet movements, participant lists, or orders. Extract participants, resources, timing, target, constraints, open questions, and risks. Prefer structured plans, cite source messages when available, and require explicit approval before sending orders or publishing plans.',
-      provenance: ['source:recent-message-history', 'kind:history-suggestion'],
-    },
-    {
-      name: 'personal-workflow-rules',
-      description:
-        'Capture repeated personal preferences and turn them into reusable operating rules.',
-      reason:
-        'Recent conversation includes durable preferences such as always/never/when I ask/use this.',
-      patterns: [
-        /\b(always|never|when i ask|use this|prefer|standard|default)\b/i,
-      ],
-      baseConfidence: 0.68,
-      instructions:
-        'Use this skill when the user gives durable preferences, repeated phrasing rules, language choices, formatting habits, or recurring workflow instructions. Summarize the candidate rule, ask whether it should become memory, a skill, or both, and create a skill draft only after consent.',
-      provenance: ['source:recent-message-history', 'kind:history-suggestion'],
-    },
-    {
-      name: 'dashboard-design-review',
-      description:
-        'Review dashboard screens for navigation, visual hierarchy, polish, and missing states.',
-      reason:
-        'Recent conversation mentions dashboard, UI, sidebar, logo, redesign, or visual changes.',
-      patterns: [
-        /\b(dashboard|sidebar|logo|ui|ux|redesign|design|icon|layout)\b/i,
-      ],
-      baseConfidence: 0.66,
-      instructions:
-        'Use this skill when reviewing or changing dashboard UI. Check navigation clarity, visual hierarchy, text fit, empty/loading/error states, responsiveness, icons, and consistency with the NanoCrab design language. Prefer concrete file-level suggestions and verify with browser screenshots when possible.',
-      provenance: ['source:recent-message-history', 'kind:history-suggestion'],
-    },
-    {
-      name: 'private-integration-triage',
-      description:
-        'Decide whether an integration belongs in core, as an optional preset, or as private runtime state.',
-      reason:
-        'Recent conversation discusses MCP servers, default skills, Docker containers, and private integrations.',
-      patterns: [
-        /\b(mcp|integration|docker|container|default setup|private|preset)\b/i,
-      ],
-      baseConfidence: 0.65,
-      instructions:
-        'Use this skill when assessing integrations. Classify each item as core default, optional preset, bundled skill, marketplace/plugin candidate, or private runtime-only state. Call out credentials, data sensitivity, required approvals, and whether the item should be committed to the repo.',
-      provenance: ['source:recent-message-history', 'kind:history-suggestion'],
-    },
-  ];
+function readTaskPromptText(limit = 200): string[] {
+  return getAllTasks()
+    .slice(0, limit)
+    .map((task) => task.prompt)
+    .filter(Boolean);
+}
 
-  return candidates
-    .map((candidate) => {
-      const evidenceCount = keywordCount(messages, candidate.patterns);
-      return {
-        ...candidate,
-        evidenceCount,
-        confidence: Math.min(
-          0.95,
-          candidate.baseConfidence + Math.max(0, evidenceCount - 1) * 0.04,
-        ),
-      };
-    })
-    .filter(
-      (candidate) =>
-        candidate.evidenceCount > 0 &&
-        !installed.has(candidate.name) &&
-        !drafted.has(candidate.name),
-    )
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, 8);
+function readJournalSuggestionText(): string[] {
+  try {
+    return findSkillWorthyJournalPatterns({ limit: 200 }).flatMap(
+      (pattern) => pattern.examples,
+    );
+  } catch {
+    return [];
+  }
+}
+
+function refreshSkillSuggestionQueue(): void {
+  const messages = readRecentConversationText();
+  const tasks = readTaskPromptText();
+  const journal = readJournalSuggestionText();
+  if (messages.length === 0 && tasks.length === 0 && journal.length === 0) {
+    return;
+  }
+  const installed = listInstalledSkillNames();
+  detectAndQueueSkillSuggestions({
+    messages,
+    tasks,
+    journal,
+    createdBy: 'history-detector',
+    existingSkillNames: [...installed],
+  });
 }
 
 router.get('/', (_req: Request, res: Response) => {
@@ -234,8 +166,30 @@ router.get('/drafts', (req: Request, res: Response) => {
   res.json(listSkillDrafts(status));
 });
 
-router.get('/suggestions', (_req: Request, res: Response) => {
-  res.json(buildSkillSuggestions());
+router.get('/suggestions', (req: Request, res: Response) => {
+  refreshSkillSuggestionQueue();
+  const status =
+    req.query.status === 'pending' ||
+    req.query.status === 'approved' ||
+    req.query.status === 'rejected'
+      ? (req.query.status as SkillSuggestionStatus)
+      : undefined;
+  res.json(listSkillSuggestions({ status }));
+});
+
+router.post('/suggestions/:id/approve', (req: Request, res: Response) => {
+  try {
+    const suggestion = approveSkillSuggestion(req.params.id as string, {
+      decidedBy: String(req.body?.decidedBy || 'dashboard'),
+      decision: req.body?.decision || 'create-draft',
+    });
+    auditLog(req, 'skill_suggestion_approved', suggestion.proposedSkillName);
+    res.json({ ok: true, suggestion });
+  } catch (err) {
+    res.status(404).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 router.post('/drafts', (req: Request, res: Response) => {
