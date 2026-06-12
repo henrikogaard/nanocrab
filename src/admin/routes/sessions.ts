@@ -226,6 +226,198 @@ router.post('/terminal/search', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/sessions/:group/:sessionId/detail — full session detail with stats + structured tool calls
+router.get('/:group/:sessionId/detail', async (req: Request, res: Response) => {
+  try {
+    const group = req.params.group as string;
+    const sessionId = req.params.sessionId as string;
+    let filePath = path.join(
+      DATA_DIR,
+      'sessions',
+      group,
+      '.agents',
+      'projects',
+      '-workspace-group',
+      `${sessionId}.jsonl`,
+    );
+    if (!fs.existsSync(filePath)) {
+      filePath = path.join(
+        DATA_DIR,
+        'sessions',
+        group,
+        '.claude',
+        'projects',
+        '-workspace-group',
+        `${sessionId}.jsonl`,
+      );
+    }
+
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    const messages: Array<{
+      role: string;
+      content: string;
+      timestamp: string;
+      type: string;
+      toolCalls?: Array<{
+        id: string;
+        name: string;
+        input: string;
+        output: string;
+        duration: string;
+      }>;
+    }> = [];
+
+    const pendingToolCalls = new Map<string, { name: string; input: string }>();
+    let firstTimestamp: string | null = null;
+    let lastTimestamp: string | null = null;
+    let toolCount = 0;
+    let model = '';
+
+    const fileStream = fs.createReadStream(filePath, { encoding: 'utf8' });
+    const rl = readline.createInterface({
+      input: fileStream,
+      crlfDelay: Infinity,
+    });
+
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        const ts = obj.timestamp || '';
+        if (!firstTimestamp) firstTimestamp = ts;
+        lastTimestamp = ts;
+
+        if (obj.type === 'user' || obj.type === 'human') {
+          messages.push({
+            role: 'user',
+            content: obj.content || obj.message || JSON.stringify(obj),
+            timestamp: ts,
+            type: obj.type,
+          });
+        } else if (obj.type === 'assistant') {
+          if (!model && obj.message?.model) {
+            model = obj.message.model;
+          }
+
+          let text = '';
+          const tc: Array<{
+            id: string;
+            name: string;
+            input: string;
+            output: string;
+            duration: string;
+          }> = [];
+
+          const contentBlocks = Array.isArray(obj.message?.content)
+            ? obj.message.content
+            : Array.isArray(obj.content)
+              ? obj.content
+              : [];
+
+          for (const block of contentBlocks) {
+            if (block.type === 'text') {
+              text += block.text || '';
+            } else if (block.type === 'tool_use') {
+              toolCount++;
+              const toolId = block.id || block.tool_use_id || `tc_${toolCount}`;
+              pendingToolCalls.set(toolId, {
+                name: block.name || '',
+                input: JSON.stringify(block.input || {}),
+              });
+              tc.push({
+                id: toolId,
+                name: block.name || '',
+                input: JSON.stringify(block.input || {}),
+                output: '',
+                duration: '',
+              });
+            } else if (block.type === 'tool_result') {
+              const toolId = block.tool_use_id || '';
+              const pending = pendingToolCalls.get(toolId);
+              if (pending) {
+                pendingToolCalls.delete(toolId);
+                tc.push({
+                  id: toolId,
+                  name: pending.name,
+                  input: pending.input,
+                  output: typeof block.content === 'string' ? block.content : JSON.stringify(block.content || ''),
+                  duration: block.duration || '',
+                });
+              }
+            }
+          }
+
+          const content = text || (tc.length > 0 ? '' : JSON.stringify(obj));
+
+          if (content || tc.length > 0) {
+            messages.push({
+              role: 'assistant',
+              content,
+              timestamp: ts,
+              type: obj.type,
+              toolCalls: tc.length > 0 ? tc : undefined,
+            });
+          }
+        } else if (obj.type === 'tool_result' && obj.message?.tool_use_id) {
+          const toolId = obj.message.tool_use_id;
+          const pending = pendingToolCalls.get(toolId);
+          if (pending) {
+            pendingToolCalls.delete(toolId);
+            for (let i = messages.length - 1; i >= 0; i--) {
+              if (messages[i].role === 'assistant') {
+                if (!messages[i].toolCalls) messages[i].toolCalls = [];
+                messages[i].toolCalls!.push({
+                  id: toolId,
+                  name: pending.name,
+                  input: pending.input,
+                  output: typeof obj.message.content === 'string'
+                    ? obj.message.content
+                    : JSON.stringify(obj.message.content || ''),
+                  duration: obj.message.duration || '',
+                });
+                break;
+              }
+            }
+          }
+        } else if (obj.type === 'queue-operation' && obj.content) {
+          messages.push({
+            role: 'user',
+            content: obj.content,
+            timestamp: ts,
+            type: 'queue',
+          });
+        }
+      } catch {
+        // skip malformed lines
+      }
+    }
+
+    const duration = firstTimestamp && lastTimestamp
+      ? Math.round((new Date(lastTimestamp).getTime() - new Date(firstTimestamp).getTime()) / 1000)
+      : 0;
+
+    res.json({
+      id: sessionId,
+      group,
+      stats: {
+        messageCount: messages.length,
+        duration,
+        toolCount,
+        model: model || 'unknown',
+        createdAt: firstTimestamp,
+        endedAt: lastTimestamp,
+      },
+      messages,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to read session detail' });
+  }
+});
+
 router.get('/:group/:sessionId', async (req: Request, res: Response) => {
   try {
     const group = req.params.group as string;

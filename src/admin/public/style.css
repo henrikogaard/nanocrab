@@ -3170,3 +3170,97 @@ tr {
   color: #ef4444;
   border: 1px solid #ef4444;
 }
+
+/* Session detail — stats header bar */
+.session-stats-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  align-items: center;
+  position: relative;
+}
+
+.session-stat {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.session-stat-label {
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+
+.session-stat-value {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.session-stats-toggle {
+  margin-left: auto;
+  cursor: pointer;
+  opacity: 0.5;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: opacity var(--transition), background var(--transition);
+}
+
+.session-stats-toggle:hover {
+  opacity: 1;
+  background: var(--surface2);
+}
+
+.session-stats-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 50;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  padding: 8px;
+  min-width: 160px;
+  margin-top: 4px;
+}
+
+.session-stats-menu label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.session-stats-menu label:hover {
+  background: var(--surface2);
+}
+
+.session-stats-menu input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+/* Session detail — transcript */
+.session-transcript {
+  padding: 16px;
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+}
+
+.session-msg.session-msg-system {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+  margin: 8px 0;
+  background: transparent;
+  border-left: none;
+}

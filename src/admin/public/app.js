@@ -681,6 +681,7 @@ const _pageMap = {
   autofix: 'renderAutofix',
   help: 'renderHelp',
   marketplace: 'renderMarketplace',
+  'session-detail': 'renderSessionDetail',
 };
 // Track which plugin frontends we've already loaded
 const _loadedFrontends = new Set();
@@ -4948,7 +4949,7 @@ function renderSessionList(sessions) {
         <td>${s.startedAt ? formatTime(s.startedAt) : '-'}</td>
         <td>${s.lastActivity ? timeAgo(s.lastActivity) : '-'}</td>
         <td>${s.messageCount}</td>
-        <td><button class="btn btn-sm btn-ghost" onclick="viewSession('${esc(s.group)}','${esc(s.sessionId)}')">View</button></td>
+        <td><button class="btn btn-sm btn-ghost" onclick="window._sessionDetailParams={group:'${esc(s.group)}',sessionId:'${esc(s.sessionId)}'};navigate('session-detail')">View</button></td>
       </tr>`,
         )
         .join('')}</tbody>
@@ -5010,6 +5011,190 @@ window.viewSession = async function (group, sessionId) {
     viewer.innerHTML = '<div class="card empty">Failed to load session</div>';
   }
 };
+
+/* Session detail page */
+window.renderSessionDetail = async function (el) {
+  const params = window._sessionDetailParams;
+  if (!params || !params.group || !params.sessionId) {
+    el.innerHTML = '<div class="card"><div class="empty">No session specified</div></div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="page-header">
+      <h2>
+        <a href="#" onclick="navigate('sessions');return false" style="color:var(--text-muted);text-decoration:none">Sessions</a>
+        <span style="color:var(--text-muted);margin:0 4px">/</span>
+        ${esc(params.sessionId.slice(0, 8))}...
+      </h2>
+      <button class="btn btn-sm btn-ghost" onclick="navigate('sessions')">Back</button>
+    </div>
+    <div id="session-stats-bar"></div>
+    <div id="session-transcript" class="card" style="padding:0;overflow:hidden;flex:1;margin-top:8px">
+      <div class="loading" style="padding:24px">Loading session...</div>
+    </div>
+  `;
+
+  try {
+    const data = await api(`/sessions/${encodeURIComponent(params.group)}/${encodeURIComponent(params.sessionId)}/detail`);
+    const transcriptEl = document.getElementById('session-transcript');
+    if (transcriptEl) transcriptEl.dataset.stats = JSON.stringify(data.stats);
+    renderSessionStats(data.stats);
+    renderSessionTranscript(data.messages, data.stats);
+  } catch (e) {
+    const t = document.getElementById('session-transcript');
+    if (t) t.innerHTML = '<div class="empty">Failed to load session</div>';
+  }
+};
+
+const DEFAULT_STATS_VISIBILITY = {
+  messages: true,
+  duration: true,
+  tools: true,
+  model: true,
+  tokens: false,
+  cost: false,
+  errors: false,
+  sessionId: false,
+  created: false,
+};
+
+function getStatVisibility() {
+  try {
+    const saved = localStorage.getItem('session_stat_visibility');
+    return saved ? { ...DEFAULT_STATS_VISIBILITY, ...JSON.parse(saved) } : DEFAULT_STATS_VISIBILITY;
+  } catch {
+    return DEFAULT_STATS_VISIBILITY;
+  }
+}
+
+function saveStatVisibility(v) {
+  localStorage.setItem('session_stat_visibility', JSON.stringify(v));
+}
+
+function renderSessionStats(stats) {
+  const el = document.getElementById('session-stats-bar');
+  if (!el) return;
+
+  const visibility = getStatVisibility();
+  const statDefs = {
+    messages: { label: 'Messages', value: stats.messageCount },
+    duration: { label: 'Duration', value: formatDuration(stats.duration) },
+    tools: { label: 'Tools', value: stats.toolCount },
+    model: { label: 'Model', value: stats.model },
+    tokens: { label: 'Tokens', value: stats.tokenCount ? stats.tokenCount.toLocaleString() : null },
+    cost: { label: 'Cost', value: stats.cost ? '$' + stats.cost.toFixed(2) : null },
+    errors: { label: 'Errors', value: stats.errorCount || null },
+    sessionId: { label: 'Session', value: stats.id ? stats.id.slice(0, 8) + '...' : null },
+    created: { label: 'Created', value: stats.createdAt ? formatTime(stats.createdAt) : null },
+  };
+
+  const visibleStats = Object.entries(statDefs)
+    .filter(([key, def]) => visibility[key] && def.value !== null)
+    .map(([key, def]) => `<span class="session-stat"><span class="session-stat-label">${def.label}:</span><span class="session-stat-value">${esc(String(def.value))}</span></span>`)
+    .join('');
+
+  el.innerHTML = `
+    <div class="session-stats-bar" id="session-stats-bar-inner">
+      ${visibleStats}
+      <span class="session-stats-toggle" onclick="toggleStatsMenu()" title="Customize stats">&#x2699;</span>
+    </div>
+  `;
+}
+
+function formatDuration(seconds) {
+  if (!seconds && seconds !== 0) return '';
+  if (seconds < 60) return seconds + 's';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m + 'm ' + s + 's';
+}
+
+window.toggleStatsMenu = function () {
+  const existing = document.getElementById('session-stats-menu');
+  if (existing) { existing.remove(); return; }
+
+  const visibility = getStatVisibility();
+  const menu = document.createElement('div');
+  menu.id = 'session-stats-menu';
+  menu.className = 'session-stats-menu';
+  menu.innerHTML = Object.keys(DEFAULT_STATS_VISIBILITY).map(key =>
+    `<label><input type="checkbox" ${visibility[key] ? 'checked' : ''} data-key="${key}"> ${key.charAt(0).toUpperCase() + key.slice(1)}</label>`
+  ).join('') +
+  '<div style="padding:4px 8px 0;display:flex;gap:6px;justify-content:flex-end;border-top:1px solid var(--border);margin-top:4px;padding-top:6px">' +
+  '<button class="btn btn-sm btn-primary" onclick="saveStatsMenu()">Done</button></div>';
+
+  const bar = document.getElementById('session-stats-bar-inner');
+  if (bar) bar.appendChild(menu);
+};
+
+window.saveStatsMenu = function () {
+  const v = {};
+  document.querySelectorAll('#session-stats-menu input[type="checkbox"]').forEach(cb => {
+    v[cb.dataset.key] = cb.checked;
+  });
+  saveStatVisibility(v);
+  const menu = document.getElementById('session-stats-menu');
+  if (menu) menu.remove();
+  const transcript = document.getElementById('session-transcript');
+  if (transcript && transcript.dataset.stats) {
+    renderSessionStats(JSON.parse(transcript.dataset.stats));
+  }
+};
+
+function renderSessionTranscript(messages, stats) {
+  const el = document.getElementById('session-transcript');
+  if (!el) return;
+
+  if (!messages || messages.length === 0) {
+    el.innerHTML = '<div class="empty">No messages in this session</div>';
+    return;
+  }
+
+  el.innerHTML = '<div class="session-transcript">' + messages.map((m, idx) => {
+    if (m.role === 'user') {
+      return `
+        <div class="session-msg session-msg-user">
+          <div class="session-msg-header" style="justify-content:flex-end;padding-right:4px">
+            ${m.timestamp ? `<span style="font-size:11px;color:var(--text-muted)">${formatTime(m.timestamp)}</span>` : ''}
+            <span class="session-msg-role">User</span>
+          </div>
+          <div class="session-msg-content">${esc(m.content)}</div>
+        </div>`;
+    } else if (m.role === 'assistant') {
+      const toolCards = (m.toolCalls || []).map(tc => `
+        <div class="chat-tool-call" style="margin:6px 0" onclick="this.querySelector('.chat-tool-call-body').classList.toggle('expanded')">
+          <div class="chat-tool-call-header">
+            <span class="tool-icon">&#x1F527;</span>
+            <span class="tool-name">${esc(tc.name)}</span>
+            <span class="tool-status ${tc.output ? 'done' : 'running'}">${tc.output ? '\u2713 ' + (tc.duration || '') + 's' : '\u25CF Running...'}</span>
+          </div>
+          <div class="chat-tool-call-body ${tc.output ? 'expanded' : ''}">
+            <div class="section-label">Input</div>
+            <pre>${esc(prettyPrint(tc.input))}</pre>
+            ${tc.output ? `<div class="section-label" style="margin-top:8px">Result</div><pre>${esc(prettyPrint(tc.output))}</pre>` : ''}
+          </div>
+        </div>
+      `).join('');
+
+      return `
+        <div class="session-msg session-msg-assistant">
+          <div class="session-msg-header">
+            <span class="session-msg-role">Assistant</span>
+            ${stats?.model ? `<span style="font-size:11px;color:var(--text-muted)">${esc(stats.model)}</span>` : ''}
+            ${m.timestamp ? `<span style="font-size:11px;color:var(--text-muted)">${formatTime(m.timestamp)}</span>` : ''}
+          </div>
+          <div class="session-msg-content">${m.content ? esc(m.content) : ''}</div>
+          ${toolCards}
+        </div>`;
+    } else {
+      return `
+        <div class="session-msg session-msg-system">
+          <div class="session-msg-content" style="font-size:11px;color:var(--text-muted);text-align:center;padding:4px 14px;border:1px solid var(--border);border-radius:12px;display:inline-block;background:var(--surface)">${esc(m.content || m.type || '')}</div>
+        </div>`;
+    }
+  }).join('') + '</div>';
+}
 
 // Backup
 async function renderBackup(el) {
