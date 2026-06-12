@@ -133,7 +133,7 @@ export function findSkillWorthyJournalPatterns(input: {
   minExamples?: number;
   limit?: number;
 }): SkillWorthyJournalPattern[] {
-  const minExamples = Math.max(input.minExamples || 3, 2);
+  const minExamples = Math.max(input.minExamples || 3, 3);
   const limit = Math.min(Math.max(input.limit || 100, 1), 200);
   const entries = listJournalEntries({
     groupFolder: input.groupFolder || null,

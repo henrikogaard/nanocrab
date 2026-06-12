@@ -156,7 +156,7 @@ function normalizeSuggestionIntent(text: string): string {
     .split(/\b(?:with|from|when|using|before|after)\b/)[0]
     .replace(/[^a-z0-9\s-]/g, ' ')
     .replace(
-      /\b(always|please|when|i|ask|for|in|the|a|an|and|to|should|could|would|make|create|draft|write)\b/g,
+      /\b(always|please|when|i|ask|for|in|the|a|an|and|to|should|could|would|make|create|draft|write|use|this|workflow)\b/g,
       ' ',
     )
     .replace(/\b(summarizes|summaries)\b/g, 'summarize')
@@ -177,7 +177,7 @@ function suggestionDescription(intent: string): string {
 }
 
 function looksSkillWorthySuggestion(text: string): boolean {
-  return /\b(always|never|when i ask|workflow|summarize|summary|digest|report|review|triage|prepare|release notes|use this|default)\b/i.test(
+  return /\b(always|never|when i ask|please|workflow|use this|default)\b/i.test(
     text,
   );
 }
@@ -267,7 +267,7 @@ export function proposeSkillDraft(input: ProposeSkillDraftInput): SkillDraft {
 export function detectAndQueueSkillSuggestions(
   input: DetectSkillSuggestionsInput,
 ): SkillSuggestion[] {
-  const minExamples = Math.max(input.minExamples || 3, 2);
+  const minExamples = Math.max(input.minExamples || 3, 3);
   const sources = [
     ...(input.messages || []).map((text) => ({
       text,
@@ -311,7 +311,7 @@ export function detectAndQueueSkillSuggestions(
   const now = new Date().toISOString();
   for (const [intent, group] of groups) {
     if (group.examples.length < minExamples) continue;
-    if (group.skillWorthyExamples === 0) continue;
+    if (group.skillWorthyExamples < minExamples) continue;
     const proposedSkillName = suggestionNameFromIntent(intent);
     if (existingNames.has(proposedSkillName)) continue;
     const suggestion: SkillSuggestion = {

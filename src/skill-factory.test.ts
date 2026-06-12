@@ -134,4 +134,48 @@ describe('skill factory', () => {
     );
     expect(listSkillSuggestions({ status: 'approved' })).toHaveLength(1);
   });
+
+  it('does not lower the skill suggestion threshold below three examples', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      messages: [
+        'Please summarize commits and risks for release notes.',
+        'Always summarize commits and risks in release notes.',
+      ],
+      createdBy: 'test',
+      minExamples: 2,
+    });
+
+    expect(suggestions).toHaveLength(0);
+    expect(listSkillSuggestions()).toHaveLength(0);
+  });
+
+  it('requires three skill-worthy repeated examples before queueing', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      messages: [
+        'Always summarize commits and risks in release notes.',
+        'Summarize commits and risks release notes.',
+        'Summarize commits and risks release notes.',
+      ],
+      createdBy: 'test',
+    });
+
+    expect(suggestions).toHaveLength(0);
+    expect(listSkillSuggestions()).toHaveLength(0);
+  });
+
+  it('queues when three repeated examples are skill-worthy', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      messages: [
+        'Please summarize commits and risks for release notes.',
+        'Always summarize commits and risks in release notes.',
+        'Use this workflow to summarize commits and risks for release notes.',
+      ],
+      createdBy: 'test',
+    });
+
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0].proposedSkillName).toBe(
+      'summarize-commits-risks-release-notes',
+    );
+  });
 });

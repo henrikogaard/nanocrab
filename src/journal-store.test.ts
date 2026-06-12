@@ -130,4 +130,24 @@ describe('journal store', () => {
     });
     expect(patterns[0].examples[0]).toContain('weekly alliance digest');
   });
+
+  it('does not lower journal skill-worthy pattern threshold below three examples', () => {
+    recordJournalEvent({
+      title: 'Please prepare a concise weekly alliance digest for the team.',
+      groupFolder: 'main',
+      tags: ['workflow'],
+    });
+    recordJournalEvent({
+      title: 'Prepare a concise weekly alliance digest from journal notes.',
+      groupFolder: 'main',
+      tags: ['workflow'],
+    });
+
+    expect(
+      findSkillWorthyJournalPatterns({
+        groupFolder: 'main',
+        minExamples: 2,
+      }),
+    ).toHaveLength(0);
+  });
 });
