@@ -1082,6 +1082,7 @@ async function renderChat(el) {
     if (e.key === 'Enter') sendMessage();
   };
   document.getElementById('chat-group-select').onchange = (e) => {
+    document.getElementById('chat-provider-popover')?.remove();
     loadMessages(e.target.value);
     updateProviderBadge(e.target.value);
   };
@@ -1266,9 +1267,11 @@ window.saveProvider = async function () {
   if (!groupJid || !provider) return;
 
   try {
+    const group = window._chatGroups?.find(g => g.jid === groupJid);
+    const existingConfig = group?.containerConfig || {};
     await api('/groups/' + encodeURIComponent(groupJid), {
       method: 'PUT',
-      body: JSON.stringify({ containerConfig: { provider, model: model || undefined } }),
+      body: JSON.stringify({ containerConfig: { ...existingConfig, provider, model: model || undefined } }),
     });
     toast('Provider updated to ' + provider + '/' + (model || 'auto'), 'success');
     document.getElementById('chat-provider-popover')?.remove();
