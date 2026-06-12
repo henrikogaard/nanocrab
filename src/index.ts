@@ -73,7 +73,21 @@ import {
   copyAgentInstructionsTemplate,
 } from './agent-instructions.js';
 import { APP_VERSION, EDITION_NAME, EDITION_VERSION } from './edition.js';
+import { extractStructuredMarkers, stripStructuredMarkers } from './admin/chat-workflow.js';
+import {
+  broadcastToolCall,
+  broadcastToolResult,
+  broadcastApprovalRequest,
+  broadcastTaskProgress,
+} from './admin/websocket.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { startProbeScheduler } from './probe-scheduler.js';
+import { getAllProviders } from './providers/index.js';
+import { liveProbeService } from './providers/live-probe.js';
+import {
+  getProviderCapabilityMatrix,
+  loadProviderProfiles,
+} from './provider-router.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -424,7 +438,25 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           ? result.result
           : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      const noInternal = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      // Extract structured markers
+      const markers = extractStructuredMarkers(noInternal);
+      const text = stripStructuredMarkers(noInternal).trim();
+
+      // Broadcast markers as typed WS events
+      for (const marker of markers) {
+        const now = new Date().toISOString();
+        if (marker.type === 'tool_call') {
+          broadcastToolCall({ id: marker.id, name: marker.name, input: marker.input, groupJid: chatJid, timestamp: now });
+        } else if (marker.type === 'tool_result') {
+          broadcastToolResult({ id: marker.id, output: marker.output, duration: marker.duration, groupJid: chatJid });
+        } else if (marker.type === 'approval_request') {
+          broadcastApprovalRequest({ id: marker.id, tool: marker.tool, reason: marker.reason, input: marker.input, groupJid: chatJid });
+        } else if (marker.type === 'progress') {
+          broadcastTaskProgress({ phase: marker.phase, pct: marker.pct, message: marker.message, groupJid: chatJid });
+        }
+      }
+
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
         await channel.sendMessage(chatJid, text);
@@ -966,6 +998,42 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Initialize provider registry
+  const providerRegistry = getAllProviders();
+  logger.info(
+    { providerCount: providerRegistry.length },
+    'Provider registry initialized',
+  );
+  for (const provider of providerRegistry) {
+    logger.info(
+      { provider: provider.id, name: provider.name },
+      'Provider registered',
+    );
+  }
+
+  // Log provider capability matrix
+  const capabilityMatrix = getProviderCapabilityMatrix();
+  logger.info(
+    { providerCount: Object.keys(capabilityMatrix).length },
+    'Provider capability matrix loaded',
+  );
+
+  // Log configured provider profiles
+  const profiles = loadProviderProfiles();
+  for (const profile of profiles) {
+    const config = getAgentProviderConfig();
+    const isActive = profile.provider === config.provider;
+    logger.info(
+      {
+        purpose: profile.id,
+        provider: profile.provider,
+        model: profile.model,
+        active: isActive,
+      },
+      `Provider profile loaded`,
+    );
+  }
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -1044,6 +1112,7 @@ async function main(): Promise<void> {
     },
   });
   startSessionCleanup();
+  startProbeScheduler();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

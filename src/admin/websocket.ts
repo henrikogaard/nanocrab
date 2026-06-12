@@ -431,3 +431,49 @@ export function broadcastMessage(message: {
 }): void {
   broadcast({ type: 'new_message', data: message });
 }
+
+export function broadcastToolCall(data: {
+  id: string;
+  name: string;
+  input: string;
+  groupJid: string;
+  timestamp: string;
+}): void {
+  broadcast({ type: 'tool_call', data });
+}
+
+export function broadcastToolResult(data: {
+  id: string;
+  output: string;
+  duration: string;
+  groupJid: string;
+}): void {
+  broadcast({ type: 'tool_result', data });
+}
+
+export function broadcastApprovalRequest(data: {
+  id: string;
+  tool: string;
+  reason: string;
+  input: string;
+  groupJid: string;
+}): void {
+  broadcast({ type: 'approval_request', data });
+}
+
+export function broadcastTaskProgress(data: {
+  phase: string;
+  pct: number;
+  message: string;
+  groupJid: string;
+}): void {
+  broadcast({ type: 'task_progress', data });
+}
+
+export function broadcastApprovalResult(data: {
+  id: string;
+  groupJid: string;
+  approved: boolean;
+}): void {
+  broadcast({ type: 'approval_result', data });
+}
