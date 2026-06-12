@@ -2947,3 +2947,92 @@ tr {
   gap: 6px;
   justify-content: flex-end;
 }
+
+/* Chat workflow — task progress bar */
+.chat-progress-bar {
+  margin: 0 12px 8px;
+  padding: 6px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: opacity 0.3s;
+}
+
+.chat-progress-bar.visible {
+  display: flex;
+}
+
+.chat-progress-bar .progress-phase {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 80px;
+}
+
+.chat-progress-bar .progress-track {
+  flex: 1;
+  height: 4px;
+  background: var(--bg);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.chat-progress-bar .progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.chat-progress-bar .progress-pct {
+  color: var(--text-muted);
+  min-width: 30px;
+  text-align: right;
+}
+
+.chat-progress-bar .progress-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Phase history expandable */
+.chat-progress-history {
+  display: none;
+  margin: 0 12px 8px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  gap: 4px;
+  flex-direction: column;
+}
+
+.chat-progress-history.visible {
+  display: flex;
+}
+
+.chat-progress-history .phase-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--text-muted);
+}
+
+.chat-progress-history .phase-entry.done {
+  color: var(--text-secondary);
+}
+
+.chat-progress-history .phase-entry.active {
+  color: var(--text);
+}

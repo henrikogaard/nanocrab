@@ -986,6 +986,11 @@ async function renderMonitoringConsolidated(el) {
 
 // Chat
 async function renderChat(el) {
+  // Clean up progress state
+  if (window._progressTimeout) {
+    clearTimeout(window._progressTimeout);
+    window._progressTimeout = null;
+  }
   const groups = await api('/groups');
   window._chatGroups = groups;
   const providers = await api('/providers');
@@ -1008,6 +1013,15 @@ async function renderChat(el) {
       <div class="chat-messages" id="chat-messages-area">
         <div class="loading">Select a group to start chatting</div>
       </div>
+      <div class="chat-progress-bar" id="chat-progress-bar" onclick="toggleProgressHistory()">
+        <span class="progress-spinner" id="progress-spinner"></span>
+        <span class="progress-phase" id="progress-phase">Thinking...</span>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+        </div>
+        <span class="progress-pct" id="progress-pct">0%</span>
+      </div>
+      <div class="chat-progress-history" id="chat-progress-history"></div>
       <div class="chat-input">
         <input type="text" id="chat-msg-input" placeholder="Type a message..." autocomplete="off">
         <button class="btn btn-sm btn-ghost" id="chat-voice-btn" title="Record voice" style="font-size:16px;padding:6px 10px">\uD83C\uDF99</button>
@@ -1059,6 +1073,24 @@ async function renderChat(el) {
     const msg = input.value.trim();
     if (!msg || !selectedJid) return;
     input.value = '';
+
+    // Start fallback progress timer
+    if (window._progressTimeout) clearTimeout(window._progressTimeout);
+    window._progressTimeout = setTimeout(() => {
+      const bar = document.getElementById('chat-progress-bar');
+      if (bar && !bar.classList.contains('visible')) {
+        bar.classList.add('visible');
+        const spinner = document.getElementById('progress-spinner');
+        if (spinner) spinner.style.display = '';
+        const phase = document.getElementById('progress-phase');
+        if (phase) phase.textContent = 'Agent is thinking...';
+        const fill = document.getElementById('progress-fill');
+        if (fill) fill.style.width = '0%';
+        const pct = document.getElementById('progress-pct');
+        if (pct) pct.textContent = '';
+      }
+    }, 30000);
+
     // Optimistic add
     chatMessages.unshift({
       content: msg,
@@ -1134,6 +1166,40 @@ async function renderChat(el) {
   const origHandler = handleWsMessage;
   const chatWsHandler = (msg) => {
     origHandler(msg);
+    if (msg.type === 'task_progress') {
+      const activeGroup = document.getElementById('chat-group-select')?.value;
+      if (msg.data.groupJid !== activeGroup) return;
+      if (window._progressTimeout) {
+        clearTimeout(window._progressTimeout);
+        window._progressTimeout = null;
+      }
+      const bar = document.getElementById('chat-progress-bar');
+      const phase = document.getElementById('progress-phase');
+      const fill = document.getElementById('progress-fill');
+      const pct = document.getElementById('progress-pct');
+      const spinner = document.getElementById('progress-spinner');
+      if (!bar || !phase || !fill || !pct) return;
+      bar.classList.add('visible');
+      phase.textContent = msg.data.message || msg.data.phase;
+      fill.style.width = Math.min(msg.data.pct, 100) + '%';
+      pct.textContent = msg.data.pct + '%';
+      const history = document.getElementById('chat-progress-history');
+      if (history) {
+        const entry = document.createElement('div');
+        entry.className = 'phase-entry' + (msg.data.pct >= 100 ? ' done' : ' active');
+        entry.innerHTML = '<span style="font-size:10px">' + (msg.data.pct >= 100 ? '\u2713' : '\u25CF') + '</span> ' + esc(msg.data.message || msg.data.phase);
+        history.appendChild(entry);
+        history.classList.add('visible');
+      }
+      if (msg.data.pct >= 100 || msg.data.phase === 'done') {
+        setTimeout(() => {
+          bar.classList.remove('visible');
+        }, 3000);
+      } else if (spinner) {
+        spinner.style.display = '';
+      }
+      return;
+    }
     if (msg.type === 'new_message' && currentPage === 'chat') {
       const m = msg.data;
       if (m.chat_jid === selectedJid) {
@@ -1279,6 +1345,11 @@ window.saveProvider = async function () {
   } catch (e) {
     toast('Failed to update provider: ' + e.message, 'error');
   }
+};
+
+window.toggleProgressHistory = function () {
+  const history = document.getElementById('chat-progress-history');
+  if (history) history.classList.toggle('visible');
 };
 
 // Channels
