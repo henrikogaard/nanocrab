@@ -987,6 +987,9 @@ async function renderMonitoringConsolidated(el) {
 // Chat
 async function renderChat(el) {
   const groups = await api('/groups');
+  window._chatGroups = groups;
+  const providers = await api('/providers');
+  window._chatProviders = providers;
   let selectedJid = groups[0]?.jid || '';
   let chatMessages = [];
   let mediaRecorder = null;
@@ -994,9 +997,12 @@ async function renderChat(el) {
 
   el.innerHTML = `
     <div class="page-header"><h2>Chat</h2>
-      <select class="search-input" id="chat-group-select" style="max-width:250px">
-        ${groups.map((g) => `<option value="${g.jid}">${esc(g.name)} (${g.channel || g.folder})</option>`).join('')}
-      </select>
+      <div style="display:flex;align-items:center;gap:10px">
+        <select class="search-input" id="chat-group-select" style="max-width:250px">
+          ${groups.map((g) => `<option value="${g.jid}">${esc(g.name)} (${g.channel || g.folder})</option>`).join('')}
+        </select>
+        <div id="chat-provider-selector" class="chat-provider-selector"></div>
+      </div>
     </div>
     <div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column">
       <div class="chat-messages" id="chat-messages-area">
@@ -1009,6 +1015,8 @@ async function renderChat(el) {
       </div>
     </div>
     <div id="chat-voice-status" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div>`;
+
+  renderProviderBadge(selectedJid);
 
   async function loadMessages(jid) {
     if (!jid) return;
@@ -1073,8 +1081,10 @@ async function renderChat(el) {
   document.getElementById('chat-msg-input').onkeydown = (e) => {
     if (e.key === 'Enter') sendMessage();
   };
-  document.getElementById('chat-group-select').onchange = (e) =>
+  document.getElementById('chat-group-select').onchange = (e) => {
     loadMessages(e.target.value);
+    updateProviderBadge(e.target.value);
+  };
 
   // Voice recording
   document.getElementById('chat-voice-btn').onclick = async () => {
@@ -1158,6 +1168,115 @@ async function renderChat(el) {
   // Load initial messages
   if (selectedJid) loadMessages(selectedJid);
 }
+
+function renderProviderBadge(groupJid) {
+  const container = document.getElementById('chat-provider-selector');
+  if (!container) return;
+  const group = window._chatGroups?.find((g) => g.jid === groupJid);
+  const provider = group?.containerConfig?.provider || 'default';
+  const model = group?.containerConfig?.model || 'auto';
+  container.innerHTML = `
+    <div class="chat-provider-badge" id="chat-provider-badge" onclick="toggleProviderPopover()">
+      ${esc(provider)} <span style="opacity:0.6">/</span> ${esc(model)} <span style="font-size:10px;margin-left:2px">&#9998;</span>
+    </div>
+  `;
+}
+
+function updateProviderBadge(groupJid) {
+  const badge = document.getElementById('chat-provider-badge');
+  if (!badge) {
+    renderProviderBadge(groupJid);
+    return;
+  }
+  const group = window._chatGroups?.find((g) => g.jid === groupJid);
+  if (group) {
+    const provider = group.containerConfig?.provider || 'default';
+    const model = group.containerConfig?.model || 'auto';
+    badge.innerHTML = `${esc(provider)} <span style="opacity:0.6">/</span> ${esc(model)} <span style="font-size:10px;margin-left:2px">&#9998;</span>`;
+  }
+}
+
+window.toggleProviderPopover = function () {
+  const existing = document.getElementById('chat-provider-popover');
+  if (existing) { existing.remove(); return; }
+
+  const groupJid = document.getElementById('chat-group-select')?.value;
+  if (!groupJid) return;
+
+  const providers = window._chatProviders || [];
+  if (!providers.length) {
+    toast('No providers available', 'error');
+    return;
+  }
+
+  const selector = document.getElementById('chat-provider-selector');
+  const popover = document.createElement('div');
+  popover.id = 'chat-provider-popover';
+  popover.className = 'chat-provider-popover';
+  popover.innerHTML = `
+    <select id="provider-select" class="form-select" style="width:100%;padding:6px 8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:12px;margin-bottom:6px">
+      ${providers.map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`).join('')}
+    </select>
+    <select id="model-select" class="form-select" style="width:100%;padding:6px 8px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:12px;margin-bottom:6px">
+      <option value="">Auto</option>
+    </select>
+    <div class="popover-actions" style="display:flex;gap:6px;justify-content:flex-end">
+      <button class="btn btn-sm btn-ghost" onclick="this.closest('.chat-provider-popover').remove()">Cancel</button>
+      <button class="btn btn-sm btn-primary" onclick="saveProvider()">Save</button>
+    </div>
+  `;
+  selector.appendChild(popover);
+
+  document.getElementById('provider-select').onchange = function () {
+    updateModelOptions(this.value);
+  };
+
+  const group = window._chatGroups?.find((g) => g.jid === groupJid);
+  if (group?.containerConfig?.provider) {
+    const ps = document.getElementById('provider-select');
+    if (ps) ps.value = group.containerConfig.provider;
+  }
+  updateModelOptions(
+    document.getElementById('provider-select')?.value,
+    group?.containerConfig?.model,
+  );
+};
+
+function updateModelOptions(providerId, selectedModel) {
+  const modelSelect = document.getElementById('model-select');
+  if (!modelSelect) return;
+  const provider = window._chatProviders?.find((p) => p.id === providerId);
+  const models = provider?.models || [];
+  modelSelect.innerHTML = `
+    <option value="">Auto</option>
+    ${models.map((m) => `<option value="${esc(m.id || m)}" ${(m.id || m) === selectedModel ? 'selected' : ''}>${esc(m.name || m)}</option>`).join('')}
+  `;
+  if (selectedModel) {
+    const hasMatch = models.some((m) => (m.id || m) === selectedModel);
+    if (!hasMatch) {
+      modelSelect.innerHTML += `<option value="${esc(selectedModel)}" selected>${esc(selectedModel)}</option>`;
+    }
+  }
+}
+
+window.saveProvider = async function () {
+  const groupJid = document.getElementById('chat-group-select')?.value;
+  const provider = document.getElementById('provider-select')?.value;
+  const model = document.getElementById('model-select')?.value;
+  if (!groupJid || !provider) return;
+
+  try {
+    await api('/groups/' + encodeURIComponent(groupJid), {
+      method: 'PUT',
+      body: JSON.stringify({ containerConfig: { provider, model: model || undefined } }),
+    });
+    toast('Provider updated to ' + provider + '/' + (model || 'auto'), 'success');
+    document.getElementById('chat-provider-popover')?.remove();
+    updateProviderBadge(groupJid);
+  } catch (e) {
+    toast('Failed to update provider: ' + e.message, 'error');
+  }
+};
 
 // Channels
 async function renderChannels(el) {
