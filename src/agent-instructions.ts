@@ -22,6 +22,20 @@ export function claudeCompatContent(): string {
   ].join('\n');
 }
 
+export function memorySkillRouterContext(isMain: boolean): string {
+  const visibilityLine = isMain
+    ? 'Main agents may review shared, private, and system skills only through admin-approved registry state.'
+    : 'Channel agents receive shared skills only; private and system skills are withheld by the router.';
+  return [
+    '# Memory And Skill Routing',
+    '',
+    visibilityLine,
+    'Injected skills are selected by bounded relevance scoring, context byte limits, and recorded routing reasons.',
+    'Memory and skill changes are provenance-tracked for admin review.',
+    '',
+  ].join('\n');
+}
+
 export function readAgentInstructions(groupDir: string): string {
   const agentsPath = agentInstructionsPath(groupDir);
   if (fs.existsSync(agentsPath)) {

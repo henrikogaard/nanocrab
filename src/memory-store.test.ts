@@ -15,6 +15,7 @@ vi.mock('./config.js', () => ({
 import { _closeDatabase, _initTestDatabase } from './db.js';
 import {
   approveMemory,
+  listMemoryProvenanceTimeline,
   listMemoryReviewQueue,
   listMemoryRecords,
   proposeMemory,
@@ -53,6 +54,39 @@ describe('memory store', () => {
       created_by: 'whatsapp_main',
     });
     expect(listMemoryRecords({ status: 'pending' })).toHaveLength(1);
+  });
+
+  it('exposes memory proposal and approval events for provenance timelines', () => {
+    const memory = proposeMemory({
+      scope: 'global',
+      type: 'fact',
+      content: 'Release notes should mention routing decisions.',
+      confidence: 0.91,
+      visibility: 'global',
+      createdBy: 'timeline-test',
+    });
+    approveMemory(memory.id);
+
+    expect(
+      listMemoryProvenanceTimeline().map((event) => ({
+        type: event.type,
+        subjectId: event.subjectId,
+        actor: event.actor,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          type: 'memory.proposed',
+          subjectId: memory.id,
+          actor: 'timeline-test',
+        },
+        {
+          type: 'memory.approved',
+          subjectId: memory.id,
+          actor: 'admin',
+        },
+      ]),
+    );
   });
 
   it('approves global memories into generated MEMORY.md', () => {

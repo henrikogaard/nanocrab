@@ -4,10 +4,13 @@ import fs from 'fs';
 import path from 'path';
 import { auditLog } from '../security.js';
 import { logger } from '../../logger.js';
+import { requireRole } from '../middleware.js';
 
 import { STORE_DIR } from '../../config.js';
 import {
+  listSkillRoutingTimeline,
   listSkillRegistry,
+  listSkillStateTimeline,
   scoreSkillsForRequest,
   SkillScope,
   SkillVisibility,
@@ -29,6 +32,7 @@ import {
 } from '../../skill-factory.js';
 import { getAllTasks } from '../../db.js';
 import { findSkillWorthyJournalPatterns } from '../../journal-store.js';
+import { listMemoryProvenanceTimeline } from '../../memory-store.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -148,6 +152,155 @@ function parseSuggestionDecision(value: unknown) {
   throw new Error('suggestion decision must be create-draft, reject, or defer');
 }
 
+function timelineLimit(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 500) : 100;
+}
+
+function buildProvenanceTimeline(limit = 100) {
+  const suggestions = listSkillSuggestions().flatMap((suggestion) => {
+    const events = [
+      {
+        id: `${suggestion.id}:suggested`,
+        type: 'skill.suggested',
+        timestamp: suggestion.createdAt,
+        actor: suggestion.createdBy,
+        subjectId: suggestion.id,
+        subjectName: suggestion.proposedSkillName,
+        summary: suggestion.description,
+        metadata: {
+          confidence: suggestion.confidence,
+          status: suggestion.status,
+          provenance: suggestion.provenance,
+          draftId: suggestion.draftId,
+        },
+      },
+    ];
+    if (suggestion.reviewedAt) {
+      events.push({
+        id: `${suggestion.id}:${suggestion.status}`,
+        type: `skill.suggestion.${suggestion.status}`,
+        timestamp: suggestion.reviewedAt,
+        actor: 'admin',
+        subjectId: suggestion.id,
+        subjectName: suggestion.proposedSkillName,
+        summary: suggestion.description,
+        metadata: {
+          confidence: suggestion.confidence,
+          status: suggestion.status,
+          provenance: suggestion.provenance,
+          draftId: suggestion.draftId,
+        },
+      });
+    }
+    return events;
+  });
+
+  const drafts = listSkillDrafts().flatMap((draft) => {
+    const events = [
+      {
+        id: `${draft.id}:created`,
+        type: 'skill.draft.created',
+        timestamp: draft.createdAt,
+        actor: draft.createdBy,
+        subjectId: draft.id,
+        subjectName: draft.name,
+        summary: draft.description,
+        metadata: {
+          status: draft.status,
+          provenance: draft.provenance,
+          syncStatus: draft.syncStatus,
+          installDir: draft.installDir,
+        },
+      },
+    ];
+    if (draft.reviewedAt) {
+      events.push({
+        id: `${draft.id}:${draft.status}`,
+        type: `skill.draft.${draft.status}`,
+        timestamp: draft.reviewedAt,
+        actor: 'admin',
+        subjectId: draft.id,
+        subjectName: draft.name,
+        summary: draft.description,
+        metadata: {
+          status: draft.status,
+          provenance: draft.provenance,
+          syncStatus: draft.syncStatus,
+          installDir: draft.installDir,
+        },
+      });
+      if (draft.status === 'approved' && draft.installDir) {
+        events.push({
+          id: `${draft.id}:installed`,
+          type: 'skill.installed',
+          timestamp: draft.reviewedAt,
+          actor: 'admin',
+          subjectId: draft.id,
+          subjectName: draft.name,
+          summary: draft.description,
+          metadata: {
+            status: draft.status,
+            provenance: draft.provenance,
+            syncStatus: draft.syncStatus,
+            installDir: draft.installDir,
+          },
+        });
+      }
+    }
+    return events;
+  });
+
+  const state = listSkillStateTimeline(limit).map((event) => ({
+    id: event.id,
+    type: event.type,
+    timestamp: event.timestamp,
+    actor: 'admin',
+    subjectId: event.skillPath,
+    subjectName: event.skillPath,
+    summary: `Skill state changed: ${Object.keys(event.patch).join(', ')}`,
+    metadata: {
+      patch: event.patch,
+      state: event.state,
+    },
+  }));
+
+  const routing = listSkillRoutingTimeline(limit).map((event) => ({
+    id: event.id,
+    type: event.type,
+    timestamp: event.timestamp,
+    actor: event.isMain ? 'main-agent' : 'channel-agent',
+    subjectId: event.groupFolder,
+    subjectName: event.groupFolder,
+    summary: `${event.injected.length} injected, ${event.excluded.length} excluded`,
+    metadata: {
+      sessionId: event.sessionId,
+      request: event.request,
+      injected: event.injected,
+      excluded: event.excluded,
+      limits: event.limits,
+    },
+  }));
+
+  const memory = listMemoryProvenanceTimeline(limit).map((event) => ({
+    id: event.id,
+    type: event.type,
+    timestamp: event.timestamp,
+    actor: event.actor,
+    subjectId: event.subjectId,
+    subjectName: event.subjectName,
+    summary: event.summary,
+    metadata: event.metadata,
+  }));
+
+  return [...memory, ...suggestions, ...drafts, ...state, ...routing]
+    .sort(
+      (a, b) =>
+        b.timestamp.localeCompare(a.timestamp) || a.id.localeCompare(b.id),
+    )
+    .slice(0, limit);
+}
+
 router.get('/', (_req: Request, res: Response) => {
   res.json({ installed: listSkillRegistry(), available: [] });
 });
@@ -187,24 +340,32 @@ router.get('/suggestions', (req: Request, res: Response) => {
   res.json(listSkillSuggestions({ status }));
 });
 
-router.post('/suggestions/:id/approve', (req: Request, res: Response) => {
-  try {
-    const suggestion = approveSkillSuggestion(req.params.id as string, {
-      decidedBy: String(req.body?.decidedBy || 'dashboard'),
-      decision: parseSuggestionDecision(req.body?.decision),
-    });
-    auditLog(req, 'skill_suggestion_approved', suggestion.proposedSkillName);
-    res.json({ ok: true, suggestion });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const status = message.includes('not found') ? 404 : 400;
-    res.status(status).json({
-      error: message,
-    });
-  }
+router.get('/timeline', (req: Request, res: Response) => {
+  res.json(buildProvenanceTimeline(timelineLimit(req.query.limit)));
 });
 
-router.post('/drafts', (req: Request, res: Response) => {
+router.post(
+  '/suggestions/:id/approve',
+  requireRole('admin'),
+  (req: Request, res: Response) => {
+    try {
+      const suggestion = approveSkillSuggestion(req.params.id as string, {
+        decidedBy: String(req.body?.decidedBy || 'dashboard'),
+        decision: parseSuggestionDecision(req.body?.decision),
+      });
+      auditLog(req, 'skill_suggestion_approved', suggestion.proposedSkillName);
+      res.json({ ok: true, suggestion });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const status = message.includes('not found') ? 404 : 400;
+      res.status(status).json({
+        error: message,
+      });
+    }
+  },
+);
+
+router.post('/drafts', requireRole('admin'), (req: Request, res: Response) => {
   try {
     const {
       skillMd,
@@ -262,29 +423,37 @@ router.get('/drafts/:id/diff', (req: Request, res: Response) => {
   }
 });
 
-router.post('/drafts/:id/approve', (req: Request, res: Response) => {
-  try {
-    const draft = approveSkillDraft(req.params.id as string);
-    auditLog(req, 'skill_draft_approved', draft.name);
-    res.json({ ok: true, draft });
-  } catch (err) {
-    res.status(404).json({
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-});
+router.post(
+  '/drafts/:id/approve',
+  requireRole('admin'),
+  (req: Request, res: Response) => {
+    try {
+      const draft = approveSkillDraft(req.params.id as string);
+      auditLog(req, 'skill_draft_approved', draft.name);
+      res.json({ ok: true, draft });
+    } catch (err) {
+      res.status(404).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
 
-router.post('/drafts/:id/reject', (req: Request, res: Response) => {
-  try {
-    const draft = rejectSkillDraft(req.params.id as string);
-    auditLog(req, 'skill_draft_rejected', draft.name);
-    res.json({ ok: true, draft });
-  } catch (err) {
-    res.status(404).json({
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-});
+router.post(
+  '/drafts/:id/reject',
+  requireRole('admin'),
+  (req: Request, res: Response) => {
+    try {
+      const draft = rejectSkillDraft(req.params.id as string);
+      auditLog(req, 'skill_draft_rejected', draft.name);
+      res.json({ ok: true, draft });
+    } catch (err) {
+      res.status(404).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
 
 // Get a single container skill's SKILL.md content
 router.get('/:skillPath', (req: Request, res: Response) => {
@@ -308,7 +477,7 @@ router.get('/:skillPath', (req: Request, res: Response) => {
 });
 
 // Create a new container skill
-router.post('/', (req: Request, res: Response) => {
+router.post('/', requireRole('admin'), (req: Request, res: Response) => {
   const { name, description, allowedTools, content } = req.body;
   if (!name || !description) {
     res.status(400).json({ error: 'Name and description required' });
@@ -352,129 +521,151 @@ router.post('/', (req: Request, res: Response) => {
 });
 
 // Update a container skill's SKILL.md
-router.put('/:skillPath', (req: Request, res: Response) => {
-  const skillPath = req.params.skillPath as string;
-  if (!/^[a-z0-9-]+$/.test(skillPath)) {
-    res.status(400).json({ error: 'Invalid skill name' });
-    return;
-  }
+router.put(
+  '/:skillPath',
+  requireRole('admin'),
+  (req: Request, res: Response) => {
+    const skillPath = req.params.skillPath as string;
+    if (!/^[a-z0-9-]+$/.test(skillPath)) {
+      res.status(400).json({ error: 'Invalid skill name' });
+      return;
+    }
 
-  const { content } = req.body;
-  if (!content) {
-    res.status(400).json({ error: 'Content required' });
-    return;
-  }
+    const { content } = req.body;
+    if (!content) {
+      res.status(400).json({ error: 'Content required' });
+      return;
+    }
 
-  const skillMd = path.join(
-    PROJECT_ROOT,
-    'container',
-    'skills',
-    skillPath,
-    'SKILL.md',
-  );
-  if (!fs.existsSync(skillMd)) {
-    res.status(404).json({ error: 'Skill not found' });
-    return;
-  }
+    const skillMd = path.join(
+      PROJECT_ROOT,
+      'container',
+      'skills',
+      skillPath,
+      'SKILL.md',
+    );
+    if (!fs.existsSync(skillMd)) {
+      res.status(404).json({ error: 'Skill not found' });
+      return;
+    }
 
-  fs.writeFileSync(skillMd, content);
-  auditLog(req, 'skill_updated', skillPath);
-  res.json({ ok: true, message: 'Skill updated. Rebuild container to apply.' });
-});
+    fs.writeFileSync(skillMd, content);
+    auditLog(req, 'skill_updated', skillPath);
+    res.json({
+      ok: true,
+      message: 'Skill updated. Rebuild container to apply.',
+    });
+  },
+);
 
 // Delete a container skill
-router.delete('/:skillPath', (req: Request, res: Response) => {
-  const skillPath = req.params.skillPath as string;
-  if (!/^[a-z0-9-]+$/.test(skillPath)) {
-    res.status(400).json({ error: 'Invalid skill name' });
-    return;
-  }
+router.delete(
+  '/:skillPath',
+  requireRole('admin'),
+  (req: Request, res: Response) => {
+    const skillPath = req.params.skillPath as string;
+    if (!/^[a-z0-9-]+$/.test(skillPath)) {
+      res.status(400).json({ error: 'Invalid skill name' });
+      return;
+    }
 
-  const skillDir = path.join(PROJECT_ROOT, 'container', 'skills', skillPath);
-  if (!fs.existsSync(skillDir)) {
-    res.status(404).json({ error: 'Skill not found' });
-    return;
-  }
+    const skillDir = path.join(PROJECT_ROOT, 'container', 'skills', skillPath);
+    if (!fs.existsSync(skillDir)) {
+      res.status(404).json({ error: 'Skill not found' });
+      return;
+    }
 
-  fs.rmSync(skillDir, { recursive: true, force: true });
-  auditLog(req, 'skill_deleted', skillPath);
-  logger.info({ skillName: skillPath }, 'Container skill deleted');
-  res.json({ ok: true, message: 'Skill deleted. Rebuild container to apply.' });
-});
+    fs.rmSync(skillDir, { recursive: true, force: true });
+    auditLog(req, 'skill_deleted', skillPath);
+    logger.info({ skillName: skillPath }, 'Container skill deleted');
+    res.json({
+      ok: true,
+      message: 'Skill deleted. Rebuild container to apply.',
+    });
+  },
+);
 
 // Enable/disable a skill
-router.put('/:skillPath/state', (req: Request, res: Response) => {
-  const skillPath = req.params.skillPath as string;
-  if (!/^[a-z0-9-]+$/.test(skillPath)) {
-    res.status(400).json({ error: 'Invalid skill name' });
-    return;
-  }
-  const { enabled, scope, visibility } = req.body || {};
-  const patch: {
-    enabled?: boolean;
-    scope?: SkillScope;
-    visibility?: SkillVisibility;
-  } = {};
-  if (enabled !== undefined) {
+router.put(
+  '/:skillPath/state',
+  requireRole('admin'),
+  (req: Request, res: Response) => {
+    const skillPath = req.params.skillPath as string;
+    if (!/^[a-z0-9-]+$/.test(skillPath)) {
+      res.status(400).json({ error: 'Invalid skill name' });
+      return;
+    }
+    const { enabled, scope, visibility } = req.body || {};
+    const patch: {
+      enabled?: boolean;
+      scope?: SkillScope;
+      visibility?: SkillVisibility;
+    } = {};
+    if (enabled !== undefined) {
+      if (typeof enabled !== 'boolean') {
+        res.status(400).json({ error: 'enabled must be boolean' });
+        return;
+      }
+      patch.enabled = enabled;
+    }
+    if (scope !== undefined) {
+      if (scope !== 'all' && scope !== 'main' && scope !== 'channels') {
+        res.status(400).json({ error: 'Invalid skill scope' });
+        return;
+      }
+      patch.scope = scope;
+    }
+    if (visibility !== undefined) {
+      if (
+        visibility !== 'shared' &&
+        visibility !== 'private' &&
+        visibility !== 'system'
+      ) {
+        res.status(400).json({ error: 'Invalid skill visibility' });
+        return;
+      }
+      patch.visibility = visibility;
+    }
+    if (Object.keys(patch).length === 0) {
+      res.status(400).json({ error: 'No state changes provided' });
+      return;
+    }
+    const state = updateSkillState(skillPath, patch);
+    auditLog(
+      req,
+      'skill_state_updated',
+      `${skillPath}: ${JSON.stringify(patch)}`,
+    );
+    res.json({
+      ok: true,
+      state,
+      note: 'New and restarted containers will use the updated skill registry.',
+    });
+  },
+);
+
+router.put(
+  '/:skillPath/toggle',
+  requireRole('admin'),
+  (req: Request, res: Response) => {
+    const skillPath = req.params.skillPath as string;
+    if (!/^[a-z0-9-]+$/.test(skillPath)) {
+      res.status(400).json({ error: 'Invalid skill name' });
+      return;
+    }
+    const { enabled } = req.body || {};
     if (typeof enabled !== 'boolean') {
       res.status(400).json({ error: 'enabled must be boolean' });
       return;
     }
-    patch.enabled = enabled;
-  }
-  if (scope !== undefined) {
-    if (scope !== 'all' && scope !== 'main' && scope !== 'channels') {
-      res.status(400).json({ error: 'Invalid skill scope' });
-      return;
-    }
-    patch.scope = scope;
-  }
-  if (visibility !== undefined) {
-    if (
-      visibility !== 'shared' &&
-      visibility !== 'private' &&
-      visibility !== 'system'
-    ) {
-      res.status(400).json({ error: 'Invalid skill visibility' });
-      return;
-    }
-    patch.visibility = visibility;
-  }
-  if (Object.keys(patch).length === 0) {
-    res.status(400).json({ error: 'No state changes provided' });
-    return;
-  }
-  const state = updateSkillState(skillPath, patch);
-  auditLog(
-    req,
-    'skill_state_updated',
-    `${skillPath}: ${JSON.stringify(patch)}`,
-  );
-  res.json({
-    ok: true,
-    state,
-    note: 'New and restarted containers will use the updated skill registry.',
-  });
-});
-
-router.put('/:skillPath/toggle', (req: Request, res: Response) => {
-  const skillPath = req.params.skillPath as string;
-  if (!/^[a-z0-9-]+$/.test(skillPath)) {
-    res.status(400).json({ error: 'Invalid skill name' });
-    return;
-  }
-  const { enabled } = req.body || {};
-  if (typeof enabled !== 'boolean') {
-    res.status(400).json({ error: 'enabled must be boolean' });
-    return;
-  }
-  const state = updateSkillState(skillPath, { enabled });
-  auditLog(req, enabled ? 'skill_enabled' : 'skill_disabled', skillPath);
-  res.json({
-    ok: true,
-    state,
-    note: 'New and restarted containers will use the updated skill registry.',
-  });
-});
+    const state = updateSkillState(skillPath, { enabled });
+    auditLog(req, enabled ? 'skill_enabled' : 'skill_disabled', skillPath);
+    res.json({
+      ok: true,
+      state,
+      note: 'New and restarted containers will use the updated skill registry.',
+    });
+  },
+);
 
 export default router;

@@ -37,7 +37,11 @@ import {
 } from './agent-provider.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { prepareActiveSkillsDirectory } from './skill-registry.js';
+import {
+  prepareActiveSkillsDirectory,
+  recordSkillRoutingDecision,
+  selectSkillsForRequest,
+} from './skill-registry.js';
 import { RegisteredGroup } from './types.js';
 import {
   resolveProviderFallbackForAction,
@@ -141,14 +145,29 @@ function latestMtimeMs(dir: string): number {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  request?: string,
+  sessionId?: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
+  const skillSelection = request
+    ? selectSkillsForRequest(request, { isMain })
+    : undefined;
   const skillsSrc = prepareActiveSkillsDirectory({
     groupFolder: group.folder,
     isMain,
+    request,
   });
+  if (request) {
+    recordSkillRoutingDecision({
+      groupFolder: group.folder,
+      isMain,
+      request,
+      sessionId,
+      selection: skillSelection,
+    });
+  }
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
@@ -573,7 +592,12 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(
+    group,
+    input.isMain,
+    input.prompt,
+    input.sessionId,
+  );
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanocrab-${safeName}-${Date.now()}`;
   let effectiveProvider = isAgentProvider(input.provider)

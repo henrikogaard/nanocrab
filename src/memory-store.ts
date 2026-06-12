@@ -72,6 +72,28 @@ export interface RefreshMemoryReviewOptions {
   staleAfterDays?: number;
 }
 
+export interface MemoryProvenanceTimelineEvent {
+  id: string;
+  type:
+    | 'memory.proposed'
+    | 'memory.approved'
+    | 'memory.rejected'
+    | 'memory.stale'
+    | 'memory.contradicted';
+  timestamp: string;
+  subjectId: string;
+  subjectName: string;
+  actor: string;
+  summary: string;
+  metadata: {
+    scope: MemoryScope;
+    visibility: MemoryVisibility;
+    source: string | null;
+    confidence: number;
+    sensitivity: MemoryRecord['sensitivity'];
+  };
+}
+
 function assertChoice<T extends string>(
   name: string,
   value: string,
@@ -362,6 +384,49 @@ export function listMemoryReviewQueue(
 
 export function getMemory(id: string): MemoryRecord | undefined {
   return getMemoryById(id);
+}
+
+export function listMemoryProvenanceTimeline(
+  limit = 100,
+): MemoryProvenanceTimelineEvent[] {
+  const events = listMemories({ limit: 200 }).flatMap((memory) => {
+    const base = {
+      subjectId: memory.id,
+      subjectName: memory.type,
+      summary: memory.content,
+      metadata: {
+        scope: memory.scope,
+        visibility: memory.visibility,
+        source: memory.source,
+        confidence: memory.confidence,
+        sensitivity: memory.sensitivity,
+      },
+    };
+    const proposed: MemoryProvenanceTimelineEvent = {
+      id: `${memory.id}:proposed`,
+      type: 'memory.proposed',
+      timestamp: memory.created_at,
+      actor: memory.created_by || 'system',
+      ...base,
+    };
+    if (memory.status === 'pending' || !memory.reviewed_at) {
+      return [proposed];
+    }
+    const reviewed: MemoryProvenanceTimelineEvent = {
+      id: `${memory.id}:${memory.status}`,
+      type: `memory.${memory.status}` as MemoryProvenanceTimelineEvent['type'],
+      timestamp: memory.reviewed_at,
+      actor: 'admin',
+      ...base,
+    };
+    return [proposed, reviewed];
+  });
+  return events
+    .sort(
+      (a, b) =>
+        b.timestamp.localeCompare(a.timestamp) || a.id.localeCompare(b.id),
+    )
+    .slice(0, Math.min(Math.max(limit, 1), 500));
 }
 
 export function renderGlobalMemoryMarkdown(): string {

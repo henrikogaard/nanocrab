@@ -60,6 +60,18 @@ Hosted OpenAI-compatible provider calls such as OpenRouter and Google Gemini are
 
 Shared runtime memory files such as `groups/global/MEMORY.md` are operator data and are ignored by git. They should be backed up with runtime state, not committed to the repository.
 
+### 3a. Memory And Skill Router Controls
+
+Memory and skills are treated as provenance-tracked runtime context:
+
+- Memory proposals are pending until an admin approves, rejects, marks stale, or marks contradicted.
+- Skill suggestions, drafts, installs, state changes, and routing decisions appear in the admin provenance timeline.
+- Skill visibility is explicit: `shared`, `private`, or `system`.
+- Skill scope is explicit: `all`, `main`, or `channels`.
+- Visibility and scope changes are only accepted through admin-authorized routes.
+
+Skill injection is bounded before a container starts. The router clamps relevance scores, excludes score `<= 0`, caps the number of injected skills, caps total skill context bytes, and records why each skill was injected or excluded. Channel agents do not receive `private` or `system` skills; those are reserved for the main/admin context. Runtime skill registry snapshots include only the skills that survived this selection step.
+
 ### 4. IPC Authorization
 
 Messages and task operations are verified against group identity:

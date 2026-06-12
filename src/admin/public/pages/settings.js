@@ -391,6 +391,10 @@ async function renderSettings(el) {
       <div id="personality-area"><div class="empty">Loading...</div></div>
     </div>
     <div class="card" style="margin-top:16px">
+      <div class="card-title">Provenance Timeline</div>
+      <div id="provenance-timeline"><div class="empty">Loading...</div></div>
+    </div>
+    <div class="card" style="margin-top:16px">
       <div style="display:flex;align-items:center;gap:20px">
         <img src="/static/nanocrab-mark.png" style="width:64px;height:64px" alt="NanoCrab">
         <div>
@@ -421,6 +425,9 @@ async function renderSettings(el) {
 
   // Load personality editor
   loadPersonalityEditor();
+
+  // Load memory/skill provenance timeline
+  loadProvenanceTimeline();
 
   // Notifications controls may be absent in stripped-down dashboards.
   const notifToggle = document.getElementById('notif-toggle');
@@ -914,6 +921,41 @@ window.togglePlugin = async function (id, enabled) {
     toast('Failed: ' + e.message, 'error');
   }
 };
+
+async function loadProvenanceTimeline() {
+  const el = document.getElementById('provenance-timeline');
+  if (!el) return;
+  try {
+    const events = await api('/skills/timeline?limit=25');
+    if (!events || events.length === 0) {
+      el.innerHTML = '<div class="empty">No provenance events yet</div>';
+      return;
+    }
+    el.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${events
+          .map((event) => {
+            const type = event.type || 'event';
+            const subject = event.subjectName || event.subjectId || '';
+            const summary = event.summary || '';
+            const actor = event.actor ? ` · ${esc(event.actor)}` : '';
+            return `
+              <div style="display:grid;grid-template-columns:150px 1fr;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+                <div style="font-size:11px;color:var(--text-muted)">${esc(timeAgo(event.timestamp || ''))}${actor}</div>
+                <div>
+                  <span class="badge badge-info" style="font-size:10px">${esc(type)}</span>
+                  <span style="font-size:12px;font-weight:600;color:var(--text);margin-left:6px">${esc(subject)}</span>
+                  <div style="font-size:12px;color:var(--text-muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(summary)}</div>
+                </div>
+              </div>`;
+          })
+          .join('')}
+      </div>`;
+  } catch {
+    el.innerHTML =
+      '<div class="empty">Failed to load provenance timeline</div>';
+  }
+}
 
 // --- 2FA Management ---
 async function load2faStatus() {

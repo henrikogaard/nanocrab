@@ -82,6 +82,17 @@ vi.mock('./provider-router.js', () => ({
   })),
 }));
 
+vi.mock('./skill-registry.js', async () => {
+  const actual = await vi.importActual<typeof import('./skill-registry.js')>(
+    './skill-registry.js',
+  );
+  return {
+    ...actual,
+    prepareActiveSkillsDirectory: vi.fn(() => '/tmp/nanocrab-runtime-skills'),
+    recordSkillRoutingDecision: vi.fn(),
+  };
+});
+
 // Create a controllable fake ChildProcess
 function createFakeProcess() {
   const proc = new EventEmitter() as EventEmitter & {
@@ -121,6 +132,10 @@ import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import { spawn } from 'child_process';
 import { readEnvFile } from './env.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
+import {
+  prepareActiveSkillsDirectory,
+  recordSkillRoutingDecision,
+} from './skill-registry.js';
 import type { RegisteredGroup } from './types.js';
 
 const mockedReadEnvFile = vi.mocked(readEnvFile);
@@ -153,6 +168,8 @@ describe('container-runner timeout behavior', () => {
     fakeProc = createFakeProcess();
     mockedReadEnvFile.mockReturnValue({});
     vi.mocked(resolveProviderFallbackForAction).mockClear();
+    vi.mocked(prepareActiveSkillsDirectory).mockClear();
+    vi.mocked(recordSkillRoutingDecision).mockClear();
   });
 
   afterEach(() => {
@@ -244,6 +261,54 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('container-runner skill routing provenance', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    mockedReadEnvFile.mockReturnValue({});
+    vi.mocked(prepareActiveSkillsDirectory).mockClear();
+    vi.mocked(recordSkillRoutingDecision).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('passes request context to skill selection and records routing decisions', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        prompt: 'Please remember the release workflow',
+        sessionId: 'session-routing',
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(prepareActiveSkillsDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupFolder: 'test-group',
+        isMain: false,
+        request: 'Please remember the release workflow',
+      }),
+    );
+    expect(recordSkillRoutingDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupFolder: 'test-group',
+        isMain: false,
+        request: 'Please remember the release workflow',
+        sessionId: 'session-routing',
+      }),
+    );
   });
 });
 

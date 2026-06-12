@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 
 import {
   approveMemory,
+  listMemoryProvenanceTimeline,
   listMemoryReviewQueue,
   listMemoryRecords,
   markMemoryContradicted,
@@ -53,6 +54,14 @@ router.get('/', (req: Request, res: Response) => {
     return;
   }
   res.json(listMemoryRecords(filters));
+});
+
+router.get('/timeline', (req: Request, res: Response) => {
+  const parsed = Number(req.query.limit);
+  const limit = Number.isFinite(parsed)
+    ? Math.min(Math.max(parsed, 1), 500)
+    : 100;
+  res.json(listMemoryProvenanceTimeline(limit));
 });
 
 router.post(
