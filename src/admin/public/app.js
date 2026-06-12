@@ -269,6 +269,8 @@ let handleWsMessage = function (msg) {
     const card = document.createElement('div');
     card.id = 'approval-card-' + msg.data.id;
     card.className = 'chat-approval-card';
+    card.dataset.approvalId = msg.data.id;
+    card.dataset.groupJid = msg.data.groupJid;
     card.innerHTML = `
       <div class="chat-approval-header">&#x26A0;&#xFE0F; Approval Required</div>
       <div class="chat-approval-body">
@@ -277,14 +279,34 @@ let handleWsMessage = function (msg) {
         <div class="approval-input">${esc(prettyPrint(msg.data.input))}</div>
       </div>
       <div class="chat-approval-actions">
-        <button class="btn btn-sm btn-deny" onclick="denyApproval('${esc(msg.data.id)}', '${esc(msg.data.groupJid)}')">Deny</button>
-        <button class="btn btn-sm btn-primary" onclick="approveApproval('${esc(msg.data.id)}', '${esc(msg.data.groupJid)}')">Approve</button>
+        <button class="btn btn-sm btn-deny" data-chat-approval-action="deny">Deny</button>
+        <button class="btn btn-sm btn-primary" data-chat-approval-action="approve">Approve</button>
       </div>
     `;
     container.appendChild(card);
+    bindChatApprovalActions(container);
     container.scrollTop = container.scrollHeight;
   }
 };
+
+function bindChatApprovalActions(container) {
+  if (container.dataset.chatApprovalActionsBound === 'true') return;
+  container.dataset.chatApprovalActionsBound = 'true';
+  container.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest('[data-chat-approval-action]');
+    if (!button) return;
+    const card = button.closest('.chat-approval-card');
+    const id = card?.dataset.approvalId;
+    const groupJid = card?.dataset.groupJid;
+    if (!id || !groupJid) return;
+    if (button.dataset.chatApprovalAction === 'approve') {
+      approveApproval(id, groupJid);
+    } else {
+      denyApproval(id, groupJid);
+    }
+  });
+}
 
 // --- Auth ---
 async function checkAuth() {
