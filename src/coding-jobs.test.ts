@@ -62,6 +62,7 @@ import {
   startCodingJob,
 } from './coding-jobs.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
+import { createApproval, reviewApproval } from './approvals.js';
 
 const TEST_ROOT = '/tmp/nanocrab-coding-jobs-test';
 
@@ -93,6 +94,21 @@ describe('coding jobs', () => {
     vi.useFakeTimers();
     fs.rmSync(TEST_ROOT, { recursive: true, force: true });
     vi.mocked(spawn).mockClear();
+    vi.mocked(resolveProviderFallbackForAction).mockReset();
+    vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
+      approved: true,
+      profile: {
+        id: 'default_coding',
+        label: 'Coding',
+        purpose: 'default_coding',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+        toolPolicy: 'approval-required',
+        updatedAt: new Date(0).toISOString(),
+      },
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+    });
   });
 
   afterEach(() => {
@@ -253,5 +269,83 @@ describe('coding jobs', () => {
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
     expect(getCodingJob(job.id)?.output).toContain('agent output');
+  });
+
+  it('blocks provider fallback for PR creation before creating a GitHub PR', async () => {
+    vi.useRealTimers();
+    const fetchMock = mockGitHubFetch((url) => {
+      if (url.includes('/pulls')) {
+        return { html_url: 'https://github.com/owner/repo/pull/9' };
+      }
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(resolveProviderFallbackForAction)
+      .mockReturnValueOnce({
+        approved: true,
+        profile: {
+          id: 'default_coding',
+          label: 'Coding',
+          purpose: 'default_coding',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+          toolPolicy: 'approval-required',
+          updatedAt: new Date(0).toISOString(),
+        },
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      })
+      .mockReturnValueOnce({
+        approved: false,
+        approvalId: 'approval-pr-provider-fallback',
+        reason: 'provider fallback for PR requires approval',
+      });
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+      createPr: true,
+    });
+    const approval = createApproval({
+      kind: 'coding-open-pr',
+      title: 'Approve test PR',
+      summary: 'Allow test PR creation.',
+      requester: 'test',
+      targetType: 'coding-job',
+      targetId: job.id,
+    });
+    reviewApproval(approval.id, 'approved', 'test');
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_pr_approval');
+    });
+    expect(resolveProviderFallbackForAction).toHaveBeenCalledWith({
+      purpose: 'default_coding',
+      action: 'pr-creation',
+      requester: 'whatsapp_main',
+      correlationId: job.id,
+    });
+    expect(getCodingJob(job.id)?.output).toContain(
+      'Provider fallback for PR creation is awaiting approval',
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('/pulls'),
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 });

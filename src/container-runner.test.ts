@@ -265,7 +265,7 @@ describe('container-runner provider fallback metadata', () => {
       {
         ...testInput,
         providerFallbackPurpose: 'default_chat',
-        providerFallbackAction: 'read',
+        providerFallbackAction: 'external-message',
       },
       () => {},
     );
@@ -278,7 +278,7 @@ describe('container-runner provider fallback metadata', () => {
 
     expect(resolveProviderFallbackForAction).toHaveBeenCalledWith({
       purpose: 'default_chat',
-      action: 'read',
+      action: 'external-message',
       requester: 'test-group',
       correlationId: null,
     });

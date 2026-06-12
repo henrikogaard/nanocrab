@@ -601,7 +601,7 @@ async function runAgent(
         provider: group.containerConfig?.provider,
         model: effectiveModel,
         providerFallbackPurpose: 'default_chat',
-        providerFallbackAction: 'read',
+        providerFallbackAction: 'external-message',
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),

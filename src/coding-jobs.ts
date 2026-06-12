@@ -655,6 +655,26 @@ function runCodingContainer(job: CodingJob, repo: CodingRepo): Promise<number> {
   });
 }
 
+function requirePrProviderFallbackApproval(
+  job: CodingJob,
+  requester: string,
+): boolean {
+  const fallback = resolveProviderFallbackForAction({
+    purpose: 'default_coding',
+    action: 'pr-creation',
+    requester,
+    correlationId: job.id,
+  });
+  if (fallback.approved) return true;
+  job.status = 'await_pr_approval';
+  updateJobOutput(
+    job,
+    `\n\nProvider fallback for PR creation is awaiting approval: ${fallback.reason}${fallback.approvalId ? ` (${fallback.approvalId})` : ''}\n`,
+  );
+  upsertCodingJob(job);
+  return false;
+}
+
 async function runCodingJob(job: CodingJob): Promise<void> {
   job.status = 'investigate';
   upsertCodingJob(job);
@@ -740,6 +760,9 @@ async function runCodingJob(job: CodingJob): Promise<void> {
     });
     upsertCodingJob(job);
     updateJobOutput(job, '\n\nPR creation is awaiting approval.\n');
+    return;
+  }
+  if (!requirePrProviderFallbackApproval(job, job.requestedBy)) {
     return;
   }
 
@@ -976,6 +999,9 @@ export async function openCodingJobPr(
     });
     job.status = 'await_pr_approval';
     upsertCodingJob(job);
+    return job;
+  }
+  if (!requirePrProviderFallbackApproval(job, by)) {
     return job;
   }
 
