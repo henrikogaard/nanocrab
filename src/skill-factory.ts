@@ -153,6 +153,10 @@ function normalizeSuggestionIntent(text: string): string {
       : lower;
   return actionText
     .toLowerCase()
+    .replace(
+      /\bfor (?:the )?(?:team|monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)\b.*$/i,
+      '',
+    )
     .split(/\b(?:with|from|when|using|before|after)\b/)[0]
     .replace(/[^a-z0-9\s-]/g, ' ')
     .replace(
@@ -296,7 +300,10 @@ export function detectAndQueueSkillSuggestions(
     };
     group.examples.push(source.text);
     group.provenance.add(source.provenance);
-    if (looksSkillWorthySuggestion(source.text)) {
+    if (
+      source.provenance === 'source:journal-history' ||
+      looksSkillWorthySuggestion(source.text)
+    ) {
       group.skillWorthyExamples += 1;
     }
     groups.set(intent, group);

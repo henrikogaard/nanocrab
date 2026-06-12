@@ -178,4 +178,20 @@ describe('skill factory', () => {
       'summarize-commits-risks-release-notes',
     );
   });
+
+  it('queues repeated journal workflow examples recognized by journal detection', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      journal: [
+        'Prepare a concise weekly alliance digest for the team.',
+        'Prepare a concise weekly alliance digest from journal notes.',
+        'Prepare a concise weekly alliance digest for Monday.',
+      ],
+      createdBy: 'test',
+    });
+
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0].proposedSkillName).toBe(
+      'prepare-concise-weekly-alliance-digest',
+    );
+  });
 });
