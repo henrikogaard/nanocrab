@@ -298,7 +298,7 @@ describe('LiveProbeService', () => {
         fs.existsSync(
           '/tmp/nanocrab-probe-history-test/store/provider-probes.json',
         ),
-      ).toBe(true);
+      ).toBe(false);
       expect(
         fs.existsSync(
           '/tmp/nanocrab-probe-history-test/store/provider-probe-history.json',

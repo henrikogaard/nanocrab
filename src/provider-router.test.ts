@@ -258,4 +258,78 @@ describe('provider-router persistence', () => {
     );
     expect(stored.history[0]).not.toHaveProperty('result');
   });
+
+  it('creates a provider-fallback approval for write-capable fallback', async () => {
+    const agentProvider = await import('./agent-provider.js');
+    vi.mocked(agentProvider.getProviderAvailability).mockReturnValue({
+      claude: true,
+      codex: false,
+      opencode: true,
+      ollama: true,
+      openrouter: true,
+      google: true,
+      'openai-responses': true,
+      'anthropic-messages': true,
+      gemini: true,
+      mistral: true,
+      'openai-compatible': true,
+    } as never);
+    const {
+      loadProviderProfiles,
+      resolveProviderFallbackForAction,
+      saveProviderProfile,
+    } = await import('./provider-router.js');
+    const { listApprovals } = await import('./approvals.js');
+    const coding = loadProviderProfiles().find(
+      (item) => item.id === 'default_coding',
+    )!;
+    const chat = loadProviderProfiles().find(
+      (item) => item.id === 'default_chat',
+    )!;
+    saveProviderProfile({
+      ...chat,
+      provider: 'openrouter',
+      model: 'openrouter/auto',
+      toolPolicy: 'read-only',
+      fallbackProfileId: null,
+    });
+    saveProviderProfile({
+      ...coding,
+      provider: 'codex',
+      model: 'gpt-5.4',
+      toolPolicy: 'approval-required',
+      fallbackProfileId: 'default_chat',
+    });
+
+    const decision = resolveProviderFallbackForAction({
+      purpose: 'default_coding',
+      action: 'coding-implementation',
+      requester: 'provider-router-test',
+      correlationId: 'job-123',
+    });
+
+    if (decision.approved) {
+      throw new Error('write-capable fallback should require approval');
+    }
+    expect(decision.approvalId).toEqual(expect.any(String));
+    const approvals = listApprovals({
+      kind: 'provider-fallback',
+      targetType: 'provider-profile',
+      targetId: 'default_coding->default_chat:coding-implementation',
+    });
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]).toMatchObject({
+      kind: 'provider-fallback',
+      status: 'pending',
+      requester: 'provider-router-test',
+      correlationId: 'job-123',
+      targetType: 'provider-profile',
+      targetId: 'default_coding->default_chat:coding-implementation',
+    });
+    expect(approvals[0].payload).toMatchObject({
+      sourceProfileId: 'default_coding',
+      targetProfileId: 'default_chat',
+      action: 'coding-implementation',
+    });
+  });
 });

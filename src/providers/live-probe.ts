@@ -1,7 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-
-import { STORE_DIR } from '../config.js';
 import { getProviderById } from './index.js';
 import type { ProviderCapabilitiesResult } from './openai-responses/provider.js';
 
@@ -47,92 +43,13 @@ export interface ProbeHistoryEntry {
   timestamp: string;
 }
 
-interface ProbeHistoryStore {
-  latestByProfile?: Record<string, unknown>;
-  history: ProbeHistoryEntry[];
-}
-
 interface CacheEntry {
   result: LiveProbeResult;
   expiresAt: number;
 }
 
 const DEFAULT_CACHE_TTL_MS = 60_000;
-const PROBE_HISTORY_PATH = path.join(STORE_DIR, 'provider-probes.json');
 const MAX_HISTORY_PER_MODEL = 20;
-
-function readProbeHistory(): ProbeHistoryEntry[] {
-  try {
-    const raw = fs.readFileSync(PROBE_HISTORY_PATH, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed.map(normalizeProbeHistoryEntry);
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      Array.isArray((parsed as ProbeHistoryStore).history)
-    ) {
-      return (parsed as ProbeHistoryStore).history.map(
-        normalizeProbeHistoryEntry,
-      );
-    }
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-function normalizeProbeHistoryEntry(entry: unknown): ProbeHistoryEntry {
-  const raw = entry as Partial<
-    ProbeHistoryEntry & {
-      providerId?: string;
-      result?: LiveProbeResult;
-    }
-  >;
-  const result = raw.result;
-  const capabilities = result?.capabilities;
-  return {
-    provider: String(raw.provider || raw.providerId || ''),
-    model: String(raw.model || result?.model || ''),
-    profileId: raw.profileId,
-    ok: Boolean(raw.ok ?? result?.ok),
-    latencyMs: raw.latencyMs ?? result?.latencyMs,
-    streaming: Boolean(raw.streaming ?? capabilities?.streaming),
-    streamingSupport: Boolean(
-      raw.streamingSupport ?? raw.streaming ?? capabilities?.streaming,
-    ),
-    toolSupport: Boolean(raw.toolSupport ?? capabilities?.toolCalls),
-    schemaSupport: Boolean(raw.schemaSupport ?? capabilities?.structuredOutput),
-    visionSupport: Boolean(raw.visionSupport ?? capabilities?.vision),
-    contextWindow: Number(
-      raw.contextWindow ?? capabilities?.contextWindow ?? 0,
-    ),
-    errorDetail: raw.errorDetail || result?.errorMessage,
-    timestamp: String(
-      raw.timestamp || result?.timestamp || new Date(0).toISOString(),
-    ),
-  };
-}
-
-function writeProbeHistory(entries: ProbeHistoryEntry[]): void {
-  let latestByProfile: Record<string, unknown> = {};
-  try {
-    const parsed = JSON.parse(fs.readFileSync(PROBE_HISTORY_PATH, 'utf-8'));
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      !Array.isArray(parsed) &&
-      parsed.latestByProfile &&
-      typeof parsed.latestByProfile === 'object'
-    ) {
-      latestByProfile = parsed.latestByProfile as Record<string, unknown>;
-    }
-  } catch {}
-  fs.mkdirSync(path.dirname(PROBE_HISTORY_PATH), { recursive: true });
-  fs.writeFileSync(
-    PROBE_HISTORY_PATH,
-    `${JSON.stringify({ latestByProfile, history: entries }, null, 2)}\n`,
-  );
-}
 
 function pruneHistory(
   entries: ProbeHistoryEntry[],
@@ -150,6 +67,7 @@ function pruneHistory(
 
 export class LiveProbeService {
   private cache = new Map<string, CacheEntry>();
+  private history: ProbeHistoryEntry[] = [];
   private cacheTtlMs: number;
 
   constructor(options?: { cacheTtlMs?: number }) {
@@ -185,7 +103,6 @@ export class LiveProbeService {
     model: string,
     result: LiveProbeResult,
   ): void {
-    const entries = readProbeHistory();
     const entry: ProbeHistoryEntry = {
       provider: providerId,
       model,
@@ -200,9 +117,9 @@ export class LiveProbeService {
       errorDetail: result.errorMessage,
       timestamp: new Date().toISOString(),
     };
-    const pruned = pruneHistory(entries, providerId, model);
+    const pruned = pruneHistory(this.history, providerId, model);
     pruned.push(entry);
-    writeProbeHistory(pruned);
+    this.history = pruned;
   }
 
   getCachedProbe(providerId: string, model: string): LiveProbeResult | null {
@@ -214,7 +131,7 @@ export class LiveProbeService {
     model?: string,
     limit?: number,
   ): ProbeHistoryEntry[] {
-    const entries = readProbeHistory();
+    const entries = this.history;
     let filtered = entries;
     if (providerId) {
       filtered = filtered.filter((e) => e.provider === providerId);
