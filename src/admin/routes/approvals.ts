@@ -12,6 +12,10 @@ import { auditLog } from '../security.js';
 
 const router = Router();
 
+function queryString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
 router.get('/', (req: Request, res: Response) => {
   res.json(
     listApprovals({
@@ -23,12 +27,16 @@ router.get('/', (req: Request, res: Response) => {
         typeof req.query.kind === 'string'
           ? (req.query.kind as ApprovalKind)
           : undefined,
-      targetType:
-        typeof req.query.targetType === 'string'
-          ? req.query.targetType
+      risk:
+        typeof req.query.risk === 'string'
+          ? (req.query.risk as 'low' | 'medium' | 'high')
           : undefined,
-      targetId:
-        typeof req.query.targetId === 'string' ? req.query.targetId : undefined,
+      requester: queryString(req.query.requester),
+      targetType: queryString(req.query.targetType),
+      targetId: queryString(req.query.targetId),
+      correlationId: queryString(req.query.correlationId),
+      createdFrom: queryString(req.query.createdFrom),
+      createdTo: queryString(req.query.createdTo),
       limit: Math.min(parseInt(req.query.limit as string) || 100, 500),
     }),
   );
@@ -44,6 +52,12 @@ router.post('/', requireRole('admin'), (req: Request, res: Response) => {
       requester: req.user?.username || 'dashboard',
       targetType: req.body.targetType,
       targetId: req.body.targetId,
+      source: req.body.source,
+      correlationId: req.body.correlationId,
+      expiresAt: req.body.expiresAt,
+      actionPreview: req.body.actionPreview,
+      resourceSummary: req.body.resourceSummary,
+      policyDecisionId: req.body.policyDecisionId,
       payload:
         req.body.payload && typeof req.body.payload === 'object'
           ? req.body.payload

@@ -45,6 +45,7 @@ Full web dashboard at your domain with 7-layer security (firewall, TLS, IP allow
 - **Overview** — live stats, weather, channel status, message feed
 - **Agents** — bot agents, coding agents, GitHub issue pickup, coding-job output, and task launcher
 - **Messages** — search, filter, export conversations across all channels
+- **Approvals** — unified inbox for pending and reviewed risky actions with provenance, filters, and approve/deny controls
 - **Memory** — shared cross-channel memory + wiki knowledge base
 - **Settings** — 2FA (TOTP), themes, API tokens, bot personality editor, plugin management
 
@@ -121,8 +122,8 @@ the same dashboard frontend as production, but intercepts `/api/*` and `/ws`
 with sample data. The dashboard auto-authenticates as a mock owner, shows a
 visible mock-mode banner, and includes placeholder content for the main
 surfaces: Dashboard, Agents, Chat, Messages, Groups, Tasks, Memory,
-Integrations, Developer tools, Git & Code, Monitoring, Containers, Security,
-Settings, Marketplace, Uptime, Wiki, Workflows, Autofix, and Copilot.
+Approvals, Integrations, Developer tools, Git & Code, Monitoring, Containers,
+Security, Settings, Marketplace, Uptime, Wiki, Workflows, Autofix, and Copilot.
 
 To use another port:
 
@@ -148,7 +149,7 @@ success responses and do not mutate live files or services.
 - **Suggested Skills** — the dashboard Skills page highlights reusable workflow candidates from recent history, such as private operations planning or dashboard design review. Suggestions become inactive drafts first and still require approval.
 - **Skill Registry** — skills can be enabled/disabled and scoped to all agents, main-only, or channel agents. Visibility can be shared, private, or system. Agents can also call `list_skills` and `search_skills` to find skills related to a user request.
 - **Reports And Research** — agents and admins can request report jobs, outline approval, Markdown/HTML/DOCX/PDF exports, Playwright-backed research notes, and optional official NotebookLM Enterprise configuration.
-- **Unified Approvals** — risky actions such as provider fallback, PR creation, report delivery, publishing, uploads, external messages, and shell-like work flow through `/api/approvals`.
+- **Unified Approvals** — risky actions such as provider fallback, repo changes, PR creation, report delivery, publishing, uploads, external messages, and tool actions flow through `/api/approvals` and the dashboard Approvals inbox. Approval records include provenance (`source`, `correlationId`, `policyDecisionId`), action/resource previews, expiry metadata, and server-side filters for status, risk, kind, requester, target type, correlation ID, and created date range. Expired pending approvals are marked `expired` and cannot be approved or denied later.
 
 ### Default Integrations
 

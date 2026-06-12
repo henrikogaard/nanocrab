@@ -178,6 +178,149 @@ const cockpitSessions = [
   },
 ];
 
+const approvals = [
+  {
+    id: 'approval-message-risk',
+    kind: 'external-message',
+    title: 'Send outbound operation update',
+    summary:
+      'Post revised rally timing to Alliance Command with player names and target windows.',
+    risk: 'high',
+    requester: 'main',
+    targetType: 'message',
+    targetId: 'msg-outbound-418',
+    source: 'chat',
+    correlationId: 'corr-nightfall-ops',
+    expiresAt: iso(-16),
+    actionPreview:
+      'Send to wa:alliance-command: Rally window moved to 21:30. Confirm leaders: Mira, Henrik, Scout-7.',
+    resourceSummary: 'WhatsApp outbound message to Alliance Command',
+    policyDecisionId: 'policy-outbound-sensitive',
+    payload: { channel: 'whatsapp', groupJid: 'wa:alliance-command' },
+    status: 'pending',
+    createdAt: iso(7),
+    reviewedAt: null,
+    reviewedBy: null,
+    decisionNote: null,
+  },
+  {
+    id: 'approval-upload-risk',
+    kind: 'upload',
+    title: 'Process uploaded scout archive',
+    summary:
+      'Extract text and images from a large uploaded archive before sharing findings with scouts.',
+    risk: 'medium',
+    requester: 'scouts',
+    targetType: 'upload',
+    targetId: 'upload-scout-archive',
+    source: 'attachment',
+    correlationId: 'corr-scout-upload',
+    expiresAt: iso(-60),
+    actionPreview: 'Unpack scout-intel.zip and run OCR on 18 image files.',
+    resourceSummary: 'ZIP upload with screenshots and notes',
+    policyDecisionId: 'policy-upload-review',
+    payload: { filename: 'scout-intel.zip', sizeMb: 42 },
+    status: 'pending',
+    createdAt: iso(18),
+    reviewedAt: null,
+    reviewedBy: null,
+    decisionNote: null,
+  },
+  {
+    id: 'approval-repo-risk',
+    kind: 'coding-open-pr',
+    title: 'Open PR for provider routing fix',
+    summary:
+      'Publish branch issue-42-provider-routing with changes to provider fallback policy.',
+    risk: 'high',
+    requester: 'coding-agent',
+    targetType: 'repo',
+    targetId: 'henrikogaard/nanocrab',
+    source: 'autofix',
+    correlationId: 'corr-gh-42',
+    expiresAt: iso(-45),
+    actionPreview:
+      'git push origin issue-42-provider-routing && gh pr create --fill',
+    resourceSummary: 'Repository change touching provider fallback code',
+    policyDecisionId: 'policy-repo-write',
+    payload: { issue: 42, branch: 'issue-42-provider-routing' },
+    status: 'pending',
+    createdAt: iso(24),
+    reviewedAt: null,
+    reviewedBy: null,
+    decisionNote: null,
+  },
+  {
+    id: 'approval-provider-risk',
+    kind: 'provider-fallback',
+    title: 'Fallback from Codex to OpenRouter',
+    summary:
+      'Primary provider failed preflight; route the current operation summary to OpenRouter.',
+    risk: 'medium',
+    requester: 'provider-router',
+    targetType: 'provider',
+    targetId: 'openrouter',
+    source: 'provider-router',
+    correlationId: 'corr-provider-fallback',
+    expiresAt: iso(-20),
+    actionPreview: 'Retry operation summary with openrouter/auto.',
+    resourceSummary: 'Provider fallback for Operations Room',
+    policyDecisionId: 'policy-provider-fallback',
+    payload: { from: 'codex', to: 'openrouter', group: 'operations' },
+    status: 'pending',
+    createdAt: iso(32),
+    reviewedAt: null,
+    reviewedBy: null,
+    decisionNote: null,
+  },
+  {
+    id: 'approval-tool-risk',
+    kind: 'tool-action',
+    title: 'Run deployment health probe',
+    summary:
+      'Call a configured tool that reaches the deployment endpoint and records freshness state.',
+    risk: 'low',
+    requester: 'uptime',
+    targetType: 'tool',
+    targetId: 'deployment-probe',
+    source: 'tool-runner',
+    correlationId: 'corr-uptime-probe',
+    expiresAt: iso(-90),
+    actionPreview: 'probe https://nanocrab.example/health --record',
+    resourceSummary: 'External HTTP probe tool action',
+    policyDecisionId: 'policy-tool-network',
+    payload: { url: 'https://nanocrab.example/health', method: 'GET' },
+    status: 'pending',
+    createdAt: iso(45),
+    reviewedAt: null,
+    reviewedBy: null,
+    decisionNote: null,
+  },
+  {
+    id: 'approval-history-1',
+    kind: 'report-outline',
+    title: 'Approve weekly alliance digest outline',
+    summary: 'Situation summary, notable events, risks, next actions.',
+    risk: 'low',
+    requester: 'operations',
+    targetType: 'report-job',
+    targetId: 'report-mock-1',
+    source: 'report-writer',
+    correlationId: 'corr-weekly-digest',
+    expiresAt: null,
+    actionPreview:
+      'Create digest outline with situation summary, notable events, risks, and next actions.',
+    resourceSummary: 'Weekly alliance digest outline',
+    policyDecisionId: 'policy-report-outline',
+    payload: { jobId: 'report-mock-1' },
+    status: 'approved',
+    createdAt: iso(180),
+    reviewedAt: iso(120),
+    reviewedBy: 'mock-owner',
+    decisionNote: 'Outline approved for drafting.',
+  },
+];
+
 const messages = [
   {
     id: 'msg-001',
@@ -1204,40 +1347,19 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
     };
   }
   if (pathname === '/approvals') {
-    return [
-      {
-        id: 'approval-mock-1',
-        kind: 'coding-open-pr',
-        title: 'Open PR for henrikogaard/nanocrab',
-        summary: 'Approve publishing branch nanocrab/issue-42-code-mock-1.',
-        risk: 'high',
-        requester: 'main',
-        targetType: 'coding-job',
-        targetId: 'code-mock-1',
-        payload: { jobId: 'code-mock-1' },
-        status: 'pending',
-        createdAt: iso(14),
-        reviewedAt: null,
-        reviewedBy: null,
-        decisionNote: null,
-      },
-      {
-        id: 'approval-mock-2',
-        kind: 'report-outline',
-        title: 'Approve weekly alliance digest outline',
-        summary: 'Situation summary, notable events, risks, next actions.',
-        risk: 'low',
-        requester: 'operations',
-        targetType: 'report-job',
-        targetId: 'report-mock-1',
-        payload: { jobId: 'report-mock-1' },
-        status: 'pending',
-        createdAt: iso(55),
-        reviewedAt: null,
-        reviewedBy: null,
-        decisionNote: null,
-      },
-    ];
+    const q = req.query as Record<string, string | undefined>;
+    return approvals
+      .filter((item) => !q.status || item.status === q.status)
+      .filter((item) => !q.risk || item.risk === q.risk)
+      .filter((item) => !q.kind || item.kind === q.kind)
+      .filter((item) => !q.requester || item.requester === q.requester)
+      .filter((item) => !q.targetType || item.targetType === q.targetType)
+      .filter(
+        (item) => !q.correlationId || item.correlationId === q.correlationId,
+      )
+      .filter((item) => !q.createdFrom || item.createdAt >= q.createdFrom)
+      .filter((item) => !q.createdTo || item.createdAt <= q.createdTo)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
   if (pathname === '/system/alerts') {
     return [

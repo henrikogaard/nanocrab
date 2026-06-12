@@ -373,6 +373,8 @@ const navIconPaths = {
     '<path d="M12 3.5 20.5 8v8L12 20.5 3.5 16V8L12 3.5Z"/><path d="M12 8.5v7"/><path d="M8.5 10.5 12 8.5l3.5 2"/><path d="M7.5 15.5 12 18l4.5-2.5"/>',
   messages:
     '<path d="M5 6.5h14v9H9l-4 3v-12Z"/><path d="M8 10h8"/><path d="M8 13h5"/>',
+  approvals:
+    '<path d="M12 3.5 18.5 6v5.3c0 4.2-2.5 7-6.5 9.2-4-2.2-6.5-5-6.5-9.2V6L12 3.5Z"/><path d="M9 12l2 2 4-5"/><path d="M8.5 6.5h7"/>',
   chat: '<path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3A7.5 7.5 0 0 1 12 19.5c-1.2 0-2.4-.3-3.4-.8L4.5 20l1.3-4A7.4 7.4 0 0 1 4.5 12Z"/><path d="M8.5 11.5h7"/><path d="M8.5 14.5h4.5"/>',
   groups:
     '<path d="M8 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M16 10a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"/><path d="M3.5 18.5c.4-3 2-5 4.5-5s4.1 2 4.5 5"/><path d="M13.2 14c2.9-.4 4.7 1.2 5.3 4.5"/>',
@@ -441,6 +443,7 @@ function showShell(page) {
     { id: 'dashboard', icon: 'dashboard', label: 'Dashboard', section: 'Home' },
     { id: 'agents', icon: 'agents', label: 'Agents' },
     { id: 'messages', icon: 'messages', label: 'Messages' },
+    { id: 'approvals', icon: 'approvals', label: 'Approvals' },
     { id: 'chat', icon: 'chat', label: 'Chat' },
     { id: 'groups', icon: 'groups', label: 'Groups', section: 'Workspace' },
     { id: 'tasks', icon: 'tasks', label: 'Tasks' },
@@ -665,6 +668,7 @@ const _pageMap = {
   agents: 'renderAgents',
   chat: 'renderChat',
   messages: 'renderMessages',
+  approvals: 'renderApprovals',
   memory: 'renderMemoryConsolidated',
   skills: 'renderSkillsPage',
   timeline: 'renderMemoryKnowledgeTimeline',
@@ -890,6 +894,272 @@ async function renderUptimeStandalone(el) {
     '<div class="page-header"><h2>Uptime Monitor</h2></div><div id="uptime-content"></div>';
   await renderUptime(document.getElementById('uptime-content'));
 }
+
+const APPROVAL_KIND_LABELS = {
+  'provider-fallback': 'Provider fallback',
+  'coding-implement': 'Repo change',
+  'coding-open-pr': 'Open PR',
+  'coding-revert': 'Revert change',
+  'report-outline': 'Report outline',
+  'report-delivery': 'Report delivery',
+  publish: 'Publish',
+  'external-message': 'Outbound message',
+  upload: 'Upload',
+  'tool-action': 'Tool action',
+};
+
+const APPROVAL_STATUS_LABELS = {
+  pending: 'Pending',
+  approved: 'Approved',
+  denied: 'Denied',
+  expired: 'Expired',
+};
+
+function approvalKindLabel(kind) {
+  return APPROVAL_KIND_LABELS[kind] || kind || 'Approval';
+}
+
+function approvalStatusBadge(status) {
+  const cls =
+    status === 'approved'
+      ? 'badge-success'
+      : status === 'denied' || status === 'expired'
+        ? 'badge-error'
+        : 'badge-warning';
+  return `<span class="badge ${cls}">${esc(APPROVAL_STATUS_LABELS[status] || status)}</span>`;
+}
+
+function approvalRiskBadge(risk) {
+  const cls =
+    risk === 'high'
+      ? 'badge-error'
+      : risk === 'medium'
+        ? 'badge-warning'
+        : 'badge-success';
+  return `<span class="badge ${cls}">${esc(risk || 'medium')}</span>`;
+}
+
+function approvalQueryFromFilters() {
+  const filters = window._approvalFilters || {};
+  const params = new URLSearchParams();
+  ['status', 'risk', 'kind', 'requester', 'targetType', 'correlationId'].forEach(
+    (key) => {
+      if (filters[key]) params.set(key, filters[key]);
+    },
+  );
+  if (filters.createdFrom)
+    params.set('createdFrom', `${filters.createdFrom}T00:00:00.000Z`);
+  if (filters.createdTo)
+    params.set('createdTo', `${filters.createdTo}T23:59:59.999Z`);
+  params.set('limit', '200');
+  return params.toString();
+}
+
+function renderApprovalCard(approval) {
+  const expires =
+    approval.expiresAt && approval.status === 'pending'
+      ? `<span class="approval-meta-item">Expires ${timeAgo(approval.expiresAt)}</span>`
+      : '';
+  const preview = approval.actionPreview
+    ? `<pre class="approval-preview">${esc(approval.actionPreview)}</pre>`
+    : '';
+  const disabled = approval.status !== 'pending' ? ' disabled' : '';
+  const selected = approval.id === window._selectedApprovalId ? ' selected' : '';
+  return `
+    <article class="approval-card${selected}" data-id="${esc(approval.id)}" onclick="selectApproval('${esc(approval.id)}')">
+      <div class="approval-card-main">
+        <div class="approval-card-title">
+          <span>${esc(approval.title)}</span>
+          ${approvalRiskBadge(approval.risk)}
+        </div>
+        <div class="approval-summary">${esc(approval.summary)}</div>
+        <div class="approval-meta-row">
+          <span class="approval-meta-item">${esc(approvalKindLabel(approval.kind))}</span>
+          <span class="approval-meta-item">${esc(approval.requester || 'system')}</span>
+          ${approval.targetType ? `<span class="approval-meta-item">${esc(approval.targetType)}</span>` : ''}
+          ${approval.correlationId ? `<span class="approval-meta-item">${esc(approval.correlationId)}</span>` : ''}
+          ${expires}
+        </div>
+        ${preview}
+      </div>
+      <div class="approval-card-actions" onclick="event.stopPropagation()">
+        ${approvalStatusBadge(approval.status)}
+        <button class="btn btn-sm btn-ghost"${disabled} onclick="denyInboxApproval('${esc(approval.id)}')">Deny</button>
+        <button class="btn btn-sm btn-primary"${disabled} onclick="approveInboxApproval('${esc(approval.id)}')">Approve</button>
+      </div>
+    </article>`;
+}
+
+function renderApprovalPanel(approval) {
+  if (!approval) {
+    return '<div class="approval-panel empty">Select an approval to inspect provenance.</div>';
+  }
+  const rows = [
+    ['Source', approval.source || 'legacy'],
+    ['Correlation', approval.correlationId || 'none'],
+    ['Policy', approval.policyDecisionId || 'none'],
+    ['Requester', approval.requester || 'system'],
+    ['Target', [approval.targetType, approval.targetId].filter(Boolean).join(' / ') || 'none'],
+    ['Created', approval.createdAt || 'unknown'],
+    ['Expires', approval.expiresAt || 'none'],
+    ['Reviewed', approval.reviewedAt || 'not reviewed'],
+    ['Reviewer', approval.reviewedBy || 'none'],
+  ];
+  return `
+    <aside class="approval-panel">
+      <div class="approval-panel-header">
+        <span>${esc(approvalKindLabel(approval.kind))}</span>
+        ${approvalStatusBadge(approval.status)}
+      </div>
+      <h3>${esc(approval.title)}</h3>
+      <p>${esc(approval.resourceSummary || approval.summary || '')}</p>
+      <div class="approval-provenance-list">
+        ${rows
+          .map(
+            ([label, value]) =>
+              `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`,
+          )
+          .join('')}
+      </div>
+      ${
+        approval.actionPreview
+          ? `<div class="section-label">Action Preview</div><pre class="approval-panel-pre">${esc(approval.actionPreview)}</pre>`
+          : ''
+      }
+      <div class="section-label">Payload</div>
+      <pre class="approval-panel-pre">${esc(prettyPrint(approval.payload || {}))}</pre>
+      ${
+        approval.decisionNote
+          ? `<div class="approval-decision-note">${esc(approval.decisionNote)}</div>`
+          : ''
+      }
+    </aside>`;
+}
+
+async function renderApprovals(el) {
+  const filters = window._approvalFilters || {
+    status: '',
+    risk: '',
+    kind: '',
+    requester: '',
+    targetType: '',
+    correlationId: '',
+    createdFrom: '',
+    createdTo: '',
+  };
+  window._approvalFilters = filters;
+  const query = approvalQueryFromFilters();
+  const approvals = await api(`/approvals?${query}`);
+  const selected =
+    approvals.find((item) => item.id === window._selectedApprovalId) ||
+    approvals.find((item) => item.status === 'pending') ||
+    approvals[0];
+  if (selected) window._selectedApprovalId = selected.id;
+  const pending = approvals.filter((approval) => approval.status === 'pending');
+  const history = approvals.filter((approval) => approval.status !== 'pending');
+  const grouped = pending.reduce((acc, approval) => {
+    const key = `${approval.risk || 'medium'}:${approval.kind}`;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(approval);
+    return acc;
+  }, {});
+  const groupedHtml = Object.entries(grouped)
+    .map(([key, items]) => {
+      const [risk, kind] = key.split(':');
+      return `<section class="approval-group">
+        <div class="approval-group-header">
+          <div><strong>${esc(approvalKindLabel(kind))}</strong><span>${items.length} pending</span></div>
+          ${approvalRiskBadge(risk)}
+        </div>
+        ${items.map(renderApprovalCard).join('')}
+      </section>`;
+    })
+    .join('');
+
+  el.innerHTML = `
+    <div class="page-header">
+      <h2>Approval Inbox</h2>
+      <button class="btn btn-sm btn-ghost" onclick="navigate('approvals')">Refresh</button>
+    </div>
+    <form class="approval-filters" id="approval-filters">
+      <select name="status">
+        <option value="">Any status</option>
+        ${['pending', 'approved', 'denied', 'expired'].map((status) => `<option value="${status}" ${filters.status === status ? 'selected' : ''}>${APPROVAL_STATUS_LABELS[status]}</option>`).join('')}
+      </select>
+      <select name="risk">
+        <option value="">Any risk</option>
+        ${['low', 'medium', 'high'].map((risk) => `<option value="${risk}" ${filters.risk === risk ? 'selected' : ''}>${risk}</option>`).join('')}
+      </select>
+      <select name="kind">
+        <option value="">Any kind</option>
+        ${Object.entries(APPROVAL_KIND_LABELS).map(([kind, label]) => `<option value="${kind}" ${filters.kind === kind ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+      </select>
+      <input name="requester" value="${esc(filters.requester || '')}" placeholder="Requester">
+      <input name="targetType" value="${esc(filters.targetType || '')}" placeholder="Target type">
+      <input name="correlationId" value="${esc(filters.correlationId || '')}" placeholder="Correlation ID">
+      <input name="createdFrom" type="date" value="${esc(filters.createdFrom || '')}" aria-label="Created from">
+      <input name="createdTo" type="date" value="${esc(filters.createdTo || '')}" aria-label="Created to">
+      <button class="btn btn-sm btn-primary" type="submit">Filter</button>
+      <button class="btn btn-sm btn-ghost" type="button" onclick="resetApprovalFilters()">Reset</button>
+    </form>
+    <div class="approval-inbox">
+      <div class="approval-main">
+        <div class="approval-section-head">
+          <h3>Pending</h3>
+          <span>${pending.length} awaiting review</span>
+        </div>
+        ${pending.length ? groupedHtml : '<div class="card empty">No pending approvals match these filters.</div>'}
+        <div class="approval-section-head">
+          <h3>History</h3>
+          <span>${history.length} reviewed</span>
+        </div>
+        ${
+          history.length
+            ? `<div class="approval-history">${history.map(renderApprovalCard).join('')}</div>`
+            : '<div class="card empty">No reviewed approvals match these filters.</div>'
+        }
+      </div>
+      ${renderApprovalPanel(selected)}
+    </div>`;
+
+  document.getElementById('approval-filters').onsubmit = (event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    window._approvalFilters = Object.fromEntries(data.entries());
+    navigate('approvals');
+  };
+}
+
+window.selectApproval = function (id) {
+  window._selectedApprovalId = id;
+  document
+    .querySelectorAll('.approval-card')
+    .forEach((card) => card.classList.toggle('selected', card.dataset.id === id));
+  if (currentPage === 'approvals') navigate('approvals');
+};
+
+window.resetApprovalFilters = function () {
+  window._approvalFilters = {};
+  navigate('approvals');
+};
+
+async function reviewInboxApproval(id, decision) {
+  const note = prompt(`${decision === 'approve' ? 'Approve' : 'Deny'} note`, '');
+  try {
+    const data = await api(`/approvals/${encodeURIComponent(id)}/${decision}`, {
+      method: 'POST',
+      body: JSON.stringify({ note: note || undefined }),
+    });
+    if (data.error) throw new Error(data.error);
+    toast(`Approval ${decision === 'approve' ? 'approved' : 'denied'}`, 'success');
+    navigate('approvals');
+  } catch (e) {
+    toast('Approval review failed: ' + e.message, 'error');
+  }
+}
+
+window.approveInboxApproval = (id) => reviewInboxApproval(id, 'approve');
+window.denyInboxApproval = (id) => reviewInboxApproval(id, 'deny');
 
 async function renderUptime(el) {
   const [monitors, groups] = await Promise.all([
