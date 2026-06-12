@@ -966,7 +966,7 @@ function renderApprovalCard(approval) {
   const disabled = approval.status !== 'pending' ? ' disabled' : '';
   const selected = approval.id === window._selectedApprovalId ? ' selected' : '';
   return `
-    <article class="approval-card${selected}" data-id="${esc(approval.id)}" onclick="selectApproval('${esc(approval.id)}')">
+    <article class="approval-card${selected}" data-id="${esc(approval.id)}">
       <div class="approval-card-main">
         <div class="approval-card-title">
           <span>${esc(approval.title)}</span>
@@ -982,10 +982,10 @@ function renderApprovalCard(approval) {
         </div>
         ${preview}
       </div>
-      <div class="approval-card-actions" onclick="event.stopPropagation()">
+      <div class="approval-card-actions">
         ${approvalStatusBadge(approval.status)}
-        <button class="btn btn-sm btn-ghost"${disabled} onclick="denyInboxApproval('${esc(approval.id)}')">Deny</button>
-        <button class="btn btn-sm btn-primary"${disabled} onclick="approveInboxApproval('${esc(approval.id)}')">Approve</button>
+        <button class="btn btn-sm btn-ghost" data-action="deny"${disabled}>Deny</button>
+        <button class="btn btn-sm btn-primary" data-action="approve"${disabled}>Approve</button>
       </div>
     </article>`;
 }
@@ -1128,6 +1128,19 @@ async function renderApprovals(el) {
     window._approvalFilters = Object.fromEntries(data.entries());
     navigate('approvals');
   };
+  el.querySelector('.approval-inbox').addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return;
+    const actionButton = event.target.closest('[data-action]');
+    if (actionButton) {
+      const card = actionButton.closest('.approval-card');
+      const id = card?.dataset.id;
+      if (!id) return;
+      reviewInboxApproval(id, actionButton.dataset.action);
+      return;
+    }
+    const card = event.target.closest('.approval-card');
+    if (card?.dataset.id) selectApproval(card.dataset.id);
+  });
 }
 
 window.selectApproval = function (id) {

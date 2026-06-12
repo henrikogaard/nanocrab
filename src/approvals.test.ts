@@ -173,4 +173,60 @@ describe('approval store', () => {
       false,
     );
   });
+
+  it('does not reuse approvals after their deadline even when already approved', () => {
+    writeApprovals([
+      {
+        id: 'approved-stale',
+        kind: 'external-message',
+        title: 'Send approved message',
+        summary: 'This approval was reviewed before its deadline.',
+        risk: 'medium',
+        requester: 'main',
+        targetType: 'message',
+        targetId: 'msg-stale-approved',
+        payload: {},
+        status: 'approved',
+        expiresAt: '2000-01-01T00:00:00.000Z',
+        createdAt: '1999-12-31T22:00:00.000Z',
+        reviewedAt: '1999-12-31T23:00:00.000Z',
+        reviewedBy: 'owner',
+        decisionNote: 'Approved before deadline.',
+      },
+    ]);
+
+    expect(
+      hasApprovedTarget('external-message', 'message', 'msg-stale-approved'),
+    ).toBe(false);
+  });
+
+  it('marks expired pending approvals during listing so they are not actionable', () => {
+    writeApprovals([
+      {
+        id: 'pending-stale',
+        kind: 'upload',
+        title: 'Review stale upload',
+        summary: 'This pending approval has passed its deadline.',
+        risk: 'medium',
+        requester: 'uploader',
+        targetType: 'upload',
+        targetId: 'upload-stale',
+        payload: {},
+        status: 'pending',
+        expiresAt: '2000-01-01T00:00:00.000Z',
+        createdAt: '1999-12-31T22:00:00.000Z',
+        reviewedAt: null,
+        reviewedBy: null,
+        decisionNote: null,
+      },
+    ]);
+
+    expect(listApprovals({ status: 'pending' })).toEqual([]);
+    expect(listApprovals({ status: 'expired' })[0]).toMatchObject({
+      id: 'pending-stale',
+      status: 'expired',
+      reviewedBy: 'system',
+      decisionNote: 'Expired before review',
+    });
+  });
 });

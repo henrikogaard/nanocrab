@@ -81,10 +81,24 @@ function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
-function isExpired(approval: ApprovalRequest, now = new Date()): boolean {
-  if (approval.status !== 'pending' || !approval.expiresAt) return false;
+function isPastDeadline(approval: ApprovalRequest, now = new Date()): boolean {
+  if (!approval.expiresAt) return false;
   const expiresAt = Date.parse(approval.expiresAt);
   return Number.isFinite(expiresAt) && expiresAt <= now.getTime();
+}
+
+function isExpiredPending(
+  approval: ApprovalRequest,
+  now = new Date(),
+): boolean {
+  return approval.status === 'pending' && isPastDeadline(approval, now);
+}
+
+function markExpired(approval: ApprovalRequest): void {
+  approval.status = 'expired';
+  approval.reviewedAt = new Date().toISOString();
+  approval.reviewedBy = 'system';
+  approval.decisionNote = 'Expired before review';
 }
 
 function normalizeApproval(record: Partial<ApprovalRequest>): ApprovalRequest {
@@ -133,10 +147,23 @@ function writeApprovals(approvals: ApprovalRequest[]): void {
   fs.writeFileSync(APPROVALS_PATH, `${JSON.stringify(approvals, null, 2)}\n`);
 }
 
+function readApprovalsWithExpiredSweep(): ApprovalRequest[] {
+  const approvals = readApprovals();
+  let changed = false;
+  for (const approval of approvals) {
+    if (isExpiredPending(approval)) {
+      markExpired(approval);
+      changed = true;
+    }
+  }
+  if (changed) writeApprovals(approvals);
+  return approvals;
+}
+
 export function listApprovals(
   filters: ApprovalFilters = {},
 ): ApprovalRequest[] {
-  return readApprovals()
+  return readApprovalsWithExpiredSweep()
     .filter((approval) => !filters.status || approval.status === filters.status)
     .filter((approval) => !filters.risk || approval.risk === filters.risk)
     .filter((approval) => !filters.kind || approval.kind === filters.kind)
@@ -214,11 +241,8 @@ export function reviewApproval(
   if (approval.status !== 'pending') {
     throw new Error(`Approval is already ${approval.status}`);
   }
-  if (isExpired(approval)) {
-    approval.status = 'expired';
-    approval.reviewedAt = new Date().toISOString();
-    approval.reviewedBy = 'system';
-    approval.decisionNote = 'Expired before review';
+  if (isExpiredPending(approval)) {
+    markExpired(approval);
     writeApprovals(approvals);
     throw new Error('Approval is expired');
   }
@@ -241,6 +265,6 @@ export function hasApprovedTarget(
       approval.targetType === targetType &&
       approval.targetId === targetId &&
       approval.status === 'approved' &&
-      !isExpired(approval),
+      !isPastDeadline(approval),
   );
 }
