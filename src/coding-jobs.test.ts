@@ -74,6 +74,7 @@ import { resolveProviderFallbackForAction } from './provider-router.js';
 import { createApproval, reviewApproval } from './approvals.js';
 import { listAuditEvents } from './audit-log.js';
 import { _closeDatabase, _initTestDatabase } from './db.js';
+import { resetPolicyRules, savePolicyRules } from './policy-engine.js';
 
 const TEST_ROOT = '/tmp/nanocrab-coding-jobs-test';
 
@@ -127,6 +128,7 @@ describe('coding jobs', () => {
       /* database may not be initialized */
     }
     _initTestDatabase();
+    resetPolicyRules();
   });
 
   afterEach(() => {
@@ -139,6 +141,7 @@ describe('coding jobs', () => {
       /* database may not be initialized */
     }
     fs.rmSync(TEST_ROOT, { recursive: true, force: true });
+    resetPolicyRules();
   });
 
   it('registers an allowed GitHub repo with its default branch', async () => {
@@ -363,6 +366,80 @@ describe('coding jobs', () => {
         (event) => event.decision === 'simulated',
       ),
     ).toBe(true);
+  });
+
+  it('audits denied dry-run implementation policies before failing the job', async () => {
+    vi.useRealTimers();
+    savePolicyRules([
+      {
+        id: 'deny-implementation',
+        actionPattern: 'coding.implement',
+        risk: 'high',
+        deny: true,
+        explanation: 'Implementation blocked for test.',
+      },
+    ]);
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Preview a risky repository update.',
+      requestedBy: 'whatsapp_main',
+      dryRun: true,
+    });
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('failed');
+    });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(
+      listAuditEvents({ correlationId: job.id }).some(
+        (event) =>
+          event.actionType === 'coding.implement' &&
+          event.decision === 'denied',
+      ),
+    ).toBe(true);
+  });
+
+  it('audits denied implementation policies without marking them approved', async () => {
+    vi.useRealTimers();
+    savePolicyRules([
+      {
+        id: 'deny-implementation',
+        actionPattern: 'coding.implement',
+        risk: 'high',
+        deny: true,
+        explanation: 'Implementation blocked for test.',
+      },
+    ]);
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+    });
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('failed');
+    });
+
+    const implementationEvents = listAuditEvents({
+      correlationId: job.id,
+    }).filter((event) => event.actionType === 'coding.implement');
+    expect(
+      implementationEvents.some((event) => event.decision === 'denied'),
+    ).toBe(true);
+    expect(
+      implementationEvents.some((event) => event.decision === 'approved'),
+    ).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it('blocks write-capable provider fallback before spawning a coding container', async () => {

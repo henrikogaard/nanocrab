@@ -36,6 +36,7 @@ import {
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
+import { auditUploadSend } from '../upload-audit.js';
 import pino from 'pino';
 
 // Baileys requires a pino-compatible logger instance
@@ -551,20 +552,41 @@ export class WhatsAppChannel implements Channel {
       const mimetype = mimeTypes[ext] || 'application/octet-stream';
 
       // Send as image, video, audio, or document based on mime type
-      if (mimetype.startsWith('image/')) {
-        await this.sock.sendMessage(jid, { image: buffer, caption, mimetype });
-      } else if (mimetype.startsWith('video/')) {
-        await this.sock.sendMessage(jid, { video: buffer, caption, mimetype });
-      } else if (mimetype.startsWith('audio/')) {
-        await this.sock.sendMessage(jid, { audio: buffer, mimetype });
-      } else {
-        await this.sock.sendMessage(jid, {
-          document: buffer,
-          mimetype,
-          fileName: filename,
+      await auditUploadSend(
+        {
+          channel: this.name,
+          jid,
+          filename,
+          filePath,
+          mimeType: mimetype,
+          sizeBytes: buffer.length,
           caption,
-        });
-      }
+        },
+        async () => {
+          if (mimetype.startsWith('image/')) {
+            await this.sock.sendMessage(jid, {
+              image: buffer,
+              caption,
+              mimetype,
+            });
+          } else if (mimetype.startsWith('video/')) {
+            await this.sock.sendMessage(jid, {
+              video: buffer,
+              caption,
+              mimetype,
+            });
+          } else if (mimetype.startsWith('audio/')) {
+            await this.sock.sendMessage(jid, { audio: buffer, mimetype });
+          } else {
+            await this.sock.sendMessage(jid, {
+              document: buffer,
+              mimetype,
+              fileName: filename,
+              caption,
+            });
+          }
+        },
+      );
       logger.info(
         { jid, filename, mimetype, size: buffer.length },
         'File sent',

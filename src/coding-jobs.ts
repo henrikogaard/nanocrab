@@ -800,7 +800,12 @@ function runCodingContainer(job: CodingJob, repo: CodingRepo): Promise<number> {
     actorId: job.id,
     actionType: 'coding.implement',
     resource: job.repo,
-    decision: job.dryRun ? 'simulated' : 'approved',
+    decision:
+      policy.decision === 'denied'
+        ? 'denied'
+        : job.dryRun
+          ? 'simulated'
+          : 'approved',
     correlationId: job.id,
     context: policy,
   });
@@ -958,6 +963,15 @@ async function runCodingJob(job: CodingJob): Promise<void> {
       context: { branch: job.branch, createPr: job.createPr },
     });
     if (policy.decision === 'denied') {
+      logAuditEvent({
+        actor: job.requestedBy,
+        actorId: job.id,
+        actionType: 'coding.implement',
+        resource: job.repo,
+        decision: 'denied',
+        correlationId: job.id,
+        context: policy,
+      });
       throw new Error(`Dry-run denied by policy: ${policy.explanation}`);
     }
     updateJobOutput(

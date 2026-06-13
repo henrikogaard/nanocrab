@@ -9,6 +9,9 @@ vi.mock('./config.js', () => ({
   STORE_DIR,
 }));
 
+const { _closeDatabase, _initTestDatabase } = await import('./db.js');
+const { listAuditEvents } = await import('./audit-log.js');
+const { auditUploadSend } = await import('./upload-audit.js');
 const { evaluatePolicy, loadPolicyRules, resetPolicyRules, savePolicyRules } =
   await import('./policy-engine.js');
 
@@ -16,6 +19,12 @@ describe('policy engine', () => {
   beforeEach(() => {
     fs.rmSync(STORE_DIR, { recursive: true, force: true });
     resetPolicyRules();
+    try {
+      _closeDatabase();
+    } catch {
+      /* database may not be initialized */
+    }
+    _initTestDatabase();
   });
 
   it('requires approval for risky write actions from stored policy rules', () => {
@@ -96,5 +105,60 @@ describe('policy engine', () => {
     expect(decision.explanation).not.toContain('hunter2');
     expect(JSON.stringify(decision.context)).not.toContain('session=secret');
     expect(JSON.stringify(decision.context)).not.toContain('abc123');
+  });
+
+  it('audits allowed upload sends with redacted context', async () => {
+    const send = vi.fn(async () => 'sent');
+
+    await expect(
+      auditUploadSend(
+        {
+          channel: 'telegram',
+          jid: 'tg:123',
+          filename: 'report.pdf',
+          filePath: '/tmp/report.pdf',
+          sizeBytes: 42,
+          context: { authorization: 'Bearer secret-token' },
+        },
+        send,
+      ),
+    ).resolves.toBe('sent');
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const events = listAuditEvents({ actionType: 'upload.send' });
+    expect(events.some((event) => event.decision === 'allowed')).toBe(true);
+    expect(JSON.stringify(events)).not.toContain('secret-token');
+  });
+
+  it('blocks and audits denied upload sends before external transfer', async () => {
+    savePolicyRules([
+      {
+        id: 'deny-uploads',
+        actionPattern: 'upload.send',
+        risk: 'high',
+        deny: true,
+        explanation: 'Do not send files from this channel.',
+      },
+    ]);
+    const send = vi.fn(async () => 'sent');
+
+    await expect(
+      auditUploadSend(
+        {
+          channel: 'signal',
+          jid: 'sig:ops',
+          filename: 'secret.zip',
+          filePath: '/tmp/secret.zip',
+          sizeBytes: 1024,
+        },
+        send,
+      ),
+    ).rejects.toThrow('Upload blocked by policy');
+
+    expect(send).not.toHaveBeenCalled();
+    expect(listAuditEvents({ actionType: 'upload.send' })[0]).toMatchObject({
+      decision: 'denied',
+      resource: 'signal/sig:ops/secret.zip',
+    });
   });
 });

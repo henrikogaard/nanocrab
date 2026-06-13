@@ -110,6 +110,71 @@ describe('task scheduler', () => {
     );
   });
 
+  it('runs dry-run scheduled tasks without sending simulated output externally', async () => {
+    vi.mocked(runContainerAgent).mockImplementationOnce(
+      async (_group, _input, _onProcess, onOutput) => {
+        await onOutput?.({
+          status: 'success',
+          result: 'Dry-run simulated container execution.',
+        });
+        return {
+          status: 'success',
+          result: 'Dry-run simulated container execution.',
+        };
+      },
+    );
+    createTask({
+      id: 'task-dry-run',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      prompt: 'send the scheduled summary',
+      tool_policy: 'dry-run',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+    const sendMessage = vi.fn(async () => {});
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage,
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(runContainerAgent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ dryRun: true }),
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(getTaskById('task-dry-run')?.last_result).toContain(
+      'Dry-run simulated',
+    );
+  });
+
   it('computeNextRun anchors interval tasks to scheduled time to prevent drift', () => {
     const scheduledTime = new Date(Date.now() - 2000).toISOString(); // 2s ago
     const task = {
