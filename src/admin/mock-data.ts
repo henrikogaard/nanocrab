@@ -2015,6 +2015,88 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       },
     ];
   }
+  if (pathname === '/mcp/infomaniak-workflows') {
+    return {
+      status: 'attention',
+      generatedAt: iso(0),
+      summary: { total: 5, ready: 3, attention: 2, blocked: 0 },
+      checks: [
+        {
+          id: 'preset-installed',
+          label: 'Infomaniak MCP preset',
+          ok: true,
+          severity: 'required',
+          detail: 'Infomaniak kSuite MCP server is installed',
+        },
+        {
+          id: 'kdrive-credentials',
+          label: 'kDrive credentials',
+          ok: true,
+          severity: 'required',
+          detail: 'INFOMANIAK_TOKEN and KDRIVE_ID are configured',
+        },
+        {
+          id: 'dav-credentials',
+          label: 'DAV credentials',
+          ok: false,
+          severity: 'advisory',
+          detail: 'DAV credentials are missing',
+          hint: 'Add DAV_USER and DAV_PASSWORD to enable contact/calendar workflows',
+        },
+        {
+          id: 'write-approval',
+          label: 'Write approval gate',
+          ok: true,
+          severity: 'required',
+          detail: 'Write-capable workflows require approval',
+        },
+      ],
+      workflows: [
+        {
+          id: 'kdrive-search-read',
+          label: 'Search and summarize kDrive documents',
+          status: 'ready',
+          detail: 'Agents can find approved kDrive sources and summarize them',
+          tools: ['mcp__infomaniak__*', 'infomaniak-ksuite'],
+          approvalRequired: false,
+        },
+        {
+          id: 'document-draft',
+          label: 'Draft reports from approved kDrive sources',
+          status: 'ready',
+          detail:
+            'Document drafts can combine approved kDrive sources with report skills',
+          tools: ['mcp__infomaniak__*', 'report-writer'],
+          approvalRequired: false,
+        },
+        {
+          id: 'upload-share',
+          label: 'Upload or share document deliverables',
+          status: 'ready',
+          detail: 'Write-capable kDrive actions are available behind approval',
+          tools: ['mcp__infomaniak__*'],
+          approvalRequired: true,
+        },
+        {
+          id: 'dav-context',
+          label: 'Use DAV contacts and calendar context',
+          status: 'attention',
+          detail: 'DAV-backed context is optional and currently incomplete',
+          tools: ['mcp__infomaniak__*', 'meeting-briefing'],
+          approvalRequired: false,
+        },
+        {
+          id: 'mail-context',
+          label: 'Use mail as document context',
+          status: 'attention',
+          detail:
+            'Mail-backed document context is optional and currently incomplete',
+          tools: ['mcp__infomaniak__*', 'email-assistant'],
+          approvalRequired: false,
+        },
+      ],
+    };
+  }
   if (pathname === '/providers') return providers();
   if (pathname === '/memory') {
     return [

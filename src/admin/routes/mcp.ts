@@ -9,6 +9,10 @@ import {
   saveConnectorPermissions,
   type ConnectorPermission,
 } from '../../connector-permissions.js';
+import {
+  buildInfomaniakWorkflows,
+  infomaniakSkillPath,
+} from '../../infomaniak-workflows.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -170,6 +174,21 @@ router.get('/', (_req: Request, res: Response) => {
 
 router.get('/health', (_req: Request, res: Response) => {
   res.json(getStatus());
+});
+
+router.get('/infomaniak-workflows', (_req: Request, res: Response) => {
+  const status = getStatus();
+  const configured = new Set(loadConfig().map((server) => server.name));
+  res.json(
+    buildInfomaniakWorkflows({
+      servers: status.servers,
+      presets: MCP_PRESETS.map((preset) => ({
+        name: preset.name,
+        installed: configured.has(preset.name),
+      })),
+      skillPath: infomaniakSkillPath(PROJECT_ROOT),
+    }),
+  );
 });
 
 router.get('/presets', (_req: Request, res: Response) => {
