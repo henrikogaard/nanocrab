@@ -1466,9 +1466,27 @@ async function renderMonitoringConsolidated(el) {
       'overview',
     )}</div>`;
   await renderMonitoring(document.getElementById('mon-tabs-overview'));
-  await renderChannels(document.getElementById('mon-tabs-channels'));
-  await renderLogs(document.getElementById('mon-tabs-logs'));
-  await renderSystem(document.getElementById('mon-tabs-system'));
+
+  const loadedTabs = new Set(['overview']);
+  const loaders = {
+    channels: renderChannels,
+    logs: renderLogs,
+    system: renderSystem,
+  };
+  el.querySelectorAll('#mon-tabs .tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const tabId = tab.dataset.tabId;
+      const loader = loaders[tabId];
+      if (!loader || loadedTabs.has(tabId)) return;
+      loadedTabs.add(tabId);
+      const target = document.getElementById(`mon-tabs-${tabId}`);
+      if (!target) return;
+      target.innerHTML = '<div class="loading">Loading</div>';
+      Promise.resolve(loader(target)).catch((err) =>
+        renderPageError(target, err, `Could not load ${tabId}`),
+      );
+    });
+  });
 }
 
 // Agents — now rendered by the full function below (renderAgents at line ~3065)
@@ -8589,7 +8607,17 @@ async function renderMonitoring(el) {
           </table></div>`;
         }
       }
-    } catch {}
+    } catch (err) {
+      const historyEl = document.getElementById('monitoring-history');
+      const chartEl = document.getElementById('monitoring-chart');
+      const message = err?.message || 'Monitoring history unavailable';
+      if (chartEl) {
+        chartEl.innerHTML = `<div class="empty">${esc(message)}</div>`;
+      }
+      if (historyEl) {
+        historyEl.innerHTML = `<div class="empty">${esc(message)}</div>`;
+      }
+    }
   };
 
   await loadMonitoring();
@@ -8616,12 +8644,14 @@ window.runAllProbes = async function () {
 async function renderPipelines(el) {
   let pipelines = [];
   try {
-    pipelines = await api('/dev/pipelines');
+    pipelines = await api('/dev/deploy');
   } catch {}
+  if (!Array.isArray(pipelines)) pipelines = [];
   let repos = [];
   try {
     repos = await api('/files/repos');
   } catch {}
+  if (!Array.isArray(repos)) repos = [];
 
   el.innerHTML = `
     <div class="page-header"><h2>Deploy Pipelines</h2>
@@ -8659,10 +8689,10 @@ async function renderPipelines(el) {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
         <div>
           <div style="font-size:16px;font-weight:600;color:var(--text)">${esc(p.name)}</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Repo: ${esc(p.repo)} \u2022 ${p.steps?.length || 0} steps ${p.lastRunAt ? ' \u2022 Last run: ' + timeAgo(p.lastRunAt) : ''}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Repo: ${esc(p.repo)} \u2022 ${p.steps?.length || 0} steps ${p.lastRun ? ' \u2022 Last run: ' + timeAgo(p.lastRun) : ''}</div>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
-          ${p.lastRunStatus === 'success' ? '<span class="badge badge-success">Success</span>' : p.lastRunStatus === 'failed' ? '<span class="badge badge-error">Failed</span>' : '<span class="badge badge-muted">Never run</span>'}
+          ${p.lastStatus === 'success' ? '<span class="badge badge-success">Success</span>' : p.lastStatus === 'failed' ? '<span class="badge badge-error">Failed</span>' : '<span class="badge badge-muted">Never run</span>'}
           <button class="btn btn-sm btn-primary" onclick="runPipeline('${esc(p.id)}',this)">Run</button>
           <button class="btn btn-sm btn-danger" onclick="deletePipeline('${esc(p.id)}',this)">Delete</button>
         </div>
@@ -8692,7 +8722,7 @@ async function renderPipelines(el) {
         return;
       }
       try {
-        const r = await api('/dev/pipelines', {
+        const r = await api('/dev/deploy', {
           method: 'POST',
           body: JSON.stringify({
             name: document.getElementById('pipeline-name').value,
@@ -8729,12 +8759,17 @@ window.runPipeline = async (id, btnEl) => {
     if (outputEl)
       outputEl.innerHTML = '<div class="loading">Running pipeline</div>';
     try {
-      const r = await api(`/dev/pipelines/${encodeURIComponent(id)}/run`, {
+      const r = await api(`/dev/deploy/${encodeURIComponent(id)}/run`, {
         method: 'POST',
       });
       if (outputEl) {
-        if (r.output) {
-          outputEl.innerHTML = `<div class="log-viewer" style="max-height:200px">${esc(r.output)}</div>`;
+        if (Array.isArray(r.results)) {
+          outputEl.innerHTML = `<div class="log-viewer" style="max-height:240px">${r.results
+            .map(
+              (result) =>
+                `<div style="margin-bottom:10px"><strong>${esc(result.step)}</strong> <span class="badge ${result.success ? 'badge-success' : 'badge-error'}">${result.success ? 'ok' : 'failed'}</span><pre style="white-space:pre-wrap;margin-top:4px">${esc(result.output || '')}</pre></div>`,
+            )
+            .join('')}</div>`;
         }
         if (r.ok !== false) toast('Pipeline completed', 'success');
         else toast(r.error || 'Pipeline failed', 'error');
@@ -8750,7 +8785,7 @@ window.runPipeline = async (id, btnEl) => {
 window.deletePipeline = async (id, btnEl) => {
   inlineConfirm(btnEl, 'Delete this pipeline?', async () => {
     try {
-      const r = await api(`/dev/pipelines/${encodeURIComponent(id)}`, {
+      const r = await api(`/dev/deploy/${encodeURIComponent(id)}`, {
         method: 'DELETE',
       });
       if (r.ok !== false) {

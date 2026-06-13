@@ -19,6 +19,7 @@ const router = Router();
 const PROJECT_ROOT = process.cwd();
 const GROUPS_DIR = path.join(PROJECT_ROOT, 'groups');
 const STORE_DIR = path.join(PROJECT_ROOT, 'store');
+const GLOBAL_INSTRUCTIONS_DIR = path.join(GROUPS_DIR, 'global');
 
 const SKIP_DIRS = new Set([
   'node_modules',
@@ -287,6 +288,34 @@ function putInstructions(req: Request, res: Response): void {
     res.status(500).json({ error: 'Failed to write file' });
   }
 }
+
+router.get('/global/agents-md', (_req: Request, res: Response) => {
+  try {
+    res.json({
+      content: readAgentInstructions(GLOBAL_INSTRUCTIONS_DIR),
+      file: fs.existsSync(agentInstructionsPath(GLOBAL_INSTRUCTIONS_DIR))
+        ? AGENT_INSTRUCTIONS_FILE
+        : CLAUDE_COMPAT_FILE,
+    });
+  } catch {
+    res.json({ content: '' });
+  }
+});
+
+router.put('/global/agents-md', (req: Request, res: Response) => {
+  const { content } = req.body;
+  if (typeof content !== 'string') {
+    res.status(400).json({ error: 'Content must be a string' });
+    return;
+  }
+  try {
+    writeAgentInstructions(GLOBAL_INSTRUCTIONS_DIR, content);
+    auditLog(req, 'file_edit', 'Updated global AGENTS.md');
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to write file' });
+  }
+});
 
 router.get('/:groupFolder/agents-md', getInstructions);
 router.put('/:groupFolder/agents-md', putInstructions);

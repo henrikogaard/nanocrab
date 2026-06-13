@@ -9,6 +9,14 @@ import { anthropicMessagesProvider } from './anthropic-messages/provider.js';
 import { geminiProvider } from './gemini/provider.js';
 import { mistralProvider } from './mistral/provider.js';
 import { openaiCompatibleProvider } from './openai-compatible/provider.js';
+import {
+  claudeRuntimeProvider,
+  codexRuntimeProvider,
+  googleRuntimeProvider,
+  ollamaRuntimeProvider,
+  opencodeRuntimeProvider,
+  openrouterRuntimeProvider,
+} from './agent-runtime/provider.js';
 
 export type {
   Provider,
@@ -18,6 +26,12 @@ export type {
 };
 
 const registeredProviders: Provider[] = [
+  claudeRuntimeProvider,
+  codexRuntimeProvider,
+  opencodeRuntimeProvider,
+  ollamaRuntimeProvider,
+  openrouterRuntimeProvider,
+  googleRuntimeProvider,
   openaiResponsesProvider,
   anthropicMessagesProvider,
   geminiProvider,
@@ -39,4 +53,10 @@ export {
   geminiProvider,
   mistralProvider,
   openaiCompatibleProvider,
+  claudeRuntimeProvider,
+  codexRuntimeProvider,
+  opencodeRuntimeProvider,
+  ollamaRuntimeProvider,
+  openrouterRuntimeProvider,
+  googleRuntimeProvider,
 };
