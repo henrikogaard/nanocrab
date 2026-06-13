@@ -2097,6 +2097,96 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       ],
     };
   }
+  if (pathname === '/mcp/calendar-workflows') {
+    return {
+      status: 'attention',
+      generatedAt: iso(0),
+      summary: { total: 5, ready: 4, attention: 1, blocked: 0 },
+      checks: [
+        {
+          id: 'calendar-provider',
+          label: 'Calendar provider',
+          ok: true,
+          severity: 'required',
+          detail: 'Google Calendar and Infomaniak DAV ready for calendar reads',
+        },
+        {
+          id: 'google-calendar',
+          label: 'Google Calendar',
+          ok: true,
+          severity: 'advisory',
+          detail:
+            'Google Workspace calendar credentials and read permissions are ready',
+        },
+        {
+          id: 'infomaniak-dav',
+          label: 'Infomaniak DAV calendar',
+          ok: true,
+          severity: 'advisory',
+          detail: 'Infomaniak DAV credentials and read permissions are ready',
+        },
+        {
+          id: 'write-approval',
+          label: 'Calendar write approval',
+          ok: true,
+          severity: 'required',
+          detail: 'Calendar writes are approval gated',
+        },
+        {
+          id: 'meeting-briefing-skill',
+          label: 'Meeting briefing skill',
+          ok: false,
+          severity: 'advisory',
+          detail: 'meeting-briefing skill is missing in this mock scenario',
+          hint: 'Restore the bundled meeting-briefing skill for richer meeting prep',
+        },
+      ],
+      workflows: [
+        {
+          id: 'agenda-review',
+          label: 'Review upcoming agenda',
+          status: 'ready',
+          detail:
+            'Agents can list upcoming calendar events and summarize the day',
+          providers: ['Google Calendar', 'Infomaniak DAV'],
+          approvalRequired: false,
+        },
+        {
+          id: 'availability',
+          label: 'Check availability and conflicts',
+          status: 'ready',
+          detail: 'Agents can inspect availability and identify conflicts',
+          providers: ['Google Calendar', 'Infomaniak DAV'],
+          approvalRequired: false,
+        },
+        {
+          id: 'meeting-briefing',
+          label: 'Prepare meeting briefings',
+          status: 'attention',
+          detail:
+            'Meeting briefings need calendar read access and the briefing skill',
+          providers: ['Google Calendar', 'Infomaniak DAV'],
+          approvalRequired: false,
+        },
+        {
+          id: 'schedule-change',
+          label: 'Create, update, or delete events',
+          status: 'ready',
+          detail: 'Calendar mutations are available behind explicit approval',
+          providers: ['Google Calendar', 'Infomaniak DAV'],
+          approvalRequired: true,
+        },
+        {
+          id: 'follow-up-reminders',
+          label: 'Create follow-up reminders',
+          status: 'ready',
+          detail: 'Agents can propose reminders after approved meeting context',
+          providers: ['Google Calendar', 'Infomaniak DAV'],
+          approvalRequired: true,
+        },
+      ],
+    };
+  }
   if (pathname === '/providers') return providers();
   if (pathname === '/memory') {
     return [
