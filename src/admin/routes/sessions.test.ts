@@ -416,6 +416,7 @@ describe('terminal session API', () => {
       const detail = (await response.json()) as {
         approvals: unknown[];
         artifacts: unknown[];
+        deliverables: unknown[];
       };
 
       expect(response.status).toBe(200);
@@ -452,6 +453,15 @@ describe('terminal session API', () => {
           }),
         ]),
       );
+      expect(detail.deliverables).toEqual([
+        expect.objectContaining({
+          id: 'job-detail-deliverable-pr',
+          title: 'Pull request',
+          status: 'pending',
+          sourceType: 'coding-job',
+          externalUrl: 'https://github.com/owner/repo/pull/8',
+        }),
+      ]);
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));

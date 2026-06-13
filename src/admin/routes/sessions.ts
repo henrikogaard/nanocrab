@@ -51,9 +51,38 @@ interface CockpitTimelineEvent {
   detail: string;
 }
 
+interface CockpitArtifact {
+  id: string;
+  name: string;
+  path: string;
+  kind: string;
+  status?: string;
+  sizeBytes?: number;
+  createdAt?: string;
+  summary?: string;
+  downloadUrl?: string;
+  externalUrl?: string;
+}
+
+interface CockpitDeliverable {
+  id: string;
+  title: string;
+  format: string;
+  path: string;
+  sourceType: string;
+  sourceId: string;
+  status: string;
+  createdAt: string;
+  sizeBytes: number | null;
+  summary: string;
+  downloadUrl?: string;
+  externalUrl?: string;
+}
+
 interface CockpitSessionDetail extends SessionInfo {
   timeline: CockpitTimelineEvent[];
-  artifacts: Array<{ id: string; name: string; path: string; kind: string }>;
+  artifacts: CockpitArtifact[];
+  deliverables: CockpitDeliverable[];
   approvals: Array<{
     id: string;
     title: string;
@@ -131,6 +160,49 @@ function extractText(obj: Record<string, any>): string {
 function compactStep(text: string, fallback: string): string {
   const oneLine = text.replace(/\s+/g, ' ').trim();
   return (oneLine || fallback).slice(0, 180);
+}
+
+function fileSizeBytes(filePath: string): number | null {
+  try {
+    const stat = fs.statSync(filePath);
+    return stat.isFile() ? stat.size : null;
+  } catch {
+    return null;
+  }
+}
+
+function artifactFormat(filePath: string, fallback = 'file'): string {
+  const ext = path.extname(filePath).replace(/^\./, '').toLowerCase();
+  return ext || fallback;
+}
+
+function deliverableFromPath(input: {
+  id: string;
+  title: string;
+  path: string;
+  sourceType: string;
+  sourceId: string;
+  status: string;
+  createdAt: string;
+  summary: string;
+  format?: string;
+  downloadUrl?: string;
+  externalUrl?: string;
+}): CockpitDeliverable {
+  return {
+    id: input.id,
+    title: input.title,
+    format: input.format || artifactFormat(input.path),
+    path: input.path,
+    sourceType: input.sourceType,
+    sourceId: input.sourceId,
+    status: input.status,
+    createdAt: input.createdAt,
+    sizeBytes: fileSizeBytes(input.path),
+    summary: input.summary,
+    downloadUrl: input.downloadUrl,
+    externalUrl: input.externalUrl,
+  };
 }
 
 function inferStatus(summary: {
@@ -432,6 +504,7 @@ export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
 
   const timeline: CockpitTimelineEvent[] = [];
   const artifacts: CockpitSessionDetail['artifacts'] = [];
+  const deliverables: CockpitSessionDetail['deliverables'] = [];
   const filePath = transcriptPath(summary.group, summary.sessionId);
   if (filePath) {
     readJsonLines(filePath)
@@ -461,12 +534,30 @@ export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
           const maybePath =
             inputRecord.file_path || inputRecord.path || inputRecord.filename;
           if (typeof maybePath === 'string' && maybePath.trim()) {
+            const artifactPath = maybePath.trim();
             artifacts.push({
               id: `${summary.id}-artifact-${artifacts.length}`,
-              name: path.basename(maybePath),
-              path: maybePath,
+              name: path.basename(artifactPath),
+              path: artifactPath,
               kind: String(block.name || 'file'),
+              status: 'ready',
+              sizeBytes: fileSizeBytes(artifactPath) || undefined,
+              createdAt: ts,
             });
+            if (/write|edit|patch|artifact|create/i.test(String(block.name))) {
+              deliverables.push(
+                deliverableFromPath({
+                  id: `${summary.id}-deliverable-${deliverables.length}`,
+                  title: path.basename(artifactPath),
+                  path: artifactPath,
+                  sourceType: 'transcript',
+                  sourceId: summary.id,
+                  status: 'ready',
+                  createdAt: ts,
+                  summary: `Produced by ${String(block.name || 'tool')} during the agent run.`,
+                }),
+              );
+            }
           }
         }
       });
@@ -479,6 +570,7 @@ export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
         name: path.basename(file),
         path: file,
         kind: 'changed-file',
+        status: 'ready',
       });
     }
     if (codingJob.prUrl) {
@@ -487,6 +579,21 @@ export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
         name: 'Pull request',
         path: codingJob.prUrl,
         kind: 'pull-request',
+        status: codingJob.status === 'completed' ? 'ready' : 'pending',
+        externalUrl: codingJob.prUrl,
+      });
+      deliverables.push({
+        id: `${codingJob.id}-deliverable-pr`,
+        title: 'Pull request',
+        format: 'github-pr',
+        path: codingJob.prUrl,
+        sourceType: 'coding-job',
+        sourceId: codingJob.id,
+        status: codingJob.status === 'completed' ? 'ready' : 'pending',
+        createdAt: codingJob.completedAt || codingJob.createdAt,
+        sizeBytes: null,
+        summary: 'Reviewable implementation branch prepared by the coding job.',
+        externalUrl: codingJob.prUrl,
       });
     }
     if (codingJob.commitSha) {
@@ -495,6 +602,19 @@ export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
         name: codingJob.commitSha.slice(0, 12),
         path: codingJob.commitSha,
         kind: 'commit',
+        status: 'ready',
+      });
+      deliverables.push({
+        id: `${codingJob.id}-deliverable-commit`,
+        title: `Commit ${codingJob.commitSha.slice(0, 12)}`,
+        format: 'commit',
+        path: codingJob.commitSha,
+        sourceType: 'coding-job',
+        sourceId: codingJob.id,
+        status: 'ready',
+        createdAt: codingJob.completedAt || codingJob.createdAt,
+        sizeBytes: null,
+        summary: 'Implementation commit recorded for audit and handoff.',
       });
     }
     if (codingJob.testSummary) {
@@ -503,6 +623,19 @@ export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
         name: 'Test summary',
         path: codingJob.testSummary,
         kind: 'test-summary',
+        status: codingJob.status === 'failed' ? 'failed' : 'ready',
+      });
+      deliverables.push({
+        id: `${codingJob.id}-deliverable-test-summary`,
+        title: 'Test summary',
+        format: 'text',
+        path: codingJob.testSummary,
+        sourceType: 'coding-job',
+        sourceId: codingJob.id,
+        status: codingJob.status === 'failed' ? 'failed' : 'ready',
+        createdAt: codingJob.completedAt || codingJob.createdAt,
+        sizeBytes: Buffer.byteLength(codingJob.testSummary, 'utf8'),
+        summary: 'Captured test output from the coding job run.',
       });
     }
   }
@@ -521,6 +654,7 @@ export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
     ...summary,
     timeline,
     artifacts: artifacts.slice(0, 24),
+    deliverables: deliverables.slice(0, 24),
     approvals,
   };
 }
