@@ -2483,6 +2483,60 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       },
     ];
   }
+  if (pathname === '/webhooks/github-health') {
+    return {
+      status: 'attention',
+      webhookUrl: 'https://nanocrab.example.com/api/webhooks/github',
+      generatedAt: iso(0),
+      summary: { total: 6, passed: 5, failedRequired: 0, failedAdvisory: 1 },
+      checks: [
+        {
+          id: 'github-token',
+          label: 'GitHub API token',
+          ok: true,
+          severity: 'required',
+          detail:
+            'GitHub token is configured for connector and coding-job API calls',
+        },
+        {
+          id: 'webhook-enabled',
+          label: 'Webhook receiver',
+          ok: true,
+          severity: 'advisory',
+          detail: 'GitHub webhook receiver is enabled',
+        },
+        {
+          id: 'webhook-secret',
+          label: 'Webhook secret',
+          ok: true,
+          severity: 'required',
+          detail: 'Webhook secret is configured',
+        },
+        {
+          id: 'target-group',
+          label: 'Notification target',
+          ok: true,
+          severity: 'required',
+          detail: 'Target group is configured',
+        },
+        {
+          id: 'event-selection',
+          label: 'Event selection',
+          ok: false,
+          severity: 'advisory',
+          detail: 'Recommended events are not all selected',
+          hint: 'Select push, pull_request, and issues events for coding and autofix workflows',
+        },
+        {
+          id: 'recent-delivery',
+          label: 'Recent delivery',
+          ok: true,
+          severity: 'advisory',
+          detail: 'Most recent event: issues on henrikogaard/nanocrab',
+        },
+      ],
+    };
+  }
   if (pathname === '/logs/system') {
     return {
       lines: [

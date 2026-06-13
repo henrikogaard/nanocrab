@@ -9,6 +9,7 @@ import { getState } from '../state.js';
 import { auditLog } from '../security.js';
 import { logger } from '../../logger.js';
 import { handleAutofixWebhook } from '../plugins/autofix/routes.js';
+import { buildGitHubConnectorHealth } from '../../github-connector-health.js';
 
 const router = Router();
 const CONFIG_PATH = path.join(STORE_DIR, 'webhook-config.json');
@@ -47,6 +48,26 @@ function logEvent(event: Record<string, unknown>): void {
   }
 }
 
+function loadEvents(limit = 50): Record<string, unknown>[] {
+  try {
+    const content = fs.readFileSync(EVENTS_PATH, 'utf-8');
+    const lines = content.trim().split('\n').filter(Boolean);
+    return lines
+      .slice(-limit)
+      .reverse()
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 // Config CRUD (protected by requireAuth in index.ts)
 router.get('/config', (_req: Request, res: Response) => {
   const config = loadConfig();
@@ -68,24 +89,33 @@ router.put('/config', (req: Request, res: Response) => {
 });
 
 router.get('/events', (_req: Request, res: Response) => {
-  try {
-    const content = fs.readFileSync(EVENTS_PATH, 'utf-8');
-    const lines = content.trim().split('\n').filter(Boolean);
-    const events = lines
-      .slice(-50)
-      .reverse()
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
-    res.json(events);
-  } catch {
-    res.json([]);
-  }
+  res.json(loadEvents());
+});
+
+router.get('/github-health', (req: Request, res: Response) => {
+  const env = readEnvFile(['GITHUB_TOKEN', 'GITHUB_WEBHOOK_SECRET']);
+  const config = loadConfig();
+  const state = getState();
+  const groups = state.registeredGroups();
+  const webhookSecret =
+    config.secret ||
+    process.env.GITHUB_WEBHOOK_SECRET ||
+    env.GITHUB_WEBHOOK_SECRET ||
+    '';
+  const token = process.env.GITHUB_TOKEN || env.GITHUB_TOKEN || '';
+  const protocol = req.protocol || 'http';
+  const host = req.get('host') || 'localhost';
+
+  res.json(
+    buildGitHubConnectorHealth({
+      webhookUrl: `${protocol}://${host}/api/webhooks/github`,
+      config,
+      events: loadEvents(),
+      tokenConfigured: !!token,
+      webhookSecretConfigured: !!webhookSecret,
+      targetGroupExists: Object.keys(groups).includes(config.targetJid),
+    }),
+  );
 });
 
 router.delete('/events', (req: Request, res: Response) => {
