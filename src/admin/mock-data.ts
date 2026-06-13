@@ -2187,6 +2187,97 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       ],
     };
   }
+  if (pathname === '/mcp/email-workflows') {
+    return {
+      status: 'attention',
+      generatedAt: iso(0),
+      summary: { total: 5, ready: 4, attention: 1, blocked: 0 },
+      checks: [
+        {
+          id: 'email-provider',
+          label: 'Email provider',
+          ok: true,
+          severity: 'required',
+          detail: 'Gmail and Infomaniak Mail ready for email reads',
+        },
+        {
+          id: 'gmail',
+          label: 'Gmail',
+          ok: true,
+          severity: 'advisory',
+          detail:
+            'Google Workspace Gmail credentials and read permissions are ready',
+        },
+        {
+          id: 'infomaniak-mail',
+          label: 'Infomaniak Mail',
+          ok: true,
+          severity: 'advisory',
+          detail: 'Infomaniak mail credentials and read permissions are ready',
+        },
+        {
+          id: 'write-approval',
+          label: 'Email write approval',
+          ok: true,
+          severity: 'required',
+          detail: 'Email sends and mailbox mutations are approval gated',
+        },
+        {
+          id: 'inbox-triage-skill',
+          label: 'Inbox triage skill',
+          ok: false,
+          severity: 'advisory',
+          detail: 'inbox-triage skill is missing in this mock scenario',
+          hint: 'Restore the bundled inbox-triage skill for cleanup workflows',
+        },
+      ],
+      workflows: [
+        {
+          id: 'mail-search-summary',
+          label: 'Search and summarize mail',
+          status: 'ready',
+          detail:
+            'Agents can search mail narrowly and summarize relevant threads',
+          providers: ['Gmail', 'Infomaniak Mail'],
+          approvalRequired: false,
+        },
+        {
+          id: 'inbox-triage',
+          label: 'Triage inboxes',
+          status: 'attention',
+          detail:
+            'Inbox triage needs email read access and the inbox-triage skill',
+          providers: ['Gmail', 'Infomaniak Mail'],
+          approvalRequired: false,
+        },
+        {
+          id: 'reply-draft',
+          label: 'Draft replies and follow-ups',
+          status: 'ready',
+          detail: 'Agents can draft replies without sending them',
+          providers: ['Gmail', 'Infomaniak Mail'],
+          approvalRequired: false,
+        },
+        {
+          id: 'send-reply',
+          label: 'Send or reply to email',
+          status: 'ready',
+          detail: 'Outbound mail is available behind explicit approval',
+          providers: ['Gmail', 'Infomaniak Mail'],
+          approvalRequired: true,
+        },
+        {
+          id: 'mailbox-mutation',
+          label: 'Archive, label, delete, or move messages',
+          status: 'ready',
+          detail:
+            'Mailbox cleanup actions are available behind explicit approval',
+          providers: ['Gmail', 'Infomaniak Mail'],
+          approvalRequired: true,
+        },
+      ],
+    };
+  }
   if (pathname === '/providers') return providers();
   if (pathname === '/memory') {
     return [

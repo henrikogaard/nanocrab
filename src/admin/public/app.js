@@ -2589,13 +2589,14 @@ window.deleteCredential = async (key, btnEl) => {
 
 // MCP Servers
 async function renderMcp(el) {
-  const [health, presets, infomaniakWorkflows, calendarWorkflows] =
+  const [health, presets, infomaniakWorkflows, calendarWorkflows, emailWorkflows] =
     await Promise.all([
-    api('/mcp/health'),
-    api('/mcp/presets').catch(() => []),
-    api('/mcp/infomaniak-workflows').catch(() => null),
-    api('/mcp/calendar-workflows').catch(() => null),
-  ]);
+      api('/mcp/health'),
+      api('/mcp/presets').catch(() => []),
+      api('/mcp/infomaniak-workflows').catch(() => null),
+      api('/mcp/calendar-workflows').catch(() => null),
+      api('/mcp/email-workflows').catch(() => null),
+    ]);
   const servers = health.servers || [];
   el.innerHTML = `
     <div class="page-header"><h2>MCP Servers</h2>
@@ -2706,6 +2707,50 @@ async function renderMcp(el) {
       </div>
       <div style="display:grid;gap:6px">
         ${calendarWorkflows.checks
+          .map(
+            (check) => `
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;font-size:12px;padding:7px 8px;border:1px solid var(--border);border-radius:var(--radius-sm)">
+            <div>
+              <strong style="color:var(--text)">${esc(check.label)}</strong>
+              <div style="color:var(--text-muted);margin-top:2px">${esc(check.detail)}</div>
+              ${check.hint && !check.ok ? `<div style="color:var(--warning);margin-top:2px">${esc(check.hint)}</div>` : ''}
+            </div>
+            <span class="badge ${check.ok ? 'badge-success' : check.severity === 'required' ? 'badge-error' : 'badge-warning'}">${check.ok ? 'OK' : check.severity === 'required' ? 'Block' : 'Warn'}</span>
+          </div>`,
+          )
+          .join('')}
+      </div>
+    </div>`
+        : ''
+    }
+    ${
+      emailWorkflows
+        ? `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px">
+        <div>
+          <div class="card-title" style="margin:0">Email Workflows</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Mail search, thread summaries, inbox triage, reply drafts, approved sending, and mailbox cleanup.</div>
+        </div>
+        <span class="badge ${emailWorkflows.status === 'ready' ? 'badge-success' : emailWorkflows.status === 'blocked' ? 'badge-error' : 'badge-warning'}">${esc(emailWorkflows.status)}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;margin-bottom:12px">
+        ${emailWorkflows.workflows
+          .map(
+            (workflow) => `
+          <div style="padding:9px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface)">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+              <strong style="font-size:12px;color:var(--text)">${esc(workflow.label)}</strong>
+              <span class="badge ${workflow.status === 'ready' ? 'badge-success' : workflow.status === 'blocked' ? 'badge-error' : 'badge-warning'}">${esc(workflow.status)}</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:5px;line-height:1.35">${esc(workflow.detail)}</div>
+            ${workflow.providers?.length ? `<div style="font-size:11px;color:var(--text-muted);margin-top:5px">${workflow.providers.map((provider) => esc(provider)).join(', ')}</div>` : ''}
+            ${workflow.approvalRequired ? '<div style="font-size:11px;color:var(--warning);margin-top:5px">Requires explicit approval before sending or mailbox changes.</div>' : ''}
+          </div>`,
+          )
+          .join('')}
+      </div>
+      <div style="display:grid;gap:6px">
+        ${emailWorkflows.checks
           .map(
             (check) => `
           <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;font-size:12px;padding:7px 8px;border:1px solid var(--border);border-radius:var(--radius-sm)">
