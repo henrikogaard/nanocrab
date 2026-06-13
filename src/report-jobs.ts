@@ -4,7 +4,12 @@ import path from 'path';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
 
 import { STORE_DIR } from './config.js';
-import { createApproval, hasApprovedTarget } from './approvals.js';
+import {
+  createApproval,
+  hasApprovedTarget,
+  listApprovals,
+  type ApprovalKind,
+} from './approvals.js';
 import { listJournalEntryRecords, findJournalEvents } from './journal-store.js';
 import { listMemoryRecords } from './memory-store.js';
 import { ProviderPurpose } from './provider-router.js';
@@ -132,6 +137,36 @@ function composeOutline(job: ReportJob): string {
     '3. Relevant memories and standing context',
     '4. Risks, gaps, and follow-up actions',
   ].join('\n');
+}
+
+function ensureReportApproval(job: ReportJob, kind: ApprovalKind): void {
+  const existing = listApprovals({
+    status: 'pending',
+    kind,
+    targetType: 'report-job',
+    targetId: job.id,
+    limit: 1,
+  });
+  if (existing.length > 0) return;
+  createApproval({
+    kind,
+    title:
+      kind === 'report-outline'
+        ? `Approve report outline: ${job.title}`
+        : `Approve report delivery: ${job.title}`,
+    summary:
+      kind === 'report-outline'
+        ? job.outline
+        : `Artifacts ready:\n${job.artifacts.map((artifact) => artifact.path).join('\n')}`,
+    risk: kind === 'report-outline' ? 'low' : 'medium',
+    requester: job.requester,
+    targetType: 'report-job',
+    targetId: job.id,
+    payload:
+      kind === 'report-outline'
+        ? { jobId: job.id }
+        : { jobId: job.id, artifacts: job.artifacts },
+  });
 }
 
 function composeMarkdown(job: ReportJob): void {
@@ -265,16 +300,7 @@ export function createReportJob(input: CreateReportJobInput): ReportJob {
   job.outline = composeOutline(job);
   upsertJob(job);
   if (job.requireOutlineApproval) {
-    createApproval({
-      kind: 'report-outline',
-      title: `Approve report outline: ${job.title}`,
-      summary: job.outline,
-      risk: 'low',
-      requester: job.requester,
-      targetType: 'report-job',
-      targetId: job.id,
-      payload: { jobId: job.id },
-    });
+    ensureReportApproval(job, 'report-outline');
   }
   return job;
 }
@@ -286,16 +312,8 @@ export async function approveReportOutline(id: string): Promise<ReportJob> {
     job.requireOutlineApproval &&
     !hasApprovedTarget('report-outline', 'report-job', id)
   ) {
-    createApproval({
-      kind: 'report-outline',
-      title: `Approve report outline: ${job.title}`,
-      summary: job.outline,
-      risk: 'low',
-      requester: job.requester,
-      targetType: 'report-job',
-      targetId: job.id,
-      payload: { jobId: job.id },
-    });
+    ensureReportApproval(job, 'report-outline');
+    throw new Error('Report outline approval is still pending');
   }
   composeMarkdown(job);
   await exportArtifacts(job);
@@ -305,16 +323,7 @@ export async function approveReportOutline(id: string): Promise<ReportJob> {
   job.updatedAt = new Date().toISOString();
   upsertJob(job);
   if (job.requireDeliveryApproval) {
-    createApproval({
-      kind: 'report-delivery',
-      title: `Approve report delivery: ${job.title}`,
-      summary: `Artifacts ready:\n${job.artifacts.map((artifact) => artifact.path).join('\n')}`,
-      risk: 'medium',
-      requester: job.requester,
-      targetType: 'report-job',
-      targetId: job.id,
-      payload: { jobId: job.id, artifacts: job.artifacts },
-    });
+    ensureReportApproval(job, 'report-delivery');
   }
   return job;
 }
@@ -322,6 +331,13 @@ export async function approveReportOutline(id: string): Promise<ReportJob> {
 export function approveReportDelivery(id: string): ReportJob {
   const job = getReportJob(id);
   if (!job) throw new Error(`Report job not found: ${id}`);
+  if (
+    job.requireDeliveryApproval &&
+    !hasApprovedTarget('report-delivery', 'report-job', id)
+  ) {
+    ensureReportApproval(job, 'report-delivery');
+    throw new Error('Report delivery approval is still pending');
+  }
   job.status = 'delivered';
   job.updatedAt = new Date().toISOString();
   upsertJob(job);

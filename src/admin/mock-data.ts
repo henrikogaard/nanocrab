@@ -2664,6 +2664,42 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         updatedAt: iso(55),
         error: null,
       },
+      {
+        id: 'report-mock-2',
+        title: 'Operations Briefing Export',
+        request: 'Prepare a source-backed briefing for tonight.',
+        requester: 'main',
+        providerProfileId: 'default_reports',
+        sourceScopes: ['journal', 'memory'],
+        outputFormats: ['markdown', 'html'],
+        deliverablesDir: 'store/deliverables',
+        requireOutlineApproval: true,
+        requireDeliveryApproval: true,
+        status: 'awaiting_delivery_approval',
+        outline:
+          '# Operations Briefing Export\n\n1. Current situation\n2. Known risks\n3. Source-backed recommendations',
+        markdown:
+          '# Operations Briefing Export\n\nRequested by: main\n\n## Request\n\nPrepare a source-backed briefing for tonight.',
+        citations: [
+          {
+            label: 'Fleet crash near Kepler-442b',
+            source: 'journal:evt-mock-1',
+          },
+        ],
+        artifacts: [
+          {
+            format: 'markdown',
+            path: '/mock/store/deliverables/operations-briefing-export.md',
+          },
+          {
+            format: 'html',
+            path: '/mock/store/deliverables/operations-briefing-export.html',
+          },
+        ],
+        createdAt: iso(35),
+        updatedAt: iso(28),
+        error: null,
+      },
     ];
   }
   if (pathname === '/research/jobs') {
@@ -3888,6 +3924,14 @@ export function handleMockApi(req: Request, res: Response): void {
       .type('svg')
       .send(
         '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#111827"/><text x="24" y="92" fill="#60a5fa" font-family="Arial" font-size="22">Mock attachment</text></svg>',
+      );
+    return;
+  }
+  if (pathname.includes('/reports/jobs/') && pathname.endsWith('/download')) {
+    res
+      .type('text/markdown')
+      .send(
+        '# Mock report artifact\n\nThis mock download does not read live files.\n',
       );
     return;
   }
