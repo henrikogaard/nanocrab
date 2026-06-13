@@ -47,6 +47,7 @@ async function renderAgents(el) {
       tools,
       agentTasks,
       codingRepos,
+      codingRepoRules,
       codingJobs,
       agentProviders,
       pendingQuestions,
@@ -65,6 +66,7 @@ async function renderAgents(el) {
       api('/agents/tools').catch(() => []),
       api('/agents/tasks').catch(() => []),
       api('/agents/coding/repos').catch(() => []),
+      api('/agents/coding/repo-rules').catch(() => []),
       api('/agents/coding/jobs').catch(() => []),
       api('/agents/providers').catch(() => []),
       api('/questions/pending').catch(() => []),
@@ -225,6 +227,22 @@ async function renderAgents(el) {
         (r) => `<option value="${esc(r.fullName)}">${esc(r.fullName)}</option>`,
       )
       .join('');
+    const codingRepoRuleRows =
+      codingRepoRules.length === 0
+        ? '<div class="empty" style="padding:10px">No repo coding rules saved yet</div>'
+        : codingRepoRules
+            .map(
+              (rule) => `
+        <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+            <strong style="font-size:12px;color:var(--text)">${esc(rule.title)}</strong>
+            <span class="badge ${rule.status === 'approved' ? 'badge-success' : 'badge-muted'}">${esc(rule.status)}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(rule.repo)} • ${esc(rule.visibility || 'shared')}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:5px;line-height:1.35">${esc(rule.content)}</div>
+        </div>`,
+            )
+            .join('');
     const codingJobRows = codingJobs
       .map((job) => {
         const statusBadge = codingJobStatusBadge(job.status);
@@ -375,6 +393,17 @@ async function renderAgents(el) {
             ? '<div class="empty" style="padding:12px">No dedicated coding jobs yet</div>'
             : codingJobRows
         }
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">Repo Coding Rules <span class="badge badge-muted" style="font-size:10px">${codingRepoRules.length}</span></div>
+        <div style="display:grid;grid-template-columns:minmax(160px,220px) 1fr 2fr auto;gap:6px;margin-bottom:12px;align-items:end">
+          <div><label style="font-size:11px;color:var(--text-muted)">Repo</label><select class="search-input" id="repo-rule-repo">${codingRepoOptions || '<option value="">No repos</option>'}</select></div>
+          <div><label style="font-size:11px;color:var(--text-muted)">Title</label><input class="search-input" id="repo-rule-title" placeholder="Use Node 22"></div>
+          <div><label style="font-size:11px;color:var(--text-muted)">Rule</label><input class="search-input" id="repo-rule-content" placeholder="Run checks through npm scripts"></div>
+          <button class="btn btn-sm btn-primary" onclick="saveRepoCodingRule()">Save Rule</button>
+        </div>
+        ${codingRepoRuleRows}
       </div>
 
       <div class="card" style="margin-bottom:16px">
@@ -639,6 +668,40 @@ window.registerCodingRepo = async function () {
       navigate('agents');
     } else {
       toast(r.error || 'Failed', 'error');
+    }
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
+window.saveRepoCodingRule = async function () {
+  const repo = document.getElementById('repo-rule-repo')?.value?.trim();
+  const title = document.getElementById('repo-rule-title')?.value?.trim();
+  const content = document.getElementById('repo-rule-content')?.value?.trim();
+  if (!repo || !title || !content) {
+    toast('Choose a repo and enter a rule title and body', 'warning');
+    return;
+  }
+  try {
+    const [owner, name] = repo.split('/');
+    const r = await api(
+      `/agents/coding/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/rules`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          title,
+          content,
+          source: 'dashboard',
+          visibility: 'shared',
+          status: 'approved',
+        }),
+      },
+    );
+    if (r.ok) {
+      toast('Repo rule saved', 'success');
+      navigate('agents');
+    } else {
+      toast(r.error || 'Failed to save rule', 'error');
     }
   } catch (e) {
     toast('Failed: ' + e.message, 'error');

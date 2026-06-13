@@ -172,6 +172,7 @@ Goal: work with GitHub repos and produce PRs while the owner is on the go.
 
 - GitHub connector:
   - DONE: repo registration/allowlist for coding jobs
+  - DONE: repo-specific coding rules/preferences are stored separately from secrets and injected into coding prompts.
   - DONE: issue listing and issue picking through dashboard/API
   - DONE: branch creation inside dedicated coding containers
   - commit signing policy
