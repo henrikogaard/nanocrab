@@ -319,6 +319,6 @@ These rules are non-negotiable:
    - DONE: Provider/model selectors in Scheduled Tasks UI (creation + edit forms)
    - DONE: Model selector in GitHub coding issue picker
    - DONE: Persistent probe history with dashboard API endpoint
-   - DONE: Periodic probe scheduler (5-min interval) with health dashboard display in Monitoring page
+   - DONE: Periodic probe scheduler (5-min interval) with local/remote inference readiness, stale probes, average latency, capability tags, and health dashboard display in Monitoring page
    - DONE: `POST /providers/probe-all` for manual re-probe from dashboard
    - DONE: 9 tests for probe scheduler (health data, version tracking, failure handling, scheduler lifecycle)

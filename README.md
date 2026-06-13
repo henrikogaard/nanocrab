@@ -316,6 +316,7 @@ when needed, which is the normal VPS/Linux container path.
 - **Settings -> Provider Profiles** chooses provider/model/tool policy for chat, coding, automations, memory, journal, skill factory, reports, documents, and vision.
 - **Groups -> Provider** overrides the provider per group.
 - **Integrations -> AI Providers** enables/disables API-key providers.
+- **Monitoring -> Inference Health** shows local vs remote provider readiness, stale probes, average latency, capability tags, and manual re-probe controls.
 
 Settings can close active agent sessions while switching providers. Main-group
 persistent containers restart automatically and new containers pick up the

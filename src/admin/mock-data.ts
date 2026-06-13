@@ -1544,67 +1544,111 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
     };
   }
   if (pathname === '/providers/health') {
+    const entries = [
+      {
+        profileId: 'default_chat',
+        provider: 'openrouter',
+        model: 'openrouter/auto',
+        purpose: 'Chat',
+        location: 'remote',
+        ok: true,
+        lastProbeAt: new Date(Date.now() - 60000).toISOString(),
+        latencyMs: 420,
+        capabilities: ['tools', 'json', 'stream', 'vision'],
+      },
+      {
+        profileId: 'default_coding',
+        provider: 'codex',
+        model: 'gpt-5.4',
+        purpose: 'Coding',
+        location: 'remote',
+        ok: true,
+        lastProbeAt: new Date(Date.now() - 120000).toISOString(),
+        latencyMs: 780,
+        capabilities: ['tools', 'json', 'stream', 'vision'],
+      },
+      {
+        profileId: 'default_automation',
+        provider: 'openrouter',
+        model: 'openrouter/auto',
+        purpose: 'Automations',
+        location: 'remote',
+        ok: false,
+        lastProbeAt: new Date(Date.now() - 300000).toISOString(),
+        latencyMs: 1260,
+        errorMessage: 'Rate limit exceeded',
+        capabilities: ['tools', 'json', 'stream', 'vision'],
+      },
+      {
+        profileId: 'default_memory',
+        provider: 'ollama',
+        model: 'gemma4:e2b',
+        purpose: 'Memory',
+        location: 'local',
+        ok: true,
+        lastProbeAt: new Date(Date.now() - 3600000).toISOString(),
+        latencyMs: 96,
+        capabilities: ['json', 'stream'],
+      },
+      {
+        profileId: 'default_journal',
+        provider: 'gemini',
+        model: 'gemini-2.5-flash',
+        purpose: 'Journal',
+        location: 'remote',
+        ok: true,
+        lastProbeAt: new Date(Date.now() - 7200000).toISOString(),
+        latencyMs: 510,
+        capabilities: ['json'],
+      },
+      {
+        profileId: 'default_report',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+        purpose: 'Reports',
+        location: 'remote',
+        ok: false,
+        lastProbeAt: new Date(Date.now() - 1800000).toISOString(),
+        latencyMs: 2100,
+        errorMessage:
+          'API reached max capacity: this model is temporarily unavailable',
+        capabilities: ['tools', 'json', 'stream'],
+      },
+    ].map((entry) => ({
+      ...entry,
+      stale:
+        entry.lastProbeAt &&
+        Date.now() - Date.parse(entry.lastProbeAt) > 15 * 60 * 1000,
+      capabilityFlags: {
+        tools: entry.capabilities.includes('tools'),
+        json: entry.capabilities.includes('json'),
+        stream: entry.capabilities.includes('stream'),
+        vision: entry.capabilities.includes('vision'),
+      },
+    }));
+    const remote = entries.filter((entry) => entry.location === 'remote');
+    const local = entries.filter((entry) => entry.location === 'local');
     return {
       version: 1,
-      entries: [
-        {
-          profileId: 'default_chat',
-          provider: 'openrouter',
-          model: 'openrouter/auto',
-          purpose: 'Chat',
-          ok: true,
-          lastProbeAt: new Date(Date.now() - 60000).toISOString(),
-          capabilities: ['tools', 'json', 'stream', 'vision'],
+      generatedAt: new Date().toISOString(),
+      summary: {
+        total: entries.length,
+        ok: entries.filter((entry) => entry.ok).length,
+        failed: entries.filter((entry) => !entry.ok).length,
+        stale: entries.filter((entry) => entry.stale).length,
+        local: {
+          total: local.length,
+          ok: local.filter((entry) => entry.ok).length,
+          failed: local.filter((entry) => !entry.ok).length,
         },
-        {
-          profileId: 'default_coding',
-          provider: 'codex',
-          model: 'gpt-5.4',
-          purpose: 'Coding',
-          ok: true,
-          lastProbeAt: new Date(Date.now() - 120000).toISOString(),
-          capabilities: ['tools', 'json', 'stream', 'vision'],
+        remote: {
+          total: remote.length,
+          ok: remote.filter((entry) => entry.ok).length,
+          failed: remote.filter((entry) => !entry.ok).length,
         },
-        {
-          profileId: 'default_automation',
-          provider: 'openrouter',
-          model: 'openrouter/auto',
-          purpose: 'Automations',
-          ok: false,
-          lastProbeAt: new Date(Date.now() - 300000).toISOString(),
-          errorMessage: 'Rate limit exceeded',
-          capabilities: ['tools', 'json', 'stream', 'vision'],
-        },
-        {
-          profileId: 'default_memory',
-          provider: 'openrouter',
-          model: 'openrouter/auto',
-          purpose: 'Memory',
-          ok: true,
-          lastProbeAt: new Date(Date.now() - 3600000).toISOString(),
-          capabilities: ['json'],
-        },
-        {
-          profileId: 'default_journal',
-          provider: 'gemini',
-          model: 'gemini-2.5-flash',
-          purpose: 'Journal',
-          ok: true,
-          lastProbeAt: new Date(Date.now() - 7200000).toISOString(),
-          capabilities: ['json'],
-        },
-        {
-          profileId: 'default_report',
-          provider: 'claude',
-          model: 'claude-sonnet-4-6',
-          purpose: 'Reports',
-          ok: false,
-          lastProbeAt: new Date(Date.now() - 1800000).toISOString(),
-          errorMessage:
-            'API reached max capacity: this model is temporarily unavailable',
-          capabilities: ['tools', 'json', 'stream'],
-        },
-      ],
+        averageLatencyMs: 861,
+      },
+      entries,
     };
   }
   if (pathname === '/providers/probe-history') {
