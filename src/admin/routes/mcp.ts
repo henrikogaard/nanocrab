@@ -18,6 +18,11 @@ import {
   calendarSkillPath,
   meetingBriefingSkillPath,
 } from '../../calendar-workflows.js';
+import {
+  buildEmailWorkflows,
+  emailSkillPath,
+  inboxTriageSkillPath,
+} from '../../email-workflows.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -203,6 +208,17 @@ router.get('/calendar-workflows', (_req: Request, res: Response) => {
       servers: status.servers,
       calendarSkillPath: calendarSkillPath(PROJECT_ROOT),
       meetingSkillPath: meetingBriefingSkillPath(PROJECT_ROOT),
+    }),
+  );
+});
+
+router.get('/email-workflows', (_req: Request, res: Response) => {
+  const status = getStatus();
+  res.json(
+    buildEmailWorkflows({
+      servers: status.servers,
+      emailSkillPath: emailSkillPath(PROJECT_ROOT),
+      inboxTriageSkillPath: inboxTriageSkillPath(PROJECT_ROOT),
     }),
   );
 });

@@ -189,6 +189,9 @@ uploads/sharing, and optional DAV/mail context.
 Calendar workflow readiness is also shown there for Google Calendar and
 Infomaniak DAV: agenda review, availability checks, meeting briefings,
 approval-gated scheduling changes, and follow-up reminders.
+Email workflow readiness covers Gmail and Infomaniak Mail: narrow search,
+thread summaries, inbox triage, reply drafts, approval-gated sending, and
+mailbox cleanup.
 
 ### Security
 
