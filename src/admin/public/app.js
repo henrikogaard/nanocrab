@@ -2430,6 +2430,9 @@ async function renderTasks(el) {
       mode: 'isolated',
     },
   ];
+  const operationTaskCount = tasks.filter((task) =>
+    (task.prompt || '').includes('[operation-schedule]'),
+  ).length;
 
   el.innerHTML = `
     <div class="page-header"><h2>Scheduled Tasks</h2><div style="display:flex;gap:8px"><button class="btn btn-sm btn-ghost" onclick="window.print()">Export</button><button class="btn btn-primary btn-sm" onclick="document.getElementById('new-task-form').style.display=document.getElementById('new-task-form').style.display==='none'?'block':'none'">New Task</button></div></div>
@@ -2445,6 +2448,22 @@ async function renderTasks(el) {
           </div>`,
         ).join('')}
       </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Operations <span class="badge badge-muted" style="font-size:10px">${operationTaskCount}</span></div>
+      <form id="operation-schedule-form">
+        <div class="grid grid-2">
+          <div class="form-group"><label>Group</label><select id="operation-group">${groups.map((g) => `<option value="${g.folder}|${g.jid}">${esc(g.name)}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Kind</label><select id="operation-intent"><option value="orders">Repeat orders</option><option value="reminder">Reminder</option></select></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Title</label><input id="operation-title" placeholder="Night rally orders"></div>
+          <div class="form-group"><label>Schedule</label><div style="display:flex;gap:8px"><select id="operation-schedule-type" style="width:120px"><option value="interval">Interval</option><option value="cron">Cron</option></select><input id="operation-schedule-value" placeholder="30m or 0 */2 * * *"></div></div>
+        </div>
+        <div class="form-group"><label>Orders / Reminder Text</label><textarea id="operation-orders" style="width:100%;min-height:76px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:13px;resize:vertical" placeholder="What should the bot repeat or remind the group about?"></textarea></div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-bottom:10px"><input type="checkbox" id="operation-delivery-approved"> Send scheduled messages to this group</label>
+        <button type="submit" class="btn btn-sm btn-primary">Create Operation Schedule</button>
+      </form>
     </div>
     <div class="card" id="new-task-form" style="display:none">
       <div class="card-title">Create Task</div>
@@ -2478,7 +2497,7 @@ async function renderTasks(el) {
     <tbody>${tasks
       .map(
         (t) => `<tr>
-      <td style="max-width:300px;color:var(--text)">${esc(truncate(t.prompt, 100))}</td>
+      <td style="max-width:300px;color:var(--text)">${(t.prompt || '').includes('[operation-schedule]') ? '<span class="badge badge-info" style="margin-right:6px">operation</span>' : ''}${esc(truncate(t.prompt, 100))}</td>
       <td><span class="badge badge-muted">${esc(t.group_folder)}</span></td>
       <td>${t.provider ? `<span class="badge badge-accent">${esc(t.provider)}</span>` : '<span class="badge badge-muted">inherit</span>'}</td>
       <td>${t.model ? `<span style="font-family:var(--mono);font-size:11px;color:var(--text)">${esc(t.model)}</span>` : '<span class="badge badge-muted">inherit</span>'}</td>
@@ -2531,6 +2550,44 @@ async function renderTasks(el) {
       });
       if (r.ok) navigate('tasks');
       else toast(r.error || 'Failed', 'error');
+    };
+  const operationForm = document.getElementById('operation-schedule-form');
+  if (operationForm)
+    operationForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const [groupFolder, chatJid] = document
+        .getElementById('operation-group')
+        .value.split('|');
+      const deliveryApproved = document.getElementById(
+        'operation-delivery-approved',
+      ).checked;
+      const r = await api('/tasks/operation-schedules', {
+        method: 'POST',
+        body: JSON.stringify({
+          groupFolder,
+          chatJid,
+          title: document.getElementById('operation-title').value,
+          orders: document.getElementById('operation-orders').value,
+          intent: document.getElementById('operation-intent').value,
+          scheduleType: document.getElementById('operation-schedule-type')
+            .value,
+          scheduleValue: document.getElementById('operation-schedule-value')
+            .value,
+          deliveryMode: deliveryApproved ? 'send' : 'preview',
+          deliveryApproved,
+        }),
+      });
+      if (r.ok) {
+        toast(
+          deliveryApproved
+            ? 'Operation schedule created'
+            : 'Preview operation schedule created',
+          'success',
+        );
+        navigate('tasks');
+      } else {
+        toast(r.error || 'Failed', 'error');
+      }
     };
 }
 

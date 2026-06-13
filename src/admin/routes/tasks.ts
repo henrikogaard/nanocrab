@@ -12,6 +12,7 @@ import path from 'path';
 import { STORE_DIR } from '../../config.js';
 import { isAgentProvider } from '../../agent-provider.js';
 import { ProviderPurpose, PROVIDER_PURPOSES } from '../../provider-router.js';
+import { createOperationSchedule } from '../../operation-schedules.js';
 
 const router = Router();
 
@@ -85,6 +86,63 @@ router.post('/', (req: Request, res: Response) => {
   });
 
   res.json({ ok: true, id });
+});
+
+router.post('/operation-schedules', (req: Request, res: Response) => {
+  const {
+    groupFolder,
+    chatJid,
+    title,
+    orders,
+    intent,
+    scheduleType,
+    scheduleValue,
+    contextMode,
+    deliveryMode,
+    deliveryApproved,
+    providerProfileId,
+    provider_profile_id,
+    provider,
+    model,
+  } = req.body;
+
+  try {
+    const result = createOperationSchedule({
+      groupFolder,
+      chatJid,
+      title,
+      orders,
+      intent: intent === 'orders' ? 'orders' : 'reminder',
+      scheduleType,
+      scheduleValue,
+      contextMode: contextMode === 'isolated' ? 'isolated' : 'group',
+      deliveryMode: deliveryMode === 'send' ? 'send' : 'preview',
+      deliveryApproved: deliveryApproved === true,
+      providerProfileId:
+        typeof providerProfileId === 'string' &&
+        PROVIDER_PURPOSES.includes(providerProfileId as ProviderPurpose)
+          ? providerProfileId
+          : typeof provider_profile_id === 'string' &&
+              PROVIDER_PURPOSES.includes(provider_profile_id as ProviderPurpose)
+            ? provider_profile_id
+            : 'default_automation',
+      provider:
+        typeof provider === 'string' && isAgentProvider(provider)
+          ? provider
+          : null,
+      model: typeof model === 'string' && model.trim() ? model.trim() : null,
+    });
+    res.json({
+      ok: true,
+      id: result.task.id,
+      task: result.task,
+      deliveryMode: result.deliveryMode,
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 router.get('/:id', (req: Request, res: Response) => {
