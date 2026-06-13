@@ -1010,6 +1010,70 @@ const repos = [
   { name: 'auroradocs', path: '/workspace/repos/auroradocs', readonly: true },
 ];
 
+function mockSkillInstallState(skillPath: string) {
+  if (skillPath === 'operation-planning') {
+    return {
+      status: 'modified',
+      skillPath,
+      exists: true,
+      currentSha256: 'mock-current-operation-planning',
+      currentVersion: null,
+      latestVersion: 2,
+      latestSha256: 'mock-history-operation-planning-v2',
+      updatedAt: iso(32),
+    };
+  }
+  return {
+    status: skillPath === 'docx-generation' ? 'untracked' : 'installed',
+    skillPath,
+    exists: true,
+    currentSha256: `mock-history-${skillPath}-v2`,
+    currentVersion: skillPath === 'docx-generation' ? null : 2,
+    latestVersion: skillPath === 'docx-generation' ? null : 2,
+    latestSha256:
+      skillPath === 'docx-generation' ? null : `mock-history-${skillPath}-v2`,
+    updatedAt: skillPath === 'docx-generation' ? null : iso(32),
+  };
+}
+
+function mockSkillVersions(skillPath: string) {
+  if (skillPath === 'docx-generation') {
+    return {
+      installState: mockSkillInstallState(skillPath),
+      versions: [],
+    };
+  }
+  return {
+    installState: mockSkillInstallState(skillPath),
+    versions: [
+      {
+        id: `skill-version-${skillPath}-2`,
+        skillPath,
+        version: 2,
+        action: skillPath === 'operation-planning' ? 'update' : 'install',
+        actor: 'dashboard',
+        timestamp: iso(32),
+        sha256: `mock-history-${skillPath}-v2`,
+        bytes: 1260,
+        note: 'Refined triggers and safety notes for mock preview.',
+        contentPath: `/mock/store/skill-versions/${skillPath}/v0002-SKILL.md`,
+      },
+      {
+        id: `skill-version-${skillPath}-1`,
+        skillPath,
+        version: 1,
+        action: 'install',
+        actor: 'skill-factory',
+        timestamp: iso(90),
+        sha256: `mock-history-${skillPath}-v1`,
+        bytes: 1048,
+        note: 'Initial approved install.',
+        contentPath: `/mock/store/skill-versions/${skillPath}/v0001-SKILL.md`,
+      },
+    ],
+  };
+}
+
 const skills = [
   {
     name: 'capabilities',
@@ -1140,6 +1204,7 @@ const skills = [
   triggers: skill.name.split('-'),
   examples: [],
   requiredTools: [],
+  installState: mockSkillInstallState(skill.path),
   ...skill,
 }));
 
@@ -3003,6 +3068,10 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         '---\nname: operation-briefing\ndescription: Produce concise operation briefings from journal events, orders, and scout reports.\n---\n\n# Operation Briefing\n\nUse journal events and approved orders to prepare a concise brief with confirmed facts, open questions, and next actions.\n',
     };
   }
+  const skillVersionsMatch = pathname.match(/^\/skills\/([^/]+)\/versions$/);
+  if (skillVersionsMatch) {
+    return mockSkillVersions(decodeURIComponent(skillVersionsMatch[1]));
+  }
   if (pathname.startsWith('/skills/')) {
     const skill = skills.find((s) => s.path === pathname.split('/')[2]);
     return {
@@ -4213,6 +4282,22 @@ export function handleMockApi(req: Request, res: Response): void {
       .send(
         '# Mock report artifact\n\nThis mock download does not read live files.\n',
       );
+    return;
+  }
+  if (pathname.match(/^\/skills\/[^/]+\/versions\/\d+\/diff$/)) {
+    res.type('text/plain').send(`--- v1/mock-skill/SKILL.md
++++ installed/mock-skill/SKILL.md
+ ---
+ name: mock-skill
+-description: Initial skill instructions.
++description: Refined skill instructions with safety notes.
+ ---
+
+ # Mock Skill
+
+-Use this skill for basic mock workflows.
++Use this skill for mock workflows with explicit approval notes.
+`);
     return;
   }
 

@@ -5,6 +5,10 @@ import crypto from 'crypto';
 
 import { CONTAINER_SKILLS_DIR, DATA_DIR, STORE_DIR } from './config.js';
 import { canUseSkill, type AgentBoundary } from './agent-boundaries.js';
+import {
+  getSkillInstallState,
+  type SkillInstallState,
+} from './skill-versions.js';
 
 export type SkillScope = 'all' | 'main' | 'channels';
 export type SkillVisibility = 'shared' | 'private' | 'system';
@@ -27,6 +31,7 @@ export interface SkillRegistryEntry {
   examples: string[];
   riskLevel: 'low' | 'medium' | 'high';
   requiredTools: string[];
+  installState?: SkillInstallState;
 }
 
 export interface SkillMatch extends SkillRegistryEntry {
@@ -326,6 +331,7 @@ export function listSkillRegistry(): SkillRegistryEntry[] {
           examples: splitList(fm.examples),
           riskLevel,
           requiredTools: splitList(fm['required-tools'] || fm['allowed-tools']),
+          installState: getSkillInstallState(dir.name),
         } satisfies SkillRegistryEntry;
       })
       .sort((a, b) => a.name.localeCompare(b.name));

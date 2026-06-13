@@ -33,6 +33,13 @@ import {
 import { getAllTasks } from '../../db.js';
 import { findSkillWorthyJournalPatterns } from '../../journal-store.js';
 import { listMemoryProvenanceTimeline } from '../../memory-store.js';
+import {
+  getSkillInstallState,
+  getSkillVersionDiff,
+  listSkillVersions,
+  recordSkillVersion,
+  rollbackSkillVersion,
+} from '../../skill-versions.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -344,6 +351,91 @@ router.get('/timeline', (req: Request, res: Response) => {
   res.json(buildProvenanceTimeline(timelineLimit(req.query.limit)));
 });
 
+router.get('/:skillPath/versions', (req: Request, res: Response) => {
+  try {
+    const skillPath = req.params.skillPath as string;
+    res.json({
+      installState: getSkillInstallState(skillPath),
+      versions: listSkillVersions(skillPath),
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.get(
+  '/:skillPath/versions/:version/diff',
+  (req: Request, res: Response) => {
+    try {
+      const fromVersion = Number(req.params.version);
+      const toVersion =
+        req.query.to === undefined ? undefined : Number(req.query.to);
+      if (!Number.isInteger(fromVersion) || fromVersion < 1) {
+        res.status(400).json({ error: 'Invalid version' });
+        return;
+      }
+      if (
+        toVersion !== undefined &&
+        (!Number.isInteger(toVersion) || toVersion < 1)
+      ) {
+        res.status(400).json({ error: 'Invalid target version' });
+        return;
+      }
+      res
+        .type('text/plain')
+        .send(
+          getSkillVersionDiff(
+            req.params.skillPath as string,
+            fromVersion,
+            toVersion,
+          ),
+        );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res
+        .status(message.includes('not found') ? 404 : 400)
+        .json({ error: message });
+    }
+  },
+);
+
+router.post(
+  '/:skillPath/versions/:version/rollback',
+  requireRole('admin'),
+  (req: Request, res: Response) => {
+    try {
+      const version = Number(req.params.version);
+      if (!Number.isInteger(version) || version < 1) {
+        res.status(400).json({ error: 'Invalid version' });
+        return;
+      }
+      const entry = rollbackSkillVersion({
+        skillPath: req.params.skillPath as string,
+        version,
+        actor: String(req.body?.actor || 'dashboard'),
+      });
+      auditLog(
+        req,
+        'skill_rollback',
+        `${req.params.skillPath}@${version} -> ${entry.version}`,
+      );
+      res.json({
+        ok: true,
+        version: entry,
+        installState: getSkillInstallState(req.params.skillPath as string),
+        message: 'Skill rolled back. Rebuild container to apply.',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      res
+        .status(message.includes('not found') ? 404 : 400)
+        .json({ error: message });
+    }
+  },
+);
+
 router.post(
   '/suggestions/:id/approve',
   requireRole('admin'),
@@ -510,6 +602,12 @@ router.post('/', requireRole('admin'), (req: Request, res: Response) => {
 
   fs.mkdirSync(skillDir, { recursive: true });
   fs.writeFileSync(path.join(skillDir, 'SKILL.md'), skillMd);
+  recordSkillVersion({
+    skillPath: folderName,
+    actor: 'dashboard',
+    action: 'create',
+    note: 'Installed directly from dashboard',
+  });
 
   auditLog(req, 'skill_created', folderName);
   logger.info({ skillName: folderName }, 'Container skill created');
@@ -550,6 +648,12 @@ router.put(
     }
 
     fs.writeFileSync(skillMd, content);
+    recordSkillVersion({
+      skillPath,
+      actor: 'dashboard',
+      action: 'update',
+      note: 'Updated from dashboard editor',
+    });
     auditLog(req, 'skill_updated', skillPath);
     res.json({
       ok: true,
@@ -575,6 +679,12 @@ router.delete(
       return;
     }
 
+    recordSkillVersion({
+      skillPath,
+      actor: 'dashboard',
+      action: 'delete',
+      note: 'Snapshot before dashboard delete',
+    });
     fs.rmSync(skillDir, { recursive: true, force: true });
     auditLog(req, 'skill_deleted', skillPath);
     logger.info({ skillName: skillPath }, 'Container skill deleted');
