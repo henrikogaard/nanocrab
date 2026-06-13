@@ -249,6 +249,43 @@ describe('mock admin data', () => {
     });
   });
 
+  it('serves model operations metrics in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/providers/model-metrics`);
+      const metrics = (await response.json()) as {
+        summary: {
+          totalModels: number;
+          healthyModels: number;
+          averageLatencyMs: number;
+        };
+        models: Array<{
+          provider: string;
+          model: string;
+          costTier: string;
+          contextWindow: number;
+          successRate: number;
+        }>;
+      };
+
+      expect(metrics.summary).toMatchObject({
+        totalModels: 2,
+        healthyModels: 1,
+        averageLatencyMs: 880,
+      });
+      expect(metrics.models).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            provider: 'openrouter',
+            model: 'openrouter/auto',
+            costTier: 'medium',
+            contextWindow: 128000,
+            successRate: 1,
+          }),
+        ]),
+      );
+    });
+  });
+
   it('serves terminal history and searchable transcripts in mock mode', async () => {
     await withServer(async (baseUrl) => {
       const historyResponse = await fetch(
