@@ -4257,6 +4257,14 @@ async function renderMemory(el) {
       <div class="card">
         <div class="card-title">Journal Summaries</div>
         <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:12px">
+          <div class="form-group" style="margin:0;flex:1;min-width:220px">
+            <label style="font-size:12px;color:var(--text-muted)">Ask Journal</label>
+            <input class="search-input" id="journal-answer-query" placeholder="What happened near Kepler?">
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="searchJournalAnswer()">Search</button>
+        </div>
+        <div id="journal-answer-result" style="margin-bottom:14px"></div>
+        <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:12px">
           <div class="form-group" style="margin:0">
             <label style="font-size:12px;color:var(--text-muted)">Group</label>
             <select class="search-input" id="journal-summary-group" style="min-width:150px">
@@ -4367,6 +4375,29 @@ window.reviewMemoryRecord = async (id, action) => {
   } catch (e) {
     toast('Failed: ' + e.message, 'error');
   }
+};
+
+window.searchJournalAnswer = async () => {
+  const query = document.getElementById('journal-answer-query')?.value || '';
+  const target = document.getElementById('journal-answer-result');
+  if (!target) return;
+  const result = await api(
+    `/journal/search?query=${encodeURIComponent(query)}`,
+  );
+  target.innerHTML = `
+    <div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;background:var(--bg)">
+      <div style="font-size:12px;color:var(--text);white-space:pre-wrap;line-height:1.45">${esc(result.answer || '')}</div>
+      ${
+        result.citations?.length
+          ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px">${result.citations
+              .map(
+                (citation) =>
+                  `<span class="badge badge-info">${esc(citation.marker)} ${esc(citation.title || citation.source)}</span>`,
+              )
+              .join('')}</div>`
+          : ''
+      }
+    </div>`;
 };
 
 window.createJournalSummary = async () => {

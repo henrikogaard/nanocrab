@@ -2624,7 +2624,30 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname === '/journal/search') {
     return {
       query: req.query.query || 'fleet crash',
-      answer: `${day(-1)}: Fleet crash near Kepler-442b (operations)`,
+      answer: `I found 1 matching event:\n${day(-1)}: Fleet crash near Kepler-442b in operations [1]\n\nRelated journal summaries:\n${day(-1)} daily summary also mentions: 42 messages reviewed. Notable events included a fleet crash near Kepler-442b and new orders for the evening operation. [2]`,
+      generatedAt: iso(0),
+      citations: [
+        {
+          marker: '[1]',
+          kind: 'event',
+          id: 'evt-mock-1',
+          title: 'Fleet crash near Kepler-442b',
+          source: 'journal:event:evt-mock-1',
+          timestamp: iso(90),
+          groupFolder: 'operations',
+          sourceIds: [],
+        },
+        {
+          marker: '[2]',
+          kind: 'summary',
+          id: 'journal-mock-1',
+          title: `${day(-1)} daily summary`,
+          source: 'journal:entry:journal-mock-1',
+          timestamp: iso(50),
+          groupFolder: 'operations',
+          sourceIds: [],
+        },
+      ],
       events: [
         {
           id: 'evt-mock-1',
@@ -2637,6 +2660,20 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           tags_json: '["fleet","crash"]',
           group_folder: 'operations',
           created_at: iso(88),
+        },
+      ],
+      entries: [
+        {
+          id: 'journal-mock-1',
+          date: day(-1),
+          scope: 'daily',
+          group_folder: 'operations',
+          summary:
+            '42 messages reviewed. Notable events included a fleet crash near Kepler-442b and new orders for the evening operation.',
+          notable_events_json: '[]',
+          source_message_ids_json: '[]',
+          provider_profile_id: 'default_journal',
+          created_at: iso(50),
         },
       ],
     };

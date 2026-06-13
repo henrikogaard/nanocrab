@@ -10,6 +10,7 @@ import {
   recordJournalEntry,
   recordJournalEvent,
 } from '../../journal-store.js';
+import { buildJournalAnswer } from '../../journal-answers.js';
 import { requireRole } from '../middleware.js';
 import { auditLog } from '../security.js';
 
@@ -114,31 +115,32 @@ router.get('/events', (req: Request, res: Response) => {
 router.get('/search', (req: Request, res: Response) => {
   const query = typeof req.query.query === 'string' ? req.query.query : '';
   if (!query.trim()) {
-    res.json({
-      query,
-      events: [],
-      answer: 'Ask a question to search the journal.',
-    });
+    res.json(
+      buildJournalAnswer({
+        query,
+        events: [],
+        entries: [],
+      }),
+    );
     return;
   }
+  const groupFolder =
+    typeof req.query.group === 'string' ? req.query.group : undefined;
+  const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
   const events = findJournalEvents({
     query,
-    groupFolder:
-      typeof req.query.group === 'string' ? req.query.group : undefined,
-    limit: Math.min(parseInt(req.query.limit as string) || 10, 50),
+    groupFolder,
+    limit,
   });
-  const answer = events.length
-    ? events
-        .slice(0, 5)
-        .map(
-          (event) =>
-            `${event.timestamp.slice(0, 10)}: ${event.title}${
-              event.location_context ? ` (${event.location_context})` : ''
-            }`,
-        )
-        .join('\n')
-    : 'No matching journal events found.';
-  res.json({ query, answer, events });
+  const entries = listJournalEntryRecords({
+    groupFolder,
+    limit: 10,
+  }).filter((entry) =>
+    `${entry.date} ${entry.scope} ${entry.summary}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+  res.json(buildJournalAnswer({ query, events, entries }));
 });
 
 router.post(
