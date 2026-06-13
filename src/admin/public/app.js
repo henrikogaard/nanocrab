@@ -39,8 +39,44 @@ async function api(path, opts = {}) {
     showLogin();
     throw new Error('Unauthorized');
   }
-  const data = await res.json();
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = {};
+  }
+  if (!res.ok) {
+    const err = new Error(data?.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    err.retryAfter = res.headers.get('Retry-After');
+    err.path = path;
+    throw err;
+  }
   return data;
+}
+
+function renderPageError(el, err, title = 'Could not load this page') {
+  const retry = err?.retryAfter
+    ? `<p style="margin-top:8px;color:var(--text-muted)">Retry after ${esc(err.retryAfter)} seconds.</p>`
+    : '';
+  el.innerHTML = `
+    <div class="card empty">
+      <div class="card-title">${esc(title)}</div>
+      <p>${esc(err?.message || 'Unknown dashboard error')}</p>
+      ${retry}
+      <button class="btn btn-sm btn-primary" style="margin-top:12px" onclick="navigate('${esc(currentPage || 'dashboard')}')">Retry</button>
+    </div>`;
+}
+
+function renderRoute(el, renderFn) {
+  try {
+    const result = renderFn(el);
+    if (result && typeof result.catch === 'function') {
+      result.catch((err) => renderPageError(el, err));
+    }
+  } catch (err) {
+    renderPageError(el, err);
+  }
 }
 
 function stopPolling() {
@@ -620,15 +656,17 @@ function showShell(page) {
   const el = document.getElementById('page-content');
   const renderFn = pages[page];
   if (renderFn) {
-    renderFn(el);
+    renderRoute(el, renderFn);
   } else {
     // Try loading plugin frontend dynamically
     el.innerHTML = '<div class="loading">Loading</div>';
-    loadPluginFrontend(page).then(() => {
-      const fn = pages[page];
-      if (fn) fn(el);
-      else el.innerHTML = '<div class="card empty">Page not found</div>';
-    });
+    loadPluginFrontend(page)
+      .then(() => {
+        const fn = pages[page];
+        if (fn) renderRoute(el, fn);
+        else el.innerHTML = '<div class="card empty">Page not found</div>';
+      })
+      .catch((err) => renderPageError(el, err, 'Could not load plugin page'));
   }
 }
 
@@ -648,6 +686,7 @@ async function loadMetricsBar() {
     if (!bar) return;
     try {
       const d = await api('/system/dashboard');
+      if (!d || typeof d !== 'object') throw new Error('Invalid dashboard data');
       const online = (d.channels || []).filter((c) => c.connected).length;
       const total = (d.channels || []).length;
       const hash = `${d.uptimeFormatted}|${d.todayCount}|${(d.containers || []).length}|${online}/${total}`;
@@ -659,7 +698,13 @@ async function loadMetricsBar() {
         <div class="metrics-item"><span class="metrics-label">Agents</span><span class="metrics-value">${(d.containers || []).length}</span></div>
         <div class="metrics-item"><span class="metrics-label">Channels</span><span class="metrics-value">${online}/${total}</span></div>`;
     } catch {
-      // Don't overwrite existing content on error
+      if (!bar.innerHTML.trim()) {
+        bar.innerHTML = `
+          <div class="metrics-item"><span class="metrics-label">Uptime</span><span class="metrics-value">-</span></div>
+          <div class="metrics-item"><span class="metrics-label">Messages</span><span class="metrics-value">-</span></div>
+          <div class="metrics-item"><span class="metrics-label">Agents</span><span class="metrics-value">-</span></div>
+          <div class="metrics-item"><span class="metrics-label">Channels</span><span class="metrics-value">-/-</span></div>`;
+      }
     }
   };
   await update();
@@ -672,6 +717,10 @@ async function loadAlerts() {
   if (!bar) return;
   try {
     const alerts = await api('/system/alerts');
+    if (!Array.isArray(alerts)) {
+      bar.innerHTML = '';
+      return;
+    }
     if (alerts.length === 0) {
       bar.innerHTML = '';
       return;

@@ -109,8 +109,21 @@ export function recordLoginAttempt(ip: string, success: boolean): void {
 // --- API Rate Limiting ---
 
 const apiRequestCounts = new Map<string, { count: number; resetAt: number }>();
-const API_RATE_LIMIT = 200;
+const API_READ_RATE_LIMIT = Math.max(
+  200,
+  parseInt(process.env.ADMIN_API_READ_RATE_LIMIT || '1200', 10) || 1200,
+);
+const API_WRITE_RATE_LIMIT = Math.max(
+  50,
+  parseInt(process.env.ADMIN_API_WRITE_RATE_LIMIT || '300', 10) || 300,
+);
 const API_RATE_WINDOW_MS = 60000;
+
+function apiLimitForMethod(method: string): number {
+  return method === 'GET' || method === 'HEAD'
+    ? API_READ_RATE_LIMIT
+    : API_WRITE_RATE_LIMIT;
+}
 
 export function apiRateLimit(
   req: Request,
@@ -128,11 +141,17 @@ export function apiRateLimit(
   }
 
   entry.count++;
-  if (entry.count > API_RATE_LIMIT) {
+  if (entry.count > apiLimitForMethod(req.method)) {
+    res.setHeader('Retry-After', Math.ceil((entry.resetAt - now) / 1000));
     res.status(429).json({ error: 'Rate limit exceeded' });
     return;
   }
   next();
+}
+
+/** @internal - tests only. */
+export function _resetApiRateLimitForTests(): void {
+  apiRequestCounts.clear();
 }
 
 // --- Security Headers ---
