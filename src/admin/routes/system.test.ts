@@ -4,15 +4,15 @@ import { validateAvatarUpload } from './system.js';
 
 describe('system routes', () => {
   it('rejects avatar uploads that are not image bytes', () => {
-    expect(() =>
-      validateAvatarUpload(Buffer.from('not an image')),
-    ).toThrow('avatar must be a JPEG, PNG, or WebP image');
+    expect(() => validateAvatarUpload(Buffer.from('not an image'))).toThrow(
+      'avatar must be a JPEG, PNG, or WebP image',
+    );
   });
 
   it('rejects avatar uploads over the size limit', () => {
-    expect(() =>
-      validateAvatarUpload(Buffer.alloc(2 * 1024 * 1024)),
-    ).toThrow('avatar must be 1 MB or smaller');
+    expect(() => validateAvatarUpload(Buffer.alloc(2 * 1024 * 1024))).toThrow(
+      'avatar must be 1 MB or smaller',
+    );
   });
 
   it('accepts JPEG avatar bytes', () => {

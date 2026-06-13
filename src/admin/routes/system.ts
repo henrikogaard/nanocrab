@@ -521,7 +521,10 @@ router.post('/avatar', async (req: Request, res: Response) => {
     const projectRoot = process.cwd();
     const avatarDir = path.join(projectRoot, 'site', 'static');
     fs.mkdirSync(avatarDir, { recursive: true });
-    fs.writeFileSync(path.join(avatarDir, `avatar.${avatar.extension}`), buffer);
+    fs.writeFileSync(
+      path.join(avatarDir, `avatar.${avatar.extension}`),
+      buffer,
+    );
     for (const extension of AVATAR_EXTENSIONS) {
       if (extension !== avatar.extension) {
         fs.rmSync(path.join(avatarDir, `avatar.${extension}`), { force: true });
@@ -536,7 +539,10 @@ router.post('/avatar', async (req: Request, res: Response) => {
       'static',
     );
     fs.mkdirSync(adminStatic, { recursive: true });
-    fs.writeFileSync(path.join(adminStatic, `avatar.${avatar.extension}`), buffer);
+    fs.writeFileSync(
+      path.join(adminStatic, `avatar.${avatar.extension}`),
+      buffer,
+    );
     for (const extension of AVATAR_EXTENSIONS) {
       if (extension !== avatar.extension) {
         fs.rmSync(path.join(adminStatic, `avatar.${extension}`), {
@@ -553,10 +559,15 @@ router.post('/avatar', async (req: Request, res: Response) => {
       'static',
     );
     fs.mkdirSync(distStatic, { recursive: true });
-    fs.writeFileSync(path.join(distStatic, `avatar.${avatar.extension}`), buffer);
+    fs.writeFileSync(
+      path.join(distStatic, `avatar.${avatar.extension}`),
+      buffer,
+    );
     for (const extension of AVATAR_EXTENSIONS) {
       if (extension !== avatar.extension) {
-        fs.rmSync(path.join(distStatic, `avatar.${extension}`), { force: true });
+        fs.rmSync(path.join(distStatic, `avatar.${extension}`), {
+          force: true,
+        });
       }
     }
     res.json({
