@@ -86,6 +86,23 @@ describe('mock admin data', () => {
           }),
         ]),
       );
+
+      const streamResponse = await fetch(
+        `${baseUrl}/api/sessions/cockpit/cockpit-approval-002/stream`,
+      );
+      const stream = (await streamResponse.json()) as {
+        events: Array<{ type: string; pct?: number; toolName?: string }>;
+      };
+
+      expect(stream.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'tool_call',
+            toolName: 'write_file',
+          }),
+          expect.objectContaining({ type: 'progress', pct: 80 }),
+        ]),
+      );
     });
   });
 

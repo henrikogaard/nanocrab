@@ -1772,6 +1772,8 @@ tr {
 .cockpit-timeline,
 .cockpit-artifacts,
 .cockpit-deliverables,
+.cockpit-tools,
+.cockpit-progress,
 .cockpit-approvals {
   display: grid;
   gap: 1px;
@@ -1783,6 +1785,8 @@ tr {
 .cockpit-timeline-item,
 .cockpit-artifact,
 .cockpit-deliverable,
+.cockpit-tool-event,
+.cockpit-progress-event,
 .cockpit-approval {
   padding: 10px 11px;
   background: var(--surface);
@@ -1796,14 +1800,24 @@ tr {
 .cockpit-timeline-item strong,
 .cockpit-artifact strong,
 .cockpit-deliverable strong,
+.cockpit-tool-event strong,
+.cockpit-progress-event strong,
 .cockpit-approval strong {
   display: block;
   color: var(--text);
   font-size: 12px;
 }
+.cockpit-tool-event time {
+  float: right;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
 .cockpit-timeline-item p,
 .cockpit-artifact small,
-.cockpit-deliverable small {
+.cockpit-deliverable small,
+.cockpit-tool-event small,
+.cockpit-progress-event small {
   margin: 4px 0 0;
   color: var(--text-muted);
   font-size: 11px;
@@ -1821,6 +1835,30 @@ tr {
   gap: 6px;
   align-items: center;
   justify-content: flex-end;
+}
+.cockpit-progress-head {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+}
+.cockpit-progress-head span {
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.cockpit-progress-track {
+  overflow: hidden;
+  height: 5px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: var(--surface2);
+}
+.cockpit-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
 }
 .cockpit-approval {
   display: flex;

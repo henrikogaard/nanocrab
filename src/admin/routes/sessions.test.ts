@@ -32,6 +32,7 @@ const DATA_DIR = config.DATA_DIR as string;
 const STORE_DIR = config.STORE_DIR as string;
 const { default: sessionsRouter, listCockpitSessions } =
   await import('./sessions.js');
+const { broadcastTaskProgress } = await import('../websocket.js');
 
 function transcriptId(group: string, sessionId: string): string {
   return `transcript:${encodeURIComponent(group)}:${encodeURIComponent(sessionId)}`;
@@ -305,6 +306,53 @@ describe('terminal session API', () => {
     expect(session?.changedFiles).toEqual([
       'src/admin/public/pages/dashboard.js',
     ]);
+  });
+
+  it('GET /cockpit/:id/stream returns recent progress events for the session group', async () => {
+    writeTranscript('main', 'run-stream', [
+      {
+        type: 'assistant',
+        timestamp: '2026-06-01T12:00:00Z',
+        content: 'Preparing progress stream',
+      },
+    ]);
+    broadcastTaskProgress({
+      phase: 'testing',
+      pct: 72,
+      message: 'Running stream tests',
+      groupJid: 'main',
+    });
+
+    const app = express();
+    app.use('/api/sessions', sessionsRouter);
+    const server = app.listen(0);
+    try {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        throw new Error('test server did not bind to a port');
+      }
+      const response = await fetch(
+        `http://127.0.0.1:${address.port}/api/sessions/cockpit/${encodeURIComponent(transcriptId('main', 'run-stream'))}/stream`,
+      );
+      const stream = (await response.json()) as {
+        events: Array<{ type: string; phase?: string; pct?: number }>;
+      };
+
+      expect(response.status).toBe(200);
+      expect(stream.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'progress',
+            phase: 'testing',
+            pct: 72,
+          }),
+        ]),
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
   });
 
   it('keeps duplicate transcript session ids globally unique by group', async () => {
