@@ -85,6 +85,18 @@ import {
 } from './admin/websocket.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startProbeScheduler } from './probe-scheduler.js';
+import {
+  approveCodingJob,
+  cancelCodingJob,
+  getCodingJob,
+  loadCodingJobs,
+  loadCodingRepos,
+  openCodingJobPr,
+  pickGitHubIssue,
+  retryCodingJob,
+  startCodingJob,
+} from './coding-jobs.js';
+import { handleMobileCodingCommand } from './mobile-coding-commands.js';
 import { getAllProviders } from './providers/index.js';
 import { liveProbeService } from './providers/live-probe.js';
 import {
@@ -935,6 +947,35 @@ async function main(): Promise<void> {
     }
   }
 
+  async function handleMobileCodeCommand(
+    chatJid: string,
+    msg: NewMessage,
+  ): Promise<boolean> {
+    const channel = findChannel(channels, chatJid);
+    if (!channel) return false;
+    return handleMobileCodingCommand({
+      text: msg.content,
+      chatJid,
+      sender: msg.sender,
+      group: registeredGroups[chatJid],
+      sendMessage: (jid, text) => channel.sendMessage(jid, text),
+      deps: {
+        startCodingJob,
+        pickGitHubIssue,
+        loadCodingRepos,
+        loadCodingJobs,
+        getCodingJob,
+        controlCodingJob: async (action, jobId, actor) => {
+          if (action === 'approve') return approveCodingJob(jobId, actor);
+          if (action === 'cancel') return cancelCodingJob(jobId, actor);
+          if (action === 'retry') return retryCodingJob(jobId, actor);
+          if (action === 'open-pr') return openCodingJobPr(jobId, actor);
+          throw new Error(`Unsupported coding action: ${action}`);
+        },
+      },
+    });
+  }
+
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: (chatJid: string, msg: NewMessage) => {
@@ -968,6 +1009,12 @@ async function main(): Promise<void> {
       if (trimmed === '/update-nanocrab') {
         handleNanoCrabUpdate(chatJid, msg).catch((err) =>
           logger.error({ err, chatJid }, 'NanoCrab update command error'),
+        );
+        return;
+      }
+      if (trimmed === '/code' || trimmed.startsWith('/code ')) {
+        handleMobileCodeCommand(chatJid, msg).catch((err) =>
+          logger.error({ err, chatJid }, 'Mobile coding command error'),
         );
         return;
       }

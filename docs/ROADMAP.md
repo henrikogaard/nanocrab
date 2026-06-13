@@ -183,7 +183,7 @@ Goal: work with GitHub repos and produce PRs while the owner is on the go.
   - DONE: "Investigate" creates a read-only plan stage before implementation.
   - DONE: "Implement" requires approval and creates commits.
   - DONE: "Open PR" requires approval before host-side GitHub mutation.
-  - NEXT: mobile chat commands for coding jobs.
+  - DONE: mobile `/code` chat commands can list repos/jobs, start jobs, pick issues, and approve/cancel/retry/open PRs.
 - Dashboard views:
   - DONE: active/recent coding jobs and output logs
   - DONE: PR links when jobs create PRs
