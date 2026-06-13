@@ -52,6 +52,10 @@ window.renderSettings = async function (el) {
   try {
     assistantProfile = await api('/assistant-profile');
   } catch {}
+  let assistantSkills = { installed: [] };
+  try {
+    assistantSkills = await api('/skills');
+  } catch {}
   const isOwner = (window._userRole || 'owner') === 'owner';
   let setupPreflight = null;
   let releaseDiagnostics = null;
@@ -310,6 +314,32 @@ window.renderSettings = async function (el) {
         </button>`;
     })
     .join('');
+  const skillFamilies = (assistantSkills.installed || []).reduce(
+    (acc, skill) => {
+      const family = skill.category || 'tool';
+      if (!acc[family]) {
+        acc[family] = { total: 0, enabled: 0, highRisk: 0 };
+      }
+      acc[family].total += 1;
+      if (skill.enabled !== false) acc[family].enabled += 1;
+      if (skill.riskLevel === 'high') acc[family].highRisk += 1;
+      return acc;
+    },
+    {},
+  );
+  const skillPreferenceRows = Object.entries(skillFamilies)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(
+      ([family, stats]) => `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--text);text-transform:capitalize">${esc(family)} skills</div>
+            <div style="font-size:11px;color:var(--text-muted)">${Number(stats.enabled)} active of ${Number(stats.total)}${Number(stats.highRisk) ? ` · ${Number(stats.highRisk)} high-risk` : ''}</div>
+          </div>
+          <span class="badge ${Number(stats.enabled) ? 'badge-success' : 'badge-muted'}">${Number(stats.enabled) ? 'Enabled' : 'Disabled'}</span>
+        </div>`,
+    )
+    .join('');
   const agentBoundaryCard = `
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">Agent Boundaries</div>
@@ -387,6 +417,27 @@ window.renderSettings = async function (el) {
 
   el.innerHTML = `
     <div class="page-header"><h2>Settings</h2></div>
+    <div class="card">
+      <div class="card-title">Assistant Profile</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+        <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Name</div>
+          <div style="font-size:16px;font-weight:700;color:var(--text)">${esc(identity.name || 'NanoCrab')}</div>
+        </div>
+        <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Trigger</div>
+          <div style="font-size:16px;font-weight:700;color:var(--text)">${esc(identity.trigger || '')}</div>
+        </div>
+        <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Avatar</div>
+          <div style="font-size:16px;font-weight:700;color:var(--text)">${esc(assistantProfile.selectedAvatar?.name || 'NanoCrab Mark')}</div>
+        </div>
+        <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Skills</div>
+          <div style="font-size:16px;font-weight:700;color:var(--text)">${Number((assistantSkills.installed || []).filter((skill) => skill.enabled !== false).length)} active</div>
+        </div>
+      </div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <div class="card">
         <div class="card-title">Change Password</div>
@@ -521,6 +572,12 @@ window.renderSettings = async function (el) {
       <div class="card-title">Personality</div>
       <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Edit the global AGENTS.md instructions that shape your bot's personality and behavior.</p>
       <div id="personality-area"><div class="empty">Loading...</div></div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">Skill Preferences</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Choose the skill families this assistant can lean on by default. Scope, visibility, and high-risk skills still follow the Skills page controls.</p>
+      <div>${skillPreferenceRows || '<div class="empty" style="padding:8px">No skills installed.</div>'}</div>
+      <div style="margin-top:12px"><button class="btn btn-sm btn-primary" onclick="navigate('skills')">Manage Skills</button></div>
     </div>
     <div class="card" style="margin-top:16px">
       <div class="card-title">Provenance Timeline</div>
