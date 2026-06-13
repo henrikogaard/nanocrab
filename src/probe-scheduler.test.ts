@@ -45,8 +45,8 @@ vi.mock('./provider-router.js', () => {
     },
     {
       id: 'default_coding',
-      provider: 'codex',
-      model: 'gpt-5.4',
+      provider: 'ollama',
+      model: 'gemma4:e2b',
       purpose: 'default_coding',
     },
   ];
@@ -60,6 +60,7 @@ vi.mock('./provider-router.js', () => {
       async () =>
         ({
           ok: true,
+          latencyMs: 120,
           errors: undefined,
           lastProbeAt: new Date().toISOString(),
           capabilities: {
@@ -90,6 +91,7 @@ describe('probe-scheduler', () => {
       async () =>
         ({
           ok: true,
+          latencyMs: 120,
           errors: undefined,
           lastProbeAt: new Date().toISOString(),
           capabilities: {
@@ -130,6 +132,15 @@ describe('probe-scheduler', () => {
     expect(result.entries[0].ok).toBe(true);
     expect(result.entries[1].profileId).toBe('default_coding');
     expect(result.entries[1].ok).toBe(true);
+    expect(result.entries[1].location).toBe('local');
+    expect(result.summary).toMatchObject({
+      total: 2,
+      ok: 2,
+      failed: 0,
+      local: { total: 1, ok: 1, failed: 0 },
+      remote: { total: 1, ok: 1, failed: 0 },
+      averageLatencyMs: 120,
+    });
   });
 
   it('runAllProbes increments version on each run', async () => {
@@ -158,6 +169,7 @@ describe('probe-scheduler', () => {
     const health = mod.getProbeHealth();
     expect(health.version).toBe(1);
     expect(health.entries).toHaveLength(2);
+    expect(health.summary.total).toBe(2);
   });
 
   it('probe health entries include capability tags from probe results', async () => {
@@ -201,5 +213,6 @@ describe('probe-scheduler', () => {
     const health = mod.getProbeHealth();
     expect(health.version).toBe(1);
     expect(Array.isArray(health.entries)).toBe(true);
+    expect(health.summary.total).toBe(2);
   });
 });

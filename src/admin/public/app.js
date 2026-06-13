@@ -8320,24 +8320,46 @@ async function renderMonitoring(el) {
         const healthEl = document.getElementById('monitoring-health');
         if (healthEl && health && Array.isArray(health.entries)) {
           const allOk = health.entries.every((e) => e.ok);
+          const summary = health.summary || {};
+          const local = summary.local || {};
+          const remote = summary.remote || {};
           healthEl.innerHTML = `
             <div class="card" style="margin:0;margin-top:16px">
               <div class="card-title" style="display:flex;align-items:center;gap:8px">
-                Provider Health
+                Inference Health
                 <span class="badge ${allOk ? 'badge-success' : 'badge-warning'}" style="font-size:10px">${health.entries.filter((e) => e.ok).length}/${health.entries.length} OK</span>
                 <button class="btn btn-sm btn-ghost" style="margin-left:auto;font-size:11px" onclick="runAllProbes()">Re-probe All</button>
               </div>
+              <div class="grid grid-4" style="margin-bottom:12px">
+                <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Remote Ready</div>
+                  <div style="font-size:18px;font-weight:700;color:var(--text)">${Number(remote.ok || 0)}/${Number(remote.total || 0)}</div>
+                </div>
+                <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Local Ready</div>
+                  <div style="font-size:18px;font-weight:700;color:var(--text)">${Number(local.ok || 0)}/${Number(local.total || 0)}</div>
+                </div>
+                <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Avg Latency</div>
+                  <div style="font-size:18px;font-weight:700;color:var(--text)">${summary.averageLatencyMs == null ? '-' : `${Number(summary.averageLatencyMs)}ms`}</div>
+                </div>
+                <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Stale Probes</div>
+                  <div style="font-size:18px;font-weight:700;color:${Number(summary.stale || 0) > 0 ? 'var(--warning)' : 'var(--text)'}">${Number(summary.stale || 0)}</div>
+                </div>
+              </div>
               <div class="table-wrap"><table>
-                <thead><tr><th>Profile</th><th>Provider</th><th>Model</th><th>Status</th><th>Last Probe</th><th>Capabilities</th></tr></thead>
+                <thead><tr><th>Profile</th><th>Provider</th><th>Model</th><th>Status</th><th>Last Probe</th><th>Latency</th><th>Capabilities</th></tr></thead>
                 <tbody>${health.entries
                   .map(
                     (e) => `
                   <tr>
                     <td style="font-weight:500;color:var(--text)">${esc(e.purpose)}</td>
-                    <td><span class="badge badge-accent">${esc(e.provider)}</span></td>
+                    <td><span class="badge ${e.location === 'local' ? 'badge-success' : 'badge-accent'}">${esc(e.location || 'remote')}</span> <span class="badge badge-muted">${esc(e.provider)}</span></td>
                     <td style="font-family:var(--mono);font-size:11px;color:var(--text)">${esc(e.model)}</td>
-                    <td><span class="status-dot ${e.ok ? 'online' : 'offline'}" style="margin-right:4px"></span><span class="badge ${e.ok ? 'badge-success' : 'badge-error'}" style="font-size:10px">${e.ok ? 'Ready' : 'Failed'}</span>${e.errorMessage ? `<div style="font-size:10px;color:var(--error);margin-top:2px">${esc(e.errorMessage)}</div>` : ''}</td>
+                    <td><span class="status-dot ${e.ok ? 'online' : 'offline'}" style="margin-right:4px"></span><span class="badge ${e.ok ? 'badge-success' : 'badge-error'}" style="font-size:10px">${e.ok ? 'Ready' : 'Failed'}</span>${e.stale ? ' <span class="badge badge-warning" style="font-size:9px">stale</span>' : ''}${e.errorMessage ? `<div style="font-size:10px;color:var(--error);margin-top:2px">${esc(e.errorMessage)}</div>` : ''}</td>
                     <td style="font-size:11px;color:var(--text-muted)">${e.lastProbeAt ? formatTime(e.lastProbeAt) : '-'}</td>
+                    <td style="font-size:11px;color:var(--text-muted)">${e.latencyMs == null ? '-' : `${Number(e.latencyMs)}ms`}</td>
                     <td>${e.capabilities.length > 0 ? e.capabilities.map((c) => `<span class="badge badge-info" style="font-size:9px">${esc(c)}</span>`).join(' ') : '<span class="badge badge-muted" style="font-size:9px">unprobed</span>'}</td>
                   </tr>`,
                   )
