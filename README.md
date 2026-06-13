@@ -183,9 +183,12 @@ Optional dashboard presets can add provider integrations. NanoCrab currently
 includes an opt-in Infomaniak kSuite preset and an `infomaniak-ksuite` skill for
 mail, kDrive, and DAV workflows. Google Workspace remains a bundled skill and
 credential surface for deployments that provide a compatible MCP server.
-The MCP dashboard also reports Infomaniak document workflow readiness, covering
-kDrive search/read, report drafting from approved sources, approval-gated
-uploads/sharing, and optional DAV/mail context.
+The MCP dashboard includes a connector catalog and setup checklist for built-in,
+preset, and manually added connectors. It shows install state, missing
+credential names, permission exposure, and whether write-capable integrations
+remain behind explicit approval gates. The same page also reports Infomaniak
+document workflow readiness, covering kDrive search/read, report drafting from
+approved sources, approval-gated uploads/sharing, and optional DAV/mail context.
 Calendar workflow readiness is also shown there for Google Calendar and
 Infomaniak DAV: agenda review, availability checks, meeting briefings,
 approval-gated scheduling changes, and follow-up reminders.

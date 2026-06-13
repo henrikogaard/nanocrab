@@ -23,6 +23,7 @@ import {
   emailSkillPath,
   inboxTriageSkillPath,
 } from '../../email-workflows.js';
+import { buildConnectorCatalog } from '../../connector-catalog.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -231,6 +232,20 @@ router.get('/presets', (_req: Request, res: Response) => {
       installed: configured.has(preset.name),
       toolPattern: `mcp__${preset.name}__*`,
     })),
+  );
+});
+
+router.get('/catalog', (_req: Request, res: Response) => {
+  const status = getStatus();
+  const configured = new Set(loadConfig().map((server) => server.name));
+  res.json(
+    buildConnectorCatalog({
+      servers: status.servers,
+      presets: MCP_PRESETS.map((preset) => ({
+        name: preset.name,
+        installed: configured.has(preset.name),
+      })),
+    }),
   );
 });
 
