@@ -40,6 +40,11 @@ import {
   revertCodingJob,
   startCodingJob,
 } from '../../coding-jobs.js';
+import {
+  listAllRepoRules,
+  listRepoRules,
+  upsertRepoRule,
+} from '../../repo-preferences.js';
 
 const router = Router();
 const TASKS_PATH = path.join(STORE_DIR, 'agent-tasks.json');
@@ -150,6 +155,48 @@ router.post('/coding/repos', async (req: Request, res: Response) => {
     });
   }
 });
+
+router.get('/coding/repo-rules', (_req: Request, res: Response) => {
+  res.json(listAllRepoRules());
+});
+
+router.get(
+  '/coding/repos/:owner/:name/rules',
+  (req: Request, res: Response) => {
+    try {
+      const repo = `${req.params.owner}/${req.params.name}`;
+      res.json(listRepoRules(repo));
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
+
+router.post(
+  '/coding/repos/:owner/:name/rules',
+  (req: Request, res: Response) => {
+    try {
+      const repo = `${req.params.owner}/${req.params.name}`;
+      const rule = upsertRepoRule({
+        id: typeof req.body.id === 'string' ? req.body.id : undefined,
+        repo,
+        title: req.body.title,
+        content: req.body.content,
+        source: req.body.source || 'dashboard',
+        visibility: req.body.visibility === 'private' ? 'private' : 'shared',
+        status: req.body.status === 'disabled' ? 'disabled' : 'approved',
+      });
+      auditLog(req, 'coding_repo_rule_upserted', `${repo}:${rule.id}`);
+      res.json({ ok: true, rule });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
 
 router.get('/coding/jobs', (_req: Request, res: Response) => {
   res.json(

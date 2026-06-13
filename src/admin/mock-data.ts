@@ -3792,6 +3792,33 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       },
     ];
   }
+  if (pathname === '/agents/coding/repo-rules') {
+    return [
+      {
+        id: 'repo-rule-node22',
+        repo: 'henrikogaard/nanocrab',
+        title: 'Use Node 22',
+        content: 'Run checks through `rtk mise exec node@22 -- ...`.',
+        source: 'memory:mock-node22',
+        status: 'approved',
+        visibility: 'shared',
+        createdAt: iso(240),
+        updatedAt: iso(30),
+      },
+      {
+        id: 'repo-rule-approval-gates',
+        repo: 'henrikogaard/nanocrab',
+        title: 'Preserve approval gates',
+        content:
+          'Repo mutations, external sends, uploads, and PR creation stay approval-gated.',
+        source: 'memory:mock-approval-gates',
+        status: 'approved',
+        visibility: 'shared',
+        createdAt: iso(220),
+        updatedAt: iso(25),
+      },
+    ];
+  }
   if (pathname === '/agents/coding/jobs') {
     return [
       {

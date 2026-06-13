@@ -34,6 +34,7 @@ import {
 import { resolveProviderFallbackForAction } from './provider-router.js';
 import { logAuditEvent } from './audit-log.js';
 import { evaluatePolicy } from './policy-engine.js';
+import { buildRepoRulesContext } from './repo-preferences.js';
 
 const CODING_REPOS_PATH = path.join(STORE_DIR, 'coding-repos.json');
 const CODING_JOBS_PATH = path.join(STORE_DIR, 'coding-jobs.json');
@@ -568,13 +569,15 @@ function updateJobOutput(job: CodingJob, text: string): void {
   upsertCodingJob(job);
 }
 
-function buildCodingPrompt(job: CodingJob): string {
+export function buildCodingPrompt(job: CodingJob): string {
+  const repoRules = buildRepoRulesContext(job.repo);
   const prompt = [
     `You are working in the cloned repository ${job.repo}.`,
     job.issueNumber
       ? `Fix GitHub issue #${job.issueNumber}: ${job.issueTitle || ''}`
       : 'Complete the requested coding task.',
     job.prompt,
+    repoRules || '',
     'Instructions:',
     '1. Inspect the repository before editing.',
     '2. Make focused changes only.',

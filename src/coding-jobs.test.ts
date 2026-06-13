@@ -59,6 +59,7 @@ vi.mock('child_process', () => ({
 
 import {
   approveCodingJob,
+  buildCodingPrompt,
   listGitHubIssues,
   loadCodingJobs,
   loadCodingRepos,
@@ -70,6 +71,7 @@ import {
   startCodingJob,
   transitionCodingJob,
 } from './coding-jobs.js';
+import { upsertRepoRule } from './repo-preferences.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
 import { createApproval, reviewApproval } from './approvals.js';
 import { listAuditEvents } from './audit-log.js';
@@ -340,6 +342,27 @@ describe('coding jobs', () => {
     expect(job.workspace).toContain('/data/coding-workspaces/jobs/');
     expect(loadCodingJobs()).toHaveLength(1);
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('includes approved repo preference rules in coding prompts', async () => {
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    upsertRepoRule({
+      repo: 'owner/repo',
+      title: 'Use npm scripts',
+      content: 'Run the repo npm scripts instead of ad-hoc shell checks.',
+      source: 'memory:repo-rule',
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Update dashboard code.',
+      requestedBy: 'dashboard',
+    });
+
+    expect(buildCodingPrompt(job)).toContain(
+      '- Use npm scripts: Run the repo npm scripts instead of ad-hoc shell checks.',
+    );
   });
 
   it('dry-runs coding jobs without spawning a write-capable container', async () => {
