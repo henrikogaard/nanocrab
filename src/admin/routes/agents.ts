@@ -20,8 +20,10 @@ import {
 import {
   getCodingJob,
   approveCodingJob,
+  approveCodingJobPr,
   cancelCodingJob,
   closeCodingJobPr,
+  denyCodingJob,
   listGitHubIssues,
   loadCodingJobs,
   loadCodingRepos,
@@ -145,6 +147,25 @@ router.post('/coding/jobs/:id/approve', (req: Request, res: Response) => {
   }
 });
 
+router.post(
+  '/coding/jobs/:id/deny-implementation',
+  (req: Request, res: Response) => {
+    try {
+      const job = denyCodingJob(
+        req.params.id as string,
+        req.user?.username || 'dashboard',
+        typeof req.body?.note === 'string' ? req.body.note : undefined,
+      );
+      auditLog(req, 'coding_job_denied', job.id);
+      res.json({ ok: true, job });
+    } catch (err) {
+      res
+        .status(400)
+        .json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+);
+
 router.post('/coding/jobs/:id/cancel', (req: Request, res: Response) => {
   try {
     const job = cancelCodingJob(
@@ -189,6 +210,28 @@ router.post('/coding/jobs/:id/open-pr', async (req: Request, res: Response) => {
       .json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
+
+router.post(
+  '/coding/jobs/:id/approve-pr',
+  async (req: Request, res: Response) => {
+    try {
+      approveCodingJobPr(
+        req.params.id as string,
+        req.user?.username || 'dashboard',
+      );
+      const job = await openCodingJobPr(
+        req.params.id as string,
+        req.user?.username || 'dashboard',
+      );
+      auditLog(req, 'coding_job_pr_approved', job.id);
+      res.json({ ok: true, job });
+    } catch (err) {
+      res
+        .status(400)
+        .json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+);
 
 router.post(
   '/coding/jobs/:id/refresh-ci',

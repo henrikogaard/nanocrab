@@ -230,6 +230,53 @@ describe('coding jobs', () => {
     );
   });
 
+  it('resolves milestone titles before querying GitHub issues', async () => {
+    const fetchMock = mockGitHubFetch((url) => {
+      if (url.includes('/milestones?')) {
+        return [
+          { number: 3, title: 'P0 Closure' },
+          { number: 4, title: 'Later' },
+        ];
+      }
+      if (url.includes('/issues?')) {
+        return [
+          {
+            number: 51,
+            title: 'Close P0 issue',
+            body: '',
+            html_url: 'https://github.com/owner/repo/issues/51',
+            updated_at: '2026-06-09T12:00:00Z',
+            labels: [{ name: 'autofix' }],
+            assignees: [],
+            milestone: { title: 'P0 Closure' },
+            user: { login: 'reporter' },
+          },
+        ];
+      }
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo', labels: ['autofix'] });
+
+    const issues = await listGitHubIssues({
+      repo: 'owner/repo',
+      milestone: 'P0 Closure',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/repos/owner/repo/milestones?'),
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('milestone=3'),
+      expect.any(Object),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('milestone=P0+Closure'),
+      expect.any(Object),
+    );
+    expect(issues.map((issue) => issue.number)).toEqual([51]);
+  });
+
   it('does not auto-pick issues from repos without an enabled coding repo config', async () => {
     mockGitHubFetch(() => [
       {
@@ -385,6 +432,45 @@ describe('coding jobs', () => {
     expect(getCodingJob(job.id)?.failureReason).toContain(
       'Implementation approval is required',
     );
+  });
+
+  it('does not schedule multiple implementation runs when approval is repeated', async () => {
+    vi.useRealTimers();
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, '');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+    });
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+
+    approveCodingJob(job.id, 'owner');
+    expect(() => approveCodingJob(job.id, 'owner')).toThrow(
+      'Cannot approve implementation from implement',
+    );
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('completed');
+    });
+    expect(spawn).toHaveBeenCalledTimes(1);
   });
 
   it('blocks provider fallback for PR creation before creating a GitHub PR', async () => {
@@ -695,5 +781,144 @@ describe('coding jobs', () => {
     expect(refreshed.lastCiError).toContain('test: vitest failed');
     expect(refreshed.status).toBe('completed');
     expect(refreshed.failureReason).toBeNull();
+  });
+
+  it('records successful GitHub Actions check runs when commit statuses are pending', async () => {
+    vi.useRealTimers();
+    mockGitHubFetch((url) => {
+      if (url.includes('/commits/abc123def456/status')) {
+        return { state: 'pending', statuses: [] };
+      }
+      if (url.includes('/commits/abc123def456/check-runs')) {
+        return {
+          check_runs: [
+            { name: 'build', status: 'completed', conclusion: 'success' },
+            { name: 'test', status: 'completed', conclusion: 'neutral' },
+          ],
+        };
+      }
+      if (url.includes('/pulls')) {
+        return { html_url: 'https://github.com/owner/repo/pull/13' };
+      }
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.mkdirSync(`${jobRoot}/owner__repo`, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/changed-files.txt`, 'src/a.ts\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+      createPr: true,
+    });
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_pr_approval');
+    });
+    const approval = createApproval({
+      kind: 'coding-open-pr',
+      title: 'Approve PR',
+      summary: 'Allow this job to publish a PR.',
+      targetType: 'coding-job',
+      targetId: job.id,
+    });
+    reviewApproval(approval.id, 'approved', 'owner');
+    const opened = await openCodingJobPr(job.id, 'owner');
+
+    const refreshed = await refreshCodingJobCi(opened.id);
+
+    expect(refreshed.ciStatus).toBe('success');
+    expect(refreshed.lastCiError).toBeNull();
+    expect(refreshed.status).toBe('completed');
+  });
+
+  it('records failing GitHub Actions check run details without commit statuses', async () => {
+    vi.useRealTimers();
+    mockGitHubFetch((url) => {
+      if (url.includes('/commits/abc123def456/status')) {
+        return { state: 'pending', statuses: [] };
+      }
+      if (url.includes('/commits/abc123def456/check-runs')) {
+        return {
+          check_runs: [
+            { name: 'build', status: 'completed', conclusion: 'success' },
+            {
+              name: 'test',
+              status: 'completed',
+              conclusion: 'failure',
+              html_url: 'https://github.com/owner/repo/actions/runs/1',
+            },
+          ],
+        };
+      }
+      if (url.includes('/pulls')) {
+        return { html_url: 'https://github.com/owner/repo/pull/14' };
+      }
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.mkdirSync(`${jobRoot}/owner__repo`, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/changed-files.txt`, 'src/a.ts\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+      createPr: true,
+    });
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_pr_approval');
+    });
+    const approval = createApproval({
+      kind: 'coding-open-pr',
+      title: 'Approve PR',
+      summary: 'Allow this job to publish a PR.',
+      targetType: 'coding-job',
+      targetId: job.id,
+    });
+    reviewApproval(approval.id, 'approved', 'owner');
+    const opened = await openCodingJobPr(job.id, 'owner');
+
+    const refreshed = await refreshCodingJobCi(opened.id);
+
+    expect(refreshed.ciStatus).toBe('failure');
+    expect(refreshed.lastCiError).toContain('test: failure');
+    expect(refreshed.status).toBe('completed');
   });
 });

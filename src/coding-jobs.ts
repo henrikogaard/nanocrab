@@ -325,6 +325,25 @@ export function getCodingRepo(fullName: string): CodingRepo | undefined {
   );
 }
 
+function isMilestoneApiValue(value: string): boolean {
+  return value === '*' || value === 'none' || /^\d+$/.test(value);
+}
+
+async function resolveMilestoneQueryValue(
+  repo: string,
+  milestone?: string,
+): Promise<string | undefined> {
+  const value = milestone?.trim();
+  if (!value) return undefined;
+  if (isMilestoneApiValue(value)) return value;
+
+  const milestones = (await githubApi(
+    `/repos/${repo}/milestones?state=all&per_page=100`,
+  )) as Array<{ number?: number; title?: string }>;
+  const match = milestones.find((item) => item.title === value);
+  return match?.number != null ? String(match.number) : undefined;
+}
+
 export async function listGitHubIssues(input: {
   repo: string;
   labels?: string[];
@@ -340,6 +359,13 @@ export async function listGitHubIssues(input: {
   }
 
   const labels = input.labels?.length ? input.labels : repo.labels;
+  const milestoneQueryValue = input.issueNumber
+    ? undefined
+    : await resolveMilestoneQueryValue(input.repo, input.milestone);
+  const milestoneTitleFilter =
+    input.milestone && !isMilestoneApiValue(input.milestone)
+      ? input.milestone
+      : null;
 
   const summarizeIssue = (issue: {
     number: number;
@@ -366,7 +392,8 @@ export async function listGitHubIssues(input: {
       return null;
     }
     if (input.assignee && !assignees.includes(input.assignee)) return null;
-    if (input.milestone && milestone !== input.milestone) return null;
+    if (milestoneTitleFilter && milestone !== milestoneTitleFilter) return null;
+    if (input.milestone === 'none' && milestone !== null) return null;
     return {
       number: issue.number,
       title: issue.title,
@@ -394,7 +421,7 @@ export async function listGitHubIssues(input: {
   });
   if (labels.length > 0) params.set('labels', labels.join(','));
   if (input.assignee) params.set('assignee', input.assignee);
-  if (input.milestone) params.set('milestone', input.milestone);
+  if (milestoneQueryValue) params.set('milestone', milestoneQueryValue);
 
   const issues = (await githubApi(
     `/repos/${input.repo}/issues?${params.toString()}`,
@@ -1169,7 +1196,7 @@ export function approveCodingJob(jobId: string, by = 'dashboard'): CodingJob {
     reviewApproval(approval.id, 'approved', by);
   }
   recordJobApproval(job, 'approve-implementation', by);
-  upsertCodingJob(job);
+  applyCodingJobTransition(job, 'implement');
   setImmediate(() => {
     const latest = getCodingJob(job.id);
     if (!latest) return;
@@ -1384,6 +1411,45 @@ function summarizeCiError(statusPayload: {
   return `${context}: ${description}`.trim();
 }
 
+function summarizeCheckRunError(
+  checkRuns: GitHubCheckRunSummary[],
+): string | null {
+  const failingRun = checkRuns.find((run) =>
+    [
+      'failure',
+      'timed_out',
+      'cancelled',
+      'action_required',
+      'startup_failure',
+    ].includes(run.conclusion || ''),
+  );
+  if (!failingRun) return null;
+  return `${failingRun.name || 'GitHub Actions'}: ${failingRun.conclusion}`;
+}
+
+interface GitHubCheckRunSummary {
+  name?: string;
+  status?: string;
+  conclusion?: string | null;
+  html_url?: string | null;
+}
+
+function evaluateCheckRuns(checkRuns: GitHubCheckRunSummary[]): {
+  status: 'pending' | 'success' | 'failure' | 'none';
+  error: string | null;
+} {
+  if (checkRuns.length === 0) return { status: 'none', error: null };
+  const failed = summarizeCheckRunError(checkRuns);
+  if (failed) return { status: 'failure', error: failed };
+  const pending = checkRuns.some(
+    (run) =>
+      run.status !== 'completed' ||
+      (run.status === 'completed' && !run.conclusion),
+  );
+  if (pending) return { status: 'pending', error: null };
+  return { status: 'success', error: null };
+}
+
 export async function refreshCodingJobCi(jobId: string): Promise<CodingJob> {
   const job = getCodingJob(jobId);
   if (!job) throw new Error(`Coding job not found: ${jobId}`);
@@ -1405,13 +1471,35 @@ export async function refreshCodingJobCi(jobId: string): Promise<CodingJob> {
       target_url?: string | null;
     }>;
   };
+  const checkRunsPayload = (await githubApi(
+    `/repos/${job.repo}/commits/${job.commitSha}/check-runs?per_page=100`,
+  )) as {
+    check_runs?: GitHubCheckRunSummary[];
+  };
+  const checkRunResult = evaluateCheckRuns(
+    Array.isArray(checkRunsPayload.check_runs)
+      ? checkRunsPayload.check_runs
+      : [],
+  );
   const state = statusPayload.state || 'pending';
-  if (state === 'success') {
-    job.ciStatus = 'success';
-    job.lastCiError = null;
-  } else if (state === 'failure' || state === 'error') {
+  const statusCount = Array.isArray(statusPayload.statuses)
+    ? statusPayload.statuses.length
+    : 0;
+  if (state === 'failure' || state === 'error') {
     job.ciStatus = 'failure';
     job.lastCiError = summarizeCiError(statusPayload);
+  } else if (checkRunResult.status === 'failure') {
+    job.ciStatus = 'failure';
+    job.lastCiError = checkRunResult.error;
+  } else if (
+    (state === 'pending' && statusCount > 0) ||
+    checkRunResult.status === 'pending'
+  ) {
+    job.ciStatus = 'pending';
+    job.lastCiError = null;
+  } else if (state === 'success' || checkRunResult.status === 'success') {
+    job.ciStatus = 'success';
+    job.lastCiError = null;
   } else {
     job.ciStatus = 'pending';
     job.lastCiError = null;

@@ -2,6 +2,40 @@
 
 // --- Agents ---
 
+function codingJobStatusBadge(status) {
+  if (status === 'completed') return 'badge-success';
+  if (['await_approval', 'await_pr_approval'].includes(status))
+    return 'badge-info';
+  if (
+    [
+      'queued',
+      'investigate',
+      'plan',
+      'implement',
+      'test',
+      'open_pr',
+      'ci_running',
+    ].includes(status)
+  )
+    return 'badge-warning';
+  if (status === 'cancelled') return 'badge-muted';
+  return 'badge-error';
+}
+
+function codingJobActive(status) {
+  return [
+    'queued',
+    'investigate',
+    'plan',
+    'await_approval',
+    'implement',
+    'test',
+    'await_pr_approval',
+    'open_pr',
+    'ci_running',
+  ].includes(status);
+}
+
 async function renderAgents(el) {
   el.innerHTML = '<div class="loading">Loading agents</div>';
   try {
@@ -153,14 +187,29 @@ async function renderAgents(el) {
       .join('');
     const codingJobRows = codingJobs
       .map((job) => {
-        const statusBadge =
-          job.status === 'completed'
-            ? 'badge-success'
-            : job.status === 'running'
-              ? 'badge-warning'
-              : job.status === 'queued'
-                ? 'badge-info'
-                : 'badge-error';
+        const statusBadge = codingJobStatusBadge(job.status);
+        const actions = [
+          job.status === 'await_approval'
+            ? `<button class="btn btn-sm btn-primary" onclick="controlCodingJob('${esc(job.id)}','approve')">Approve</button>`
+            : '',
+          job.status === 'await_approval'
+            ? `<button class="btn btn-sm btn-ghost" onclick="denyCodingJobImplementation('${esc(job.id)}')">Deny</button>`
+            : '',
+          job.status === 'await_pr_approval'
+            ? `<button class="btn btn-sm btn-primary" onclick="controlCodingJob('${esc(job.id)}','approve-pr')">Approve PR</button>`
+            : '',
+          job.commitSha && ['ci_running', 'completed'].includes(job.status)
+            ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','refresh-ci')">CI</button>`
+            : '',
+          ['failed', 'cancelled'].includes(job.status)
+            ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','retry')">Retry</button>`
+            : '',
+          !['completed', 'cancelled'].includes(job.status)
+            ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','cancel')">Cancel</button>`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('');
         return `<div class="channel-card" style="padding:8px 0">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -173,9 +222,7 @@ async function renderAgents(el) {
         </div>
         <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
           <span class="badge ${statusBadge}" style="font-size:10px">${esc(job.status)}</span>
-          <button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','open-pr')">PR</button>
-          <button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','retry')">Retry</button>
-          <button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','cancel')">Cancel</button>
+          ${actions}
           <button class="btn btn-sm btn-ghost" onclick="viewCodingJob('${esc(job.id)}')">View</button>
         </div>
       </div>`;
@@ -247,7 +294,9 @@ async function renderAgents(el) {
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
           ${cockpitRows
             .map(
-              (row) => `<div style="border:1px solid var(--border);border-radius:8px;padding:12px;min-height:82px">
+              (
+                row,
+              ) => `<div style="border:1px solid var(--border);border-radius:8px;padding:12px;min-height:82px">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
                   <span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">${esc(row.label)}</span>
                   <span class="badge badge-muted" style="font-size:10px">${row.count}</span>
@@ -583,7 +632,13 @@ window.pickCodingIssue = async function () {
   try {
     const r = await api('/agents/coding/pick-issue', {
       method: 'POST',
-      body: JSON.stringify({ repo, labels, provider, model: model || undefined, createPr }),
+      body: JSON.stringify({
+        repo,
+        labels,
+        provider,
+        model: model || undefined,
+        createPr,
+      }),
     });
     if (!r.ok) {
       toast(r.error || 'Failed', 'error');
@@ -610,14 +665,42 @@ window.viewCodingJob = async function (id) {
     '<div class="card"><div class="loading">Loading coding job...</div></div>';
   try {
     const job = await api('/agents/coding/jobs/' + encodeURIComponent(id));
-    const statusBadge =
-      job.status === 'completed'
-        ? 'badge-success'
-        : job.status === 'running'
-          ? 'badge-warning'
-          : job.status === 'queued'
-            ? 'badge-info'
-            : 'badge-error';
+    const statusBadge = codingJobStatusBadge(job.status);
+    const actions = [
+      job.status === 'await_approval'
+        ? `<button class="btn btn-sm btn-primary" onclick="controlCodingJob('${esc(id)}','approve')">Approve implementation</button>`
+        : '',
+      job.status === 'await_approval'
+        ? `<button class="btn btn-sm btn-ghost" onclick="denyCodingJobImplementation('${esc(id)}')">Deny implementation</button>`
+        : '',
+      job.status === 'await_pr_approval'
+        ? `<button class="btn btn-sm btn-primary" onclick="controlCodingJob('${esc(id)}','approve-pr')">Approve PR</button>`
+        : '',
+      job.commitSha && ['ci_running', 'completed'].includes(job.status)
+        ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(id)}','refresh-ci')">Refresh CI</button>`
+        : '',
+      ['failed', 'cancelled'].includes(job.status)
+        ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(id)}','retry')">Retry</button>`
+        : '',
+      !['completed', 'cancelled'].includes(job.status)
+        ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(id)}','cancel')">Cancel</button>`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('');
+    const diff =
+      job.diffSummary ||
+      (job.changedFiles || []).join('\n') ||
+      '(no diff captured yet)';
+    const tests = job.testSummary || '(no test summary captured yet)';
+    const ci = [
+      `Status: ${job.ciStatus || 'unknown'}`,
+      job.lastCiError ? `Last error: ${job.lastCiError}` : '',
+      job.commitSha ? `Commit: ${job.commitSha}` : '',
+      job.prUrl ? `PR: ${job.prUrl}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
     panel.innerHTML = `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -628,6 +711,7 @@ window.viewCodingJob = async function (id) {
           ${job.prUrl ? `<a href="${esc(job.prUrl)}" target="_blank" style="color:var(--accent);font-size:12px">Pull request</a>` : ''}
         </div>
         <div style="display:flex;gap:6px">
+          ${actions}
           <button class="btn btn-sm btn-ghost" onclick="viewCodingJob('${esc(id)}')">Refresh</button>
           <button class="btn btn-sm btn-ghost" onclick="document.getElementById('task-output-panel').style.display='none'">Close</button>
         </div>
@@ -636,9 +720,14 @@ window.viewCodingJob = async function (id) {
         <strong>Branch:</strong> ${esc(job.branch)}<br>
         <strong>Workspace:</strong> ${esc(job.workspace)}
       </div>
-      <pre style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;font-size:11px;max-height:440px;overflow:auto;white-space:pre-wrap;word-break:break-word;color:var(--text)">${esc(job.output || '(no output yet)')}</pre>
+      <div class="autofix-review-grid">
+        <div class="autofix-review-pane"><div class="autofix-pane-title">Diff</div><pre>${esc(diff)}</pre></div>
+        <div class="autofix-review-pane"><div class="autofix-pane-title">Log</div><pre>${esc(job.output || '(no output yet)')}</pre></div>
+        <div class="autofix-review-pane"><div class="autofix-pane-title">Tests</div><pre>${esc(tests)}</pre></div>
+        <div class="autofix-review-pane"><div class="autofix-pane-title">CI</div><pre>${esc(ci || 'Status: unknown')}</pre></div>
+      </div>
     </div>`;
-    if (job.status === 'running' || job.status === 'queued') {
+    if (codingJobActive(job.status)) {
       setTimeout(() => {
         if (
           document.getElementById('task-output-panel')?.style.display !== 'none'
@@ -797,6 +886,36 @@ window.controlCodingJob = async function (id, action) {
     });
     if (r.ok) {
       toast('Coding job action queued: ' + action, 'success');
+      if (
+        document.getElementById('task-output-panel')?.style.display !== 'none'
+      ) {
+        await viewCodingJob(id);
+      }
+      if (currentPage === 'agents') navigate('agents');
+    } else {
+      toast(r.error || 'Coding job action failed', 'error');
+    }
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
+window.denyCodingJobImplementation = async function (id) {
+  const note =
+    prompt('Reason for denying implementation?') ||
+    'Denied from Agents dashboard';
+  try {
+    const r = await api('/agents/coding/jobs/' + id + '/deny-implementation', {
+      method: 'POST',
+      body: JSON.stringify({ note }),
+    });
+    if (r.ok) {
+      toast('Implementation denied', 'success');
+      if (
+        document.getElementById('task-output-panel')?.style.display !== 'none'
+      ) {
+        await viewCodingJob(id);
+      }
       if (currentPage === 'agents') navigate('agents');
     } else {
       toast(r.error || 'Coding job action failed', 'error');
