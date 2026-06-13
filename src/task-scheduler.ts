@@ -212,6 +212,7 @@ async function runTask(
         model: effectiveModel,
         providerFallbackPurpose: fallbackPurpose,
         providerFallbackAction: 'automation-execution',
+        dryRun: task.tool_policy === 'dry-run',
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

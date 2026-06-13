@@ -67,6 +67,7 @@ import agentMessagesRoutes, {
 } from './routes/agent-messages.js';
 import questionsRoutes, { initQuestionsDb } from './routes/questions.js';
 import approvalsRoutes from './routes/approvals.js';
+import auditRoutes from './routes/audit.js';
 import chatRoutes from './routes/chat.js';
 import developerRoutes, {
   recordMonitoringSnapshot,
@@ -206,6 +207,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/copilot/oauth/callback', copilotRoutes);
 
   // Auth routes (login has its own rate limiting)
+  app.use('/api/audit', requireAuth, auditRoutes);
   app.use('/api', authRoutes);
 
   // Core API routes — role-based access control

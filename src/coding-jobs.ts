@@ -32,6 +32,8 @@ import {
   reviewApproval,
 } from './approvals.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
+import { logAuditEvent } from './audit-log.js';
+import { evaluatePolicy } from './policy-engine.js';
 
 const CODING_REPOS_PATH = path.join(STORE_DIR, 'coding-repos.json');
 const CODING_JOBS_PATH = path.join(STORE_DIR, 'coding-jobs.json');
@@ -101,6 +103,7 @@ export interface CodingJob {
   branch: string;
   workspace: string;
   createPr: boolean;
+  dryRun: boolean;
   prUrl: string | null;
   commitSha: string | null;
   changedFiles: string[];
@@ -130,6 +133,7 @@ export interface StartCodingJobInput {
   provider?: string;
   model?: string;
   createPr?: boolean;
+  dryRun?: boolean;
   branchName?: string;
   requestedBy: string;
 }
@@ -239,6 +243,7 @@ function ensureJobDefaults(job: CodingJob): CodingJob {
     transitionHistory: [],
     failureReason: null,
     approvalHistory: [],
+    dryRun: false,
   };
   const normalized = { ...defaults, ...job };
   if (!normalized.transitionedAt[normalized.status]) {
@@ -479,6 +484,16 @@ const CODING_JOB_TRANSITIONS: Record<CodingJobStatus, CodingJobStatus[]> = {
 function failTransition(job: CodingJob, reason: string): never {
   job.failureReason = reason;
   upsertCodingJob(job);
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'coding.transition',
+    resource: job.id,
+    decision: 'error',
+    correlationId: job.id,
+    error: reason,
+    context: { status: job.status },
+  });
   throw new Error(reason);
 }
 
@@ -496,12 +511,14 @@ function applyCodingJobTransition(
   }
   if (
     to === 'implement' &&
+    !job.dryRun &&
     !hasApprovedTarget('coding-implement', 'coding-job', job.id)
   ) {
     return failTransition(job, 'Implementation approval is required');
   }
   if (
     to === 'open_pr' &&
+    !job.dryRun &&
     !hasApprovedTarget('coding-open-pr', 'coding-job', job.id)
   ) {
     return failTransition(job, 'PR approval is required');
@@ -516,6 +533,22 @@ function applyCodingJobTransition(
     job.completedAt = at;
   }
   upsertCodingJob(job);
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'coding.transition',
+    resource: job.id,
+    decision: job.dryRun ? 'simulated' : failureReason ? 'error' : 'allowed',
+    correlationId: job.id,
+    error: failureReason,
+    context: {
+      from,
+      to,
+      repo: job.repo,
+      branch: job.branch,
+      dryRun: job.dryRun,
+    },
+  });
   return job;
 }
 
@@ -754,6 +787,28 @@ function codingContainerMounts(job: CodingJob): Array<{
 }
 
 function runCodingContainer(job: CodingJob, repo: CodingRepo): Promise<number> {
+  const policy = evaluatePolicy({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'coding.implement',
+    resource: job.repo,
+    dryRun: job.dryRun,
+    context: { branch: job.branch, provider: job.provider, model: job.model },
+  });
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'coding.implement',
+    resource: job.repo,
+    decision: job.dryRun ? 'simulated' : 'approved',
+    correlationId: job.id,
+    context: policy,
+  });
+  if (policy.decision === 'denied') {
+    throw new Error(
+      `Coding implementation denied by policy: ${policy.explanation}`,
+    );
+  }
   const jobRoot = writeCodingJobFiles(job, repo);
   const envFilePath = writeDockerEnvFile(buildCodingContainerEnv(job, repo));
   const safeName = job.id.replace(/[^a-zA-Z0-9_.-]/g, '-');
@@ -791,6 +846,19 @@ function runCodingContainer(job: CodingJob, repo: CodingRepo): Promise<number> {
     job,
     `\n\nStarting coding container ${containerName} with workspace ${jobRoot}\n`,
   );
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'container.spawn',
+    resource: job.repo,
+    decision: 'allowed',
+    correlationId: job.id,
+    context: {
+      containerName,
+      workspace: jobRoot,
+      mounts: codingContainerMounts(job).map((mount) => mount.containerPath),
+    },
+  });
 
   return new Promise((resolve, reject) => {
     const proc = spawn(CONTAINER_RUNTIME_BIN, args, {
@@ -822,6 +890,21 @@ function requirePrProviderFallbackApproval(
     action: 'pr-creation',
     requester,
     correlationId: job.id,
+  });
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'provider.fallback',
+    resource: job.repo,
+    decision: fallback.approved ? 'approved' : 'requires_approval',
+    correlationId: job.id,
+    context: {
+      action: 'pr-creation',
+      requester,
+      ...(fallback.approved
+        ? { provider: fallback.provider, model: fallback.model }
+        : { reason: fallback.reason, approvalId: fallback.approvalId }),
+    },
   });
   if (fallback.approved) return true;
   job.status = 'await_pr_approval';
@@ -865,11 +948,81 @@ async function runCodingJob(job: CodingJob): Promise<void> {
     applyCodingJobTransition(job, 'await_approval');
   }
 
+  if (job.dryRun) {
+    const policy = evaluatePolicy({
+      actor: job.requestedBy,
+      actorId: job.id,
+      actionType: 'coding.implement',
+      resource: job.repo,
+      dryRun: true,
+      context: { branch: job.branch, createPr: job.createPr },
+    });
+    if (policy.decision === 'denied') {
+      throw new Error(`Dry-run denied by policy: ${policy.explanation}`);
+    }
+    updateJobOutput(
+      job,
+      [
+        '\n\nDry-run simulation:',
+        `- Classified implementation as ${policy.risk} risk.`,
+        '- Skipped container spawn and external repository writes.',
+        job.createPr
+          ? '- Simulated pull request creation without GitHub API calls.'
+          : '',
+        '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+    logAuditEvent({
+      actor: job.requestedBy,
+      actorId: job.id,
+      actionType: 'coding.implement',
+      resource: job.repo,
+      decision: 'simulated',
+      correlationId: job.id,
+      context: policy,
+    });
+    applyCodingJobTransition(job, 'implement');
+    applyCodingJobTransition(job, 'test');
+    job.diffSummary = 'Dry-run only; no files were modified.';
+    job.testSummary = 'Dry-run simulation; tests were not executed.';
+    job.changedFiles = [];
+    if (job.createPr) {
+      logAuditEvent({
+        actor: job.requestedBy,
+        actorId: job.id,
+        actionType: 'coding.open_pr',
+        resource: job.repo,
+        decision: 'simulated',
+        correlationId: job.id,
+        context: { branch: job.branch, dryRun: true },
+      });
+    }
+    applyCodingJobTransition(job, 'completed');
+    upsertCodingJob(job);
+    return;
+  }
+
   const fallback = resolveProviderFallbackForAction({
     purpose: 'default_coding',
     action: 'coding-implementation',
     requester: job.requestedBy,
     correlationId: job.id,
+  });
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'provider.fallback',
+    resource: job.repo,
+    decision: fallback.approved ? 'approved' : 'requires_approval',
+    correlationId: job.id,
+    context: {
+      action: 'coding-implementation',
+      ...(fallback.approved
+        ? { provider: fallback.provider, model: fallback.model }
+        : { reason: fallback.reason, approvalId: fallback.approvalId }),
+    },
   });
   if (!fallback.approved) {
     updateJobOutput(
@@ -1061,6 +1214,7 @@ export async function startCodingJob(
     branch,
     workspace,
     createPr: input.createPr === true,
+    dryRun: input.dryRun === true,
     prUrl: null,
     commitSha: null,
     changedFiles: [],
@@ -1284,6 +1438,20 @@ export async function openCodingJobPr(
   if (job.status !== 'await_pr_approval') {
     throw new Error(`Cannot open PR from ${job.status}`);
   }
+  if (job.dryRun) {
+    logAuditEvent({
+      actor: by,
+      actorId: job.id,
+      actionType: 'coding.open_pr',
+      resource: job.repo,
+      decision: 'simulated',
+      correlationId: job.id,
+      context: { branch: job.branch },
+    });
+    applyCodingJobTransition(job, 'completed');
+    upsertCodingJob(job);
+    return job;
+  }
   if (!hasApprovedTarget('coding-open-pr', 'coding-job', job.id)) {
     const pending = findPendingApprovalForTarget(
       'coding-open-pr',
@@ -1308,6 +1476,25 @@ export async function openCodingJobPr(
   }
   if (!requirePrProviderFallbackApproval(job, by)) {
     return job;
+  }
+  const policy = evaluatePolicy({
+    actor: by,
+    actorId: job.id,
+    actionType: 'coding.open_pr',
+    resource: job.repo,
+    context: { branch: job.branch, changedFiles: job.changedFiles },
+  });
+  logAuditEvent({
+    actor: by,
+    actorId: job.id,
+    actionType: 'coding.open_pr',
+    resource: job.repo,
+    decision: policy.decision === 'denied' ? 'denied' : 'approved',
+    correlationId: job.id,
+    context: policy,
+  });
+  if (policy.decision === 'denied') {
+    throw new Error(`PR creation denied by policy: ${policy.explanation}`);
   }
   applyCodingJobTransition(job, 'open_pr');
 

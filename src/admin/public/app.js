@@ -397,6 +397,8 @@ const navIconPaths = {
     '<path d="M5 6.5h14v9H9l-4 3v-12Z"/><path d="M8 10h8"/><path d="M8 13h5"/>',
   approvals:
     '<path d="M12 3.5 18.5 6v5.3c0 4.2-2.5 7-6.5 9.2-4-2.2-6.5-5-6.5-9.2V6L12 3.5Z"/><path d="M9 12l2 2 4-5"/><path d="M8.5 6.5h7"/>',
+  audit:
+    '<path d="M6.5 4.5h11v15h-11z"/><path d="M9 8h6"/><path d="M9 11.5h6"/><path d="M9 15h3"/><path d="M15.5 15l2 2 3-4"/>',
   chat: '<path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3A7.5 7.5 0 0 1 12 19.5c-1.2 0-2.4-.3-3.4-.8L4.5 20l1.3-4A7.4 7.4 0 0 1 4.5 12Z"/><path d="M8.5 11.5h7"/><path d="M8.5 14.5h4.5"/>',
   groups:
     '<path d="M8 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M16 10a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"/><path d="M3.5 18.5c.4-3 2-5 4.5-5s4.1 2 4.5 5"/><path d="M13.2 14c2.9-.4 4.7 1.2 5.3 4.5"/>',
@@ -466,6 +468,7 @@ function showShell(page) {
     { id: 'agents', icon: 'agents', label: 'Agents' },
     { id: 'messages', icon: 'messages', label: 'Messages' },
     { id: 'approvals', icon: 'approvals', label: 'Approvals' },
+    { id: 'audit', icon: 'audit', label: 'Audit' },
     { id: 'chat', icon: 'chat', label: 'Chat' },
     { id: 'groups', icon: 'groups', label: 'Groups', section: 'Workspace' },
     { id: 'tasks', icon: 'tasks', label: 'Tasks' },
@@ -691,6 +694,7 @@ const _pageMap = {
   chat: 'renderChat',
   messages: 'renderMessages',
   approvals: 'renderApprovals',
+  audit: 'renderAudit',
   memory: 'renderMemoryConsolidated',
   skills: 'renderSkillsPage',
   timeline: 'renderMemoryKnowledgeTimeline',
@@ -4559,6 +4563,206 @@ async function renderSystem(el) {
     </div>`;
 }
 
+function auditQueryFromFilters() {
+  const filters = window._auditFilters || {};
+  const params = new URLSearchParams();
+  for (const key of [
+    'actor',
+    'actionType',
+    'resource',
+    'decision',
+    'correlationId',
+    'from',
+    'to',
+  ]) {
+    if (filters[key]) params.set(key, filters[key]);
+  }
+  params.set('limit', filters.limit || '150');
+  return params.toString();
+}
+
+function auditDecisionBadge(decision) {
+  const value = decision || 'allowed';
+  const cls =
+    value === 'denied' || value === 'error'
+      ? 'badge-error'
+      : value === 'simulated'
+        ? 'badge-warning'
+        : value === 'approved' || value === 'allowed'
+          ? 'badge-success'
+          : 'badge-muted';
+  return `<span class="badge ${cls}">${esc(value)}</span>`;
+}
+
+function renderAuditEventRow(event, selectedId) {
+  const action = event.actionType || event.action || 'unknown';
+  const resource = event.resource || event.details || '';
+  return `<button class="audit-event ${event.id === selectedId ? 'selected' : ''}" data-id="${esc(event.id || event.timestamp)}">
+    <span>${formatTime(event.timestamp)}</span>
+    <strong>${esc(action)}</strong>
+    ${auditDecisionBadge(event.decision || (action.includes('fail') ? 'error' : 'allowed'))}
+    <small>${esc(resource)}</small>
+  </button>`;
+}
+
+function renderAuditDetail(event, replay) {
+  if (!event) return '<aside class="audit-detail empty">Select an audit event</aside>';
+  const context = event.context || {
+    ip: event.ip,
+    details: event.details,
+    userAgent: event.userAgent,
+  };
+  return `<aside class="audit-detail">
+    <div class="audit-detail-head">
+      <div>
+        <h3>${esc(event.actionType || event.action || 'Audit event')}</h3>
+        <span>${esc(event.resource || event.details || '')}</span>
+      </div>
+      ${auditDecisionBadge(event.decision || 'allowed')}
+    </div>
+    <div class="audit-meta-grid">
+      ${[
+        ['Actor', event.actor || event.ip || 'dashboard'],
+        ['Actor ID', event.actorId || '-'],
+        ['Correlation', event.correlationId || '-'],
+        ['Duration', event.durationMs != null ? `${event.durationMs}ms` : '-'],
+        ['Error', event.error || '-'],
+      ]
+        .map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`)
+        .join('')}
+    </div>
+    <div class="section-label">Context</div>
+    <pre class="audit-json">${esc(prettyPrint(context))}</pre>
+    ${
+      replay?.events?.length
+        ? `<div class="section-label">Correlation Replay</div>
+          <div class="audit-replay">
+            ${replay.events
+              .map(
+                (item) => `<div><span>${formatTime(item.timestamp)}</span><strong>${esc(item.actionType)}</strong>${auditDecisionBadge(item.decision)}</div>`,
+              )
+              .join('')}
+          </div>`
+        : ''
+    }
+  </aside>`;
+}
+
+async function renderAudit(el) {
+  const filters = window._auditFilters || {
+    actor: '',
+    actionType: '',
+    resource: '',
+    decision: '',
+    correlationId: '',
+    from: '',
+    to: '',
+    limit: '150',
+  };
+  window._auditFilters = filters;
+  const events = await api(`/audit?${auditQueryFromFilters()}`);
+  const selected =
+    events.find((event) => event.id === window._selectedAuditId) || events[0];
+  if (selected?.id) window._selectedAuditId = selected.id;
+  const replay =
+    selected?.correlationId && selected.correlationId !== '-'
+      ? await api(`/audit/replay/${encodeURIComponent(selected.correlationId)}`).catch(() => null)
+      : null;
+
+  el.innerHTML = `
+    <div class="page-header">
+      <h2>Audit</h2>
+      <div class="page-actions">
+        <button class="btn btn-sm btn-ghost" onclick="navigate('audit')">Refresh</button>
+        <button class="btn btn-sm btn-primary" onclick="exportAuditJson()">Export JSON</button>
+      </div>
+    </div>
+    <form class="audit-filters" id="audit-filters">
+      <input name="actor" value="${esc(filters.actor || '')}" placeholder="Actor">
+      <input name="actionType" value="${esc(filters.actionType || '')}" placeholder="Action type">
+      <input name="resource" value="${esc(filters.resource || '')}" placeholder="Resource">
+      <select name="decision">
+        <option value="">Any decision</option>
+        ${['allowed', 'approved', 'requires_approval', 'denied', 'simulated', 'error'].map((decision) => `<option value="${decision}" ${filters.decision === decision ? 'selected' : ''}>${decision}</option>`).join('')}
+      </select>
+      <input name="correlationId" value="${esc(filters.correlationId || '')}" placeholder="Correlation ID">
+      <input name="from" type="datetime-local" value="${esc(filters.from || '')}" aria-label="From">
+      <input name="to" type="datetime-local" value="${esc(filters.to || '')}" aria-label="To">
+      <button class="btn btn-sm btn-primary" type="submit">Filter</button>
+      <button class="btn btn-sm btn-ghost" type="button" onclick="resetAuditFilters()">Reset</button>
+    </form>
+    <div class="audit-layout">
+      <section class="audit-list">
+        ${events.length ? events.map((event) => renderAuditEventRow(event, selected?.id)).join('') : '<div class="empty">No audit events match these filters.</div>'}
+      </section>
+      ${renderAuditDetail(selected, replay)}
+    </div>
+    <div class="audit-simulator">
+      <div class="card-title">Policy Simulator</div>
+      <form id="policy-simulator-form" class="audit-sim-grid">
+        <input name="actor" placeholder="Actor" value="dashboard">
+        <input name="actionType" placeholder="Action type" value="coding.open_pr">
+        <input name="resource" placeholder="Resource" value="henrikogaard/nanocrab">
+        <label class="audit-checkbox"><input type="checkbox" name="dryRun"> Dry-run</label>
+        <textarea name="context" placeholder='{"branch":"nanocrab/task"}'>{"branch":"nanocrab/task"}</textarea>
+        <button class="btn btn-sm btn-primary" type="submit">Simulate</button>
+      </form>
+      <pre class="audit-json" id="policy-simulator-output"></pre>
+    </div>`;
+
+  document.getElementById('audit-filters').onsubmit = (event) => {
+    event.preventDefault();
+    window._auditFilters = Object.fromEntries(new FormData(event.currentTarget).entries());
+    navigate('audit');
+  };
+  document.querySelector('.audit-list')?.addEventListener('click', (event) => {
+    const row = event.target.closest('.audit-event');
+    if (!row) return;
+    window._selectedAuditId = row.dataset.id;
+    navigate('audit');
+  });
+  document.getElementById('policy-simulator-form').onsubmit = async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    let context = {};
+    try {
+      context = data.context ? JSON.parse(data.context) : {};
+    } catch {
+      toast('Simulator context must be valid JSON', 'error');
+      return;
+    }
+    const result = await api('/audit/simulate', {
+      method: 'POST',
+      body: JSON.stringify({
+        actor: data.actor,
+        actionType: data.actionType,
+        resource: data.resource,
+        dryRun: data.dryRun === 'on',
+        context,
+      }),
+    });
+    document.getElementById('policy-simulator-output').textContent = prettyPrint(result);
+  };
+}
+
+window.resetAuditFilters = function () {
+  window._auditFilters = {};
+  navigate('audit');
+};
+
+window.exportAuditJson = async function () {
+  const payload = await api(`/audit/export?${auditQueryFromFilters()}`);
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `nanocrab-audit-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
 async function renderSecurity(el) {
   const [allowlist, audit, health] = await Promise.all([
     api('/allowlist'),
@@ -4596,7 +4800,7 @@ async function renderSecurity(el) {
     {
       name: 'Audit Logging',
       status: audit.length > 0 || true,
-      desc: 'All admin actions logged to logs/admin-audit.log',
+      desc: 'Admin and high-impact runtime actions are available in the Audit dashboard',
     },
     {
       name: 'IP Allowlist',
@@ -4635,8 +4839,12 @@ async function renderSecurity(el) {
   const score = Math.round((passCount / totalCount) * 100);
 
   // Failed login attempts from audit
-  const failedLogins = audit.filter((a) => a.action === 'login_failed');
-  const recentBlocked = audit.filter((a) => a.action === 'ip_blocked');
+  const failedLogins = audit.filter(
+    (a) => (a.action || a.actionType) === 'login_failed',
+  );
+  const recentBlocked = audit.filter(
+    (a) => (a.action || a.actionType) === 'ip_blocked',
+  );
 
   el.innerHTML = `
     <div class="page-header"><h2>Security</h2></div>
@@ -4710,9 +4918,9 @@ async function renderSecurity(el) {
             .map(
               (a) => `<tr>
             <td style="white-space:nowrap;font-size:11px">${formatTime(a.timestamp)}</td>
-            <td><span class="badge ${a.action.includes('fail') || a.action.includes('block') ? 'badge-error' : a.action.includes('success') || a.action.includes('changed') || a.action.includes('enabled') ? 'badge-success' : 'badge-muted'}">${esc(a.action)}</span></td>
-            <td style="font-family:var(--mono);font-size:11px">${esc(a.ip)}</td>
-            <td style="font-size:11px;max-width:250px;overflow:hidden;text-overflow:ellipsis">${esc(a.details || '')}</td>
+            <td><span class="badge ${(a.action || a.actionType || '').includes('fail') || (a.action || a.actionType || '').includes('block') ? 'badge-error' : (a.action || a.actionType || '').includes('success') || (a.action || a.actionType || '').includes('changed') || (a.action || a.actionType || '').includes('enabled') ? 'badge-success' : 'badge-muted'}">${esc(a.action || a.actionType)}</span></td>
+            <td style="font-family:var(--mono);font-size:11px">${esc(a.ip || a.actor || '')}</td>
+            <td style="font-size:11px;max-width:250px;overflow:hidden;text-overflow:ellipsis">${esc(a.details || a.resource || '')}</td>
             <td style="font-size:10px;max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--text-muted)">${esc((a.userAgent || '').slice(0, 60))}</td>
           </tr>`,
             )

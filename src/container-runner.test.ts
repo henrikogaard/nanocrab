@@ -262,6 +262,31 @@ describe('container-runner timeout behavior', () => {
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
   });
+
+  it('simulates dry-run container execution without spawning and keeps mounts read-only', async () => {
+    const onOutput = vi.fn(async () => {});
+    vi.mocked(spawn).mockClear();
+
+    const result = await runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        isScheduledTask: true,
+        dryRun: true,
+      },
+      () => {
+        throw new Error('dry-run should not register a spawned process');
+      },
+      onOutput,
+    );
+
+    expect(result.status).toBe('success');
+    expect(result.result).toContain('Dry-run simulated');
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'success' }),
+    );
+    expect(spawn).not.toHaveBeenCalled();
+  });
 });
 
 describe('container-runner skill routing provenance', () => {

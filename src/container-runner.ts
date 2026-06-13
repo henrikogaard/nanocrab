@@ -48,6 +48,8 @@ import {
   type ProviderPurpose,
 } from './provider-router.js';
 import type { FallbackAction } from './providers/fallback-policy.js';
+import { logAuditEvent } from './audit-log.js';
+import { evaluatePolicy } from './policy-engine.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCRAB_OUTPUT_START---';
@@ -67,6 +69,7 @@ export interface ContainerInput {
   provider?: AgentProvider;
   providerFallbackPurpose?: ProviderPurpose;
   providerFallbackAction?: FallbackAction;
+  dryRun?: boolean;
 }
 
 export interface ContainerOutput {
@@ -600,6 +603,49 @@ export async function runContainerAgent(
   );
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanocrab-${safeName}-${Date.now()}`;
+  const policy = evaluatePolicy({
+    actor: input.groupFolder,
+    actorId: input.sessionId || null,
+    actionType: 'container.spawn',
+    resource: group.folder,
+    dryRun: input.dryRun === true,
+    context: {
+      containerName,
+      chatJid: input.chatJid,
+      isMain: input.isMain,
+      isScheduledTask: input.isScheduledTask,
+      mountCount: mounts.length,
+      mounts: mounts.map((mount) => ({
+        containerPath: mount.containerPath,
+        readonly: input.dryRun ? true : mount.readonly,
+      })),
+    },
+  });
+  logAuditEvent({
+    actor: input.groupFolder,
+    actorId: input.sessionId || null,
+    actionType: 'container.spawn',
+    resource: group.folder,
+    decision: policy.decision,
+    correlationId: input.sessionId || null,
+    context: policy,
+  });
+  if (policy.decision === 'denied' || policy.decision === 'requires_approval') {
+    return {
+      status: 'error',
+      result: null,
+      error: `Container spawn ${policy.decision}: ${policy.explanation}`,
+    };
+  }
+  if (policy.decision === 'simulated') {
+    const simulated: ContainerOutput = {
+      status: 'success',
+      result: `Dry-run simulated container execution for ${group.name}. No container was spawned and all mounts were treated as read-only.`,
+      newSessionId: input.sessionId,
+    };
+    if (onOutput) await onOutput(simulated);
+    return simulated;
+  }
   let effectiveProvider = isAgentProvider(input.provider)
     ? input.provider
     : undefined;
@@ -612,6 +658,20 @@ export async function runContainerAgent(
       correlationId: input.sessionId || null,
       sourceProvider: effectiveProvider,
       sourceModel: effectiveModel,
+    });
+    logAuditEvent({
+      actor: input.groupFolder,
+      actorId: input.sessionId || null,
+      actionType: 'provider.fallback',
+      resource: input.providerFallbackPurpose,
+      decision: fallback.approved ? 'approved' : 'requires_approval',
+      correlationId: input.sessionId || null,
+      context: {
+        action: input.providerFallbackAction,
+        ...(fallback.approved
+          ? { provider: fallback.provider, model: fallback.model }
+          : { reason: fallback.reason, approvalId: fallback.approvalId }),
+      },
     });
     if (!fallback.approved) {
       return {
@@ -839,6 +899,17 @@ export async function runContainerAgent(
           result: null,
           error: `Container timed out after ${configTimeout}ms`,
         });
+        logAuditEvent({
+          actor: input.groupFolder,
+          actorId: input.sessionId || null,
+          actionType: 'container.spawn',
+          resource: group.folder,
+          decision: 'error',
+          correlationId: input.sessionId || null,
+          durationMs: duration,
+          error: `Container timed out after ${configTimeout}ms`,
+          context: { containerName, code },
+        });
         return;
       }
 
@@ -934,6 +1005,17 @@ export async function runContainerAgent(
           result: null,
           error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
         });
+        logAuditEvent({
+          actor: input.groupFolder,
+          actorId: input.sessionId || null,
+          actionType: 'container.spawn',
+          resource: group.folder,
+          decision: 'error',
+          correlationId: input.sessionId || null,
+          durationMs: duration,
+          error: stderr.slice(-500),
+          context: { containerName, code, logFile },
+        });
         return;
       }
 
@@ -948,6 +1030,16 @@ export async function runContainerAgent(
             status: 'success',
             result: null,
             newSessionId,
+          });
+          logAuditEvent({
+            actor: input.groupFolder,
+            actorId: input.sessionId || null,
+            actionType: 'container.spawn',
+            resource: group.folder,
+            decision: 'allowed',
+            correlationId: input.sessionId || null,
+            durationMs: duration,
+            context: { containerName, streaming: true, newSessionId },
           });
         });
         return;
@@ -983,6 +1075,21 @@ export async function runContainerAgent(
         );
 
         resolve(output);
+        logAuditEvent({
+          actor: input.groupFolder,
+          actorId: input.sessionId || null,
+          actionType: 'container.spawn',
+          resource: group.folder,
+          decision: output.status === 'success' ? 'allowed' : 'error',
+          correlationId: input.sessionId || null,
+          durationMs: duration,
+          error: output.error,
+          context: {
+            containerName,
+            status: output.status,
+            hasResult: !!output.result,
+          },
+        });
       } catch (err) {
         logger.error(
           {
@@ -999,6 +1106,17 @@ export async function runContainerAgent(
           result: null,
           error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
         });
+        logAuditEvent({
+          actor: input.groupFolder,
+          actorId: input.sessionId || null,
+          actionType: 'container.spawn',
+          resource: group.folder,
+          decision: 'error',
+          correlationId: input.sessionId || null,
+          durationMs: duration,
+          error: err,
+          context: { containerName },
+        });
       }
     });
 
@@ -1013,6 +1131,17 @@ export async function runContainerAgent(
         status: 'error',
         result: null,
         error: `Container spawn error: ${err.message}`,
+      });
+      logAuditEvent({
+        actor: input.groupFolder,
+        actorId: input.sessionId || null,
+        actionType: 'container.spawn',
+        resource: group.folder,
+        decision: 'error',
+        correlationId: input.sessionId || null,
+        durationMs: Date.now() - startTime,
+        error: err,
+        context: { containerName },
       });
     });
   });

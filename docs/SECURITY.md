@@ -72,6 +72,14 @@ Memory and skills are treated as provenance-tracked runtime context:
 
 Skill injection is bounded before a container starts. The router clamps relevance scores, excludes score `<= 0`, caps the number of injected skills, caps total skill context bytes, and records why each skill was injected or excluded. Channel agents do not receive `private` or `system` skills; those are reserved for the main/admin context. Runtime skill registry snapshots include only the skills that survived this selection step.
 
+### 3b. Policy, Dry-Run, And Audit Replay
+
+High-impact actions are evaluated by the host-side policy engine before execution. Policy rules live in `store/policies.json` and support wildcard action patterns, risk classification, approval requirements, dry-run eligibility, and sanitized explanations. If no custom rules exist, NanoCrab applies conservative defaults for coding writes, provider fallback, container spawn, uploads, and outbound sends.
+
+Audit events are stored in SQLite (`audit_events`) with actor, action, resource, decision, sanitized context, correlation id, duration, and error fields. The admin Audit page can filter events, replay a correlation timeline, export JSON, and simulate policy decisions. Audit context redacts tokens, passwords, API keys, secrets, cookies, authorization headers, and common bearer/API-key values before persistence.
+
+Dry-run mode records `decision: simulated` audit events and avoids external writes. Coding-job dry-runs skip container execution, Git commits, pushes, and pull request creation while still recording the workflow timeline. Scheduled automations can run with `tool_policy: dry-run`; the container runner returns a simulated result without spawning a container and treats mounts as read-only in the recorded decision.
+
 ### 4. IPC Authorization
 
 Messages and task operations are verified against group identity:

@@ -1,5 +1,7 @@
 import { Channel, NewMessage } from './types.js';
 import { formatLocalTime } from './timezone.js';
+import { logAuditEvent } from './audit-log.js';
+import { evaluatePolicy } from './policy-engine.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -60,9 +62,57 @@ export function routeOutbound(
   jid: string,
   text: string,
 ): Promise<void> {
+  const start = Date.now();
+  const policy = evaluatePolicy({
+    actor: 'router',
+    actionType: 'channel.send',
+    resource: jid,
+    context: { jid, textLength: text.length },
+  });
+  logAuditEvent({
+    actor: 'router',
+    actionType: 'channel.send',
+    resource: jid,
+    decision: policy.decision,
+    context: policy,
+  });
+  if (policy.decision === 'denied' || policy.decision === 'requires_approval') {
+    logAuditEvent({
+      actor: 'router',
+      actionType: 'policy.denial',
+      resource: jid,
+      decision: policy.decision,
+      durationMs: Date.now() - start,
+      context: policy,
+    });
+    throw new Error(`Outbound send blocked by policy: ${policy.explanation}`);
+  }
   const channel = channels.find((c) => c.ownsJid(jid) && c.isConnected());
   if (!channel) throw new Error(`No channel for JID: ${jid}`);
-  return channel.sendMessage(jid, text);
+  return channel
+    .sendMessage(jid, text)
+    .then(() => {
+      logAuditEvent({
+        actor: 'router',
+        actionType: 'channel.send',
+        resource: jid,
+        decision: 'allowed',
+        durationMs: Date.now() - start,
+        context: { channel: channel.name, textLength: text.length },
+      });
+    })
+    .catch((err) => {
+      logAuditEvent({
+        actor: 'router',
+        actionType: 'channel.send',
+        resource: jid,
+        decision: 'error',
+        durationMs: Date.now() - start,
+        error: err,
+        context: { channel: channel.name, textLength: text.length },
+      });
+      throw err;
+    });
 }
 
 export function findChannel(

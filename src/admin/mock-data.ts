@@ -321,6 +321,102 @@ const approvals = [
   },
 ];
 
+const auditEvents = [
+  {
+    id: 'audit-code-plan',
+    timestamp: iso(22),
+    actor: 'coding-agent',
+    actorId: 'code-mock-1',
+    actionType: 'coding.transition',
+    resource: 'code-mock-1',
+    decision: 'allowed',
+    context: { from: 'queued', to: 'plan', repo: 'henrikogaard/nanocrab' },
+    correlationId: 'code-mock-1',
+    durationMs: 12,
+    error: null,
+  },
+  {
+    id: 'audit-code-dry-run',
+    timestamp: iso(21),
+    actor: 'coding-agent',
+    actorId: 'code-mock-1',
+    actionType: 'coding.implement',
+    resource: 'henrikogaard/nanocrab',
+    decision: 'simulated',
+    context: {
+      branch: 'nanocrab/p0-policy-engine',
+      dryRun: true,
+      explanation: 'Repository write simulated with read-only mounts.',
+    },
+    correlationId: 'code-mock-1',
+    durationMs: 41,
+    error: null,
+  },
+  {
+    id: 'audit-pr-approval',
+    timestamp: iso(19),
+    actor: 'mock-owner',
+    actorId: 'approval-repo-risk',
+    actionType: 'approval.coding-open-pr.approved',
+    resource: 'coding-job/af-job-1',
+    decision: 'approved',
+    context: {
+      approvalId: 'approval-repo-risk',
+      policyDecisionId: 'policy-repo-write',
+    },
+    correlationId: 'corr-gh-42',
+    durationMs: 4,
+    error: null,
+  },
+  {
+    id: 'audit-provider-fallback',
+    timestamp: iso(32),
+    actor: 'provider-router',
+    actorId: null,
+    actionType: 'provider.fallback',
+    resource: 'default_coding',
+    decision: 'requires_approval',
+    context: {
+      from: 'codex/gpt-5.4',
+      to: 'openrouter/auto',
+      reason: 'Primary provider preflight failed.',
+    },
+    correlationId: 'corr-provider-fallback',
+    durationMs: 8,
+    error: null,
+  },
+  {
+    id: 'audit-channel-send',
+    timestamp: iso(11),
+    actor: 'router',
+    actorId: null,
+    actionType: 'channel.send',
+    resource: 'wa:alliance-command',
+    decision: 'allowed',
+    context: { channel: 'whatsapp', textLength: 184 },
+    correlationId: 'corr-nightfall-ops',
+    durationMs: 73,
+    error: null,
+  },
+  {
+    id: 'audit-upload-denied',
+    timestamp: iso(45),
+    actor: 'attachment-handler',
+    actorId: 'upload-scout-archive',
+    actionType: 'upload.process',
+    resource: 'scout-intel.zip',
+    decision: 'denied',
+    context: {
+      filename: 'scout-intel.zip',
+      reason: 'Archive processing denied by policy simulator.',
+      apiKey: '[REDACTED]',
+    },
+    correlationId: 'corr-scout-upload',
+    durationMs: 2,
+    error: 'Upload policy denied archive extraction',
+  },
+];
+
 const messages = [
   {
     id: 'msg-001',
@@ -2177,57 +2273,35 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
     return { enabled: true, ips: ['92.221.30.107', '10.0.0.0/24'] };
   }
   if (pathname === '/audit') {
-    return [
-      {
-        timestamp: iso(18),
-        action: 'skill_draft_created',
-        ip: '92.221.30.107',
-        details: 'operation-briefing',
-        userAgent: 'Mock browser',
+    const q = req.query;
+    return auditEvents
+      .filter((event) => !q.actor || event.actor === q.actor)
+      .filter((event) => !q.actionType || event.actionType === q.actionType)
+      .filter((event) => !q.decision || event.decision === q.decision)
+      .filter(
+        (event) => !q.correlationId || event.correlationId === q.correlationId,
+      )
+      .slice(0, Math.min(parseInt(String(q.limit || '100'), 10), 1000));
+  }
+  if (pathname === '/audit/export') {
+    return { exportedAt: iso(0), events: auditEvents };
+  }
+  if (pathname.startsWith('/audit/replay/')) {
+    const correlationId = decodeURIComponent(pathname.split('/').pop() || '');
+    const events = auditEvents
+      .filter((event) => event.correlationId === correlationId)
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    return {
+      correlationId,
+      events,
+      summary: {
+        eventCount: events.length,
+        firstActionType: events[0]?.actionType || null,
+        lastActionType: events[events.length - 1]?.actionType || null,
+        lastDecision: events[events.length - 1]?.decision || null,
+        durationMs: events.length ? 120000 : null,
       },
-      {
-        timestamp: iso(24),
-        action: 'memory_approved',
-        ip: '92.221.30.107',
-        details: 'mem-mock-2',
-        userAgent: 'Mock browser',
-      },
-      {
-        timestamp: iso(38),
-        action: 'skill_draft_approved',
-        ip: '92.221.30.107',
-        details: 'daily-summary',
-        userAgent: 'Mock browser',
-      },
-      {
-        timestamp: iso(66),
-        action: 'memory_edit',
-        ip: '92.221.30.107',
-        details: 'Updated shared MEMORY.md',
-        userAgent: 'Mock browser',
-      },
-      {
-        timestamp: iso(11),
-        action: 'login_success',
-        ip: '92.221.30.107',
-        details: 'mock owner session',
-        userAgent: 'Mock browser',
-      },
-      {
-        timestamp: iso(95),
-        action: 'provider_changed',
-        ip: '92.221.30.107',
-        details: 'codex/gpt-5.4',
-        userAgent: 'Mock browser',
-      },
-      {
-        timestamp: iso(180),
-        action: 'login_failed',
-        ip: '203.0.113.22',
-        details: 'bad password',
-        userAgent: 'Unknown',
-      },
-    ];
+    };
   }
   if (pathname === '/usage') return usage();
   if (pathname === '/sessions') return sessions();
@@ -2925,6 +2999,22 @@ function writeResponse(pathname: string): JsonValue {
   if (pathname.includes('/preflight'))
     return ok({ message: 'Mock preflight passed' });
   if (pathname === '/providers/probe-all') return { version: 2, entries: [] };
+  if (pathname === '/audit/simulate') {
+    return ok({
+      decision: {
+        id: 'policy-mock-simulation',
+        actionType: 'coding.open_pr',
+        resource: 'henrikogaard/nanocrab',
+        risk: 'high',
+        decision: 'requires_approval',
+        approvalRequired: true,
+        dryRunAllowed: true,
+        explanation: 'Repository-changing coding actions require approval.',
+        matchedRuleIds: ['coding-writes'],
+        context: { branch: 'nanocrab/task' },
+      },
+    });
+  }
   return ok({ message: 'Mock write accepted. No live data changed.' });
 }
 

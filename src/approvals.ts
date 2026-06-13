@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { STORE_DIR } from './config.js';
+import { logAuditEvent } from './audit-log.js';
 
 export type ApprovalKind =
   | 'provider-fallback'
@@ -226,6 +227,23 @@ export function createApproval(input: CreateApprovalInput): ApprovalRequest {
   const approvals = readApprovals();
   approvals.push(approval);
   writeApprovals(approvals);
+  logAuditEvent({
+    actor: input.requester || 'system',
+    actionType: `approval.${approval.kind}.created`,
+    resource: `${approval.targetType || approval.kind}/${approval.targetId || approval.id}`,
+    decision: 'requires_approval',
+    correlationId: approval.correlationId,
+    context: {
+      approvalId: approval.id,
+      kind: approval.kind,
+      risk: approval.risk,
+      source: approval.source,
+      title: approval.title,
+      resourceSummary: approval.resourceSummary,
+      policyDecisionId: approval.policyDecisionId,
+      payload: approval.payload,
+    },
+  });
   return approval;
 }
 
@@ -251,6 +269,21 @@ export function reviewApproval(
   approval.reviewedBy = reviewedBy;
   approval.decisionNote = decisionNote || null;
   writeApprovals(approvals);
+  logAuditEvent({
+    actor: reviewedBy,
+    actionType: `approval.${approval.kind}.${status}`,
+    resource: `${approval.targetType || approval.kind}/${approval.targetId || approval.id}`,
+    decision: status,
+    correlationId: approval.correlationId,
+    context: {
+      approvalId: approval.id,
+      kind: approval.kind,
+      risk: approval.risk,
+      source: approval.source,
+      note: approval.decisionNote,
+      policyDecisionId: approval.policyDecisionId,
+    },
+  });
   return approval;
 }
 

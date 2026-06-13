@@ -72,6 +72,8 @@ import {
 } from './coding-jobs.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
 import { createApproval, reviewApproval } from './approvals.js';
+import { listAuditEvents } from './audit-log.js';
+import { _closeDatabase, _initTestDatabase } from './db.js';
 
 const TEST_ROOT = '/tmp/nanocrab-coding-jobs-test';
 
@@ -119,12 +121,23 @@ describe('coding jobs', () => {
       provider: 'claude',
       model: 'claude-sonnet-4-6',
     });
+    try {
+      _closeDatabase();
+    } catch {
+      /* database may not be initialized */
+    }
+    _initTestDatabase();
   });
 
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    try {
+      _closeDatabase();
+    } catch {
+      /* database may not be initialized */
+    }
     fs.rmSync(TEST_ROOT, { recursive: true, force: true });
   });
 
@@ -324,6 +337,32 @@ describe('coding jobs', () => {
     expect(job.workspace).toContain('/data/coding-workspaces/jobs/');
     expect(loadCodingJobs()).toHaveLength(1);
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('dry-runs coding jobs without spawning a write-capable container', async () => {
+    vi.useRealTimers();
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Preview a risky repository update.',
+      requestedBy: 'whatsapp_main',
+      dryRun: true,
+      createPr: true,
+    });
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('completed');
+    });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(getCodingJob(job.id)?.output).toContain('Dry-run simulation');
+    expect(getCodingJob(job.id)?.changedFiles).toEqual([]);
+    expect(
+      listAuditEvents({ correlationId: job.id }).some(
+        (event) => event.decision === 'simulated',
+      ),
+    ).toBe(true);
   });
 
   it('blocks write-capable provider fallback before spawning a coding container', async () => {
