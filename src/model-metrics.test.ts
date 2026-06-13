@@ -115,4 +115,52 @@ describe('model metrics', () => {
       averageLatencyMs: null,
     });
   });
+
+  it('clears stale history errors when the latest probe succeeds', () => {
+    const metrics = buildModelMetricsData(
+      [
+        {
+          profileId: 'default_chat',
+          provider: 'openrouter',
+          model: 'openrouter/auto',
+          ok: false,
+          latencyMs: 500,
+          streaming: true,
+          streamingSupport: true,
+          toolSupport: true,
+          schemaSupport: true,
+          visionSupport: true,
+          contextWindow: 128000,
+          errorDetail: 'old timeout',
+          timestamp: '2026-06-13T10:00:00.000Z',
+        },
+      ],
+      {
+        default_chat: {
+          profileId: 'default_chat',
+          provider: 'openrouter',
+          model: 'openrouter/auto',
+          ok: true,
+          latencyMs: 125,
+          lastProbeAt: '2026-06-13T10:10:00.000Z',
+          checks: [],
+          capabilities: {
+            tool_calls: true,
+            structured_output: true,
+            streaming: true,
+            vision: true,
+            code_strength: 'agentic',
+            context_window: 200000,
+            cost_tier: 'medium',
+            privacy_tier: 'third-party',
+            supports_mcp_strategy: 'container-loop',
+          },
+        },
+      },
+      new Date('2026-06-13T10:15:00.000Z'),
+    );
+
+    expect(metrics.models[0].lastProbeAt).toBe('2026-06-13T10:10:00.000Z');
+    expect(metrics.models[0].lastError).toBeNull();
+  });
 });

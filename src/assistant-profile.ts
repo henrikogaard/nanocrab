@@ -21,6 +21,7 @@ export interface AssistantProfile {
 }
 
 const PROFILE_PATH = path.join(STORE_DIR, 'assistant-profile.json');
+const UPLOADED_AVATAR_EXTENSIONS = ['jpg', 'png', 'webp'] as const;
 
 export const BUILTIN_AVATARS: AssistantAvatarOption[] = [
   {
@@ -65,15 +66,25 @@ export const BUILTIN_AVATARS: AssistantAvatarOption[] = [
   },
 ];
 
-function uploadedAvatarAvailable(): boolean {
-  const candidates = [
-    path.join(process.cwd(), 'src/admin/public/static/avatar.jpg'),
-    path.join(process.cwd(), 'dist/admin/public/static/avatar.jpg'),
+function uploadedAvatarUrl(): string | null {
+  const staticDirs = [
+    path.join(process.cwd(), 'src/admin/public/static'),
+    path.join(process.cwd(), 'dist/admin/public/static'),
   ];
-  return candidates.some((candidate) => fs.existsSync(candidate));
+  for (const extension of UPLOADED_AVATAR_EXTENSIONS) {
+    if (
+      staticDirs.some((staticDir) =>
+        fs.existsSync(path.join(staticDir, `avatar.${extension}`)),
+      )
+    ) {
+      return `/static/avatar.${extension}`;
+    }
+  }
+  return null;
 }
 
 export function listAssistantAvatars(): AssistantAvatarOption[] {
+  const uploadedUrl = uploadedAvatarUrl();
   return [
     {
       id: 'default',
@@ -88,8 +99,8 @@ export function listAssistantAvatars(): AssistantAvatarOption[] {
       kind: 'uploaded',
       name: 'Uploaded Avatar',
       description: 'Use the custom image uploaded to the dashboard.',
-      url: '/static/avatar.jpg',
-      available: uploadedAvatarAvailable(),
+      url: uploadedUrl || '/static/avatar.jpg',
+      available: Boolean(uploadedUrl),
     },
     ...BUILTIN_AVATARS,
   ];

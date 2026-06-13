@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { CronExpressionParser } from 'cron-parser';
 
+import { TIMEZONE } from './config.js';
 import { createTask } from './db.js';
 import type { ScheduledTask } from './types.js';
 
@@ -63,7 +64,10 @@ function normalizeSchedule(
     throw new Error('scheduleType must be cron or interval');
   }
   if (scheduleType === 'cron') {
-    const interval = CronExpressionParser.parse(rawValue);
+    const interval = CronExpressionParser.parse(rawValue, {
+      currentDate: now,
+      tz: TIMEZONE,
+    });
     return { value: rawValue, nextRun: interval.next().toDate().toISOString() };
   }
 

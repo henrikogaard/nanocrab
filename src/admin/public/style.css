@@ -1981,6 +1981,12 @@ tr {
   display: grid;
   gap: 8px;
 }
+.dash-feature-grid {
+  margin-bottom: 14px;
+}
+.dash-tool-label {
+  margin-top: 2px;
+}
 .dash-action {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
@@ -2003,6 +2009,13 @@ tr {
   border-color: var(--accent);
   background: var(--surface);
   transform: translateY(-1px);
+}
+.dash-feature-action {
+  background: color-mix(in srgb, var(--accent-bg) 36%, var(--surface2));
+}
+.dash-feature-action .dash-action-mark {
+  border-color: var(--info);
+  background: var(--info-bg);
 }
 .dash-action:active {
   transform: translateY(1px) scale(0.98);

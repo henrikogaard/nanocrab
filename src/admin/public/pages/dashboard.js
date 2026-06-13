@@ -101,6 +101,15 @@ async function renderDashboard(el) {
         ['Restart', 'Confirm service', 'restartService(this)'],
       ];
 
+      const featureActions = [
+        ['Operation Schedules', 'Create group reminders', "navigate('tasks')"],
+        ['Model Metrics', 'Latency and reliability', "navigate('monitoring')"],
+        ['Connector Catalog', 'Setup and permissions', "navigate('integrations')"],
+        ['Assistant Profile', 'Avatar and identity', "navigate('settings')"],
+        ['Agent Access', 'Scopes and connectors', "navigate('agents')"],
+        ['Connector Skills', 'Review enabled skills', "navigate('skills')"],
+      ];
+
       const channelRows =
         channels
           .map((ch, index) => {
@@ -215,6 +224,18 @@ async function renderDashboard(el) {
         .map(
           ([label, detail, action], index) => `
             <button class="dash-action dash-reveal" style="--i:${index}" onclick="${action}">
+              <span class="dash-action-mark"></span>
+              <span>
+                <strong>${label}</strong>
+                <small>${detail}</small>
+              </span>
+            </button>`,
+        )
+        .join('');
+      const featureRows = featureActions
+        .map(
+          ([label, detail, action], index) => `
+            <button class="dash-action dash-feature-action dash-reveal" style="--i:${index}" onclick="${action}">
               <span class="dash-action-mark"></span>
               <span>
                 <strong>${label}</strong>
@@ -361,6 +382,9 @@ async function renderDashboard(el) {
                   <h3>Quick actions</h3>
                 </div>
               </div>
+              <div class="dash-section-label">New surfaces</div>
+              <div class="dash-action-grid dash-feature-grid">${featureRows}</div>
+              <div class="dash-section-label dash-tool-label">Operator tools</div>
               <div class="dash-action-grid">${actionRows}</div>
             </section>
 

@@ -62,4 +62,26 @@ describe('operation schedules', () => {
     ).toThrow('scheduled message delivery requires explicit approval');
     expect(saveTask).not.toHaveBeenCalled();
   });
+
+  it('calculates cron next_run from the supplied creation time', () => {
+    const result = createOperationSchedule(
+      {
+        groupFolder: 'operations',
+        chatJid: 'tg:operations-room',
+        title: 'Daily orders',
+        orders: 'Repeat daily orders.',
+        intent: 'orders',
+        scheduleType: 'cron',
+        scheduleValue: '0 9 * * *',
+        deliveryMode: 'preview',
+      },
+      {
+        id: 'operation-cron-test',
+        now: new Date('2030-01-01T10:00:00.000Z'),
+        saveTask: vi.fn(),
+      },
+    );
+
+    expect(result.task.next_run).toMatch(/^2030-/);
+  });
 });

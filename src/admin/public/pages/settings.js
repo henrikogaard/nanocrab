@@ -697,7 +697,7 @@ window.renderSettings = async function (el) {
         msgEl.textContent = 'Avatar updated!';
         msgEl.style.color = 'var(--success)';
         document.getElementById('avatar-preview').src =
-          '/static/avatar.jpg?' + Date.now();
+          (data.url || '/static/avatar.jpg') + '?' + Date.now();
       } else {
         msgEl.textContent = 'Failed';
         msgEl.style.color = 'var(--error)';

@@ -404,10 +404,12 @@ function connectorExclusionReason(
   agentBoundary?: AgentBoundary,
 ): SkillInjectionDecision | null {
   if (!agentBoundary) return null;
-  const required = requiredConnectorIds(skill.requiredTools);
+  const required = requiredConnectorIds(skill.requiredTools).filter(
+    (connectorId) => connectorId !== 'nanocrab',
+  );
   if (required.length === 0) return null;
   const allowed = new Set(agentBoundary.connectorIds);
-  return required.every((connectorId) => allowed.has(connectorId))
+  return required.some((connectorId) => allowed.has(connectorId))
     ? null
     : 'excluded-connector-scope';
 }

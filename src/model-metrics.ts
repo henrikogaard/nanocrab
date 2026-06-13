@@ -175,11 +175,11 @@ export function buildModelMetricsData(
         costTier: latestProbe?.capabilities?.cost_tier || 'unknown',
         lastProbeAt:
           latestProbe?.lastProbeAt || latestHistory?.timestamp || null,
-        lastError:
-          latestProbe?.errorDetail ||
-          latestProbe?.errors?.[0] ||
-          latestHistory?.errorDetail ||
-          null,
+        lastError: latestProbe
+          ? latestProbe.ok
+            ? null
+            : latestProbe.errorDetail || latestProbe.errors?.[0] || null
+          : latestHistory?.errorDetail || null,
       };
     },
   );

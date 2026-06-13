@@ -63,6 +63,43 @@ import {
 } from '../../provider-router.js';
 
 const router = Router();
+const MAX_AVATAR_BYTES = 1024 * 1024;
+const AVATAR_EXTENSIONS = ['jpg', 'png', 'webp'] as const;
+
+export interface AvatarUploadValidation {
+  contentType: 'image/jpeg' | 'image/png' | 'image/webp';
+  extension: 'jpg' | 'png' | 'webp';
+}
+
+export function validateAvatarUpload(buffer: Buffer): AvatarUploadValidation {
+  if (buffer.length > MAX_AVATAR_BYTES) {
+    throw new Error('avatar must be 1 MB or smaller');
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8) {
+    return { contentType: 'image/jpeg', extension: 'jpg' };
+  }
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return { contentType: 'image/png', extension: 'png' };
+  }
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    return { contentType: 'image/webp', extension: 'webp' };
+  }
+  throw new Error('avatar must be a JPEG, PNG, or WebP image');
+}
 
 function normalizeProviderBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/+$/, '');
@@ -450,13 +487,46 @@ router.get('/stats', (_req: Request, res: Response) => {
 // Upload avatar
 router.post('/avatar', async (req: Request, res: Response) => {
   const chunks: Buffer[] = [];
-  req.on('data', (chunk: Buffer) => chunks.push(chunk));
+  let totalBytes = 0;
+  let rejected = false;
+  req.on('data', (chunk: Buffer) => {
+    totalBytes += chunk.length;
+    if (totalBytes > MAX_AVATAR_BYTES) {
+      rejected = true;
+      chunks.length = 0;
+      return;
+    }
+    chunks.push(chunk);
+  });
   req.on('end', () => {
+    if (rejected) {
+      if (!res.headersSent) {
+        res
+          .status(413)
+          .json({ ok: false, error: 'avatar must be 1 MB or smaller' });
+      }
+      return;
+    }
     const buffer = Buffer.concat(chunks);
+    let avatar: AvatarUploadValidation;
+    try {
+      avatar = validateAvatarUpload(buffer);
+    } catch (error) {
+      res.status(400).json({
+        ok: false,
+        error: error instanceof Error ? error.message : 'invalid avatar',
+      });
+      return;
+    }
     const projectRoot = process.cwd();
     const avatarDir = path.join(projectRoot, 'site', 'static');
     fs.mkdirSync(avatarDir, { recursive: true });
-    fs.writeFileSync(path.join(avatarDir, 'avatar.jpg'), buffer);
+    fs.writeFileSync(path.join(avatarDir, `avatar.${avatar.extension}`), buffer);
+    for (const extension of AVATAR_EXTENSIONS) {
+      if (extension !== avatar.extension) {
+        fs.rmSync(path.join(avatarDir, `avatar.${extension}`), { force: true });
+      }
+    }
     // Also save to admin public for dashboard use
     const adminStatic = path.join(
       projectRoot,
@@ -466,7 +536,14 @@ router.post('/avatar', async (req: Request, res: Response) => {
       'static',
     );
     fs.mkdirSync(adminStatic, { recursive: true });
-    fs.writeFileSync(path.join(adminStatic, 'avatar.jpg'), buffer);
+    fs.writeFileSync(path.join(adminStatic, `avatar.${avatar.extension}`), buffer);
+    for (const extension of AVATAR_EXTENSIONS) {
+      if (extension !== avatar.extension) {
+        fs.rmSync(path.join(adminStatic, `avatar.${extension}`), {
+          force: true,
+        });
+      }
+    }
     // Copy to dist too
     const distStatic = path.join(
       projectRoot,
@@ -476,8 +553,17 @@ router.post('/avatar', async (req: Request, res: Response) => {
       'static',
     );
     fs.mkdirSync(distStatic, { recursive: true });
-    fs.writeFileSync(path.join(distStatic, 'avatar.jpg'), buffer);
-    res.json({ ok: true });
+    fs.writeFileSync(path.join(distStatic, `avatar.${avatar.extension}`), buffer);
+    for (const extension of AVATAR_EXTENSIONS) {
+      if (extension !== avatar.extension) {
+        fs.rmSync(path.join(distStatic, `avatar.${extension}`), { force: true });
+      }
+    }
+    res.json({
+      ok: true,
+      contentType: avatar.contentType,
+      url: `/static/avatar.${avatar.extension}`,
+    });
   });
 });
 

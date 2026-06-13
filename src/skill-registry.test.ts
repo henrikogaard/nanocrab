@@ -292,4 +292,49 @@ describe('skill registry', () => {
     expect(selection.injected[0].path).toBe('github-connector');
     expect(selection.injected[0].decision).toBe('injected');
   });
+
+  it('injects connector skills when one alternative connector provider is allowed', () => {
+    const boundary: AgentBoundary = {
+      agentId: 'main',
+      groupFolder: 'main',
+      isMain: true,
+      channelScopes: ['all'],
+      filesystemScopes: [],
+      skillScopes: {
+        allowedScopes: ['all'],
+        allowedVisibility: ['shared'],
+      },
+      providerProfiles: ['default_chat'],
+      connectorIds: ['nanocrab', 'google-workspace'],
+      externalWrites: { allowed: true, requiresApproval: true },
+    };
+
+    const selection = selectSkillsForRequest('email inbox triage', {
+      isMain: true,
+      agentBoundary: boundary,
+      skills: [
+        {
+          name: 'Email Assistant',
+          description: 'Email triage helper',
+          path: 'email-assistant',
+          category: 'core',
+          enabled: true,
+          scope: 'all',
+          visibility: 'shared',
+          triggers: ['email', 'inbox'],
+          examples: [],
+          riskLevel: 'medium',
+          requiredTools: [
+            'mcp__google-workspace__*',
+            'mcp__infomaniak__*',
+            'mcp__infomaniak_*__*',
+          ],
+        },
+      ],
+      skillBytes: { 'email-assistant': 50 },
+    });
+
+    expect(selection.injected[0].path).toBe('email-assistant');
+    expect(selection.injected[0].decision).toBe('injected');
+  });
 });
