@@ -193,9 +193,7 @@ export class AgentRuntimeProvider implements Provider {
     this.name = AGENT_PROVIDER_DEFINITIONS[provider].name;
   }
 
-  async getCapabilities(
-    _model: string,
-  ): Promise<ProviderCapabilitiesResult> {
+  async getCapabilities(_model: string): Promise<ProviderCapabilitiesResult> {
     return { ...CAPABILITIES[this.id] };
   }
 
