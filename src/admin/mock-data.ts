@@ -3384,11 +3384,115 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         id: 'wf-daily-summary',
         name: 'Daily Casual Summary',
         enabled: true,
-        trigger: 'schedule',
-        targetGroup: 'operations',
-        lastRun: iso(80),
-        status: 'ok',
-        actions: ['Collect messages', 'Extract notable events', 'Send summary'],
+        trigger: { type: 'cron', value: '0 8 * * *' },
+        createdAt: iso(2880),
+        lastTriggered: iso(80),
+        actions: [
+          { type: 'prompt', value: 'Collect messages' },
+          { type: 'prompt', value: 'Extract notable events' },
+          {
+            type: 'message',
+            value: 'Send summary',
+            targetJid: 'tg:operations-room',
+          },
+        ],
+      },
+    ];
+  }
+  if (pathname === '/missions/runbooks') {
+    return [
+      {
+        id: 'runbook-morning-brief',
+        title: 'Morning Operations Brief',
+        description:
+          'Collect overnight signals, summarize risks, and prepare operator actions.',
+        createdAt: iso(2880),
+        updatedAt: iso(2880),
+        steps: [
+          {
+            id: 'rb-step-signals',
+            title: 'Collect signals',
+            detail: 'Review journal events, inboxes, and active automations.',
+            requiresApproval: false,
+          },
+          {
+            id: 'rb-step-draft',
+            title: 'Draft brief',
+            detail: 'Prepare concise decisions, blockers, and next moves.',
+            requiresApproval: false,
+          },
+          {
+            id: 'rb-step-send',
+            title: 'Send brief',
+            detail: 'Publish to the operations channel after review.',
+            requiresApproval: true,
+          },
+        ],
+      },
+      {
+        id: 'runbook-incident',
+        title: 'Connector Incident Review',
+        description: 'Triage connector failures and capture recovery notes.',
+        createdAt: iso(1440),
+        updatedAt: iso(120),
+        steps: [
+          {
+            id: 'rb-step-scope',
+            title: 'Scope impact',
+            detail:
+              'Identify affected connector, group, and last healthy check.',
+            requiresApproval: false,
+          },
+          {
+            id: 'rb-step-recover',
+            title: 'Apply recovery',
+            detail:
+              'Restart or change connector permissions only after approval.',
+            requiresApproval: true,
+          },
+        ],
+      },
+    ];
+  }
+  if (pathname === '/missions') {
+    return [
+      {
+        id: 'mission-saturday-brief',
+        title: 'Saturday briefing',
+        owner: 'Henrik',
+        runbookId: 'runbook-morning-brief',
+        status: 'running',
+        createdAt: iso(180),
+        updatedAt: iso(20),
+        steps: [
+          {
+            id: 'mission-step-signals',
+            title: 'Collect signals',
+            detail: 'Review journal events, inboxes, and active automations.',
+            requiresApproval: false,
+            status: 'completed',
+            note: 'Journal and artifact vault reviewed.',
+            updatedAt: iso(50),
+            completedAt: iso(50),
+          },
+          {
+            id: 'mission-step-draft',
+            title: 'Draft brief',
+            detail: 'Prepare concise decisions, blockers, and next moves.',
+            requiresApproval: false,
+            status: 'running',
+            updatedAt: iso(20),
+            startedAt: iso(20),
+          },
+          {
+            id: 'mission-step-send',
+            title: 'Send brief',
+            detail: 'Publish to the operations channel after review.',
+            requiresApproval: true,
+            status: 'pending',
+            updatedAt: iso(180),
+          },
+        ],
       },
     ];
   }

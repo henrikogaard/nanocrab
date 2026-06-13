@@ -59,7 +59,7 @@ Optional features that can be enabled/disabled from the dashboard:
 | **GitHub Copilot** | Multi-account OAuth, assign Copilot to issues, track PRs                                |
 | **Uptime Monitor** | HTTP + file-freshness health checks with bot alerts                                     |
 | **Chat**           | Send messages to the bot from the dashboard                                             |
-| **Workflows**      | Automation workflows with triggers and actions                                          |
+| **Workflows**      | Automation workflows plus missions/runbooks with tracked operator steps                 |
 | **Wiki**           | Markdown knowledge base                                                                 |
 
 Additional plugins can be installed from git URLs via the Marketplace page, or created as personal plugins that stay local (gitignored).
@@ -161,6 +161,7 @@ success responses and do not mutate live files or services.
 - **Suggested Skills** — the dashboard Skills page highlights reusable workflow candidates from recent history, such as private operations planning or dashboard design review. Suggestions become inactive drafts first and still require approval.
 - **Skill Registry** — skills can be enabled/disabled and scoped to all agents, main-only, or channel agents. Visibility can be shared, private, or system. Agents can also call `list_skills` and `search_skills` to find skills related to a user request.
 - **Reports And Research** — agents and admins can request report jobs, review outlines in Report Studio, keep draft/export generation behind outline approval, keep delivery behind a second approval gate, download generated Markdown/HTML/DOCX/PDF artifacts, index deliverables into an Artifact Vault with retention/search/source links, run Playwright-backed research notes, and configure optional official NotebookLM Enterprise support.
+- **Missions And Runbooks** — the Workflows page can define reusable runbooks, start missions from those runbooks, and track step state (`pending`, `running`, `completed`, `blocked`, or `skipped`). Steps marked as approval-required cannot be completed without an approval reference.
 - **Unified Approvals** — risky actions such as provider fallback, repo changes, PR creation, report delivery, publishing, uploads, external messages, and tool actions flow through `/api/approvals` and the dashboard Approvals inbox. Approval records include provenance (`source`, `correlationId`, `policyDecisionId`), action/resource previews, expiry metadata, and server-side filters for status, risk, kind, requester, target type, correlation ID, and created date range. Expired pending approvals are marked `expired` and cannot be approved or denied later.
 - **Backup, Restore, And Migration** — owners can create essential or full backups, download encrypted archives, configure automatic backup cadence/retention, review manual restore steps, and check legacy NanoClaw migration readiness from the dashboard Backup page.
 

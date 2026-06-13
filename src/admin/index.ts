@@ -52,6 +52,7 @@ import memoryRoutes from './routes/memory.js';
 import journalRoutes from './routes/journal.js';
 import reportsRoutes from './routes/reports.js';
 import artifactsRoutes from './routes/artifacts.js';
+import missionsRoutes from './routes/missions.js';
 import researchRoutes from './routes/research.js';
 import usageRoutes from './routes/usage.js';
 import sessionsRoutes from './routes/sessions.js';
@@ -226,6 +227,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/journal', requireAuth, journalRoutes);
   app.use('/api/reports', requireAuth, reportsRoutes);
   app.use('/api/artifacts', requireAuth, artifactsRoutes);
+  app.use('/api/missions', requireAuth, missionsRoutes);
   app.use('/api/research', requireAuth, researchRoutes);
   app.use('/api/usage', requireAuth, usageRoutes);
   app.use('/api/sessions', requireAuth, sessionsRoutes);
