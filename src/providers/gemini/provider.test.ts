@@ -53,7 +53,10 @@ describe('GeminiProvider', () => {
       const fetchMock = vi.fn(async () => ({
         ok: true,
         json: async () => ({
-          models: [{ name: 'models/gemini-3.5-flash' }, { name: 'models/gemini-2.5-pro' }],
+          models: [
+            { name: 'models/gemini-3.5-flash' },
+            { name: 'models/gemini-2.5-pro' },
+          ],
         }),
       }));
       vi.stubGlobal('fetch', fetchMock);

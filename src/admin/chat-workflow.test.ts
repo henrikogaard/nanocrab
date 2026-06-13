@@ -1,9 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { extractStructuredMarkers, stripStructuredMarkers } from './chat-workflow.js';
+import {
+  extractStructuredMarkers,
+  stripStructuredMarkers,
+} from './chat-workflow.js';
 
 describe('extractStructuredMarkers', () => {
   it('extracts tool_call marker', () => {
-    const markers = extractStructuredMarkers('<tool_call id="tc_1" name="read_file" input=\'{"path":"src/config.ts"}\' />');
+    const markers = extractStructuredMarkers(
+      '<tool_call id="tc_1" name="read_file" input=\'{"path":"src/config.ts"}\' />',
+    );
     expect(markers).toHaveLength(1);
     if (markers[0].type === 'tool_call') {
       expect(markers[0].id).toBe('tc_1');
@@ -14,7 +19,9 @@ describe('extractStructuredMarkers', () => {
   });
 
   it('extracts tool_result marker', () => {
-    const markers = extractStructuredMarkers('<tool_result id="tc_1" output=\'{"content":"ok"}\' duration="0.342" />');
+    const markers = extractStructuredMarkers(
+      '<tool_result id="tc_1" output=\'{"content":"ok"}\' duration="0.342" />',
+    );
     expect(markers).toHaveLength(1);
     if (markers[0].type === 'tool_result') {
       expect(markers[0].id).toBe('tc_1');
@@ -24,7 +31,9 @@ describe('extractStructuredMarkers', () => {
   });
 
   it('extracts approval_request marker', () => {
-    const markers = extractStructuredMarkers('<approval_request id="ar_1" tool="write_file" reason="Modifying config" input=\'{"path":"/etc/config.yaml"}\' />');
+    const markers = extractStructuredMarkers(
+      '<approval_request id="ar_1" tool="write_file" reason="Modifying config" input=\'{"path":"/etc/config.yaml"}\' />',
+    );
     expect(markers).toHaveLength(1);
     if (markers[0].type === 'approval_request') {
       expect(markers[0].tool).toBe('write_file');
@@ -33,7 +42,9 @@ describe('extractStructuredMarkers', () => {
   });
 
   it('extracts progress marker with inner text as message', () => {
-    const markers = extractStructuredMarkers('<progress phase="researching" pct="15">Researching codebase...</progress>');
+    const markers = extractStructuredMarkers(
+      '<progress phase="researching" pct="15">Researching codebase...</progress>',
+    );
     expect(markers).toHaveLength(1);
     if (markers[0].type === 'progress') {
       expect(markers[0].phase).toBe('researching');
@@ -43,7 +54,9 @@ describe('extractStructuredMarkers', () => {
   });
 
   it('extracts progress marker with message attribute as fallback', () => {
-    const markers = extractStructuredMarkers('<progress phase="writing" pct="50" message="Writing..." />');
+    const markers = extractStructuredMarkers(
+      '<progress phase="writing" pct="50" message="Writing..." />',
+    );
     expect(markers).toHaveLength(1);
     if (markers[0].type === 'progress') {
       expect(markers[0].message).toBe('Writing...');
@@ -79,12 +92,14 @@ describe('extractStructuredMarkers', () => {
 
 describe('stripStructuredMarkers', () => {
   it('removes all markers from text', () => {
-    const text = 'Hello <tool_call id="tc_1" name="read_file" input=\'{}\' /> world';
+    const text =
+      'Hello <tool_call id="tc_1" name="read_file" input=\'{}\' /> world';
     expect(stripStructuredMarkers(text)).toBe('Hello  world');
   });
 
   it('removes progress marker with inner text', () => {
-    const text = 'before<progress phase="test" pct="10">message</progress>after';
+    const text =
+      'before<progress phase="test" pct="10">message</progress>after';
     expect(stripStructuredMarkers(text)).toBe('beforeafter');
   });
 });

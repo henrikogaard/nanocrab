@@ -73,7 +73,10 @@ import {
   copyAgentInstructionsTemplate,
 } from './agent-instructions.js';
 import { APP_VERSION, EDITION_NAME, EDITION_VERSION } from './edition.js';
-import { extractStructuredMarkers, stripStructuredMarkers } from './admin/chat-workflow.js';
+import {
+  extractStructuredMarkers,
+  stripStructuredMarkers,
+} from './admin/chat-workflow.js';
 import {
   broadcastToolCall,
   broadcastToolResult,
@@ -438,7 +441,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           ? result.result
           : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const noInternal = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      const noInternal = raw
+        .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+        .trim();
       // Extract structured markers
       const markers = extractStructuredMarkers(noInternal);
       const text = stripStructuredMarkers(noInternal).trim();
@@ -447,13 +452,35 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       for (const marker of markers) {
         const now = new Date().toISOString();
         if (marker.type === 'tool_call') {
-          broadcastToolCall({ id: marker.id, name: marker.name, input: marker.input, groupJid: chatJid, timestamp: now });
+          broadcastToolCall({
+            id: marker.id,
+            name: marker.name,
+            input: marker.input,
+            groupJid: chatJid,
+            timestamp: now,
+          });
         } else if (marker.type === 'tool_result') {
-          broadcastToolResult({ id: marker.id, output: marker.output, duration: marker.duration, groupJid: chatJid });
+          broadcastToolResult({
+            id: marker.id,
+            output: marker.output,
+            duration: marker.duration,
+            groupJid: chatJid,
+          });
         } else if (marker.type === 'approval_request') {
-          broadcastApprovalRequest({ id: marker.id, tool: marker.tool, reason: marker.reason, input: marker.input, groupJid: chatJid });
+          broadcastApprovalRequest({
+            id: marker.id,
+            tool: marker.tool,
+            reason: marker.reason,
+            input: marker.input,
+            groupJid: chatJid,
+          });
         } else if (marker.type === 'progress') {
-          broadcastTaskProgress({ phase: marker.phase, pct: marker.pct, message: marker.message, groupJid: chatJid });
+          broadcastTaskProgress({
+            phase: marker.phase,
+            pct: marker.pct,
+            message: marker.message,
+            groupJid: chatJid,
+          });
         }
       }
 

@@ -6,7 +6,13 @@ vi.mock('../env.js', () => ({
 
 vi.mock('../container-runtime.js', () => ({}));
 vi.mock('../logger.js', () => ({
-  logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn() },
+  logger: {
+    info: vi.fn(),
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
 }));
 
 import { getAllProviders } from './index.js';
@@ -15,7 +21,7 @@ import { getProviderCapabilityMatrix } from '../provider-router.js';
 describe('provider initialization', () => {
   it('registers all provider adapters', () => {
     const providers = getAllProviders();
-    const ids = providers.map(p => p.id);
+    const ids = providers.map((p) => p.id);
     expect(ids).toContain('openai-responses');
     expect(ids).toContain('anthropic-messages');
     expect(ids).toContain('gemini');

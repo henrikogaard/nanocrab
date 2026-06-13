@@ -90,7 +90,10 @@ export async function runAllProbes(): Promise<ProbeHealthData> {
         capabilities: caps,
       });
     } catch (err) {
-      logger.error({ err, profile: profile.id }, 'Probe scheduler: profile probe failed');
+      logger.error(
+        { err, profile: profile.id },
+        'Probe scheduler: profile probe failed',
+      );
       entries.push({
         profileId: profile.id,
         provider: profile.provider,
@@ -121,7 +124,10 @@ export function startProbeScheduler(
   const loop = async () => {
     try {
       const data = await runAllProbes();
-      logger.info({ count: data.entries.length }, 'Probe scheduler cycle completed');
+      logger.info(
+        { count: data.entries.length },
+        'Probe scheduler cycle completed',
+      );
       if (broadcast) {
         broadcast(data);
       }

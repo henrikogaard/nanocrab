@@ -37,8 +37,18 @@ vi.mock('./logger.js', () => ({
 
 vi.mock('./provider-router.js', () => {
   const mockProfiles = [
-    { id: 'default_chat', provider: 'openrouter', model: 'openrouter/auto', purpose: 'default_chat' },
-    { id: 'default_coding', provider: 'codex', model: 'gpt-5.4', purpose: 'default_coding' },
+    {
+      id: 'default_chat',
+      provider: 'openrouter',
+      model: 'openrouter/auto',
+      purpose: 'default_chat',
+    },
+    {
+      id: 'default_coding',
+      provider: 'codex',
+      model: 'gpt-5.4',
+      purpose: 'default_coding',
+    },
   ];
 
   const mockProbes: Record<string, any> = {};
@@ -153,9 +163,7 @@ describe('probe-scheduler', () => {
   it('probe health entries include capability tags from probe results', async () => {
     // Check that the mock returns capabilities correctly
     const providerRouter = await import('./provider-router.js');
-    const mockProbe = await providerRouter.runLiveProviderProbe(
-      null as any,
-    );
+    const mockProbe = await providerRouter.runLiveProviderProbe(null as any);
     expect((mockProbe as any).capabilities).toBeDefined();
     expect((mockProbe as any).capabilities.tool_calls).toBe(true);
 

@@ -41,10 +41,9 @@ describe('AnthropicMessagesProvider', () => {
     it('returns model-specific context window and cost tier', async () => {
       const opus =
         await anthropicMessagesProvider.getCapabilities('claude-opus-4-6');
-      const haiku =
-        await anthropicMessagesProvider.getCapabilities(
-          'claude-haiku-4-5-20251001',
-        );
+      const haiku = await anthropicMessagesProvider.getCapabilities(
+        'claude-haiku-4-5-20251001',
+      );
 
       expect(opus.contextWindow).toBe(200000);
       expect(opus.costTier).toBe('high');
@@ -58,10 +57,7 @@ describe('AnthropicMessagesProvider', () => {
       const fetchMock = vi.fn(async () => ({
         ok: true,
         json: async () => ({
-          data: [
-            { id: 'claude-sonnet-4-6' },
-            { id: 'claude-opus-4-6' },
-          ],
+          data: [{ id: 'claude-sonnet-4-6' }, { id: 'claude-opus-4-6' }],
         }),
       }));
       vi.stubGlobal('fetch', fetchMock);
