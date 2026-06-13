@@ -1,17 +1,161 @@
 import { Router, Request, Response } from 'express';
+import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import QRCode from 'qrcode';
 import { getState } from '../state.js';
 import { readEnvFile } from '../../env.js';
 import { buildChannelStatus } from '../../channel-status.js';
+import { requireRole } from '../middleware.js';
+import { logger } from '../../logger.js';
 
 const router = Router();
+const WHATSAPP_QR_TTL_MS = 60_000;
+
+let whatsappPairingProc: ChildProcess | null = null;
+let whatsappPairingStartedAt: string | null = null;
+let whatsappPairingError: string | null = null;
 
 /** Mask a sensitive value: show first 4 + ... + last 4 chars */
 function mask(value: string): string {
   if (!value) return '';
   if (value.length <= 12) return value.slice(0, 4) + '...';
   return value.slice(0, 4) + '...' + value.slice(-4);
+}
+
+function storePath(...parts: string[]): string {
+  return path.join(process.cwd(), 'store', ...parts);
+}
+
+function readTextSafe(filePath: string): string {
+  try {
+    return fs.readFileSync(filePath, 'utf-8').trim();
+  } catch {
+    return '';
+  }
+}
+
+function whatsappCredentialsExist(): boolean {
+  return fs.existsSync(storePath('auth', 'creds.json'));
+}
+
+function readWhatsAppAuthStatus(): {
+  state: string;
+  error: string | null;
+  pairingCode: string | null;
+} {
+  if (whatsappCredentialsExist()) {
+    return { state: 'paired', error: null, pairingCode: null };
+  }
+
+  const content = readTextSafe(storePath('auth-status.txt'));
+  const pairingCode = readTextSafe(storePath('pairing-code.txt')) || null;
+  if (!content) {
+    return {
+      state: whatsappPairingProc ? 'starting' : 'not_configured',
+      error: whatsappPairingError,
+      pairingCode,
+    };
+  }
+  if (content === 'authenticated' || content === 'already_authenticated') {
+    return { state: 'paired', error: null, pairingCode };
+  }
+  if (content.startsWith('pairing_code:')) {
+    return {
+      state: 'waiting_for_pairing_code',
+      error: null,
+      pairingCode: content.replace('pairing_code:', '') || pairingCode,
+    };
+  }
+  if (content.startsWith('failed:')) {
+    return {
+      state: 'error',
+      error: content.replace('failed:', '') || 'unknown',
+      pairingCode,
+    };
+  }
+  return { state: content, error: whatsappPairingError, pairingCode };
+}
+
+async function readWhatsAppQr(): Promise<{
+  qrCode: string | null;
+  qrExpiresAt: string | null;
+  qrExpired: boolean;
+}> {
+  const qrPath = storePath('qr-data.txt');
+  if (!fs.existsSync(qrPath)) {
+    return { qrCode: null, qrExpiresAt: null, qrExpired: false };
+  }
+  const stat = fs.statSync(qrPath);
+  const qrExpiresAt = new Date(stat.mtimeMs + WHATSAPP_QR_TTL_MS).toISOString();
+  const qrExpired = Date.now() > stat.mtimeMs + WHATSAPP_QR_TTL_MS;
+  const qrData = readTextSafe(qrPath);
+  if (!qrData || qrExpired) {
+    return { qrCode: null, qrExpiresAt, qrExpired };
+  }
+  return {
+    qrCode: await QRCode.toDataURL(qrData, { margin: 1, width: 280 }),
+    qrExpiresAt,
+    qrExpired,
+  };
+}
+
+function stopWhatsAppPairingProcess(): void {
+  if (!whatsappPairingProc) return;
+  try {
+    whatsappPairingProc.kill('SIGTERM');
+  } catch {
+    // Process may have already exited.
+  }
+  whatsappPairingProc = null;
+}
+
+function startWhatsAppPairing(method: string, phone?: string): void {
+  stopWhatsAppPairingProcess();
+  whatsappPairingError = null;
+  whatsappPairingStartedAt = new Date().toISOString();
+
+  fs.mkdirSync(storePath(), { recursive: true });
+  for (const file of ['qr-data.txt', 'auth-status.txt', 'pairing-code.txt']) {
+    try {
+      fs.unlinkSync(storePath(file));
+    } catch {
+      // Missing stale state is fine.
+    }
+  }
+
+  const args =
+    method === 'pairing-code'
+      ? [
+          'tsx',
+          'src/whatsapp-auth.ts',
+          '--pairing-code',
+          '--phone',
+          phone || '',
+        ]
+      : ['tsx', 'src/whatsapp-auth.ts'];
+  whatsappPairingProc = spawn('npx', args, {
+    cwd: process.cwd(),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  const logFile = path.join(process.cwd(), 'logs', 'whatsapp-pairing.log');
+  fs.mkdirSync(path.dirname(logFile), { recursive: true });
+  const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+  whatsappPairingProc.stdout?.pipe(logStream);
+  whatsappPairingProc.stderr?.pipe(logStream);
+
+  whatsappPairingProc.on('error', (err) => {
+    whatsappPairingError = err.message;
+    logger.error({ err }, 'WhatsApp dashboard pairing failed to start');
+  });
+  whatsappPairingProc.on('exit', (code) => {
+    if (code && code !== 0) {
+      whatsappPairingError ||= `auth process exited with code ${code}`;
+    }
+    whatsappPairingProc = null;
+    logStream.end();
+  });
 }
 
 /** All supported channels with their env requirements */
@@ -148,5 +292,89 @@ router.get('/', (_req: Request, res: Response) => {
 
   res.json({ active: activeChannels, available: availableChannels });
 });
+
+router.get('/whatsapp/pairing', async (_req: Request, res: Response) => {
+  const auth = readWhatsAppAuthStatus();
+  const qr = await readWhatsAppQr();
+  const whatsappChannel = getState().channels.find(
+    (ch) => ch.name.toLowerCase() === 'whatsapp',
+  );
+  const health = whatsappChannel ? buildChannelStatus(whatsappChannel) : null;
+
+  const state =
+    health?.connected === true
+      ? 'connected'
+      : qr.qrCode
+        ? 'waiting_for_qr_scan'
+        : qr.qrExpired
+          ? 'expired_qr'
+          : auth.state;
+
+  res.json({
+    state,
+    method: readTextSafe(storePath('pairing-code.txt')) ? 'pairing-code' : 'qr',
+    connected: health?.connected === true,
+    configured: whatsappCredentialsExist(),
+    startedAt: whatsappPairingStartedAt,
+    qrCode: qr.qrCode,
+    qrExpiresAt: qr.qrExpiresAt,
+    qrExpired: qr.qrExpired,
+    pairingCode: auth.pairingCode,
+    error: auth.error || whatsappPairingError,
+    statusReason: health?.reason || null,
+  });
+});
+
+router.post(
+  '/whatsapp/pairing/start',
+  requireRole('owner'),
+  (req: Request, res: Response) => {
+    const method = req.body?.method === 'pairing-code' ? 'pairing-code' : 'qr';
+    const phone = String(req.body?.phone || '').replace(/\D/g, '');
+    if (method === 'pairing-code' && !phone) {
+      res.status(400).json({ error: 'phone is required for pairing-code' });
+      return;
+    }
+    startWhatsAppPairing(method, phone);
+    res.json({ ok: true, state: 'starting' });
+  },
+);
+
+router.post(
+  '/whatsapp/pairing/cancel',
+  requireRole('owner'),
+  (_req: Request, res: Response) => {
+    stopWhatsAppPairingProcess();
+    whatsappPairingError = null;
+    res.json({ ok: true, state: 'cancelled' });
+  },
+);
+
+router.post(
+  '/whatsapp/pairing/reset',
+  requireRole('owner'),
+  async (_req: Request, res: Response) => {
+    stopWhatsAppPairingProcess();
+    const whatsappChannel = getState().channels.find(
+      (ch) => ch.name.toLowerCase() === 'whatsapp',
+    );
+    try {
+      await whatsappChannel?.disconnect();
+    } catch (err) {
+      logger.warn({ err }, 'Failed to disconnect WhatsApp before reset');
+    }
+    fs.rmSync(storePath('auth'), { recursive: true, force: true });
+    for (const file of ['qr-data.txt', 'auth-status.txt', 'pairing-code.txt']) {
+      try {
+        fs.unlinkSync(storePath(file));
+      } catch {
+        // Missing stale state is fine.
+      }
+    }
+    whatsappPairingError = null;
+    whatsappPairingStartedAt = null;
+    res.json({ ok: true, state: 'not_configured' });
+  },
+);
 
 export default router;

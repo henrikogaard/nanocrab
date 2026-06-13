@@ -1821,7 +1821,10 @@ window.denyApproval = async function (id, groupJid) {
 
 // Channels
 async function renderChannels(el) {
-  const data = await api('/channels');
+  const [data, whatsappPairing] = await Promise.all([
+    api('/channels'),
+    api('/channels/whatsapp/pairing').catch(() => null),
+  ]);
 
   const activeHtml = data.active
     .map(
@@ -1840,6 +1843,7 @@ async function renderChannels(el) {
           <button class="btn btn-sm btn-ghost" onclick="restartChannel('${esc(ch.id)}',this)">Restart</button>
         </div>
       </div>
+      ${ch.id === 'whatsapp' ? renderWhatsAppPairingPanel(whatsappPairing) : ''}
       <table>
         ${ch.envVars
           .map(
@@ -1888,7 +1892,102 @@ async function renderChannels(el) {
     <div class="page-header"><h2>Channels</h2></div>
     <div class="grid grid-2">${activeHtml}</div>
     ${availableHtml}`;
+
+  if (whatsappPairing && currentPage === 'monitoring') {
+    poll(() => navigate('monitoring'), 5000);
+  }
 }
+
+function renderWhatsAppPairingPanel(pairing) {
+  if (!pairing) return '';
+  const stateLabel = pairing.state || 'unknown';
+  const stateBadge =
+    pairing.connected ||
+    pairing.state === 'paired' ||
+    pairing.state === 'connected'
+      ? 'badge-success'
+      : pairing.state === 'error' || pairing.state === 'expired_qr'
+        ? 'badge-error'
+        : pairing.state === 'not_configured'
+          ? 'badge-muted'
+          : 'badge-warning';
+  return `
+    <div style="margin:12px 0;padding:12px;background:var(--surface2);border-radius:var(--radius-sm);border:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <div>
+          <div style="font-size:13px;font-weight:600">Dashboard Pairing</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(pairing.statusReason || pairing.error || 'Use WhatsApp linked devices to pair this dashboard session.')}</div>
+        </div>
+        <span class="badge ${stateBadge}" style="font-size:10px">${esc(stateLabel)}</span>
+      </div>
+      ${
+        pairing.qrCode
+          ? `<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+              <img src="${pairing.qrCode}" alt="WhatsApp pairing QR code" style="width:180px;height:180px;background:#fff;padding:8px;border-radius:8px">
+              <div style="font-size:12px;color:var(--text-muted);max-width:260px">
+                <div style="font-weight:600;color:var(--text);margin-bottom:6px">Scan with WhatsApp</div>
+                <div>Settings -> Linked Devices -> Link a Device.</div>
+                <div style="margin-top:6px">Expires ${pairing.qrExpiresAt ? formatTime(pairing.qrExpiresAt) : 'soon'}.</div>
+              </div>
+            </div>`
+          : ''
+      }
+      ${
+        pairing.pairingCode
+          ? `<div style="font-size:22px;font-family:var(--mono);letter-spacing:2px;margin:8px 0;color:var(--accent)">${esc(pairing.pairingCode)}</div>`
+          : ''
+      }
+      ${
+        pairing.error
+          ? `<div class="alert-banner alert-error" style="margin:8px 0"><span>${esc(pairing.error)}</span></div>`
+          : ''
+      }
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="startWhatsAppPairing('qr')">${pairing.qrExpired ? 'Refresh QR' : 'Start QR Pairing'}</button>
+        <button class="btn btn-sm btn-ghost" onclick="startWhatsAppPairing('pairing-code')">Pairing Code</button>
+        <button class="btn btn-sm btn-ghost" onclick="cancelWhatsAppPairing()">Cancel</button>
+        <button class="btn btn-sm btn-ghost" onclick="resetWhatsAppSession()">Reset Session</button>
+      </div>
+    </div>`;
+}
+
+window.startWhatsAppPairing = async function (method) {
+  let body = { method };
+  if (method === 'pairing-code') {
+    const phone = prompt('Phone number with country code, digits only');
+    if (!phone) return;
+    body.phone = phone;
+  }
+  const res = await api('/channels/whatsapp/pairing/start', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (res.ok) toast('WhatsApp pairing started', 'success');
+  else toast(res.error || 'Pairing failed to start', 'error');
+  navigate('monitoring');
+};
+
+window.cancelWhatsAppPairing = async function () {
+  const res = await api('/channels/whatsapp/pairing/cancel', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  if (res.ok) toast('WhatsApp pairing cancelled', 'info');
+  else toast(res.error || 'Cancel failed', 'error');
+  navigate('monitoring');
+};
+
+window.resetWhatsAppSession = async function () {
+  if (!confirm('Reset WhatsApp session files and disconnect the channel?'))
+    return;
+  const res = await api('/channels/whatsapp/pairing/reset', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  if (res.ok) toast('WhatsApp session reset', 'success');
+  else toast(res.error || 'Reset failed', 'error');
+  navigate('monitoring');
+};
 
 // Dashboard, agents, settings, coding, plugins, marketplace, and help.
 // are loaded from pages/*.js
