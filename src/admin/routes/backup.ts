@@ -1,5 +1,5 @@
 import express, { Router, Request, Response } from 'express';
-import { execFileSync, execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -7,143 +7,31 @@ import path from 'path';
 import { STORE_DIR, DATA_DIR, GROUPS_DIR } from '../../config.js';
 import { auditLog } from '../security.js';
 import { logger } from '../../logger.js';
+import {
+  defaultBackupDir,
+  formatBackupSize,
+  getBackupPaths,
+  getMigrationStatus,
+  isValidBackupFilename,
+  listBackupStatus,
+  restoreGuide,
+} from '../../backup-service.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
-const BACKUP_DIR = path.join(PROJECT_ROOT, 'backups');
-
-interface BackupManifest {
-  version: string;
-  created: string;
-  hostname: string;
-  contents: string[];
-  size: number;
-}
-
-// Directories and files to back up
-function getBackupPaths(): Array<{
-  path: string;
-  label: string;
-  critical: boolean;
-}> {
-  const home = process.env.HOME || '/root';
-  return [
-    {
-      path: path.join(PROJECT_ROOT, '.env'),
-      label: '.env (credentials)',
-      critical: true,
-    },
-    {
-      path: path.join(PROJECT_ROOT, '.mcp.json'),
-      label: '.mcp.json',
-      critical: false,
-    },
-    {
-      path: path.join(STORE_DIR),
-      label: 'store/ (database, auth, configs)',
-      critical: true,
-    },
-    {
-      path: path.join(GROUPS_DIR),
-      label: 'groups/ (memory, conversations, attachments)',
-      critical: true,
-    },
-    {
-      path: path.join(DATA_DIR),
-      label: 'data/ (sessions, codex)',
-      critical: false,
-    },
-    {
-      path: path.join(PROJECT_ROOT, 'site'),
-      label: 'site/ (landing page)',
-      critical: false,
-    },
-    {
-      path: path.join(PROJECT_ROOT, 'logs'),
-      label: 'logs/ (system logs)',
-      critical: false,
-    },
-    {
-      path: path.join(home, '.config', 'nanocrab'),
-      label: '~/.config/nanocrab/ (mount allowlist)',
-      critical: false,
-    },
-    {
-      path: path.join(home, '.local', 'share', 'signal-cli'),
-      label: '~/.local/share/signal-cli/ (Signal account)',
-      critical: true,
-    },
-  ];
-}
-
-function getSize(p: string): number {
-  try {
-    if (!fs.existsSync(p)) return 0;
-    const stat = fs.statSync(p);
-    if (stat.isFile()) return stat.size;
-    const output = execFileSync('du', ['-sb', p], {
-      encoding: 'utf-8',
-      timeout: 10000,
-    }).trim();
-    return parseInt(output.split('\t')[0]) || 0;
-  } catch {
-    return 0;
-  }
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
-  return (bytes / 1073741824).toFixed(1) + ' GB';
-}
+const BACKUP_DIR = defaultBackupDir({ projectRoot: PROJECT_ROOT });
 
 // List what would be backed up + existing backups
 router.get('/', (_req: Request, res: Response) => {
-  const paths = getBackupPaths();
-  const items = paths.map((p) => ({
-    ...p,
-    exists: fs.existsSync(p.path),
-    size: getSize(p.path),
-    sizeFormatted: formatSize(getSize(p.path)),
-  }));
-
-  // List existing backups
-  const backups: Array<{
-    name: string;
-    size: number;
-    sizeFormatted: string;
-    created: string;
-  }> = [];
-  try {
-    if (fs.existsSync(BACKUP_DIR)) {
-      for (const file of fs
-        .readdirSync(BACKUP_DIR)
-        .filter((f) => f.endsWith('.tar.gz'))
-        .sort()
-        .reverse()) {
-        const stat = fs.statSync(path.join(BACKUP_DIR, file));
-        backups.push({
-          name: file,
-          size: stat.size,
-          sizeFormatted: formatSize(stat.size),
-          created: stat.mtime.toISOString(),
-        });
-      }
-    }
-  } catch {
-    /* ok */
-  }
-
-  const totalSize = items.reduce((sum, i) => sum + i.size, 0);
-
-  res.json({
-    items,
-    totalSize,
-    totalSizeFormatted: formatSize(totalSize),
-    backups,
-    backupDir: BACKUP_DIR,
-  });
+  res.json(
+    listBackupStatus({
+      projectRoot: PROJECT_ROOT,
+      storeDir: STORE_DIR,
+      dataDir: DATA_DIR,
+      groupsDir: GROUPS_DIR,
+      backupDir: BACKUP_DIR,
+    }),
+  );
 });
 
 // Create a backup
@@ -157,7 +45,12 @@ router.post('/', (req: Request, res: Response) => {
   const filename = `nanocrab-backup-${timestamp}.tar.gz`;
   const filepath = path.join(BACKUP_DIR, filename);
 
-  const paths = getBackupPaths()
+  const paths = getBackupPaths({
+    projectRoot: PROJECT_ROOT,
+    storeDir: STORE_DIR,
+    dataDir: DATA_DIR,
+    groupsDir: GROUPS_DIR,
+  })
     .filter((p) => includeAll || p.critical)
     .map((p) => p.path)
     .filter((p) => fs.existsSync(p));
@@ -179,7 +72,7 @@ router.post('/', (req: Request, res: Response) => {
       ok: true,
       filename,
       size: stat.size,
-      sizeFormatted: formatSize(stat.size),
+      sizeFormatted: formatBackupSize(stat.size),
       path: filepath,
     });
   } catch (err) {
@@ -192,11 +85,7 @@ router.post('/', (req: Request, res: Response) => {
 // Download a backup (plain)
 router.get('/download/:filename', (req: Request, res: Response) => {
   const filename = req.params.filename as string;
-  if (
-    filename.includes('..') ||
-    filename.includes('/') ||
-    !filename.endsWith('.tar.gz')
-  ) {
+  if (!isValidBackupFilename(filename)) {
     res.status(400).json({ error: 'Invalid filename' });
     return;
   }
@@ -221,11 +110,7 @@ router.post('/download-encrypted/:filename', (req: Request, res: Response) => {
     res.status(400).json({ error: 'Passphrase required (min 8 characters)' });
     return;
   }
-  if (
-    filename.includes('..') ||
-    filename.includes('/') ||
-    !filename.endsWith('.tar.gz')
-  ) {
+  if (!isValidBackupFilename(filename)) {
     res.status(400).json({ error: 'Invalid filename' });
     return;
   }
@@ -297,11 +182,7 @@ router.post(
 // Delete a backup
 router.delete('/:filename', (req: Request, res: Response) => {
   const filename = req.params.filename as string;
-  if (
-    filename.includes('..') ||
-    filename.includes('/') ||
-    !filename.endsWith('.tar.gz')
-  ) {
+  if (!isValidBackupFilename(filename)) {
     res.status(400).json({ error: 'Invalid filename' });
     return;
   }
@@ -319,27 +200,11 @@ router.delete('/:filename', (req: Request, res: Response) => {
 
 // Restore instructions (actual restore is manual for safety)
 router.get('/restore-guide', (_req: Request, res: Response) => {
-  res.json({
-    steps: [
-      '1. Stop NanoCrab: systemctl --user stop nanocrab',
-      '2. Copy backup to new server',
-      '3. Extract: tar -xzf nanocrab-backup-*.tar.gz -C /',
-      '4. Clone the repo: git clone <your-nanocrab-repo-url>',
-      '5. Copy extracted files into the new repo directory',
-      '6. Install dependencies: npm install',
-      '7. Build: npm run build && ./container/build.sh',
-      '8. Set up admin: npx tsx setup/index.ts --step admin -- --username USER --password PASS --domain DOMAIN --port 9743',
-      '9. Start: systemctl --user start nanocrab',
-      '10. Verify channels reconnect and data is intact',
-    ],
-    notes: [
-      'WhatsApp auth may need re-pairing if moving to a different server',
-      'Signal account transfers automatically if signal-cli data is restored',
-      'Telegram bot token works from any server',
-      'Update DNS if the server IP changes',
-      'Caddy will auto-generate new SSL certificates',
-    ],
-  });
+  res.json(restoreGuide());
+});
+
+router.get('/migration-status', (_req: Request, res: Response) => {
+  res.json(getMigrationStatus({ projectRoot: PROJECT_ROOT }));
 });
 
 // --- Auto-backup configuration ---
@@ -416,7 +281,12 @@ export async function checkAutoBackup(): Promise<void> {
   const filename = `nanocrab-auto-${timestamp}.tar.gz`;
   const filepath = path.join(BACKUP_DIR, filename);
 
-  const paths = getBackupPaths()
+  const paths = getBackupPaths({
+    projectRoot: PROJECT_ROOT,
+    storeDir: STORE_DIR,
+    dataDir: DATA_DIR,
+    groupsDir: GROUPS_DIR,
+  })
     .filter((p) => p.critical)
     .map((p) => p.path)
     .filter((p) => fs.existsSync(p));

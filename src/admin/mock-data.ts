@@ -2648,6 +2648,37 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       ],
     };
   }
+  if (pathname === '/backup/auto-config') {
+    return { enabled: true, schedule: 'weekly', keepCount: 4 };
+  }
+  if (pathname === '/backup/migration-status') {
+    return {
+      command: 'npm run migrate:nanocrab',
+      summary: { legacyFound: 1, readyToMigrate: 1, targetConflicts: 0 },
+      checks: [
+        {
+          id: 'config',
+          label: 'Configuration directory',
+          legacyPath: '/home/mock/.config/nanoclaw',
+          targetPath: '/home/mock/.config/nanocrab',
+          legacyExists: true,
+          targetExists: false,
+          status: 'ready',
+          detail: 'Legacy state can be migrated safely',
+        },
+        {
+          id: 'launch-agent',
+          label: 'macOS LaunchAgent',
+          legacyPath: '/home/mock/Library/LaunchAgents/com.nanoclaw.plist',
+          targetPath: '/home/mock/Library/LaunchAgents/com.nanocrab.plist',
+          legacyExists: false,
+          targetExists: false,
+          status: 'not-needed',
+          detail: 'No legacy NanoClaw state found',
+        },
+      ],
+    };
+  }
   if (pathname === '/backup/restore-guide') {
     return {
       steps: [

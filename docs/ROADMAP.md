@@ -15,7 +15,7 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 - Better terminal controls exist in the dashboard: named shell session id, reconnect, clear, copy transcript, and xterm output.
 - Standalone cleanup is implemented: NanoCrab is treated as its own product with NanoCrab-first code, plugins, skills, MCP names, container names, docs, and migration tooling.
 - P0 closure sweep complete: non-epic P0 issues for cockpit/approvals, provider hardening, memory/skill review surfaces, timeline/router safety, GitHub coding jobs, policy/audit/dry-run controls, connector boundaries, and first-run setup are closed. Remaining P0-labeled GitHub issues are roadmap epics with lower-priority follow-up children still open.
-- Still future work: richer CI-status visualization, mobile coding-agent chat commands, backup/restore UI, more MCP source connectors, production release diagnostics, and continued dashboard UX polish.
+- Still future work: richer CI-status visualization, mobile coding-agent chat commands, more MCP source connectors, and continued dashboard UX polish.
 
 ---
 
