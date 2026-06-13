@@ -77,6 +77,25 @@ describe('setup state resume', () => {
     expect(mode).toBe(0o600);
   });
 
+  it('persists all-completed legacy state even when resume would skip every step', () => {
+    const statePath = path.join(tempDir(), '.setup-state.json');
+    const steps = ['environment', 'admin', 'provider'];
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({ version: 1, completed: steps }),
+      { mode: 0o644 },
+    );
+
+    const migrated = readSetupState(statePath, steps);
+    const persisted = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+    const mode = fs.statSync(statePath).mode & 0o777;
+
+    expect(getNextSetupStep(migrated, steps)).toBeNull();
+    expect(persisted.version).toBe(2);
+    expect(Object.keys(persisted.steps).sort()).toEqual(steps.sort());
+    expect(mode).toBe(0o600);
+  });
+
   it('does not complete steps that return input-required or failed semantic status', () => {
     const statePath = path.join(tempDir(), '.setup-state.json');
     const state = createInitialSetupState(['admin', 'provider']);
