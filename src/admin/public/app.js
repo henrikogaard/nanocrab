@@ -475,6 +475,7 @@ function showShell(page) {
     { id: 'memory', icon: 'memory', label: 'Memory' },
     { id: 'skills', icon: 'skills', label: 'Skills' },
     { id: 'reports', icon: 'audit', label: 'Reports' },
+    { id: 'artifacts', icon: 'files', label: 'Artifacts' },
     { id: 'timeline', icon: 'timeline', label: 'Timeline' },
   ];
 
@@ -705,6 +706,7 @@ const _pageMap = {
   groups: 'renderGroups',
   tasks: 'renderTasks',
   reports: 'renderReports',
+  artifacts: 'renderArtifacts',
   workflows: 'renderWorkflows',
   credentials: 'renderCredentials',
   integrations: 'renderIntegrationsConsolidated',
@@ -3294,6 +3296,111 @@ window.approveReportDelivery = async (id) => {
     toast('Report delivered', 'success');
     navigate('reports');
   } else toast(r.error || 'Delivery approval is still pending', 'warning');
+};
+
+function artifactSize(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function artifactDownloadHref(record) {
+  if (record.sourceType !== 'report-job') return '';
+  if (typeof record.sourceArtifactIndex !== 'number') return '';
+  return `/api/reports/jobs/${encodeURIComponent(record.sourceId)}/artifacts/${record.sourceArtifactIndex}/download`;
+}
+
+async function renderArtifacts(el) {
+  const [records, summary] = await Promise.all([
+    api('/artifacts/vault').catch(() => []),
+    api('/artifacts/vault/summary').catch(() => ({
+      total: 0,
+      totalSizeBytes: 0,
+      kinds: [],
+      formats: [],
+    })),
+  ]);
+  el.innerHTML = `
+    <div class="page-header"><h2>Artifact Vault</h2></div>
+    <div class="card">
+      <div class="grid grid-4">
+        <div><div style="font-size:11px;color:var(--text-muted)">Artifacts</div><div style="font-size:20px;font-weight:600">${summary.total || 0}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Storage</div><div style="font-size:20px;font-weight:600">${artifactSize(summary.totalSizeBytes || 0)}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Kinds</div><div style="font-size:13px;color:var(--text);margin-top:6px">${(summary.kinds || []).map((kind) => `<span class="badge badge-info">${esc(kind)}</span>`).join(' ') || '-'}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Formats</div><div style="font-size:13px;color:var(--text);margin-top:6px">${(summary.formats || []).map((format) => `<span class="badge badge-muted">${esc(format)}</span>`).join(' ') || '-'}</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        <input id="artifact-query" class="search-input" style="max-width:280px" placeholder="Search title, path, source, tag">
+        <input id="artifact-source" class="search-input" style="max-width:220px" placeholder="Source link">
+        <button class="btn btn-sm btn-primary" onclick="searchArtifacts()">Search</button>
+        <button class="btn btn-sm btn-ghost" onclick="reindexArtifacts()">Reindex reports</button>
+        <button class="btn btn-sm btn-ghost" onclick="pruneArtifacts()">Prune expired</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Vault Records</div>
+      <div id="artifact-results">${renderArtifactRecords(records)}</div>
+    </div>`;
+}
+
+function renderArtifactRecords(records) {
+  if (!records.length)
+    return '<div style="font-size:12px;color:var(--text-muted)">No artifacts indexed yet. Reindex reports after generating deliverables.</div>';
+  return records
+    .map((record) => {
+      const href = artifactDownloadHref(record);
+      return `
+      <div class="channel-card" style="align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <strong style="color:var(--text)">${esc(record.title)}</strong>
+            <span class="badge badge-info">${esc(record.kind)}</span>
+            <span class="badge badge-muted">${esc(record.format)}</span>
+            <span class="badge badge-muted">${artifactSize(record.sizeBytes)}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:5px;font-family:var(--mono);word-break:break-all">${esc(record.path)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:5px">Source: <span class="badge badge-muted">${esc(record.sourceType)}</span> ${esc(record.sourceId)} · Retention ${record.retentionDays}d · Expires ${record.expiresAt ? esc(record.expiresAt.slice(0, 10)) : 'never'}</div>
+          ${
+            record.sourceLinks?.length
+              ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:7px">${record.sourceLinks.map((link) => `<span class="badge badge-success">${esc(link.label || link.source)}</span>`).join('')}</div>`
+              : '<div style="font-size:11px;color:var(--text-muted);margin-top:7px">No source links recorded.</div>'
+          }
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${href ? `<a class="btn btn-sm btn-ghost" href="${href}" download>Download</a>` : ''}
+          ${record.sourceType === 'report-job' ? `<button class="btn btn-sm btn-ghost" onclick="navigate('reports')">Report</button>` : ''}
+        </div>
+      </div>`;
+    })
+    .join('');
+}
+
+window.searchArtifacts = async () => {
+  const params = new URLSearchParams();
+  const query = document.getElementById('artifact-query')?.value || '';
+  const source = document.getElementById('artifact-source')?.value || '';
+  if (query) params.set('query', query);
+  if (source) params.set('source', source);
+  const records = await api(`/artifacts/vault?${params.toString()}`);
+  const target = document.getElementById('artifact-results');
+  if (target) target.innerHTML = renderArtifactRecords(records);
+};
+
+window.reindexArtifacts = async () => {
+  const r = await api('/artifacts/vault/reindex', { method: 'POST' });
+  if (r.ok) {
+    toast(`Indexed ${r.total} artifact records`, 'success');
+    navigate('artifacts');
+  } else toast(r.error || 'Reindex failed', 'error');
+};
+
+window.pruneArtifacts = async () => {
+  const r = await api('/artifacts/vault/prune', { method: 'POST' });
+  if (r.ok) {
+    toast(`Pruned ${r.removed} expired records`, 'success');
+    navigate('artifacts');
+  } else toast(r.error || 'Prune failed', 'error');
 };
 
 // Skills

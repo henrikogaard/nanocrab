@@ -4,6 +4,7 @@ import path from 'path';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
 
 import { STORE_DIR } from './config.js';
+import { buildArtifactVaultFromReports } from './artifact-vault.js';
 import {
   createApproval,
   hasApprovedTarget,
@@ -322,6 +323,7 @@ export async function approveReportOutline(id: string): Promise<ReportJob> {
     : 'draft_ready';
   job.updatedAt = new Date().toISOString();
   upsertJob(job);
+  buildArtifactVaultFromReports({ reports: [job] });
   if (job.requireDeliveryApproval) {
     ensureReportApproval(job, 'report-delivery');
   }
