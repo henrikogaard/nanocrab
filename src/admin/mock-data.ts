@@ -234,8 +234,8 @@ const approvals = [
       'Publish branch issue-42-provider-routing with changes to provider fallback policy.',
     risk: 'high',
     requester: 'coding-agent',
-    targetType: 'repo',
-    targetId: 'henrikogaard/nanocrab',
+    targetType: 'coding-job',
+    targetId: 'af-job-1',
     source: 'autofix',
     correlationId: 'corr-gh-42',
     expiresAt: iso(-45),
@@ -2752,11 +2752,62 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         repo: 'henrikogaard/nanocrab',
         issueNumber: 43,
         issueTitle: 'Add dashboard mock mode',
+        provider: 'codex',
         model: 'gpt-5.4',
-        status: 'running',
+        status: 'await_pr_approval',
+        branch: 'nanocrab/issue-43-af-job-1',
+        prUrl: null,
+        commitSha: null,
+        changedFiles: [
+          'src/admin/public/pages/autofix.js',
+          'src/admin/mock-data.ts',
+        ],
+        diffSummary:
+          'src/admin/public/pages/autofix.js | 82 +++++++++++++++++++++\nsrc/admin/mock-data.ts | 24 ++++++',
+        testSummary:
+          'rtk mise exec node@22 -- npx vitest run src/coding-jobs.test.ts\n11 tests passed',
+        ciStatus: 'pending',
+        lastCiError: null,
+        transitionedAt: {
+          queued: iso(25),
+          investigate: iso(24),
+          plan: iso(23),
+          await_approval: iso(22),
+          implement: iso(21),
+          test: iso(20),
+          await_pr_approval: iso(19),
+        },
+        failureReason: null,
         createdAt: iso(19),
         startedAt: iso(19),
-        output: 'Mock job is generating a patch...',
+        output:
+          'Investigating repository and issue context.\nImplementation approved by mock-owner.\nDiff stat captured. PR creation is awaiting approval.\n',
+      },
+    ];
+  }
+  if (pathname === '/autofix/issues') {
+    return [
+      {
+        number: 43,
+        title: 'Add dashboard mock mode',
+        body: 'The Autofix dashboard needs realistic review data.',
+        labels: ['autofix', 'ui'],
+        assignees: ['henrikogaard'],
+        milestone: 'P0 Closure',
+        author: 'henrikogaard',
+        htmlUrl: 'https://github.com/henrikogaard/nanocrab/issues/43',
+        updatedAt: iso(30),
+      },
+      {
+        number: 44,
+        title: 'Block PR creation without approval',
+        body: 'Opening PRs must be approval gated.',
+        labels: ['autofix', 'safety'],
+        assignees: [],
+        milestone: 'P0 Closure',
+        author: 'reviewer',
+        htmlUrl: 'https://github.com/henrikogaard/nanocrab/issues/44',
+        updatedAt: iso(44),
       },
     ];
   }
@@ -2766,11 +2817,36 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       repo: 'henrikogaard/nanocrab',
       issueNumber: 43,
       issueTitle: 'Add dashboard mock mode',
+      provider: 'codex',
       model: 'gpt-5.4',
-      status: 'running',
+      status: 'await_pr_approval',
+      branch: 'nanocrab/issue-43-af-job-1',
+      prUrl: null,
+      commitSha: null,
+      changedFiles: [
+        'src/admin/public/pages/autofix.js',
+        'src/admin/mock-data.ts',
+      ],
+      diffSummary:
+        'src/admin/public/pages/autofix.js | 82 +++++++++++++++++++++\nsrc/admin/mock-data.ts | 24 ++++++',
+      testSummary:
+        'rtk mise exec node@22 -- npx vitest run src/coding-jobs.test.ts\n11 tests passed',
+      ciStatus: 'pending',
+      lastCiError: null,
+      transitionedAt: {
+        queued: iso(25),
+        investigate: iso(24),
+        plan: iso(23),
+        await_approval: iso(22),
+        implement: iso(21),
+        test: iso(20),
+        await_pr_approval: iso(19),
+      },
+      failureReason: null,
       createdAt: iso(19),
       startedAt: iso(19),
-      output: 'Mock autofix output\nNo repository was cloned.\n',
+      output:
+        'Investigating repository and issue context.\nImplementation approved by mock-owner.\nDiff stat captured. PR creation is awaiting approval.\n',
     };
   }
   if (pathname === '/marketplace') {

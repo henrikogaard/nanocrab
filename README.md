@@ -67,10 +67,10 @@ Additional plugins can be installed from git URLs via the Marketplace page, or c
 ### Autonomous Coding
 
 - **Coding Task Launcher** — pick tool (Claude Code / Codex / Copilot), model, working directory, and describe the task
-- **GitHub Coding Jobs** — register repos, list/pick issues, start dedicated coding containers, inspect diffs/output, request approval, open PRs, retry, cancel, and revert
+- **GitHub Coding Jobs** — register enabled repos, pick issues by repo/label/assignee/milestone/number, inspect diffs/output/tests/CI, approve implementation, approve PRs, retry, cancel, and revert
 - **Isolated Coding Jobs** — WhatsApp/Signal/Telegram agents can request repo coding jobs through MCP; an ephemeral coding container clones and edits inside `data/coding-workspaces`
 - **Scheduled Tasks** — recurring coding jobs (hourly, daily, weekly)
-- **GitHub Autofix Pipeline** — webhook-driven: issue created → agent fixes → PR opened → bot notifies you
+- **GitHub Autofix Pipeline** — webhook-driven: issue created/labeled → approval-gated coding job → reviewed PR publish → bot notifies you
 - **PR Review** — an agent reviews every new PR and posts comments
 
 Coding jobs are available only from the main group. Add
@@ -88,12 +88,23 @@ Create a scheduled task that periodically asks the main agent to pick an autofix
 The agent calls MCP tools such as `register_coding_repo`,
 `list_github_issues`, `start_coding_job`, `pick_github_issue`, and
 the scheduled-task tools. The dashboard exposes the same flow under
-**Agents -> GitHub Coding Jobs**. The host creates job metadata and launches a
-short-lived agent container with only that job directory mounted at
-`/workspace/coding-job`. The container performs clone/edit/commit/push work;
-the host then creates the GitHub PR through the API after approval. Job metadata is stored in
-`store/coding-jobs.json`, registered repos live in `store/coding-repos.json`,
-and workspaces live under `data/coding-workspaces/jobs/`.
+**Agents -> GitHub Coding Jobs** and **Autofix**. Issue pickup only runs for
+enabled repo configs and supports repo, label, assignee, milestone, and direct
+issue-number filters. Jobs move through `queued -> investigate -> plan ->
+await_approval -> implement -> test -> await_pr_approval -> open_pr ->
+ci_running -> completed`, with transition timestamps and failure reasons stored
+on the job record.
+
+The host creates job metadata and launches a short-lived agent container with
+only that job directory mounted at `/workspace/coding-job`. The container clones
+and edits the repo, then emits diff, changed-file, and test summaries for
+dashboard review. Implementation requires an approved `coding-implement` record
+tied to the job id before the container can mutate the workspace. Commit, push,
+and GitHub PR creation require an approved `coding-open-pr` record tied to the
+same job id before the host performs those repo mutations. Job metadata is
+stored in `store/coding-jobs.json`, registered repos live in
+`store/coding-repos.json`, and workspaces live under
+`data/coding-workspaces/jobs/`.
 
 Coding runtimes are limited to `claude`, `codex`, and `opencode`; chat-only
 providers such as Ollama/OpenRouter/Google stay in the normal agent path unless

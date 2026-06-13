@@ -175,6 +175,69 @@ body {
   border: 0;
 }
 
+.autofix-filter-grid {
+  display: grid;
+  grid-template-columns:
+    minmax(88px, 0.6fr) minmax(140px, 1fr) minmax(120px, 0.8fr)
+    minmax(140px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.autofix-review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.autofix-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.autofix-review-pane {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.autofix-pane-title {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  background: var(--surface2);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.autofix-review-pane pre {
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  padding: 10px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 860px) {
+  .autofix-filter-grid,
+  .autofix-review-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Login */
 .login-container {
   display: flex;

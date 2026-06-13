@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
@@ -48,18 +48,26 @@ vi.mock('./provider-router.js', () => ({
 }));
 
 vi.mock('child_process', () => ({
+  execFileSync: vi.fn((command: string, args: string[]) => {
+    if (command === 'git' && args[0] === 'rev-parse') return 'abc123def456\n';
+    return '';
+  }),
   spawn: vi.fn(() => {
     throw new Error('spawn should not run while coding jobs are queued');
   }),
 }));
 
 import {
+  approveCodingJob,
   listGitHubIssues,
   loadCodingJobs,
   loadCodingRepos,
   getCodingJob,
+  openCodingJobPr,
+  pickGitHubIssue,
   registerCodingRepo,
   startCodingJob,
+  transitionCodingJob,
 } from './coding-jobs.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
 import { createApproval, reviewApproval } from './approvals.js';
@@ -94,6 +102,7 @@ describe('coding jobs', () => {
     vi.useFakeTimers();
     fs.rmSync(TEST_ROOT, { recursive: true, force: true });
     vi.mocked(spawn).mockClear();
+    vi.mocked(execFileSync).mockClear();
     vi.mocked(resolveProviderFallbackForAction).mockReset();
     vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
       approved: true,
@@ -176,11 +185,81 @@ describe('coding jobs', () => {
         body: 'It drifts.',
         labels: ['autofix'],
         assignees: ['henrik'],
+        milestone: null,
         author: 'reporter',
         htmlUrl: 'https://github.com/owner/repo/issues/7',
         updatedAt: '2026-06-09T10:00:00Z',
       },
     ]);
+  });
+
+  it('picks issues by direct number after applying repo, label, assignee, and milestone filters', async () => {
+    const fetchMock = mockGitHubFetch((url) => {
+      if (url.includes('/issues/42')) {
+        return {
+          number: 42,
+          title: 'Repair approvals',
+          body: 'Require a matching approval before mutation.',
+          html_url: 'https://github.com/owner/repo/issues/42',
+          updated_at: '2026-06-09T12:00:00Z',
+          labels: [{ name: 'autofix' }, { name: 'p0' }],
+          assignees: [{ login: 'henrik' }],
+          milestone: { title: 'P0 Closure' },
+          user: { login: 'reporter' },
+        };
+      }
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo', labels: ['autofix'] });
+
+    const result = await pickGitHubIssue({
+      repo: 'owner/repo',
+      issueNumber: 42,
+      labels: ['autofix', 'p0'],
+      assignee: 'henrik',
+      milestone: 'P0 Closure',
+      requestedBy: 'dashboard',
+    });
+
+    expect(result?.issue.number).toBe(42);
+    expect(result?.job.issueNumber).toBe(42);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/repos/owner/repo/issues/42'),
+      expect.any(Object),
+    );
+  });
+
+  it('does not auto-pick issues from repos without an enabled coding repo config', async () => {
+    mockGitHubFetch(() => [
+      {
+        number: 9,
+        title: 'Should not run',
+        html_url: 'https://github.com/owner/repo/issues/9',
+        updated_at: '2026-06-09T12:00:00Z',
+      },
+    ]);
+
+    await expect(
+      pickGitHubIssue({
+        repo: 'owner/repo',
+        labels: ['autofix'],
+        requestedBy: 'dashboard',
+      }),
+    ).rejects.toThrow('not registered for coding jobs');
+  });
+
+  it('throws on invalid workflow state transitions', async () => {
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+    });
+
+    expect(() => transitionCodingJob(job.id, 'open_pr')).toThrow(
+      'Invalid coding job transition',
+    );
   });
 
   it('queues coding jobs without blocking on git clone', async () => {
@@ -250,6 +329,11 @@ describe('coding jobs', () => {
     });
 
     await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+
+    await vi.waitFor(() => {
       expect(getCodingJob(job.id)?.status).toBe('completed');
     });
     expect(spawn).toHaveBeenCalledWith(
@@ -269,6 +353,37 @@ describe('coding jobs', () => {
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
     expect(getCodingJob(job.id)?.output).toContain('agent output');
+    expect(getCodingJob(job.id)?.transitionedAt).toMatchObject({
+      investigate: expect.any(String),
+      plan: expect.any(String),
+      await_approval: expect.any(String),
+      implement: expect.any(String),
+      test: expect.any(String),
+      completed: expect.any(String),
+    });
+  });
+
+  it('blocks implementation before plan approval', async () => {
+    vi.useRealTimers();
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+    });
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(() => transitionCodingJob(job.id, 'implement')).toThrow(
+      'Implementation approval is required',
+    );
+    expect(getCodingJob(job.id)?.failureReason).toContain(
+      'Implementation approval is required',
+    );
   });
 
   it('blocks provider fallback for PR creation before creating a GitHub PR', async () => {
@@ -281,6 +396,20 @@ describe('coding jobs', () => {
     });
     await registerCodingRepo({ repo: 'owner/repo' });
     vi.mocked(resolveProviderFallbackForAction)
+      .mockReturnValueOnce({
+        approved: true,
+        profile: {
+          id: 'default_coding',
+          label: 'Coding',
+          purpose: 'default_coding',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+          toolPolicy: 'approval-required',
+          updatedAt: new Date(0).toISOString(),
+        },
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      })
       .mockReturnValueOnce({
         approved: true,
         profile: {
@@ -321,6 +450,13 @@ describe('coding jobs', () => {
       requestedBy: 'whatsapp_main',
       createPr: true,
     });
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_pr_approval');
+    });
     const approval = createApproval({
       kind: 'coding-open-pr',
       title: 'Approve test PR',
@@ -331,13 +467,15 @@ describe('coding jobs', () => {
     });
     reviewApproval(approval.id, 'approved', 'test');
 
+    await openCodingJobPr(job.id, 'owner');
+
     await vi.waitFor(() => {
       expect(getCodingJob(job.id)?.status).toBe('await_pr_approval');
     });
     expect(resolveProviderFallbackForAction).toHaveBeenCalledWith({
       purpose: 'default_coding',
       action: 'pr-creation',
-      requester: 'whatsapp_main',
+      requester: 'owner',
       correlationId: job.id,
     });
     expect(getCodingJob(job.id)?.output).toContain(
@@ -345,6 +483,81 @@ describe('coding jobs', () => {
     );
     expect(fetchMock).not.toHaveBeenCalledWith(
       expect.stringContaining('/pulls'),
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('opens a PR only after the matching PR approval is approved', async () => {
+    vi.useRealTimers();
+    const fetchMock = mockGitHubFetch((url) => {
+      if (url.includes('/pulls')) {
+        return { html_url: 'https://github.com/owner/repo/pull/10' };
+      }
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.mkdirSync(`${jobRoot}/owner__repo`, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/changed-files.txt`, 'src/a.ts\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        fs.writeFileSync(`${metadataDir}/test-summary.txt`, 'vitest passed\n');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+      createPr: true,
+    });
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_pr_approval');
+    });
+
+    await expect(openCodingJobPr(job.id, 'owner')).rejects.toThrow(
+      'PR approval is required',
+    );
+    const wrongApproval = createApproval({
+      kind: 'coding-open-pr',
+      title: 'Wrong job',
+      summary: 'Wrong target',
+      targetType: 'coding-job',
+      targetId: 'other-job',
+    });
+    reviewApproval(wrongApproval.id, 'approved', 'owner');
+    await expect(openCodingJobPr(job.id, 'owner')).rejects.toThrow(
+      'PR approval is required',
+    );
+
+    const approval = createApproval({
+      kind: 'coding-open-pr',
+      title: 'Approve PR',
+      summary: 'Allow this job to publish a PR.',
+      targetType: 'coding-job',
+      targetId: job.id,
+    });
+    reviewApproval(approval.id, 'approved', 'owner');
+    const opened = await openCodingJobPr(job.id, 'owner');
+
+    expect(opened.prUrl).toBe('https://github.com/owner/repo/pull/10');
+    expect(opened.status).toBe('ci_running');
+    expect(opened.testSummary).toContain('vitest passed');
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/repos/owner/repo/pulls'),
       expect.objectContaining({ method: 'POST' }),
     );
   });
