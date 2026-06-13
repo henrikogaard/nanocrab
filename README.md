@@ -6,7 +6,7 @@
 
 > Standalone personal AI assistant platform with multi-channel messaging, an admin dashboard, provider-neutral agent skills, autonomous coding agents, memory, journal, and plugin support.
 
-**NanoCrab 2.0-Beta1**
+**NanoCrab 2.0-RC2**
 
 ---
 
@@ -14,11 +14,11 @@
 
 NanoCrab is a standalone personal assistant platform for running AI agents in isolated containers. It combines messaging channels, a web dashboard, provider routing, autonomous coding, long-term memory, journal/event tracking, and provider-neutral skills in one understandable Node.js process.
 
-NanoCrab is its own product now. It is not an upstream-compatible fork of any upstream project. NanoCrab 2.0-Beta1 uses NanoCrab-native container images, MCP names, config paths, cookies, logs, and service identifiers.
+NanoCrab is its own product now. It is not an upstream-compatible fork of any upstream project. NanoCrab 2.0-RC2 uses NanoCrab-native container images, MCP names, config paths, cookies, logs, and service identifiers.
 
 ## Learning, Memory, And Skills
 
-NanoCrab 2.0-Beta1 is a major step toward a long-running personal agent. It can learn over time, keep memories, reuse those memories across channels, and grow its own provider-neutral skills, but it does this with review and provenance instead of silently absorbing everything it sees.
+NanoCrab 2.0-RC2 is a major step toward a long-running personal agent. It can learn over time, keep memories, reuse those memories across channels, and grow its own provider-neutral skills, but it does this with review and provenance instead of silently absorbing everything it sees.
 
 - **Structured memory** is stored as reviewed records with scope, type, content, source, confidence, sensitivity, visibility, stale-review state, and contradiction metadata.
 - **Shared context** is generated from approved memories into runtime `MEMORY.md` files, so chat, automations, coding jobs, journal extraction, and reports can all benefit from the same remembered facts and preferences.
@@ -458,7 +458,7 @@ Single Node.js process. Channels self-register at startup. Agents execute in iso
 
 ## Release And Upgrade Notes
 
-NanoCrab 2.0-Beta1 is tested with Node.js 24. Node.js 20-24 are the supported range; avoid Node.js 26 for now because native dependencies such as SQLite bindings may not install cleanly there yet.
+NanoCrab 2.0-RC2 is tested with Node.js 24. Node.js 20-24 are the supported range; avoid Node.js 26 for now because native dependencies such as SQLite bindings may not install cleanly there yet.
 
 Useful release checks:
 
@@ -497,7 +497,7 @@ Each plugin exports: `id`, `name`, `router` (Express), `sidebar` config, and opt
 
 ## Standalone Product
 
-NanoCrab 2.0-Beta1 is a standalone product, not an upstream-compatible fork.
+NanoCrab 2.0-RC2 is a standalone product, not an upstream-compatible fork.
 
 New capabilities should land as normal NanoCrab code, optional private plugins, or approved provider-neutral skills through the Skill Factory.
 

@@ -1,6 +1,6 @@
 {
   "name": "nanocrab",
-  "version": "2.0.0-beta.1",
+  "version": "2.0.0-rc.2",
   "description": "NanoCrab — standalone personal AI assistant platform",
   "type": "module",
   "main": "dist/index.js",
