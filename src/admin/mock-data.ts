@@ -189,7 +189,7 @@ const cockpitSessions = [
     lastActivity: iso(1),
     messageCount: 42,
     approvalCount: 0,
-    artifactCount: 2,
+    artifactCount: 3,
     changedFiles: [
       'src/admin/routes/sessions.ts',
       'src/admin/public/pages/dashboard.js',
@@ -211,7 +211,7 @@ const cockpitSessions = [
     lastActivity: iso(7),
     messageCount: 27,
     approvalCount: 2,
-    artifactCount: 1,
+    artifactCount: 2,
     changedFiles: ['docs/ops/nightfall-orders.md'],
     currentStep: 'Waiting for approval to publish revised operation orders.',
     filePath: 'cockpit-approval-002.jsonl',
@@ -229,7 +229,7 @@ const cockpitSessions = [
     lastActivity: iso(132),
     messageCount: 13,
     approvalCount: 0,
-    artifactCount: 0,
+    artifactCount: 1,
     changedFiles: [],
     currentStep:
       'Provider request failed after retrying scout report extraction.',
@@ -248,7 +248,7 @@ const cockpitSessions = [
     lastActivity: iso(295),
     messageCount: 58,
     approvalCount: 1,
-    artifactCount: 3,
+    artifactCount: 4,
     changedFiles: ['src/admin/routes/containers.ts', 'src/admin/websocket.ts'],
     currentStep: 'Completed implementation and recorded focused test results.',
     filePath: '',
@@ -1428,45 +1428,353 @@ function sessions(): JsonValue[] {
   return cockpitSessions;
 }
 
+function cockpitArtifacts(
+  id: string,
+  session: (typeof cockpitSessions)[number],
+) {
+  const changedFileArtifacts = session.changedFiles.map((file, index) => ({
+    id: `${id}-changed-file-${index + 1}`,
+    name: file.split('/').pop(),
+    path: file,
+    kind: 'changed-file',
+    status: session.status === 'failed' ? 'failed' : 'ready',
+    createdAt: iso(14 - index),
+    summary:
+      index === 0
+        ? 'Primary file touched by the agent run.'
+        : 'Supporting file updated as part of the same run.',
+  }));
+
+  const generatedArtifacts: Record<string, JsonValue[]> = {
+    'cockpit-running-001': [
+      {
+        id: 'cockpit-running-001-summary',
+        name: 'cockpit-summary.md',
+        path: 'data/runtime/cockpit/cockpit-running-001/summary.md',
+        kind: 'run-summary',
+        status: 'drafting',
+        createdAt: iso(5),
+        summary: 'Live run summary with provider, model, and latest step.',
+      },
+    ],
+    'cockpit-approval-002': [
+      {
+        id: 'cockpit-approval-002-preview',
+        name: 'nightfall-orders.preview.md',
+        path: 'data/approvals/cockpit-approval-002/preview.md',
+        kind: 'approval-preview',
+        status: 'pending-approval',
+        createdAt: iso(9),
+        summary: 'Diff preview for revised operation orders awaiting review.',
+      },
+    ],
+    'cockpit-failed-003': [
+      {
+        id: 'cockpit-failed-003-error-log',
+        name: 'provider-error.log',
+        path: 'data/runtime/cockpit/cockpit-failed-003/provider-error.log',
+        kind: 'error-log',
+        status: 'failed',
+        createdAt: iso(132),
+        summary: 'OpenRouter timeout and retry trace captured for triage.',
+      },
+    ],
+    'cockpit-complete-004': [
+      {
+        id: 'cockpit-complete-004-test-summary',
+        name: 'test-summary.txt',
+        path: 'data/runtime/cockpit/cockpit-complete-004/test-summary.txt',
+        kind: 'test-summary',
+        status: 'ready',
+        createdAt: iso(300),
+        summary: 'Focused route and websocket tests passed.',
+      },
+      {
+        id: 'cockpit-complete-004-pr-notes',
+        name: 'pr-notes.md',
+        path: 'data/runtime/cockpit/cockpit-complete-004/pr-notes.md',
+        kind: 'pull-request-notes',
+        status: 'ready',
+        createdAt: iso(296),
+        summary: 'Implementation summary and manual verification notes.',
+      },
+    ],
+  };
+
+  return [...changedFileArtifacts, ...(generatedArtifacts[id] || [])];
+}
+
+function cockpitTimeline(
+  id: string,
+  session: (typeof cockpitSessions)[number],
+): JsonValue[] {
+  const common = [
+    {
+      id: `${id}-start`,
+      timestamp: session.startedAt,
+      type: 'started',
+      title: 'Session started',
+      detail: `${session.provider}/${session.model} run started for ${session.group}.`,
+    },
+    {
+      id: `${id}-context`,
+      timestamp: iso(Math.max(1, Math.floor(session.messageCount / 2))),
+      type: 'context',
+      title: 'Context loaded',
+      detail:
+        'Loaded group instructions, provider profile, active skills, and recent channel context.',
+    },
+  ];
+
+  const specific: Record<string, JsonValue[]> = {
+    'cockpit-running-001': [
+      {
+        id: 'cockpit-running-001-tool',
+        timestamp: iso(10),
+        type: 'tool_call',
+        title: 'Read transcript index',
+        detail:
+          'Inspected recent transcript files and extracted session metadata for cockpit summaries.',
+      },
+      {
+        id: 'cockpit-running-001-artifact',
+        timestamp: iso(5),
+        type: 'artifact',
+        title: 'Draft summary updated',
+        detail:
+          'Wrote a live cockpit summary artifact with current run metrics.',
+      },
+    ],
+    'cockpit-approval-002': [
+      {
+        id: 'cockpit-approval-002-diff',
+        timestamp: iso(22),
+        type: 'tool_call',
+        title: 'Prepared orders diff',
+        detail:
+          'Generated a preview for docs/ops/nightfall-orders.md with changed target windows.',
+      },
+      {
+        id: 'cockpit-approval-002-approval',
+        timestamp: iso(7),
+        type: 'waiting_approval',
+        title: 'Approval requested',
+        detail:
+          'Operator approval is required before publishing revised operation orders to the channel.',
+      },
+    ],
+    'cockpit-failed-003': [
+      {
+        id: 'cockpit-failed-003-retry',
+        timestamp: iso(140),
+        type: 'retry',
+        title: 'Provider retry attempted',
+        detail:
+          'Retried scout report extraction after an OpenRouter timeout and stale upstream response.',
+      },
+      {
+        id: 'cockpit-failed-003-failed',
+        timestamp: session.lastEventAt,
+        type: 'failed',
+        title: 'Run failed',
+        detail:
+          'Provider request failed after retry budget was exhausted; error log captured as an artifact.',
+      },
+    ],
+    'cockpit-complete-004': [
+      {
+        id: 'cockpit-complete-004-tests',
+        timestamp: iso(304),
+        type: 'test',
+        title: 'Focused tests passed',
+        detail:
+          'Route and websocket tests passed before the implementation notes were recorded.',
+      },
+      {
+        id: 'cockpit-complete-004-complete',
+        timestamp: session.lastEventAt,
+        type: 'completed',
+        title: 'Run completed',
+        detail:
+          'Implementation, artifacts, and approval history were captured for handoff.',
+      },
+    ],
+  };
+
+  return [
+    ...common,
+    ...(specific[id] || []),
+    {
+      id: `${id}-step`,
+      timestamp: session.lastEventAt,
+      type: session.status,
+      title: session.status.replace(/_/g, ' '),
+      detail: session.currentStep,
+    },
+  ];
+}
+
+function cockpitApprovals(
+  id: string,
+  session: (typeof cockpitSessions)[number],
+): JsonValue[] {
+  if (session.approvalCount === 0) return [];
+
+  const status = session.status === 'waiting_approval' ? 'pending' : 'approved';
+  const fixtures: Record<string, JsonValue[]> = {
+    'cockpit-approval-002': [
+      {
+        id: 'cockpit-approval-002-file-approval',
+        title: 'Approve operation orders diff',
+        status,
+        risk: 'medium',
+        requester: 'operations',
+        targetType: 'file',
+        targetId: 'docs/ops/nightfall-orders.md',
+        createdAt: iso(12),
+        summary:
+          'Review and approve the revised Nightfall timing before saving it to the ops document.',
+      },
+      {
+        id: 'cockpit-approval-002-message-approval',
+        title: 'Send revised timing to Operations Room',
+        status,
+        risk: 'high',
+        requester: 'operations',
+        targetType: 'message',
+        targetId: 'tg:operations-room',
+        createdAt: iso(7),
+        summary:
+          'Publish the approved target windows to the Telegram operations channel.',
+      },
+    ],
+    'cockpit-complete-004': [
+      {
+        id: 'cockpit-complete-004-pr-approval',
+        title: 'Open implementation PR',
+        status: 'approved',
+        risk: 'medium',
+        requester: 'main',
+        targetType: 'github-pr',
+        targetId: 'HenrikOrg/nanocrab',
+        createdAt: iso(312),
+        reviewedAt: iso(302),
+        summary:
+          'Approved opening a PR with route, websocket, and cockpit dashboard changes.',
+      },
+    ],
+  };
+
+  return fixtures[id] || [];
+}
+
 function cockpitDetail(id: string): JsonValue | undefined {
   const session = cockpitSessions.find((item) => item.id === id);
   if (!session) return undefined;
   return {
     ...session,
-    timeline: [
-      {
-        id: `${id}-start`,
-        timestamp: session.startedAt,
-        type: 'started',
-        title: 'Session started',
-        detail: `${session.provider}/${session.model} run started for ${session.group}.`,
-      },
-      {
-        id: `${id}-step`,
-        timestamp: session.lastEventAt,
-        type: session.status,
-        title: session.status.replace(/_/g, ' '),
-        detail: session.currentStep,
-      },
-    ],
-    artifacts: session.changedFiles.map((file, index) => ({
-      id: `${id}-artifact-${index}`,
-      name: file.split('/').pop(),
-      path: file,
-      kind: 'changed-file',
-    })),
-    approvals:
-      session.approvalCount > 0
-        ? Array.from({ length: session.approvalCount }, (_, index) => ({
-            id: `${id}-approval-${index + 1}`,
-            title:
-              index === 0 ? 'Approve file changes' : 'Approve outbound message',
-            status:
-              session.status === 'waiting_approval' ? 'pending' : 'approved',
-            risk: index === 0 ? 'medium' : 'low',
-            createdAt: iso(12 + index),
-          }))
-        : [],
+    timeline: cockpitTimeline(id, session),
+    artifacts: cockpitArtifacts(id, session),
+    approvals: cockpitApprovals(id, session),
+  };
+}
+
+function mockSessionMessages(group: string, sessionId: string): JsonValue[] {
+  const session =
+    cockpitSessions.find(
+      (item) => item.group === group && item.sessionId === sessionId,
+    ) || cockpitSessions[0];
+
+  return [
+    {
+      role: 'user',
+      timestamp: session.startedAt,
+      content:
+        group === 'operations'
+          ? 'Update the Nightfall operation orders and ask before publishing.'
+          : 'Review this run and surface the current status in the cockpit.',
+      toolUse: false,
+    },
+    {
+      role: 'assistant',
+      timestamp: iso(16),
+      content:
+        'I loaded the group instructions, checked the relevant files, and started building a concise run summary.',
+      toolUse: true,
+      toolCalls: [
+        {
+          id: `${sessionId}-tool-read`,
+          name: 'read_file',
+          input: JSON.stringify({
+            path:
+              group === 'operations'
+                ? 'docs/ops/nightfall-orders.md'
+                : 'src/admin/routes/sessions.ts',
+          }),
+          output: 'Loaded mock file content and extracted current section map.',
+          duration: '1.2',
+        },
+      ],
+    },
+    {
+      role: 'assistant',
+      timestamp: session.lastEventAt,
+      content: session.currentStep,
+      toolUse: session.status !== 'waiting_approval',
+      toolCalls:
+        session.status === 'failed'
+          ? [
+              {
+                id: `${sessionId}-tool-provider`,
+                name: 'provider_request',
+                input: JSON.stringify({ provider: session.provider }),
+                output: 'Timeout after retry budget was exhausted.',
+                duration: '30.0',
+              },
+            ]
+          : undefined,
+    },
+  ];
+}
+
+function mockSessionDetail(group: string, sessionId: string): JsonValue {
+  const session =
+    cockpitSessions.find(
+      (item) => item.group === group && item.sessionId === sessionId,
+    ) || cockpitSessions[0];
+  const messages = mockSessionMessages(group, sessionId) as Array<{
+    role: string;
+    toolCalls?: unknown[];
+  }>;
+  const toolCount = messages.reduce(
+    (count, message) => count + (message.toolCalls?.length || 0),
+    0,
+  );
+  const duration = Math.max(
+    0,
+    Math.round(
+      (new Date(session.lastEventAt).getTime() -
+        new Date(session.startedAt).getTime()) /
+        1000,
+    ),
+  );
+
+  return {
+    id: sessionId,
+    group,
+    stats: {
+      messageCount: messages.length,
+      duration,
+      toolCount,
+      model: session.model,
+      provider: session.provider,
+      tokenCount: 18_420,
+      cost: session.provider === 'ollama' ? 0 : 0.38,
+      errorCount: session.status === 'failed' ? 1 : 0,
+      createdAt: session.startedAt,
+      endedAt: session.status === 'running' ? null : session.lastEventAt,
+    },
+    messages,
   };
 }
 
@@ -3432,22 +3740,19 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname.startsWith('/sessions/cockpit/')) {
     return cockpitDetail(decodeURIComponent(pathname.split('/').pop() || ''));
   }
+  if (pathname.match(/^\/sessions\/[^/]+\/[^/]+\/detail$/)) {
+    const [, , group, sessionId] = pathname.split('/');
+    return mockSessionDetail(
+      decodeURIComponent(group || ''),
+      decodeURIComponent(sessionId || ''),
+    );
+  }
   if (pathname.match(/^\/sessions\/[^/]+\/[^/]+$/)) {
-    return [
-      {
-        role: 'user',
-        timestamp: iso(24),
-        content: 'What happened around Kepler-442b?',
-        toolUse: false,
-      },
-      {
-        role: 'assistant',
-        timestamp: iso(23),
-        content:
-          'Scout-7 reported a fleet sighting near Kepler-442b. Confidence 0.82. I recorded it as a journal event.',
-        toolUse: true,
-      },
-    ];
+    const [, , group, sessionId] = pathname.split('/');
+    return mockSessionMessages(
+      decodeURIComponent(group || ''),
+      decodeURIComponent(sessionId || ''),
+    );
   }
   if (pathname === '/backup') {
     return {

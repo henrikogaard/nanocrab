@@ -138,6 +138,9 @@ visible mock-mode banner, and includes placeholder content for the main
 surfaces: Dashboard, Agents, Chat, Messages, Groups, Tasks, Memory,
 Approvals, Integrations, Developer tools, Git & Code, Monitoring, Containers,
 Security, Settings, Marketplace, Uptime, Wiki, Workflows, Autofix, and Copilot.
+The cockpit and session surfaces include richer sample runs for active,
+approval-blocked, failed, and completed agents, including timelines, artifacts,
+approvals, stats, and tool-call transcripts.
 
 To use another port:
 
