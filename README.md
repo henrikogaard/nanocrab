@@ -439,7 +439,7 @@ npm run mock:admin:build
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the Hermes/OpenClaw-inspired roadmap and the remaining polish areas after 2.0-Beta1.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the Hermes/OpenClaw-inspired roadmap. The non-epic P0 closure sweep is complete; the remaining P0-labeled GitHub issues are roadmap epics that still track lower-priority follow-up children.
 
 ### Plugin Architecture
 

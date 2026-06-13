@@ -1,6 +1,6 @@
 # NanoCrab Handover
 
-Last updated: 2026-06-10
+Last updated: 2026-06-13
 
 ## Repository State
 
@@ -14,7 +14,7 @@ Last updated: 2026-06-10
 
 - Local workstation changes are committed and pushed through `origin/main`.
 - The GitHub issue tracker has a roadmap index plus milestones, epics, and child issues for the Hermes/OpenClaw expansion.
-- README, command docs, roadmap, changelog, and repository agent instructions describe the 2.0-Beta1 direction.
+- README, command docs, roadmap, changelog, and repository agent instructions describe the 2.0-Beta1 direction and the completed non-epic P0 closure sweep.
 - Skills are provider-neutral and managed through the skill registry.
 - Runtime memories and generated `MEMORY.md` files are private state and gitignored.
 
@@ -28,6 +28,7 @@ Last updated: 2026-06-10
 - Dedicated coding job containers for GitHub work.
 - Reports, research jobs, deliverables, artifacts, approvals, and Playwright support.
 - Optional Infomaniak kSuite MCP preset.
+- P0 release foundations are in place: cockpit/approval inbox, provider probes/fallback approval, memory/skill review timelines, coding workflow approvals/PR/CI tracking, policy/audit/dry-run controls, connector boundaries, and first-run setup preflight.
 
 ## VPS State
 
@@ -60,8 +61,7 @@ Last updated: 2026-06-10
 
 ## Next High-Value Work
 
-- Build the Agent Cockpit and unified approval inbox.
-- Harden provider live probes and write-capable fallback approval.
-- Expand memory/skill timelines with review filters and contradiction handling.
-- Finish OpenClaw-style GitHub coding workflows with staged approvals, PR/CI dashboard, diffs, and mobile commands.
+- Keep the P0 roadmap epics open only for their remaining follow-up children; all non-epic P0 implementation issues are closed.
+- Add mobile chat commands and persisted repo preference/rules for coding jobs.
+- Build backup/restore/migration UI and production release diagnostics.
 - Grow the connector catalog with permissioned email, calendar, kDrive, GitHub, and document workflows.

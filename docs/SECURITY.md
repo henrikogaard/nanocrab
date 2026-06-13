@@ -112,7 +112,7 @@ Real API credentials **never enter containers**. NanoCrab uses its built-in cred
 5. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`.
 
 **Provider routes:**
-Claude, OpenRouter, and Google Gemini API traffic can be proxied this way. Ollama normally uses a local or LAN endpoint without a secret. NanoCrab has provider profiles for chat, coding, automations, memory, journal extraction, skill factory, reports, documents, and vision. Write-capable profiles should keep `approval-required` tool policy unless the deployment is explicitly trusted. Live per-model capability probes and fallback enforcement are still hardening work.
+Claude, OpenRouter, and Google Gemini API traffic can be proxied this way. Ollama normally uses a local or LAN endpoint without a secret. NanoCrab has provider profiles for chat, coding, automations, memory, journal extraction, skill factory, reports, documents, and vision. Write-capable profiles should keep `approval-required` tool policy unless the deployment is explicitly trusted. Live per-model capability probes and fallback enforcement are implemented, with future work focused on broader provider coverage and release diagnostics.
 
 **NOT Mounted:**
 
