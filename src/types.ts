@@ -218,6 +218,16 @@ export interface NewJournalEventRecord {
 
 // --- Channel abstraction ---
 
+export type ChannelHealthStatus = 'healthy' | 'down' | 'disabled' | 'degraded';
+
+export interface ChannelStatusSnapshot {
+  name: string;
+  connected: boolean;
+  status: ChannelHealthStatus;
+  lastActiveAt: string | null;
+  reason: string;
+}
+
 export interface Channel {
   name: string;
   connect(): Promise<void>;
@@ -229,6 +239,8 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: richer runtime health for dashboard and diagnostics.
+  getStatus?(): ChannelStatusSnapshot;
 }
 
 // Callback type that channels use to deliver inbound messages

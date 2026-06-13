@@ -17,6 +17,7 @@ import {
 } from '../../config.js';
 import { readEnvFile, writeEnvValue } from '../../env.js';
 import { getState } from '../state.js';
+import { buildChannelStatus } from '../../channel-status.js';
 import { auditLog } from '../security.js';
 import { requireRole } from '../middleware.js';
 import { logger } from '../../logger.js';
@@ -160,10 +161,7 @@ router.get('/', (_req: Request, res: Response) => {
 router.get('/dashboard', async (_req: Request, res: Response) => {
   const state = getState();
   const uptimeMs = Date.now() - state.startTime;
-  const channels = state.channels.map((ch) => ({
-    name: ch.name,
-    connected: ch.isConnected(),
-  }));
+  const channels = state.channels.map((ch) => buildChannelStatus(ch));
   const containers = state.queue.getActiveContainers();
 
   const db = new Database(path.join(STORE_DIR, 'messages.db'), {
@@ -360,11 +358,7 @@ router.post(
 // Channel health check
 router.get('/health', (_req: Request, res: Response) => {
   const state = getState();
-  const health = state.channels.map((ch) => ({
-    name: ch.name,
-    connected: ch.isConnected(),
-    status: ch.isConnected() ? 'healthy' : 'down',
-  }));
+  const health = state.channels.map((ch) => buildChannelStatus(ch));
 
   const allHealthy = health.every((h) => h.connected);
   res.json({

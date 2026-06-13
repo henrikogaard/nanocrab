@@ -59,9 +59,26 @@ describe('SignalChannel connection status', () => {
     await channel.connect();
 
     expect(channel.isConnected()).toBe(true);
+    expect(channel.getStatus()).toMatchObject({
+      connected: true,
+      status: 'healthy',
+      reason: 'signal-cli RPC endpoint is ready',
+    });
+    expect(channel.getStatus().lastActiveAt).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/rpc'),
       expect.any(Object),
     );
+  });
+
+  it('reports a diagnostic reason after disconnect', async () => {
+    await channel.disconnect();
+
+    expect(channel.getStatus()).toMatchObject({
+      connected: false,
+      status: 'down',
+      lastActiveAt: null,
+      reason: 'Signal channel disconnected',
+    });
   });
 });

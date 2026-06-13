@@ -17,7 +17,7 @@ import { logger } from '../logger.js';
 import { auditUploadSend } from '../upload-audit.js';
 import { transcribeAudio } from '../transcription.js';
 import { registerChannel, ChannelOpts } from './registry.js';
-import { Channel, NewMessage } from '../types.js';
+import { Channel, ChannelStatusSnapshot, NewMessage } from '../types.js';
 
 const SIGNAL_CLI_PORT = 8080;
 const DAEMON_STARTUP_TIMEOUT_MS = 90000;
@@ -74,6 +74,9 @@ export class SignalChannel implements Channel {
   private phoneNumber: string;
   private port: number;
   private connected = false;
+  private lastReadyAt: string | null = null;
+  private lastMessageAt: string | null = null;
+  private lastError: string | null = null;
   private daemonRestarts = 0;
   private rpcId = 0;
   private lastTimestamps = new Set<number>();
@@ -179,6 +182,8 @@ export class SignalChannel implements Channel {
         await this.rpc('version', {});
         logger.info('signal-cli daemon ready');
         this.connected = true;
+        this.lastReadyAt = new Date().toISOString();
+        this.lastError = null;
         this.daemonRestarts = 0;
         this.startMemoryWatchdog();
         return;
@@ -196,6 +201,7 @@ export class SignalChannel implements Channel {
     if (this.daemonRestarts >= MAX_DAEMON_RESTARTS) {
       logger.error('signal-cli daemon exceeded max restarts, giving up');
       this.connected = false;
+      this.lastError = 'signal-cli daemon exceeded max restarts';
       return;
     }
 
@@ -214,6 +220,7 @@ export class SignalChannel implements Channel {
     } catch (err) {
       logger.error({ err }, 'Failed to restart signal-cli daemon');
       this.connected = false;
+      this.lastError = err instanceof Error ? err.message : String(err);
     }
   }
 
@@ -260,6 +267,7 @@ export class SignalChannel implements Channel {
   }
 
   private async processMessage(msg: SignalJsonMessage): Promise<void> {
+    this.lastMessageAt = new Date().toISOString();
     const envelope = msg.envelope;
     const data = envelope.dataMessage;
     if (!data) return; // typing indicator, receipt, etc.
@@ -524,12 +532,28 @@ export class SignalChannel implements Channel {
     return this.connected;
   }
 
+  getStatus(): ChannelStatusSnapshot {
+    const lastActiveAt = maxIso(this.lastMessageAt, this.lastReadyAt);
+    return {
+      name: this.name,
+      connected: this.connected,
+      status: this.connected ? 'healthy' : 'down',
+      lastActiveAt,
+      reason: this.connected
+        ? lastActiveAt === this.lastMessageAt
+          ? 'Signal message activity observed'
+          : 'signal-cli RPC endpoint is ready'
+        : this.lastError || 'signal-cli daemon is not connected',
+    };
+  }
+
   ownsJid(jid: string): boolean {
     return jid.startsWith('sig:');
   }
 
   async disconnect(): Promise<void> {
     this.connected = false;
+    this.lastError = 'Signal channel disconnected';
 
     if (this.daemon) {
       this.daemon.kill('SIGTERM');
@@ -604,6 +628,12 @@ export class SignalChannel implements Channel {
     }
     return json.result;
   }
+}
+
+function maxIso(a: string | null, b: string | null): string | null {
+  if (!a) return b;
+  if (!b) return a;
+  return Date.parse(a) >= Date.parse(b) ? a : b;
 }
 
 function mimeToExt(mime: string): string {

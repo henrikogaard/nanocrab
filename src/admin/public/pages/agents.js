@@ -56,6 +56,7 @@ async function renderAgents(el) {
       researchJobs,
       terminals,
       boundaries,
+      channelInfo,
     ] = await Promise.all([
       api('/groups').catch(() => []),
       api('/containers').catch(() => []),
@@ -73,8 +74,16 @@ async function renderAgents(el) {
       api('/research/jobs').catch(() => []),
       api('/sessions/terminal/active').catch(() => []),
       api('/agents/boundaries').catch(() => []),
+      api('/channels').catch(() => ({ active: [] })),
     ]);
     const groups = Array.isArray(groupsRaw) ? groupsRaw : [];
+    const channels = Array.isArray(channelInfo?.active)
+      ? channelInfo.active
+      : [];
+    const channelById = channels.reduce((acc, channel) => {
+      if (channel.id) acc[channel.id] = channel;
+      return acc;
+    }, {});
     const boundaryByFolder = (boundaries || []).reduce((acc, item) => {
       if (item.folder) acc[item.folder] = item;
       return acc;
@@ -92,6 +101,8 @@ async function renderAgents(el) {
         const container = containers.find(
           (c) => c.groupJid === g.jid || c.groupFolder === g.folder,
         );
+        const channelStatus = channelById[ch];
+        const channelConnected = channelStatus?.connected === true;
         const isActive = !!container;
         const isIdle = container?.idleWaiting;
         const isEnabled = g.enabled !== false;
@@ -110,26 +121,36 @@ async function renderAgents(el) {
         if (!isEnabled) {
           statusBadge = 'Disabled';
           statusColor = 'badge-muted';
+        } else if (!channelStatus || !channelConnected) {
+          statusBadge = 'Offline';
+          statusColor = 'badge-error';
         } else if (isActive && !isIdle) {
           statusBadge = 'Running';
           statusColor = 'badge-success';
         } else if (isActive && isIdle) {
           statusBadge = 'Idle';
           statusColor = 'badge-warning';
+        } else if (channelConnected) {
+          statusBadge = 'Active';
+          statusColor = 'badge-success';
         } else {
           statusBadge = 'Offline';
           statusColor = 'badge-error';
         }
 
+        const lastActive = g.lastActivity || channelStatus?.lastActiveAt;
+        const statusReason =
+          channelStatus?.statusReason || 'Channel adapter is not active';
+
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);${!isEnabled ? 'opacity:.62' : ''}">
         <div style="display:flex;align-items:center;gap:10px">
-          <span class="status-dot ${!isEnabled ? '' : isActive ? (isIdle ? 'idle' : 'online') : 'offline'}" style="width:8px;height:8px"></span>
+          <span class="status-dot ${!isEnabled ? '' : channelConnected ? (isActive && isIdle ? 'idle' : 'online') : 'offline'}" style="width:8px;height:8px"></span>
           <div>
             <strong>${esc(g.name)}</strong>
             <span class="badge badge-muted" style="margin-left:6px;font-size:9px">${ch}</span>
             ${g.isMain ? '<span class="badge badge-success" style="font-size:9px;margin-left:3px">Persistent</span>' : ''}
             ${isPrimary ? '<span class="badge badge-accent" style="font-size:9px;margin-left:3px">Primary</span>' : ''}
-            <div style="font-size:11px;color:var(--text-muted)">${g.lastActivity ? 'Active ' + timeAgo(g.lastActivity) : 'No activity'}</div>
+            <div style="font-size:11px;color:var(--text-muted)">${lastActive ? 'Active ' + timeAgo(lastActive) : 'No activity'} · ${esc(statusReason)}</div>
             <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
               <span class="badge badge-muted" style="font-size:8px">${esc((boundary?.channelScopes || ['own']).join(','))} channels</span>
               <span class="badge ${boundary?.externalWrites?.allowed ? 'badge-warning' : 'badge-success'}" style="font-size:8px">${boundary?.externalWrites?.allowed ? 'writes gated' : 'read/write denied'}</span>

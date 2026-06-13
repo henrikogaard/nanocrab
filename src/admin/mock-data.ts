@@ -54,7 +54,7 @@ const groups = [
     name: 'Scouting Desk',
     folder: 'scouts',
     channel: 'signal',
-    enabled: false,
+    enabled: true,
     active: false,
     isMain: true,
     isPrimary: false,
@@ -70,7 +70,14 @@ const groups = [
 const channels = [
   { name: 'whatsapp', connected: true, status: 'healthy', lastSeen: iso(1) },
   { name: 'telegram', connected: true, status: 'healthy', lastSeen: iso(3) },
-  { name: 'signal', connected: true, status: 'healthy', lastSeen: iso(1) },
+  {
+    name: 'signal',
+    connected: true,
+    status: 'healthy',
+    lastSeen: iso(1),
+    lastActiveAt: iso(1),
+    statusReason: 'Mock Signal message activity observed',
+  },
 ];
 
 const agentBoundaries = [
@@ -1722,8 +1729,23 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           icon: 'SG',
           description: 'Scout desk and private alerts.',
           connected: true,
+          status: 'healthy',
+          lastActiveAt: iso(1),
+          statusReason: 'Mock Signal message activity observed',
           envVars: ['SIGNAL_PHONE_NUMBER'],
           config: { SIGNAL_PHONE_NUMBER: '+47 *** ** 107' },
+        },
+        {
+          id: 'signal-failing',
+          name: 'Signal (failing sample)',
+          icon: 'SG',
+          description: 'Mock diagnostic sample for a Signal daemon failure.',
+          connected: false,
+          status: 'down',
+          lastActiveAt: iso(180),
+          statusReason: 'Mock signal-cli daemon is not connected',
+          envVars: ['SIGNAL_PHONE_NUMBER'],
+          config: { SIGNAL_PHONE_NUMBER: '+47 *** ** 108' },
         },
       ],
       available: [
