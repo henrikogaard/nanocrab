@@ -1,8 +1,9 @@
 // NanoCrab Admin — Settings Page
 
-async function renderSettings(el) {
+window.renderSettings = async function (el) {
   const currentTheme =
     document.documentElement.getAttribute('data-theme') || 'dark';
+  const settingsThemes = ['dark', 'light', 'midnight', 'forest', 'amber'];
   const themeLabels = {
     dark: 'Dark',
     light: 'Light',
@@ -35,6 +36,21 @@ async function renderSettings(el) {
   let agentBoundaries = [];
   try {
     agentBoundaries = await api('/agents/boundaries');
+  } catch {}
+  let assistantProfile = {
+    selectedAvatarId: 'default',
+    selectedAvatar: {
+      id: 'default',
+      kind: 'default',
+      name: 'NanoCrab Mark',
+      description: 'Default NanoCrab logo mark.',
+      url: '/static/nanocrab-mark.png',
+      available: true,
+    },
+    avatars: [],
+  };
+  try {
+    assistantProfile = await api('/assistant-profile');
   } catch {}
   const isOwner = (window._userRole || 'owner') === 'owner';
   let setupPreflight = null;
@@ -273,6 +289,27 @@ async function renderSettings(el) {
         </table>
       </div>
     </div>`;
+  const avatarOptions = (assistantProfile.avatars || [])
+    .map((avatar) => {
+      const selected = avatar.id === assistantProfile.selectedAvatarId;
+      const unavailable = !avatar.available;
+      const kindLabel =
+        avatar.kind === 'default'
+          ? 'Default'
+          : avatar.kind === 'uploaded'
+            ? 'Uploaded'
+            : 'Built-in';
+      return `
+        <button type="button" class="avatar-option ${selected ? 'active' : ''}" ${unavailable ? 'disabled' : ''} onclick="selectAssistantAvatar('${esc(avatar.id)}')">
+          <img src="${esc(avatar.url)}" alt="${esc(avatar.name)}" onerror="this.style.opacity='0.25'">
+          <span>
+            <strong>${esc(avatar.name)}</strong>
+            <small>${esc(avatar.description || '')}</small>
+            <em>${esc(kindLabel)}${unavailable ? ' · not uploaded' : ''}</em>
+          </span>
+        </button>`;
+    })
+    .join('');
   const agentBoundaryCard = `
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">Agent Boundaries</div>
@@ -315,7 +352,7 @@ async function renderSettings(el) {
         <button class="btn btn-sm btn-ghost" onclick="refreshSetupPreflight()">Refresh</button>
       </div>
       <div id="setup-preflight-list" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">
-        ${setupPreflight.checks
+        ${(setupPreflight.checks || [])
           .map(
             (check) => `
           <div style="padding:9px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface)">
@@ -415,25 +452,30 @@ async function renderSettings(el) {
         <div style="margin-bottom:16px">
           <label style="font-size:12px;color:var(--text-muted);font-weight:500;display:block;margin-bottom:8px">Theme</label>
           <div class="theme-grid">
-            ${THEMES.map(
-              (t) => `
+            ${settingsThemes
+              .map(
+                (t) => `
               <button class="theme-option ${currentTheme === t ? 'active' : ''}" data-theme="${t}" onclick="setTheme('${t}')">
                 <div class="theme-preview" style="background:${themeColors[t]}"></div>
                 <span>${themeLabels[t]}</span>
               </button>`,
-            ).join('')}
+              )
+              .join('')}
           </div>
         </div>
         <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
           <div class="card-title">Bot Avatar</div>
-          <div style="display:flex;align-items:center;gap:16px">
-            <img src="/static/avatar.jpg" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--border)" onerror="this.onerror=null;this.src='/static/nanocrab-mark.png'" id="avatar-preview" alt="Bot avatar">
-            <div>
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">
+            <img src="${esc(assistantProfile.selectedAvatar?.url || '/static/nanocrab-mark.png')}" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--border);background:var(--surface)" onerror="this.onerror=null;this.src='/static/nanocrab-mark.png'" id="avatar-preview" alt="Bot avatar">
+            <div style="min-width:0">
+              <div style="font-size:13px;font-weight:600;color:var(--text)" id="avatar-current-name">${esc(assistantProfile.selectedAvatar?.name || 'NanoCrab Mark')}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin:3px 0 8px" id="avatar-current-kind">${esc(assistantProfile.selectedAvatar?.kind || 'default')}</div>
               <input type="file" id="avatar-file" accept="image/*" style="display:none">
               <button class="btn btn-sm btn-ghost" onclick="document.getElementById('avatar-file').click()">Upload New Avatar</button>
               <div id="avatar-msg" style="font-size:12px;color:var(--text-muted);margin-top:4px"></div>
             </div>
           </div>
+          <div class="avatar-grid">${avatarOptions || '<div class="empty">No avatar options available.</div>'}</div>
         </div>
       </div>
       <div class="card">
@@ -642,7 +684,7 @@ async function renderSettings(el) {
         if (msg) msg.textContent = '';
       }, 4000);
     };
-}
+};
 
 function renderReleaseDiagnostics(result) {
   return (result.sections || [])
@@ -1254,6 +1296,52 @@ window.savePersonality = async function () {
   } catch {
     msg.textContent = 'Save error';
     msg.style.color = 'var(--error)';
+  }
+  setTimeout(() => {
+    if (msg) msg.textContent = '';
+  }, 4000);
+};
+
+window.selectAssistantAvatar = async function (selectedAvatarId) {
+  const msg = document.getElementById('avatar-msg');
+  try {
+    const res = await api('/assistant-profile/avatar', {
+      method: 'PUT',
+      body: JSON.stringify({ selectedAvatarId }),
+    });
+    if (!res.ok) {
+      throw new Error(res.error || 'Failed to save avatar');
+    }
+    const profile = res.profile;
+    document
+      .querySelectorAll('.avatar-option')
+      .forEach((option) => option.classList.remove('active'));
+    const clicked = Array.from(
+      document.querySelectorAll('.avatar-option'),
+    ).find((option) =>
+      option.getAttribute('onclick')?.includes(`'${selectedAvatarId}'`),
+    );
+    if (clicked) clicked.classList.add('active');
+    const preview = document.getElementById('avatar-preview');
+    if (preview && profile?.selectedAvatar?.url) {
+      preview.src = profile.selectedAvatar.url;
+    }
+    const name = document.getElementById('avatar-current-name');
+    if (name)
+      name.textContent = profile?.selectedAvatar?.name || selectedAvatarId;
+    const kind = document.getElementById('avatar-current-kind');
+    if (kind) kind.textContent = profile?.selectedAvatar?.kind || '';
+    if (msg) {
+      msg.textContent = 'Avatar saved';
+      msg.style.color = 'var(--success)';
+    }
+    toast('Assistant avatar updated', 'success');
+  } catch (err) {
+    if (msg) {
+      msg.textContent = err.message || 'Failed';
+      msg.style.color = 'var(--error)';
+    }
+    toast(err.message || 'Failed to save avatar', 'error');
   }
   setTimeout(() => {
     if (msg) msg.textContent = '';

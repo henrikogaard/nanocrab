@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Reef Hermit avatar</title>
+  <desc id="desc">A compact hermit crab avatar with a spiral shell and tiny face.</desc>
+  <circle cx="64" cy="64" r="58" fill="#fff6e6"/>
+  <circle cx="64" cy="64" r="55" fill="none" stroke="#2b1a10" stroke-width="4"/>
+  <path d="M38 78c-2-27 17-47 44-43 22 3 34 21 29 39-6 23-35 30-50 12 20 4 34-5 33-19-1-12-13-20-27-16-16 4-23 18-18 35z" fill="#f08c00" stroke="#2b1a10" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M53 78c-4-12 3-23 16-25 10-1 18 5 18 14 0 11-11 17-21 12" fill="none" stroke="#ffe8cc" stroke-width="7" stroke-linecap="round"/>
+  <ellipse cx="44" cy="85" rx="17" ry="13" fill="#ff922b" stroke="#2b1a10" stroke-width="5"/>
+  <circle cx="37" cy="75" r="5" fill="#2b1a10"/>
+  <circle cx="51" cy="75" r="5" fill="#2b1a10"/>
+  <path d="M30 88l-15 9M39 96l-9 14M55 95l12 13" stroke="#2b1a10" stroke-width="5" stroke-linecap="round"/>
+</svg>
