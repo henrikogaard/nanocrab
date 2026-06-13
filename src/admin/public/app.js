@@ -1330,7 +1330,14 @@ async function renderUptime(el) {
         ? '<div class="card empty">No monitors configured. Add one above.</div>'
         : monitors
             .map(
-              (m) => `
+              (m) => {
+                const interval = Number.isFinite(Number(m.interval))
+                  ? Number(m.interval)
+                  : 300;
+                const alertAfter = Number.isFinite(Number(m.alertAfter))
+                  ? Number(m.alertAfter)
+                  : 3;
+                return `
       <div class="card" style="margin-bottom:8px;border-left:3px solid ${!m.enabled ? 'var(--text-muted)' : m.isDown ? 'var(--error)' : 'var(--success)'}">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div>
@@ -1352,7 +1359,7 @@ async function renderUptime(el) {
           <button class="btn btn-sm btn-ghost" onclick="showMonitorHistory('${m.id}')">History</button>
           <button class="btn btn-sm btn-ghost" onclick="toggleMonitor('${m.id}',${!m.enabled})">${m.enabled ? 'Disable' : 'Enable'}</button>
           <button class="btn btn-sm btn-danger" onclick="deleteMonitor('${m.id}',this)">Delete</button>
-          <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Every ${m.interval}s \u2022 Alert after ${m.alertAfter} failures</span>
+          <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Every ${interval}s \u2022 Alert after ${alertAfter} failures</span>
         </div>
         ${
           m.expectedBody
@@ -1365,7 +1372,8 @@ async function renderUptime(el) {
         <div style="display:none">
         </div>
         <div id="monitor-history-${m.id}" style="display:none;margin-top:10px"></div>
-      </div>`,
+      </div>`;
+              },
             )
             .join('')
     }`;
@@ -3319,121 +3327,168 @@ async function renderReports(el) {
         `<option value="${esc(profile.id)}" ${profile.id === 'default_reports' ? 'selected' : ''}>${esc(profile.label || profile.id)} — ${esc(profile.provider)}/${esc(profile.model)}</option>`,
     )
     .join('');
+  const reportJobs = Array.isArray(jobs) ? jobs : [];
+  const briefingSchedules = Array.isArray(briefings) ? briefings : [];
+  const groupList = Array.isArray(groups) ? groups : [];
+  const pendingReportCount = reportJobs.filter((job) =>
+    String(job.status || '').includes('awaiting'),
+  ).length;
   el.innerHTML = `
-    <div class="page-header"><h2>Report Studio</h2></div>
-    <div class="grid grid-2">
-      <div class="card">
-        <div class="card-title">New Report Job</div>
-        <form id="report-create-form">
-          <div class="form-group"><label>Title</label><input id="report-title" placeholder="Weekly alliance digest"></div>
-          <div class="form-group"><label>Request</label><textarea id="report-request" rows="4" placeholder="Summarize recent events, decisions, risks, and next actions" required></textarea></div>
-          <div class="grid grid-2">
-            <div class="form-group"><label>Source Scopes</label><input id="report-sources" value="journal, memory"></div>
-            <div class="form-group"><label>Deliverables Directory</label><input id="report-dir" placeholder="store/deliverables"></div>
-          </div>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 12px">
-            ${['markdown', 'html', 'docx', 'pdf'].map((format) => `<label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text)"><input type="checkbox" class="report-format" value="${format}" ${format === 'markdown' ? 'checked' : ''}> ${format.toUpperCase()}</label>`).join('')}
-          </div>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-            <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text)"><input id="report-outline-approval" type="checkbox" checked> Outline approval</label>
-            <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text)"><input id="report-delivery-approval" type="checkbox" checked> Delivery approval</label>
-          </div>
-          <button type="submit" class="btn btn-primary">Create Report</button>
-        </form>
+    <div class="page-header">
+      <div>
+        <span class="report-kicker">Documents</span>
+        <h2>Report Studio</h2>
       </div>
-      <div class="card">
-        <div class="card-title">Pipeline Rules</div>
-        <div style="display:grid;gap:8px;font-size:12px;color:var(--text-muted)">
-          <div><span class="badge badge-warning">Outline</span> Report drafts and exports wait for an approved outline.</div>
-          <div><span class="badge badge-warning">Delivery</span> Generated artifacts wait for delivery approval before being marked delivered.</div>
-          <div><span class="badge badge-info">Exports</span> Artifact downloads are served only from the job deliverables directory.</div>
-        </div>
+      <div class="page-actions">
+        <span class="badge badge-accent">${reportJobs.length} jobs</span>
+        <span class="badge badge-muted">${briefingSchedules.length} briefings</span>
+        <span class="badge ${pendingReportCount ? 'badge-warning' : 'badge-success'}">${pendingReportCount} waiting</span>
       </div>
     </div>
-    <div class="grid grid-2">
-      <div class="card">
-        <div class="card-title">Scheduled Briefings</div>
-        <form id="briefing-create-form">
-          <div class="form-group"><label>Title</label><input id="briefing-title" placeholder="Daily operations brief" required></div>
-          <div class="grid grid-2">
-            <div class="form-group"><label>Cadence</label><select id="briefing-cadence"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
-            <div class="form-group"><label>Local Time</label><input id="briefing-time" type="time" value="08:30" required></div>
+    <div class="report-studio">
+      <section class="report-studio-hero">
+        <div class="report-create-panel">
+          <div class="report-create-head">
+            <div>
+              <span class="report-kicker">New report</span>
+              <h3>Turn memory and journals into a deliverable</h3>
+            </div>
+            <span class="badge badge-info">approval gated</span>
           </div>
-          <div class="grid grid-2">
-            <div class="form-group"><label>Target Group</label><select id="briefing-group">${groups.map((group) => `<option value="${esc(group.folder)}" data-jid="${esc(group.jid)}">${esc(group.name)}</option>`).join('')}</select></div>
-            <div class="form-group"><label>Source Scopes</label><input id="briefing-sources" value="journal, memory"></div>
-          </div>
-          <div class="form-group"><label>Provider Profile</label><select id="briefing-provider-profile">${reportProfileOptions}</select></div>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 12px">
-            ${['markdown', 'html', 'docx', 'pdf'].map((format) => `<label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text)"><input type="checkbox" class="briefing-format" value="${format}" ${format === 'markdown' ? 'checked' : ''}> ${format.toUpperCase()}</label>`).join('')}
-          </div>
-          <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text);margin-bottom:14px"><input id="briefing-delivery-approval" type="checkbox" checked> Require delivery approval</label>
-          <button type="submit" class="btn btn-primary btn-sm" ${groups.length ? '' : 'disabled'}>Create Briefing Schedule</button>
-        </form>
-      </div>
-      <div class="card">
-        <div class="card-title">Briefing Jobs <span class="badge badge-muted">${briefings.length}</span></div>
-        ${
-          briefings.length
-            ? briefings
-                .map(
-                  (briefing) => `
-          <div style="padding:10px 0;border-bottom:1px solid var(--border)">
-            <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
-              <div>
-                <strong style="color:var(--text)">${esc(briefing.title)}</strong>
-                <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(briefing.cadence)} at ${esc(briefing.localTime)} ${esc(briefing.timezone || '')}</div>
+          <form id="report-create-form" class="report-create-form">
+            <div class="form-group">
+              <label>Title</label>
+              <input id="report-title" placeholder="Weekly alliance digest">
+            </div>
+            <div class="form-group">
+              <label>Request</label>
+              <textarea id="report-request" rows="5" placeholder="Summarize recent events, decisions, risks, and next actions" required></textarea>
+            </div>
+            <div class="report-form-grid">
+              <div class="form-group">
+                <label>Source Scopes</label>
+                <input id="report-sources" value="journal, memory">
               </div>
-              <span class="badge ${briefing.status === 'active' ? 'badge-success' : 'badge-muted'}">${esc(briefing.status)}</span>
+              <div class="form-group">
+                <label>Provider Profile</label>
+                <select id="report-provider-profile">${reportProfileOptions}</select>
+              </div>
             </div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-              <span class="badge badge-info">${esc(briefing.scheduleValue)}</span>
-              ${(briefing.sourceScopes || []).map((scope) => `<span class="badge badge-muted">${esc(scope)}</span>`).join('')}
-              ${briefing.requireDeliveryApproval ? '<span class="badge badge-warning">delivery approval</span>' : ''}
-              <span class="badge badge-accent">${esc(briefing.providerProfileId || 'default_reports')}</span>
+            <div class="form-group">
+              <label>Deliverables Directory</label>
+              <input id="report-dir" placeholder="store/deliverables">
             </div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Task: ${esc(briefing.scheduledTaskId || '')}</div>
-          </div>`,
-                )
-                .join('')
-            : '<div style="font-size:12px;color:var(--text-muted)">No briefing schedules yet.</div>'
-        }
-      </div>
-    </div>
-    <div class="card">
+            <div class="report-format-grid" aria-label="Report output formats">
+              ${['markdown', 'html', 'docx', 'pdf'].map((format) => `<label class="report-format-option"><input type="checkbox" class="report-format" value="${format}" ${format === 'markdown' ? 'checked' : ''}> <span>${format.toUpperCase()}</span></label>`).join('')}
+            </div>
+            <div class="report-check-row">
+              <label class="report-check-option"><input id="report-outline-approval" type="checkbox" checked> <span>Outline approval</span></label>
+              <label class="report-check-option"><input id="report-delivery-approval" type="checkbox" checked> <span>Delivery approval</span></label>
+            </div>
+            <button type="submit" class="btn btn-primary">Create Report</button>
+          </form>
+        </div>
+        <aside class="report-pipeline-panel">
+          <span class="report-kicker">Pipeline</span>
+          <h3>Reports stay reviewable before anything leaves NanoCrab.</h3>
+          <div class="report-pipeline-list">
+            <div class="report-pipeline-step"><span class="report-step-index">01</span><div><strong>Request</strong><span>Choose sources, formats, and provider.</span></div></div>
+            <div class="report-pipeline-step"><span class="report-step-index">02</span><div><strong>Outline</strong><span>Approve the structure before drafting.</span></div></div>
+            <div class="report-pipeline-step"><span class="report-step-index">03</span><div><strong>Export</strong><span>Create Markdown, HTML, DOCX, or PDF artifacts.</span></div></div>
+            <div class="report-pipeline-step"><span class="report-step-index">04</span><div><strong>Delivery</strong><span>Release only after approval.</span></div></div>
+          </div>
+        </aside>
+      </section>
+      <section class="report-work-grid">
+        <div class="report-section-panel">
+          <div class="card-title">Scheduled Briefings</div>
+          <form id="briefing-create-form" class="report-create-form">
+            <div class="form-group"><label>Title</label><input id="briefing-title" placeholder="Daily operations brief" required></div>
+            <div class="report-form-grid">
+              <div class="form-group"><label>Cadence</label><select id="briefing-cadence"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
+              <div class="form-group"><label>Local Time</label><input id="briefing-time" type="time" value="08:30" required></div>
+            </div>
+            <div class="report-form-grid">
+              <div class="form-group"><label>Target Group</label><select id="briefing-group">${groupList.map((group) => `<option value="${esc(group.folder)}" data-jid="${esc(group.jid)}">${esc(group.name)}</option>`).join('')}</select></div>
+              <div class="form-group"><label>Source Scopes</label><input id="briefing-sources" value="journal, memory"></div>
+            </div>
+            <div class="form-group"><label>Provider Profile</label><select id="briefing-provider-profile">${reportProfileOptions}</select></div>
+            <div class="report-format-grid" aria-label="Briefing output formats">
+              ${['markdown', 'html', 'docx', 'pdf'].map((format) => `<label class="report-format-option"><input type="checkbox" class="briefing-format" value="${format}" ${format === 'markdown' ? 'checked' : ''}> <span>${format.toUpperCase()}</span></label>`).join('')}
+            </div>
+            <div class="report-check-row">
+              <label class="report-check-option"><input id="briefing-delivery-approval" type="checkbox" checked> <span>Require delivery approval</span></label>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm" ${groupList.length ? '' : 'disabled'}>Create Briefing Schedule</button>
+          </form>
+        </div>
+        <aside class="report-side-panel">
+          <div class="card-title">Briefing Jobs <span class="badge badge-muted">${briefingSchedules.length}</span></div>
+          <div class="report-list">
+            ${
+              briefingSchedules.length
+                ? briefingSchedules
+                    .map(
+                      (briefing) => `
+              <div class="briefing-card">
+                <div class="briefing-card-head">
+                  <div>
+                    <strong>${esc(briefing.title)}</strong>
+                    <span>${esc(briefing.cadence)} at ${esc(briefing.localTime)} ${esc(briefing.timezone || '')}</span>
+                  </div>
+                  <span class="badge ${briefing.status === 'active' ? 'badge-success' : 'badge-muted'}">${esc(briefing.status)}</span>
+                </div>
+                <div class="briefing-card-meta">
+                  <span class="badge badge-info">${esc(briefing.scheduleValue)}</span>
+                  ${(briefing.sourceScopes || []).map((scope) => `<span class="badge badge-muted">${esc(scope)}</span>`).join('')}
+                  ${briefing.requireDeliveryApproval ? '<span class="badge badge-warning">delivery approval</span>' : ''}
+                  <span class="badge badge-accent">${esc(briefing.providerProfileId || 'default_reports')}</span>
+                </div>
+                <div class="report-job-meta">Task: ${esc(briefing.scheduledTaskId || '')}</div>
+              </div>`,
+                    )
+                    .join('')
+                : '<div class="empty report-empty">No briefing schedules yet.</div>'
+            }
+          </div>
+        </aside>
+      </section>
+      <section class="report-section-panel">
       <div class="card-title">Report Jobs</div>
       ${
-        jobs.length
-          ? jobs
+        reportJobs.length
+          ? reportJobs
               .map(
                 (job) => `
-        <div class="channel-card" style="align-items:flex-start">
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-              <strong style="color:var(--text)">${esc(job.title)}</strong>
+        <div class="report-job-card">
+          <div class="report-job-head">
+            <div>
+              <strong>${esc(job.title)}</strong>
+              <span>${esc(job.request)}</span>
+            </div>
+            <div class="report-job-actions">
               ${reportStatusBadge(job.status)}
               ${job.requireOutlineApproval ? '<span class="badge badge-muted">outline approval</span>' : ''}
               ${job.requireDeliveryApproval ? '<span class="badge badge-muted">delivery approval</span>' : ''}
             </div>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${esc(job.request)}</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:6px">${esc(reportApprovalText(job))}</div>
+          </div>
+          <div class="report-job-meta">${esc(reportApprovalText(job))}</div>
             ${
               job.outline
-                ? `<pre style="white-space:pre-wrap;margin-top:8px;max-height:140px;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;font-size:11px;color:var(--text)">${esc(job.outline)}</pre>`
+                ? `<pre class="report-outline-preview">${esc(job.outline)}</pre>`
                 : ''
             }
             ${
               job.artifacts?.length
-                ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${job.artifacts
+                ? `<div class="report-artifact-actions">${job.artifacts
                     .map(
                       (artifact, index) =>
                         `<a class="btn btn-sm btn-ghost" href="/api/reports/jobs/${encodeURIComponent(job.id)}/artifacts/${index}/download" download>${esc(artifact.format).toUpperCase()}</a>`,
                     )
                     .join('')}</div>`
-                : '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">No exported artifacts yet.</div>'
+                : '<div class="report-job-meta">No exported artifacts yet.</div>'
             }
-          </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          <div class="report-job-actions">
             ${
               job.status === 'awaiting_outline_approval'
                 ? `<button class="btn btn-sm btn-primary" onclick="approveReportOutline('${esc(job.id)}')">Generate after approval</button>`
@@ -3449,8 +3504,9 @@ async function renderReports(el) {
         </div>`,
               )
               .join('')
-          : '<div style="font-size:12px;color:var(--text-muted)">No report jobs yet.</div>'
+          : '<div class="empty report-empty">No report jobs yet.</div>'
       }
+      </section>
     </div>`;
 
   document.getElementById('report-create-form').onsubmit = async (e) => {
@@ -3470,6 +3526,8 @@ async function renderReports(el) {
         request: document.getElementById('report-request').value,
         sourceScopes,
         outputFormats: formats.length ? formats : ['markdown'],
+        providerProfileId: document.getElementById('report-provider-profile')
+          ?.value,
         deliverablesDir:
           document.getElementById('report-dir').value || undefined,
         requireOutlineApproval: document.getElementById(
@@ -3675,6 +3733,7 @@ async function renderSkills(el, options = {}) {
         <button class="btn btn-sm btn-ghost" onclick="document.getElementById('new-skill-form').style.display=document.getElementById('new-skill-form').style.display==='none'?'block':'none'">Install Directly</button>
       </div>
     </div>
+    <div class="skills-page">
     <div class="card" id="new-skill-draft-form" style="display:none">
       <div class="card-title">Draft Skill From Instructions <span class="badge badge-info">Approval required</span></div>
       <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Create a provider-neutral skill draft from task instructions. It stays inactive until you review and approve it.</p>
@@ -3816,7 +3875,8 @@ async function renderSkills(el, options = {}) {
     <div id="skill-editor" style="display:none"></div>
     <div id="skill-version-viewer" style="display:none"></div>
     <div id="skill-draft-viewer" style="display:none"></div>
-    ${options.embedded ? '' : '<div id="skills-page-timeline"></div>'}`;
+    ${options.embedded ? '' : '<div id="skills-page-timeline"></div>'}
+    </div>`;
 
   // Create form handler
   document.getElementById('skill-draft-create-form').onsubmit = async (e) => {
@@ -4448,21 +4508,21 @@ function renderTimelineItems(items) {
           ? 'var(--warning)'
           : 'var(--accent)';
   return `
-    <div style="position:relative;padding-left:26px">
-      <div style="position:absolute;left:8px;top:0;bottom:0;width:2px;background:var(--border)"></div>
+    <div class="knowledge-timeline">
+      <div class="knowledge-timeline-line"></div>
       ${items
         .map(
           (item) => `
-        <div style="position:relative;margin-bottom:16px">
-          <div style="position:absolute;left:-22px;top:4px;width:11px;height:11px;border-radius:50%;background:${color(item.tone)};box-shadow:0 0 0 4px color-mix(in srgb, ${color(item.tone)} 18%, transparent)"></div>
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start">
-            <div style="min-width:0">
-              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
+        <div class="knowledge-timeline-item">
+          <div class="knowledge-timeline-dot" style="background:${color(item.tone)};box-shadow:0 0 0 4px color-mix(in srgb, ${color(item.tone)} 18%, transparent)"></div>
+          <div class="knowledge-timeline-card">
+            <div>
+              <div class="knowledge-timeline-title">
                 <span class="badge ${item.kind === 'skill' ? 'badge-accent' : 'badge-info'}">${esc(item.kind)}</span>
-                <span style="font-size:13px;font-weight:700;color:var(--text)">${esc(item.title)}</span>
+                <span>${esc(item.title)}</span>
               </div>
-              <div style="font-size:12px;color:var(--text-muted);line-height:1.45">${esc(item.detail || '')}</div>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${formatTime(item.timestamp)} &middot; ${esc(item.meta || '')}</div>
+              <p>${esc(item.detail || '')}</p>
+              <time>${formatTime(item.timestamp)} &middot; ${esc(item.meta || '')}</time>
             </div>
             ${item.action || ''}
           </div>
@@ -7223,17 +7283,21 @@ function formatTime(ts) {
   });
 }
 function timeAgo(ts) {
-  const d = Date.now() - new Date(ts).getTime();
+  const time = new Date(ts).getTime();
+  if (!ts || !Number.isFinite(time)) return '-';
+  const d = Date.now() - time;
   if (d < 60000) return 'just now';
   if (d < 3600000) return `${Math.floor(d / 60000)}m ago`;
   if (d < 86400000) return `${Math.floor(d / 3600000)}h ago`;
   return `${Math.floor(d / 86400000)}d ago`;
 }
 function formatBytes(b) {
-  if (b < 1024) return b + ' B';
-  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
-  if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
-  return (b / 1073741824).toFixed(1) + ' GB';
+  const bytes = Number(b);
+  if (!Number.isFinite(bytes) || bytes < 0) return '-';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+  return (bytes / 1073741824).toFixed(1) + ' GB';
 }
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -8411,43 +8475,70 @@ async function renderMonitoring(el) {
       const sys = await api('/system');
       const statsEl = document.getElementById('monitoring-stats');
       if (!statsEl) return;
-      const cpuLoad = sys.system?.loadAvg?.[0]?.toFixed(2) || '0';
-      const cpuPct = Math.min(
-        100,
-        (parseFloat(cpuLoad) / (sys.system?.cpus || 1)) * 100,
-      ).toFixed(1);
-      const ramPct = sys.system?.totalMemory
-        ? ((1 - sys.system.freeMemory / sys.system.totalMemory) * 100).toFixed(
-            1,
-          )
+      const cpuLoadNumber = Number(sys.system?.loadAvg?.[0]);
+      const cpuLoad = Number.isFinite(cpuLoadNumber)
+        ? cpuLoadNumber.toFixed(2)
         : '0';
-      const heapPct = sys.memory?.heapLimit
-        ? ((sys.memory.heapUsed / sys.memory.heapLimit) * 100).toFixed(1)
-        : '0';
+      const cpuCores = Number(sys.system?.cpus) || 1;
+      const cpuPct = Math.min(100, (parseFloat(cpuLoad) / cpuCores) * 100);
+      const ramTotal = Number(sys.system?.totalMemory);
+      const ramFree = Number(sys.system?.freeMemory);
+      const ramUsed =
+        Number.isFinite(ramTotal) && Number.isFinite(ramFree)
+          ? Math.max(0, ramTotal - ramFree)
+          : undefined;
+      const ramPct =
+        Number.isFinite(ramTotal) && ramTotal > 0 && Number.isFinite(ramUsed)
+          ? ((ramUsed / ramTotal) * 100).toFixed(1)
+          : '0';
+      const heapUsed = Number(sys.memory?.heapUsed);
+      const heapLimit = Number(sys.memory?.heapLimit);
+      const heapPct =
+        Number.isFinite(heapLimit) && heapLimit > 0 && Number.isFinite(heapUsed)
+          ? ((heapUsed / heapLimit) * 100).toFixed(1)
+          : '0';
+      const disk = sys.system?.disk;
+      const diskTotal = Number(disk?.total);
+      const diskFree = Number(disk?.free);
+      const diskUsedFromPayload = Number(disk?.used);
+      const diskUsed = Number.isFinite(diskUsedFromPayload)
+        ? diskUsedFromPayload
+        : Number.isFinite(diskTotal) && Number.isFinite(diskFree)
+          ? Math.max(0, diskTotal - diskFree)
+          : undefined;
+      const diskPercentFromPayload = Number(disk?.percent);
+      const diskPctNumber = Number.isFinite(diskPercentFromPayload)
+        ? diskPercentFromPayload
+        : Number.isFinite(diskTotal) &&
+            diskTotal > 0 &&
+            Number.isFinite(diskUsed)
+          ? (diskUsed / diskTotal) * 100
+          : 0;
+      const diskPct = Math.max(0, Math.min(100, diskPctNumber)).toFixed(1);
 
       statsEl.innerHTML = `
         <div class="grid grid-3" style="margin-bottom:16px">
           <div class="card" style="margin:0">
             <div class="card-title">CPU Load</div>
             <div style="font-size:24px;font-weight:700;color:var(--text);margin-bottom:8px">${cpuLoad} <span style="font-size:14px;color:var(--text-muted)">/ ${sys.system?.cpus || '?'} cores</span></div>
-            <div class="monitoring-bar"><div class="monitoring-fill" style="width:${cpuPct}%;background:${parseFloat(cpuPct) > 80 ? 'var(--error)' : parseFloat(cpuPct) > 50 ? 'var(--warning)' : 'var(--success)'}"></div></div>
+            <div class="monitoring-bar"><div class="monitoring-fill" style="width:${cpuPct.toFixed(1)}%;background:${cpuPct > 80 ? 'var(--error)' : cpuPct > 50 ? 'var(--warning)' : 'var(--success)'}"></div></div>
           </div>
           <div class="card" style="margin:0">
             <div class="card-title">RAM Usage</div>
-            <div style="font-size:24px;font-weight:700;color:var(--text);margin-bottom:8px">${ramPct}% <span style="font-size:14px;color:var(--text-muted)">${formatBytes(sys.system?.totalMemory - sys.system?.freeMemory)} / ${formatBytes(sys.system?.totalMemory)}</span></div>
+            <div style="font-size:24px;font-weight:700;color:var(--text);margin-bottom:8px">${ramPct}% <span style="font-size:14px;color:var(--text-muted)">${formatBytes(ramUsed)} / ${formatBytes(ramTotal)}</span></div>
             <div class="monitoring-bar"><div class="monitoring-fill" style="width:${ramPct}%;background:${parseFloat(ramPct) > 80 ? 'var(--error)' : parseFloat(ramPct) > 50 ? 'var(--warning)' : 'var(--success)'}"></div></div>
           </div>
           <div class="card" style="margin:0">
             <div class="card-title">Heap Usage</div>
-            <div style="font-size:24px;font-weight:700;color:var(--text);margin-bottom:8px">${heapPct}% <span style="font-size:14px;color:var(--text-muted)">${formatBytes(sys.memory?.heapUsed)} / ${formatBytes(sys.memory?.heapLimit)}</span></div>
+            <div style="font-size:24px;font-weight:700;color:var(--text);margin-bottom:8px">${heapPct}% <span style="font-size:14px;color:var(--text-muted)">${formatBytes(heapUsed)} / ${formatBytes(heapLimit)}</span></div>
             <div class="monitoring-bar"><div class="monitoring-fill" style="width:${heapPct}%;background:${parseFloat(heapPct) > 80 ? 'var(--error)' : parseFloat(heapPct) > 50 ? 'var(--warning)' : 'var(--success)'}"></div></div>
           </div>
           ${
-            sys.system?.disk
+            disk
               ? `<div class="card" style="margin:0">
             <div class="card-title">Disk Usage</div>
-            <div style="font-size:24px;font-weight:700;color:var(--text);margin-bottom:8px">${sys.system.disk.percent}% <span style="font-size:14px;color:var(--text-muted)">${formatBytes(sys.system.disk.used)} / ${formatBytes(sys.system.disk.total)}</span></div>
-            <div class="monitoring-bar"><div class="monitoring-fill" style="width:${sys.system.disk.percent}%;background:${sys.system.disk.percent > 85 ? 'var(--error)' : sys.system.disk.percent > 70 ? 'var(--warning)' : 'var(--success)'}"></div></div>
+            <div style="font-size:24px;font-weight:700;color:var(--text);margin-bottom:8px">${diskPct}% <span style="font-size:14px;color:var(--text-muted)">${formatBytes(diskUsed)} / ${formatBytes(diskTotal)}</span></div>
+            <div class="monitoring-bar"><div class="monitoring-fill" style="width:${diskPct}%;background:${parseFloat(diskPct) > 85 ? 'var(--error)' : parseFloat(diskPct) > 70 ? 'var(--warning)' : 'var(--success)'}"></div></div>
           </div>`
               : ''
           }

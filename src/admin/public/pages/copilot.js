@@ -33,10 +33,13 @@ async function renderCopilot(el) {
 
     const jobRows = jobs.map(j => {
       const statusBadge = j.status === 'completed' ? 'badge-success' : j.status === 'working' ? 'badge-warning' : j.status === 'failed' ? 'badge-error' : 'badge-muted';
+      const issueNumber = Number(j.issueNumber);
+      const issueRef = Number.isFinite(issueNumber) ? `#${issueNumber}` : '';
+      const issueTitle = j.issueTitle || j.title || '';
       return `<div class="channel-card" style="padding:8px 0">
         <div style="flex:1">
-          <span style="font-weight:500">${esc(j.repo)}#${j.issueNumber}</span>
-          <span style="font-size:12px;color:var(--text-muted);margin-left:8px">${esc(j.issueTitle)}</span>
+          <span style="font-weight:500">${esc(j.repo || 'Repository')}${issueRef}</span>
+          ${issueTitle ? `<span style="font-size:12px;color:var(--text-muted);margin-left:8px">${esc(issueTitle)}</span>` : ''}
           ${j.prUrl ? `<a href="${esc(j.prUrl)}" target="_blank" style="font-size:11px;color:var(--accent);margin-left:8px">View PR</a>` : ''}
         </div>
         <div style="display:flex;gap:6px;align-items:center">
@@ -186,4 +189,3 @@ window.copilotAssign = async function (accountId, owner, repo, issueNumber, btn)
     btn.textContent = 'Assign Copilot';
   }
 };
-
