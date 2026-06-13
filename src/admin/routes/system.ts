@@ -29,6 +29,7 @@ import {
 } from '../../edition.js';
 import { ensureCodexOAuth, getCodexAuthStatus } from '../../codex-auth.js';
 import { runSetupPreflight } from '../../setup-preflight.js';
+import { runReleaseDiagnostics } from '../../release-diagnostics.js';
 import { CONTAINER_RUNTIME_BIN } from '../../container-runtime.js';
 import {
   AGENT_PROVIDER_DEFINITIONS,
@@ -388,6 +389,15 @@ router.get('/setup/preflight', requireRole('owner'), async (_req, res) => {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     });
+  }
+});
+
+router.get('/release-diagnostics', requireRole('owner'), async (_req, res) => {
+  try {
+    res.json(await runReleaseDiagnostics());
+  } catch (err) {
+    logger.error({ err }, 'Release diagnostics failed');
+    res.status(500).json({ error: 'Release diagnostics failed' });
   }
 });
 
