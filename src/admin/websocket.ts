@@ -21,7 +21,14 @@ interface WsMessage {
 }
 
 let wss: WebSocketServer | null = null;
-const logWatchers = new Map<WebSocket, fs.FSWatcher>();
+type WatchFileListener = (curr: fs.Stats, prev: fs.Stats) => void;
+
+type LogWatcher = {
+  filePath: string;
+  listener: WatchFileListener;
+};
+
+const logWatchers = new Map<WebSocket, LogWatcher>();
 const terminals = new Map<
   string,
   {
@@ -293,7 +300,7 @@ function getStatusData(): object {
   };
 }
 
-function startLogStream(ws: WebSocket, logFile: string): void {
+export function startLogStream(ws: WebSocket, logFile: string): void {
   stopLogStream(ws);
 
   const projectRoot = process.cwd();
@@ -316,7 +323,7 @@ function startLogStream(ws: WebSocket, logFile: string): void {
 
   // Watch for changes
   let lastSize = fs.statSync(filePath).size;
-  const watcher = fs.watchFile(filePath, { interval: 1000 }, () => {
+  const listener: WatchFileListener = () => {
     try {
       const stat = fs.statSync(filePath);
       if (stat.size > lastSize) {
@@ -339,15 +346,16 @@ function startLogStream(ws: WebSocket, logFile: string): void {
     } catch {
       // ignore
     }
-  });
+  };
 
-  logWatchers.set(ws, watcher as unknown as fs.FSWatcher);
+  fs.watchFile(filePath, { interval: 1000 }, listener);
+  logWatchers.set(ws, { filePath, listener });
 }
 
-function stopLogStream(ws: WebSocket): void {
+export function stopLogStream(ws: WebSocket): void {
   const watcher = logWatchers.get(ws);
   if (watcher) {
-    fs.unwatchFile(watcher as unknown as string);
+    fs.unwatchFile(watcher.filePath, watcher.listener);
     logWatchers.delete(ws);
   }
 }

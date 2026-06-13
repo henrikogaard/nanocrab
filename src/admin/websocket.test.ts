@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { WebSocket } from 'ws';
+
+type WatchFileListener = (curr: fs.Stats, prev: fs.Stats) => void;
 
 const TEST_DIR = vi.hoisted(() => {
   const os = require('os');
@@ -31,6 +34,8 @@ import {
   finalizeSessionFile,
   loadHistoricalSessions,
   listTerminalSessions,
+  startLogStream,
+  stopLogStream,
   listCockpitStreamEvents,
   broadcastTaskProgress,
   broadcastToolCall,
@@ -44,6 +49,7 @@ describe('file-backed terminal sessions', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     fs.rmSync(TEST_DIR, { recursive: true, force: true });
   });
 
@@ -100,6 +106,45 @@ describe('file-backed terminal sessions', () => {
   it('readSessionLog returns empty string for missing session', () => {
     const content = readSessionLog('nonexistent');
     expect(content).toBe('');
+  });
+
+  it('unsubscribes log streams using the watched file path and listener', () => {
+    const logsDir = path.join(TEST_DIR, 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+    fs.writeFileSync(path.join(logsDir, 'nanocrab.log'), 'line one\n');
+
+    let watchedPath: string | undefined;
+    let watchedListener: WatchFileListener | undefined;
+    vi.spyOn(process, 'cwd').mockReturnValue(TEST_DIR);
+    vi.spyOn(fs, 'watchFile').mockImplementation(
+      (
+        filename: fs.PathLike,
+        optionsOrListener:
+          | WatchFileListener
+          | { interval?: number; persistent?: boolean },
+        listener?: WatchFileListener,
+      ) => {
+        watchedPath = filename.toString();
+        watchedListener =
+          typeof optionsOrListener === 'function'
+            ? optionsOrListener
+            : listener;
+        return {} as fs.StatWatcher;
+      },
+    );
+    const unwatchSpy = vi.spyOn(fs, 'unwatchFile').mockImplementation(() => {});
+    const ws = {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+
+    startLogStream(ws, 'system');
+    stopLogStream(ws);
+
+    expect(watchedPath).toBe(path.join(logsDir, 'nanocrab.log'));
+    expect(watchedListener).toBeDefined();
+    expect(unwatchSpy).toHaveBeenCalledWith(watchedPath, watchedListener);
+    expect(() => stopLogStream(ws)).not.toThrow();
   });
 
   it('handles multiple appends to same session', () => {
