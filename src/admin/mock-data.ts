@@ -1768,6 +1768,28 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       ],
     };
   }
+  if (pathname === '/channels/whatsapp/pairing') {
+    return {
+      state: 'waiting_for_qr_scan',
+      method: 'qr',
+      connected: false,
+      configured: false,
+      startedAt: iso(1),
+      qrCode:
+        'data:image/svg+xml;utf8,' +
+        encodeURIComponent(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180"><rect width="180" height="180" fill="white"/><rect x="20" y="20" width="40" height="40" fill="black"/><rect x="120" y="20" width="40" height="40" fill="black"/><rect x="20" y="120" width="40" height="40" fill="black"/><rect x="80" y="80" width="20" height="20" fill="black"/><rect x="110" y="110" width="30" height="30" fill="black"/></svg>',
+        ),
+      qrExpiresAt: iso(-1),
+      qrExpired: false,
+      pairingCode: null,
+      error: null,
+      statusReason: 'Mock QR is waiting for a WhatsApp linked-device scan',
+    };
+  }
+  if (pathname.startsWith('/channels/whatsapp/pairing/')) {
+    return { ok: true, state: 'starting' };
+  }
   if (pathname === '/groups') return groups;
   if (pathname === '/containers') return containers;
   if (pathname === '/containers/recent') {
