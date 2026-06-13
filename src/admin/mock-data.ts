@@ -669,7 +669,7 @@ const tasks = [
     group_folder: 'main',
     chat_jid: 'wa:alliance-command',
     prompt:
-      'Repeat active operation orders and list missing confirmations every 30 minutes.',
+      '[operation-schedule]\nTitle: Shield watch reminders\nIntent: reminder\n\nRepeat active operation orders and list missing confirmations every 30 minutes.',
     schedule_type: 'interval',
     schedule_value: '1800000',
     next_run: iso(-21),
@@ -677,6 +677,8 @@ const tasks = [
     status: 'active',
     provider: 'claude',
     model: 'claude-sonnet-4-6',
+    provider_profile_id: 'default_automation',
+    tool_policy: 'approval-required',
     context_mode: 'group',
     created_at: day(-3) + 'T18:00:00.000Z',
   },
@@ -2123,6 +2125,28 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       profile: mockAssistantProfile(
         String(req.body?.selectedAvatarId || 'default'),
       ),
+    });
+  }
+  if (method === 'POST' && pathname === '/tasks/operation-schedules') {
+    const deliveryApproved = req.body?.deliveryApproved === true;
+    return ok({
+      id: 'mock-operation-schedule',
+      deliveryMode: deliveryApproved ? 'send' : 'preview',
+      task: {
+        id: 'mock-operation-schedule',
+        group_folder: req.body?.groupFolder || 'operations',
+        chat_jid: req.body?.chatJid || 'tg:operations-room',
+        prompt:
+          '[operation-schedule]\nTitle: Mock operation reminder\nIntent: reminder\n\nRepeat rally orders and ask for missing confirmations.',
+        schedule_type: req.body?.scheduleType || 'interval',
+        schedule_value: req.body?.scheduleValue || '1800000',
+        next_run: iso(-30),
+        status: 'active',
+        provider_profile_id: 'default_automation',
+        tool_policy: deliveryApproved ? 'approval-required' : 'dry-run',
+        context_mode: 'group',
+        created_at: iso(0),
+      },
     });
   }
   if (method !== 'GET') return writeResponse(pathname);

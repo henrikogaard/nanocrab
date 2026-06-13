@@ -195,6 +195,60 @@ describe('mock admin data', () => {
     });
   });
 
+  it('serves operation schedules in mock mode without live mutation', async () => {
+    await withServer(async (baseUrl) => {
+      const listResponse = await fetch(`${baseUrl}/api/tasks`);
+      const tasks = (await listResponse.json()) as Array<{
+        id: string;
+        prompt: string;
+        tool_policy?: string;
+      }>;
+
+      expect(tasks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'task-operation-reminder',
+            prompt: expect.stringContaining('[operation-schedule]'),
+            tool_policy: 'approval-required',
+          }),
+        ]),
+      );
+
+      const createResponse = await fetch(
+        `${baseUrl}/api/tasks/operation-schedules`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            groupFolder: 'operations',
+            chatJid: 'tg:operations-room',
+            title: 'Mock reminder',
+            orders: 'Confirm rally roles.',
+            intent: 'reminder',
+            scheduleType: 'interval',
+            scheduleValue: '30m',
+            deliveryMode: 'preview',
+            deliveryApproved: false,
+          }),
+        },
+      );
+      const created = (await createResponse.json()) as {
+        ok: boolean;
+        deliveryMode: string;
+        task: { prompt: string; tool_policy: string };
+      };
+
+      expect(created).toMatchObject({
+        ok: true,
+        deliveryMode: 'preview',
+        task: {
+          prompt: expect.stringContaining('[operation-schedule]'),
+          tool_policy: 'dry-run',
+        },
+      });
+    });
+  });
+
   it('serves terminal history and searchable transcripts in mock mode', async () => {
     await withServer(async (baseUrl) => {
       const historyResponse = await fetch(
