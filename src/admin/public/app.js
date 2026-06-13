@@ -973,11 +973,16 @@ function approvalRiskBadge(risk) {
 function approvalQueryFromFilters() {
   const filters = window._approvalFilters || {};
   const params = new URLSearchParams();
-  ['status', 'risk', 'kind', 'requester', 'targetType', 'correlationId'].forEach(
-    (key) => {
-      if (filters[key]) params.set(key, filters[key]);
-    },
-  );
+  [
+    'status',
+    'risk',
+    'kind',
+    'requester',
+    'targetType',
+    'correlationId',
+  ].forEach((key) => {
+    if (filters[key]) params.set(key, filters[key]);
+  });
   if (filters.createdFrom)
     params.set('createdFrom', `${filters.createdFrom}T00:00:00.000Z`);
   if (filters.createdTo)
@@ -995,7 +1000,8 @@ function renderApprovalCard(approval) {
     ? `<pre class="approval-preview">${esc(approval.actionPreview)}</pre>`
     : '';
   const disabled = approval.status !== 'pending' ? ' disabled' : '';
-  const selected = approval.id === window._selectedApprovalId ? ' selected' : '';
+  const selected =
+    approval.id === window._selectedApprovalId ? ' selected' : '';
   return `
     <article class="approval-card${selected}" data-id="${esc(approval.id)}">
       <div class="approval-card-main">
@@ -1030,7 +1036,11 @@ function renderApprovalPanel(approval) {
     ['Correlation', approval.correlationId || 'none'],
     ['Policy', approval.policyDecisionId || 'none'],
     ['Requester', approval.requester || 'system'],
-    ['Target', [approval.targetType, approval.targetId].filter(Boolean).join(' / ') || 'none'],
+    [
+      'Target',
+      [approval.targetType, approval.targetId].filter(Boolean).join(' / ') ||
+        'none',
+    ],
     ['Created', approval.createdAt || 'unknown'],
     ['Expires', approval.expiresAt || 'none'],
     ['Reviewed', approval.reviewedAt || 'not reviewed'],
@@ -1123,7 +1133,12 @@ async function renderApprovals(el) {
       </select>
       <select name="kind">
         <option value="">Any kind</option>
-        ${Object.entries(APPROVAL_KIND_LABELS).map(([kind, label]) => `<option value="${kind}" ${filters.kind === kind ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+        ${Object.entries(APPROVAL_KIND_LABELS)
+          .map(
+            ([kind, label]) =>
+              `<option value="${kind}" ${filters.kind === kind ? 'selected' : ''}>${esc(label)}</option>`,
+          )
+          .join('')}
       </select>
       <input name="requester" value="${esc(filters.requester || '')}" placeholder="Requester">
       <input name="targetType" value="${esc(filters.targetType || '')}" placeholder="Target type">
@@ -1178,7 +1193,9 @@ window.selectApproval = function (id) {
   window._selectedApprovalId = id;
   document
     .querySelectorAll('.approval-card')
-    .forEach((card) => card.classList.toggle('selected', card.dataset.id === id));
+    .forEach((card) =>
+      card.classList.toggle('selected', card.dataset.id === id),
+    );
   if (currentPage === 'approvals') navigate('approvals');
 };
 
@@ -1188,14 +1205,20 @@ window.resetApprovalFilters = function () {
 };
 
 async function reviewInboxApproval(id, decision) {
-  const note = prompt(`${decision === 'approve' ? 'Approve' : 'Deny'} note`, '');
+  const note = prompt(
+    `${decision === 'approve' ? 'Approve' : 'Deny'} note`,
+    '',
+  );
   try {
     const data = await api(`/approvals/${encodeURIComponent(id)}/${decision}`, {
       method: 'POST',
       body: JSON.stringify({ note: note || undefined }),
     });
     if (data.error) throw new Error(data.error);
-    toast(`Approval ${decision === 'approve' ? 'approved' : 'denied'}`, 'success');
+    toast(
+      `Approval ${decision === 'approve' ? 'approved' : 'denied'}`,
+      'success',
+    );
     navigate('approvals');
   } catch (e) {
     toast('Approval review failed: ' + e.message, 'error');
@@ -2672,7 +2695,9 @@ async function renderMcp(el) {
             </div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
               ${
-                !item.installed && item.setupPath === 'preset' && item.presetName
+                !item.installed &&
+                item.setupPath === 'preset' &&
+                item.presetName
                   ? `<button class="btn btn-sm btn-primary" onclick="installMcpPreset('${esc(item.presetName)}')">Install preset</button>`
                   : !item.installed && item.setupPath === 'manual'
                     ? `<button class="btn btn-sm btn-primary" onclick="document.getElementById('new-mcp-form').style.display='block';document.getElementById('new-mcp-form').scrollIntoView({behavior:'smooth',block:'start'})">Add server</button>`
@@ -3278,9 +3303,12 @@ async function renderReports(el) {
 }
 
 window.approveReportOutline = async (id) => {
-  const r = await api(`/reports/jobs/${encodeURIComponent(id)}/approve-outline`, {
-    method: 'POST',
-  });
+  const r = await api(
+    `/reports/jobs/${encodeURIComponent(id)}/approve-outline`,
+    {
+      method: 'POST',
+    },
+  );
   if (r.ok) {
     toast('Report outline approved', 'success');
     navigate('reports');
@@ -5241,7 +5269,8 @@ function renderAuditEventRow(event, selectedId) {
 }
 
 function renderAuditDetail(event, replay) {
-  if (!event) return '<aside class="audit-detail empty">Select an audit event</aside>';
+  if (!event)
+    return '<aside class="audit-detail empty">Select an audit event</aside>';
   const context = event.context || {
     ip: event.ip,
     details: event.details,
@@ -5263,7 +5292,10 @@ function renderAuditDetail(event, replay) {
         ['Duration', event.durationMs != null ? `${event.durationMs}ms` : '-'],
         ['Error', event.error || '-'],
       ]
-        .map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`)
+        .map(
+          ([label, value]) =>
+            `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`,
+        )
         .join('')}
     </div>
     <div class="section-label">Context</div>
@@ -5274,7 +5306,8 @@ function renderAuditDetail(event, replay) {
           <div class="audit-replay">
             ${replay.events
               .map(
-                (item) => `<div><span>${formatTime(item.timestamp)}</span><strong>${esc(item.actionType)}</strong>${auditDecisionBadge(item.decision)}</div>`,
+                (item) =>
+                  `<div><span>${formatTime(item.timestamp)}</span><strong>${esc(item.actionType)}</strong>${auditDecisionBadge(item.decision)}</div>`,
               )
               .join('')}
           </div>`
@@ -5301,7 +5334,9 @@ async function renderAudit(el) {
   if (selected?.id) window._selectedAuditId = selected.id;
   const replay =
     selected?.correlationId && selected.correlationId !== '-'
-      ? await api(`/runtime-audit/replay/${encodeURIComponent(selected.correlationId)}`).catch(() => null)
+      ? await api(
+          `/runtime-audit/replay/${encodeURIComponent(selected.correlationId)}`,
+        ).catch(() => null)
       : null;
 
   el.innerHTML = `
@@ -5347,7 +5382,9 @@ async function renderAudit(el) {
 
   document.getElementById('audit-filters').onsubmit = (event) => {
     event.preventDefault();
-    window._auditFilters = Object.fromEntries(new FormData(event.currentTarget).entries());
+    window._auditFilters = Object.fromEntries(
+      new FormData(event.currentTarget).entries(),
+    );
     navigate('audit');
   };
   document.querySelector('.audit-list')?.addEventListener('click', (event) => {
@@ -5358,7 +5395,9 @@ async function renderAudit(el) {
   });
   document.getElementById('policy-simulator-form').onsubmit = async (event) => {
     event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const data = Object.fromEntries(
+      new FormData(event.currentTarget).entries(),
+    );
     let context = {};
     try {
       context = data.context ? JSON.parse(data.context) : {};
@@ -5376,7 +5415,8 @@ async function renderAudit(el) {
         context,
       }),
     });
-    document.getElementById('policy-simulator-output').textContent = prettyPrint(result);
+    document.getElementById('policy-simulator-output').textContent =
+      prettyPrint(result);
   };
 }
 
@@ -7102,15 +7142,93 @@ window.deleteWikiPage = async (name) => {
 // --- Workflows ---
 async function renderWorkflows(el) {
   let workflows = [];
+  let runbooks = [];
+  let missions = [];
   try {
     workflows = await api('/workflows');
   } catch {}
-  const groups = await api('/groups');
+  try {
+    runbooks = await api('/missions/runbooks');
+  } catch {}
+  try {
+    missions = await api('/missions');
+  } catch {}
+  let groups = [];
+  try {
+    groups = await api('/groups');
+  } catch {}
 
   el.innerHTML = `
     <div class="page-header">
       <h2>Workflows</h2>
-      <button class="btn btn-primary btn-sm" onclick="document.getElementById('new-workflow-form').style.display=document.getElementById('new-workflow-form').style.display==='none'?'block':'none'">New Workflow</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-sm btn-ghost" onclick="document.getElementById('new-runbook-form').style.display=document.getElementById('new-runbook-form').style.display==='none'?'block':'none'">New Runbook</button>
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('new-workflow-form').style.display=document.getElementById('new-workflow-form').style.display==='none'?'block':'none'">New Workflow</button>
+      </div>
+    </div>
+    <div class="grid grid-2" style="align-items:start;margin-bottom:16px">
+      <div class="card" id="new-runbook-form" style="display:none">
+        <div class="card-title">Create Runbook</div>
+        <form id="runbook-create-form">
+          <div class="form-group"><label>Title</label><input id="runbook-title" placeholder="Morning operations brief" required></div>
+          <div class="form-group"><label>Description</label><input id="runbook-description" placeholder="Reusable checklist for an operator mission"></div>
+          <div id="runbook-steps-list">
+            <div class="card-title" style="margin-top:8px">Steps</div>
+            <div class="runbook-step-row" style="display:grid;grid-template-columns:minmax(160px,1fr) minmax(220px,2fr) auto;gap:8px;margin-bottom:8px;align-items:end">
+              <div class="form-group" style="margin:0"><label>Step</label><input class="runbook-step-title" placeholder="Collect signals"></div>
+              <div class="form-group" style="margin:0"><label>Detail</label><input class="runbook-step-detail" placeholder="Review journal and inboxes"></div>
+              <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-muted);padding-bottom:10px"><input type="checkbox" class="runbook-step-approval"> Approval</label>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button type="button" class="btn btn-sm btn-ghost" onclick="addRunbookStep()">+ Add Step</button>
+            <button type="submit" class="btn btn-primary btn-sm">Create Runbook</button>
+          </div>
+        </form>
+      </div>
+      <div class="card">
+        <div class="card-title">Start Mission</div>
+        <form id="mission-create-form">
+          <div class="form-group"><label>Mission Title</label><input id="mission-title" placeholder="Saturday briefing"></div>
+          <div class="grid grid-2">
+            <div class="form-group"><label>Runbook</label><select id="mission-runbook">${runbooks.map((runbook) => `<option value="${esc(runbook.id)}">${esc(runbook.title)}</option>`).join('')}</select></div>
+            <div class="form-group"><label>Owner</label><input id="mission-owner" placeholder="Operator"></div>
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm" ${runbooks.length ? '' : 'disabled'}>Start Mission</button>
+        </form>
+      </div>
+    </div>
+    <div class="grid grid-2" style="align-items:start;margin-bottom:16px">
+      <div class="card">
+        <div class="card-title">Active Missions <span class="badge badge-muted">${missions.length}</span></div>
+        ${
+          missions.length === 0
+            ? '<div class="empty" style="padding:16px">No missions started</div>'
+            : missions.map(renderMissionCard).join('')
+        }
+      </div>
+      <div class="card">
+        <div class="card-title">Runbooks <span class="badge badge-muted">${runbooks.length}</span></div>
+        ${
+          runbooks.length === 0
+            ? '<div class="empty" style="padding:16px">No runbooks configured</div>'
+            : runbooks
+                .map(
+                  (runbook) => `
+          <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;gap:8px">
+              <strong style="color:var(--text)">${esc(runbook.title)}</strong>
+              <span class="badge badge-muted">${runbook.steps?.length || 0} steps</span>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${esc(runbook.description || 'Reusable operator checklist')}</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+              ${(runbook.steps || []).map((step) => `<span class="badge ${step.requiresApproval ? 'badge-warning' : 'badge-info'}">${esc(step.title)}</span>`).join('')}
+            </div>
+          </div>`,
+                )
+                .join('')
+        }
+      </div>
     </div>
     <div class="card" id="new-workflow-form" style="display:none">
       <div class="card-title">Create Workflow</div>
@@ -7176,6 +7294,62 @@ async function renderWorkflows(el) {
   // Store groups for action rows
   window._wfGroups = groups;
 
+  const runbookForm = document.getElementById('runbook-create-form');
+  if (runbookForm)
+    runbookForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const steps = Array.from(document.querySelectorAll('.runbook-step-row'))
+        .map((row) => ({
+          title: row.querySelector('.runbook-step-title')?.value?.trim() || '',
+          detail:
+            row.querySelector('.runbook-step-detail')?.value?.trim() ||
+            undefined,
+          requiresApproval:
+            row.querySelector('.runbook-step-approval')?.checked === true,
+        }))
+        .filter((step) => step.title);
+      if (steps.length === 0) {
+        toast('Add at least one runbook step', 'warning');
+        return;
+      }
+      const r = await api('/missions/runbooks', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: document.getElementById('runbook-title').value,
+          description: document.getElementById('runbook-description').value,
+          steps,
+        }),
+      }).catch(() => null);
+      if (r?.ok) {
+        toast('Runbook created', 'success');
+        navigate('workflows');
+      } else toast(r?.error || 'Failed to create runbook', 'error');
+    };
+
+  const missionForm = document.getElementById('mission-create-form');
+  if (missionForm)
+    missionForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const runbookId = document.getElementById('mission-runbook')?.value;
+      const title = document.getElementById('mission-title')?.value?.trim();
+      if (!runbookId || !title) {
+        toast('Choose a runbook and title', 'warning');
+        return;
+      }
+      const r = await api('/missions', {
+        method: 'POST',
+        body: JSON.stringify({
+          title,
+          runbookId,
+          owner: document.getElementById('mission-owner')?.value,
+        }),
+      }).catch(() => null);
+      if (r?.ok) {
+        toast('Mission started', 'success');
+        navigate('workflows');
+      } else toast(r?.error || 'Failed to start mission', 'error');
+    };
+
   const form = document.getElementById('workflow-create-form');
   if (form)
     form.onsubmit = async (e) => {
@@ -7214,6 +7388,89 @@ async function renderWorkflows(el) {
       }
     };
 }
+
+function missionStatusBadge(status) {
+  if (status === 'completed') return 'badge-success';
+  if (status === 'blocked') return 'badge-error';
+  if (status === 'running') return 'badge-warning';
+  return 'badge-muted';
+}
+
+function renderMissionCard(mission) {
+  return `
+    <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+        <div>
+          <strong style="color:var(--text)">${esc(mission.title)}</strong>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${mission.owner ? 'Owner: ' + esc(mission.owner) + ' • ' : ''}Updated ${mission.updatedAt ? timeAgo(mission.updatedAt) : 'recently'}</div>
+        </div>
+        <span class="badge ${missionStatusBadge(mission.status)}">${esc(mission.status || 'pending')}</span>
+      </div>
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+        ${(mission.steps || [])
+          .map(
+            (step, index) => `
+        <div style="display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:center;padding:8px;background:var(--surface2);border-radius:var(--radius-sm)">
+          <span class="pipeline-step-num">${index + 1}</span>
+          <div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <strong style="font-size:12px;color:var(--text)">${esc(step.title)}</strong>
+              <span class="badge ${missionStatusBadge(step.status)}">${esc(step.status)}</span>
+              ${step.requiresApproval ? '<span class="badge badge-warning">Approval</span>' : ''}
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(step.note || step.detail || '')}</div>
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
+            <button class="btn btn-sm btn-ghost" onclick="updateMissionStepStatus('${esc(mission.id)}','${esc(step.id)}','running')">Start</button>
+            <button class="btn btn-sm btn-success" onclick="updateMissionStepStatus('${esc(mission.id)}','${esc(step.id)}','completed',${step.requiresApproval ? 'true' : 'false'})">Done</button>
+            <button class="btn btn-sm btn-ghost" onclick="updateMissionStepStatus('${esc(mission.id)}','${esc(step.id)}','blocked')">Block</button>
+          </div>
+        </div>`,
+          )
+          .join('')}
+      </div>
+    </div>`;
+}
+
+window.addRunbookStep = () => {
+  const list = document.getElementById('runbook-steps-list');
+  if (!list) return;
+  const row = document.createElement('div');
+  row.className = 'runbook-step-row';
+  row.style.cssText =
+    'display:grid;grid-template-columns:minmax(160px,1fr) minmax(220px,2fr) auto auto;gap:8px;margin-bottom:8px;align-items:end';
+  row.innerHTML = `
+    <div class="form-group" style="margin:0"><input class="runbook-step-title" placeholder="Step title"></div>
+    <div class="form-group" style="margin:0"><input class="runbook-step-detail" placeholder="Step detail"></div>
+    <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text-muted);padding-bottom:10px"><input type="checkbox" class="runbook-step-approval"> Approval</label>
+    <button type="button" class="btn btn-sm btn-danger" onclick="this.parentElement.remove()" style="margin-bottom:2px">X</button>`;
+  list.appendChild(row);
+};
+
+window.updateMissionStepStatus = async (
+  missionId,
+  stepId,
+  status,
+  requiresApproval,
+) => {
+  const payload = { status };
+  if (status === 'completed' && requiresApproval) {
+    const approvalId = prompt('Approval reference required');
+    if (!approvalId) {
+      toast('Approval reference required', 'warning');
+      return;
+    }
+    payload.approvalId = approvalId;
+  }
+  const r = await api(`/missions/${missionId}/steps/${stepId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  }).catch(() => null);
+  if (r?.ok) {
+    toast('Mission step updated', 'success');
+    navigate('workflows');
+  } else toast(r?.error || 'Failed to update mission step', 'error');
+};
 
 window.addWorkflowAction = () => {
   const list = document.getElementById('wf-actions-list');

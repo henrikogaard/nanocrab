@@ -12,6 +12,7 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 - Artifact basics exist: agents can create/list text artifacts in the group workspace and send generated files through channel tools.
 - Provider basics exist: Claude, Codex, OpenCode, Ollama, OpenRouter, and Google are selectable with preflight checks and credential-proxy support where needed. Provider profiles now route chat, coding, automations, memory, journal, skill factory, reports, docs, and vision defaults.
 - Report jobs support source scopes, outline approval, Markdown/HTML/DOCX/PDF deliverables, artifacts, and delivery approval.
+- Personal operations now include reusable runbooks and missions with step-level status tracking; approval-required steps need an approval reference before completion.
 - Better terminal controls exist in the dashboard: named shell session id, reconnect, clear, copy transcript, and xterm output.
 - Standalone cleanup is implemented: NanoCrab is treated as its own product with NanoCrab-first code, plugins, skills, MCP names, container names, docs, and migration tooling.
 - P0 closure sweep complete: non-epic P0 issues for cockpit/approvals, provider hardening, memory/skill review surfaces, timeline/router safety, GitHub coding jobs, policy/audit/dry-run controls, connector boundaries, and first-run setup are closed. Remaining P0-labeled GitHub issues are roadmap epics with lower-priority follow-up children still open.
@@ -301,7 +302,10 @@ These rules are non-negotiable:
    - Draft, validate, diff, approve, install, and sync skills.
 7. **Reports/Documents v1**
    - MCP-backed source collection, outlines, exports, and provenance.
-8. **Provider Expansion**
+8. **Personal Operations v1** - PARTIAL
+   - DONE: reusable runbooks, missions started from runbooks, dashboard step tracking, and approval references for sensitive steps.
+   - NEXT: daily and weekly briefing jobs.
+9. **Provider Expansion**
    - DONE: OpenAI Responses API adapter with 11 tests
    - DONE: Anthropic Messages API adapter with 13 tests
    - DONE: Google Gemini API adapter with 12 tests
