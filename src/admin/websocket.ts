@@ -48,6 +48,39 @@ interface SessionMetadata {
   bytes: number;
 }
 
+export interface CockpitStreamEvent {
+  id: string;
+  type: 'tool_call' | 'tool_result' | 'progress';
+  groupJid: string;
+  timestamp: string;
+  title: string;
+  detail: string;
+  status: 'running' | 'completed' | 'failed';
+  pct?: number;
+  phase?: string;
+  toolName?: string;
+  duration?: string;
+}
+
+const cockpitStreamEvents: CockpitStreamEvent[] = [];
+
+function recordCockpitStreamEvent(event: CockpitStreamEvent): void {
+  cockpitStreamEvents.push(event);
+  if (cockpitStreamEvents.length > 200) {
+    cockpitStreamEvents.splice(0, cockpitStreamEvents.length - 200);
+  }
+}
+
+export function listCockpitStreamEvents(input: {
+  group?: string;
+  limit?: number;
+}): CockpitStreamEvent[] {
+  const limit = Math.max(1, Math.min(input.limit || 50, 100));
+  return cockpitStreamEvents
+    .filter((event) => !input.group || event.groupJid === input.group)
+    .slice(-limit);
+}
+
 function loadSessionIndex(): SessionMetadata[] {
   try {
     return JSON.parse(fs.readFileSync(INDEX_PATH, 'utf-8'));
@@ -470,6 +503,16 @@ export function broadcastToolCall(data: {
   groupJid: string;
   timestamp: string;
 }): void {
+  recordCockpitStreamEvent({
+    id: data.id,
+    type: 'tool_call',
+    groupJid: data.groupJid,
+    timestamp: data.timestamp,
+    title: data.name,
+    detail: data.input,
+    status: 'running',
+    toolName: data.name,
+  });
   broadcast({ type: 'tool_call', data });
 }
 
@@ -479,6 +522,16 @@ export function broadcastToolResult(data: {
   duration: string;
   groupJid: string;
 }): void {
+  recordCockpitStreamEvent({
+    id: data.id,
+    type: 'tool_result',
+    groupJid: data.groupJid,
+    timestamp: new Date().toISOString(),
+    title: `Result ${data.id}`,
+    detail: data.output,
+    status: 'completed',
+    duration: data.duration,
+  });
   broadcast({ type: 'tool_result', data });
 }
 
@@ -498,6 +551,17 @@ export function broadcastTaskProgress(data: {
   message: string;
   groupJid: string;
 }): void {
+  recordCockpitStreamEvent({
+    id: `progress-${data.groupJid}-${Date.now()}`,
+    type: 'progress',
+    groupJid: data.groupJid,
+    timestamp: new Date().toISOString(),
+    title: data.phase,
+    detail: data.message,
+    status: data.pct >= 100 || data.phase === 'done' ? 'completed' : 'running',
+    pct: data.pct,
+    phase: data.phase,
+  });
   broadcast({ type: 'task_progress', data });
 }
 

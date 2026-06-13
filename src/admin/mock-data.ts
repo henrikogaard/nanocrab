@@ -1775,6 +1775,96 @@ function cockpitDeliverables(
   return fixtures[id] || [];
 }
 
+function cockpitStream(id: string): JsonValue {
+  const fixtures: Record<string, JsonValue[]> = {
+    'cockpit-running-001': [
+      {
+        id: 'tc-read-transcripts',
+        type: 'tool_call',
+        groupJid: 'main',
+        timestamp: iso(10),
+        title: 'read_file',
+        detail: '{"path":"data/sessions/main/index.json"}',
+        status: 'completed',
+        toolName: 'read_file',
+        duration: '0.8',
+      },
+      {
+        id: 'progress-cockpit-running-001',
+        type: 'progress',
+        groupJid: 'main',
+        timestamp: iso(3),
+        title: 'summarizing',
+        detail: 'Building cockpit session summaries',
+        status: 'running',
+        phase: 'summarizing',
+        pct: 68,
+      },
+    ],
+    'cockpit-approval-002': [
+      {
+        id: 'tc-write-orders',
+        type: 'tool_call',
+        groupJid: 'operations',
+        timestamp: iso(22),
+        title: 'write_file',
+        detail: '{"path":"docs/ops/nightfall-orders.md"}',
+        status: 'completed',
+        toolName: 'write_file',
+        duration: '1.1',
+      },
+      {
+        id: 'progress-cockpit-approval-002',
+        type: 'progress',
+        groupJid: 'operations',
+        timestamp: iso(7),
+        title: 'approval',
+        detail: 'Waiting for operator approval',
+        status: 'running',
+        phase: 'approval',
+        pct: 80,
+      },
+    ],
+    'cockpit-failed-003': [
+      {
+        id: 'tc-provider-retry',
+        type: 'tool_result',
+        groupJid: 'scouts',
+        timestamp: iso(132),
+        title: 'provider_request',
+        detail: 'Timeout after retry budget was exhausted.',
+        status: 'failed',
+        duration: '30.0',
+      },
+    ],
+    'cockpit-complete-004': [
+      {
+        id: 'tc-run-tests',
+        type: 'tool_result',
+        groupJid: 'HenrikOrg/nanocrab',
+        timestamp: iso(304),
+        title: 'npm test',
+        detail: 'Focused tests passed.',
+        status: 'completed',
+        duration: '8.4',
+      },
+      {
+        id: 'progress-cockpit-complete-004',
+        type: 'progress',
+        groupJid: 'HenrikOrg/nanocrab',
+        timestamp: iso(295),
+        title: 'done',
+        detail: 'Run completed',
+        status: 'completed',
+        phase: 'done',
+        pct: 100,
+      },
+    ],
+  };
+
+  return { sessionId: id, events: fixtures[id] || [] };
+}
+
 function cockpitDetail(id: string): JsonValue | undefined {
   const session = cockpitSessions.find((item) => item.id === id);
   if (!session) return undefined;
@@ -3860,6 +3950,10 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname === '/usage') return usage();
   if (pathname === '/sessions') return sessions();
   if (pathname === '/sessions/cockpit') return sessions();
+  if (pathname.match(/^\/sessions\/cockpit\/[^/]+\/stream$/)) {
+    const id = decodeURIComponent(pathname.split('/')[3] || '');
+    return cockpitStream(id);
+  }
   if (pathname.startsWith('/sessions/cockpit/')) {
     return cockpitDetail(decodeURIComponent(pathname.split('/').pop() || ''));
   }

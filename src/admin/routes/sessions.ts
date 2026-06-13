@@ -7,6 +7,7 @@ import { DATA_DIR, SESSIONS_DIR } from '../../config.js';
 import { requireRole } from '../middleware.js';
 import {
   isSafeTerminalSessionId,
+  listCockpitStreamEvents,
   listTerminalSessions,
   readSessionLog,
 } from '../websocket.js';
@@ -677,6 +678,47 @@ router.get('/cockpit', (_req: Request, res: Response) => {
     res.json(listCockpitSessions());
   } catch {
     res.status(500).json({ error: 'Failed to list cockpit sessions' });
+  }
+});
+
+router.get('/cockpit/:id/stream', (req: Request, res: Response) => {
+  try {
+    const detail = buildCockpitDetail(req.params.id as string);
+    if (!detail) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    const liveEvents = listCockpitStreamEvents({
+      group: detail.group,
+      limit: 40,
+    });
+    const fallbackEvents = detail.timeline
+      .filter((event) =>
+        /tool|progress|test|approval|artifact|retry/i.test(
+          `${event.type} ${event.title}`,
+        ),
+      )
+      .slice(-20)
+      .map((event) => ({
+        id: event.id,
+        type: event.type.includes('tool') ? 'tool_call' : 'progress',
+        groupJid: detail.group,
+        timestamp: event.timestamp,
+        title: event.title,
+        detail: event.detail,
+        status:
+          detail.status === 'failed'
+            ? 'failed'
+            : detail.status === 'completed'
+              ? 'completed'
+              : 'running',
+      }));
+    res.json({
+      sessionId: detail.id,
+      events: liveEvents.length > 0 ? liveEvents : fallbackEvents,
+    });
+  } catch {
+    res.status(500).json({ error: 'Failed to read cockpit stream' });
   }
 });
 

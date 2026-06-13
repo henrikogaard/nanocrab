@@ -31,6 +31,10 @@ import {
   finalizeSessionFile,
   loadHistoricalSessions,
   listTerminalSessions,
+  listCockpitStreamEvents,
+  broadcastTaskProgress,
+  broadcastToolCall,
+  broadcastToolResult,
   broadcastCockpitSessionUpdate,
 } from './websocket.js';
 
@@ -117,5 +121,47 @@ describe('file-backed terminal sessions', () => {
         currentStep: 'Running focused tests',
       }),
     ).not.toThrow();
+  });
+
+  it('records recent tool and progress events for cockpit streams', () => {
+    broadcastToolCall({
+      id: 'tc-stream-1',
+      name: 'read_file',
+      input: '{"path":"README.md"}',
+      groupJid: 'main',
+      timestamp: '2026-06-01T12:00:00Z',
+    });
+    broadcastToolResult({
+      id: 'tc-stream-1',
+      output: 'ok',
+      duration: '0.2',
+      groupJid: 'main',
+    });
+    broadcastTaskProgress({
+      phase: 'testing',
+      pct: 60,
+      message: 'Running focused tests',
+      groupJid: 'main',
+    });
+
+    expect(listCockpitStreamEvents({ group: 'main' })).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'tc-stream-1',
+          type: 'tool_call',
+          status: 'running',
+        }),
+        expect.objectContaining({
+          id: 'tc-stream-1',
+          type: 'tool_result',
+          status: 'completed',
+        }),
+        expect.objectContaining({
+          type: 'progress',
+          phase: 'testing',
+          pct: 60,
+        }),
+      ]),
+    );
   });
 });

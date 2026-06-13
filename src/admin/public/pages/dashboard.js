@@ -537,7 +537,12 @@ async function loadCockpitDetail(id) {
   const detail = document.getElementById('cockpit-detail');
   if (!detail || !id) return;
   try {
-    const data = await api(`/sessions/cockpit/${encodeURIComponent(id)}`);
+    const [data, stream] = await Promise.all([
+      api(`/sessions/cockpit/${encodeURIComponent(id)}`),
+      api(`/sessions/cockpit/${encodeURIComponent(id)}/stream`).catch(() => ({
+        events: [],
+      })),
+    ]);
     const timeline = (data.timeline || [])
       .slice(-8)
       .reverse()
@@ -580,6 +585,39 @@ async function loadCockpitDetail(id) {
           </div>`;
       })
       .join('');
+    const streamEvents = Array.isArray(stream.events) ? stream.events : [];
+    const toolTimeline = streamEvents
+      .filter(
+        (event) => event.type === 'tool_call' || event.type === 'tool_result',
+      )
+      .slice(-8)
+      .reverse()
+      .map(
+        (event) => `
+          <div class="cockpit-tool-event">
+            <time>${event.timestamp ? timeAgo(event.timestamp) : '-'}</time>
+            <strong>${esc(event.title || event.toolName || event.type)}</strong>
+            <small>${esc([event.status, event.duration ? `${event.duration}s` : '', truncate(event.detail || '', 120)].filter(Boolean).join(' · '))}</small>
+          </div>`,
+      )
+      .join('');
+    const progressEvents = streamEvents
+      .filter((event) => event.type === 'progress')
+      .slice(-5)
+      .reverse()
+      .map((event) => {
+        const pct = Math.max(0, Math.min(Number(event.pct || 0), 100));
+        return `
+          <div class="cockpit-progress-event">
+            <div class="cockpit-progress-head">
+              <strong>${esc(event.detail || event.title || 'Progress')}</strong>
+              <span>${pct}%</span>
+            </div>
+            <div class="cockpit-progress-track"><span style="width:${pct}%"></span></div>
+            <small>${esc([event.phase, event.status].filter(Boolean).join(' · '))}</small>
+          </div>`;
+      })
+      .join('');
     const approvals = (data.approvals || [])
       .slice(0, 5)
       .map(
@@ -604,6 +642,14 @@ async function loadCockpitDetail(id) {
         <section>
           <div class="dash-section-label">Deliverables</div>
           <div class="cockpit-deliverables">${deliverables || '<div class="dash-empty">No deliverables published.</div>'}</div>
+        </section>
+        <section>
+          <div class="dash-section-label">Tool Timeline</div>
+          <div class="cockpit-tools">${toolTimeline || '<div class="dash-empty">No tool events recorded.</div>'}</div>
+        </section>
+        <section>
+          <div class="dash-section-label">Progress</div>
+          <div class="cockpit-progress">${progressEvents || '<div class="dash-empty">No progress stream yet.</div>'}</div>
         </section>
         <section>
           <div class="dash-section-label">Approvals</div>
