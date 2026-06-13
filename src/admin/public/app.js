@@ -3643,6 +3643,7 @@ async function renderSkills(el, options = {}) {
                 <span class="badge ${s.enabled ? 'badge-success' : 'badge-muted'}">${s.enabled ? 'Enabled' : 'Disabled'}</span>
                 <span class="badge badge-info">${esc(s.scope || 'all')}</span>
                 <span class="badge ${s.visibility === 'private' ? 'badge-warning' : 'badge-muted'}">${esc(s.visibility || 'shared')}</span>
+                ${s.installState ? `<span class="badge ${s.installState.status === 'installed' ? 'badge-success' : s.installState.status === 'modified' ? 'badge-warning' : s.installState.status === 'missing' ? 'badge-error' : 'badge-muted'}">${esc(s.installState.status)}</span>` : ''}
                 ${s.riskLevel ? `<span class="badge ${s.riskLevel === 'high' ? 'badge-error' : s.riskLevel === 'medium' ? 'badge-warning' : 'badge-muted'}">risk ${esc(s.riskLevel)}</span>` : ''}
               </div>
               <div style="font-size:12px;color:var(--text-muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis">${esc(s.description || 'No description')}</div>
@@ -3665,6 +3666,7 @@ async function renderSkills(el, options = {}) {
                 <option value="system" ${s.visibility === 'system' ? 'selected' : ''}>System</option>
               </select>
               <button class="btn btn-sm btn-ghost" onclick="editSkill('${esc(s.path)}')">Edit</button>
+              <button class="btn btn-sm btn-ghost" onclick="viewSkillVersions('${esc(s.path)}')">History</button>
               ${cat !== 'core' ? `<button class="btn btn-sm btn-danger" onclick="deleteSkill('${esc(s.path)}',this)">Delete</button>` : ''}
             </div>
           </div>`,
@@ -3674,6 +3676,7 @@ async function renderSkills(el, options = {}) {
       })
       .join('')}
     <div id="skill-editor" style="display:none"></div>
+    <div id="skill-version-viewer" style="display:none"></div>
     <div id="skill-draft-viewer" style="display:none"></div>
     ${options.embedded ? '' : '<div id="skills-page-timeline"></div>'}`;
 
@@ -3847,6 +3850,79 @@ window.saveSkill = async (skillPath) => {
     toast(r.message || 'Saved', 'success');
     document.getElementById('skill-editor').style.display = 'none';
   } else toast(r.error || 'Failed', 'error');
+};
+
+window.viewSkillVersions = async (skillPath) => {
+  const data = await api(`/skills/${encodeURIComponent(skillPath)}/versions`);
+  const viewer = document.getElementById('skill-version-viewer');
+  const state = data.installState || {};
+  viewer.style.display = 'block';
+  viewer.innerHTML = `
+    <div class="card" style="margin-top:16px">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px">
+        <div class="card-title" style="margin:0">History: ${esc(skillPath)}/SKILL.md</div>
+        <button class="btn btn-sm btn-ghost" onclick="document.getElementById('skill-version-viewer').style.display='none'">Close</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+        <span class="badge badge-muted">${esc(state.status || 'unknown')}</span>
+        <span class="badge badge-info">current ${esc(String(state.currentVersion || 'untracked'))}</span>
+        <span class="badge badge-muted">latest ${esc(String(state.latestVersion || 'none'))}</span>
+      </div>
+      ${
+        data.versions && data.versions.length
+          ? data.versions
+              .map(
+                (version) => `
+        <div class="channel-card" style="align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <span style="font-weight:600;color:var(--text)">v${esc(String(version.version))}</span>
+              <span class="badge badge-info">${esc(version.action)}</span>
+              ${version.restoredFromVersion ? `<span class="badge badge-warning">from v${esc(String(version.restoredFromVersion))}</span>` : ''}
+              <span class="badge badge-muted">${esc(String(version.bytes || 0))} bytes</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(version.actor || 'unknown')} &middot; ${formatTime(version.timestamp)} &middot; ${esc((version.sha256 || '').slice(0, 12))}</div>
+            ${version.note ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">${esc(version.note)}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <button class="btn btn-sm btn-ghost" onclick="viewSkillVersionDiff('${esc(skillPath)}',${Number(version.version)})">Diff</button>
+            <button class="btn btn-sm btn-ghost" onclick="rollbackSkillVersion('${esc(skillPath)}',${Number(version.version)},this)">Rollback</button>
+          </div>
+        </div>`,
+              )
+              .join('')
+          : '<div class="empty" style="padding:12px">No versions recorded yet</div>'
+      }
+      <pre id="skill-version-diff" class="log-viewer" style="display:none;margin-top:12px;max-height:360px;white-space:pre-wrap"></pre>
+    </div>`;
+  viewer.scrollIntoView({ behavior: 'smooth' });
+};
+
+window.viewSkillVersionDiff = async (skillPath, version) => {
+  const res = await fetch(
+    `/api/skills/${encodeURIComponent(skillPath)}/versions/${encodeURIComponent(version)}/diff`,
+    { headers: { Accept: 'text/plain' } },
+  );
+  const diff = await res.text();
+  const target = document.getElementById('skill-version-diff');
+  target.style.display = 'block';
+  target.textContent = diff;
+};
+
+window.rollbackSkillVersion = async (skillPath, version, btnEl) => {
+  inlineConfirm(btnEl, `Rollback "${skillPath}" to v${version}?`, async () => {
+    const r = await api(
+      `/skills/${encodeURIComponent(skillPath)}/versions/${encodeURIComponent(version)}/rollback`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ actor: 'dashboard' }),
+      },
+    );
+    if (r.ok) {
+      toast(r.message || 'Rolled back', 'success');
+      await viewSkillVersions(skillPath);
+    } else toast(r.error || 'Failed', 'error');
+  });
 };
 
 window.deleteSkill = async (skillPath, btnEl) => {

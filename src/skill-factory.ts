@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { CONTAINER_SKILLS_DIR, STORE_DIR } from './config.js';
+import { recordSkillVersion } from './skill-versions.js';
 
 export type SkillDraftStatus = 'pending' | 'approved' | 'rejected';
 export type SkillSuggestionStatus = 'pending' | 'approved' | 'rejected';
@@ -429,6 +430,12 @@ export function approveSkillDraft(id: string): SkillDraft {
   const installDir = path.join(CONTAINER_SKILLS_DIR, draft.name);
   fs.mkdirSync(installDir, { recursive: true });
   fs.copyFileSync(skillPath(id), path.join(installDir, 'SKILL.md'));
+  recordSkillVersion({
+    skillPath: draft.name,
+    actor: 'skill-factory',
+    action: 'install',
+    note: `Approved draft ${draft.id}`,
+  });
   draft.status = 'approved';
   draft.reviewedAt = new Date().toISOString();
   draft.installDir = installDir;

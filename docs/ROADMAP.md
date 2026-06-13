@@ -151,6 +151,7 @@ Let the agent create skills, but never install them silently.
 - DONE: Require owner/admin approval before installing into `container/skills`.
 - After approval, rebuild/sync skills so the skill becomes shared across all channels.
 - DONE: Draft metadata tracks proposer, validation state, installed version, review/install time, provenance, and diff review data.
+- DONE: Installed skills keep version snapshots, install-state badges, dashboard diff review, and admin rollback controls.
 
 ### Journal v2
 
