@@ -1172,6 +1172,17 @@ export async function retryCodingJob(
 export function approveCodingJob(jobId: string, by = 'dashboard'): CodingJob {
   const job = getCodingJob(jobId);
   if (!job) throw new Error(`Coding job not found: ${jobId}`);
+  if (
+    [
+      'implement',
+      'test',
+      'await_pr_approval',
+      'open_pr',
+      'ci_running',
+    ].includes(job.status)
+  ) {
+    return job;
+  }
   if (job.status !== 'await_approval') {
     throw new Error(`Cannot approve implementation from ${job.status}`);
   }

@@ -462,10 +462,12 @@ describe('coding jobs', () => {
       expect(getCodingJob(job.id)?.status).toBe('await_approval');
     });
 
-    approveCodingJob(job.id, 'owner');
-    expect(() => approveCodingJob(job.id, 'owner')).toThrow(
-      'Cannot approve implementation from implement',
-    );
+    const firstApproval = approveCodingJob(job.id, 'owner');
+    const repeatedApproval = approveCodingJob(job.id, 'owner');
+
+    expect(firstApproval.status).toBe('implement');
+    expect(repeatedApproval.status).toBe('implement');
+    expect(repeatedApproval.id).toBe(job.id);
 
     await vi.waitFor(() => {
       expect(getCodingJob(job.id)?.status).toBe('completed');
