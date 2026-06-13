@@ -9,6 +9,7 @@ import { transcribeAudio } from '../transcription.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
+import { auditUploadSend } from '../upload-audit.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -464,9 +465,20 @@ export class TelegramChannel implements Channel {
       const numericId = jid.replace(/^tg:/, '');
       const buffer = fs.readFileSync(filePath);
       const file = new InputFile(buffer, filename);
-      await this.bot.api.sendDocument(numericId, file, {
-        caption: caption,
-      });
+      await auditUploadSend(
+        {
+          channel: this.name,
+          jid,
+          filename,
+          filePath,
+          sizeBytes: buffer.length,
+          caption,
+        },
+        () =>
+          this.bot!.api.sendDocument(numericId, file, {
+            caption: caption,
+          }),
+      );
       logger.info({ jid, filePath, filename }, 'Telegram file sent');
     } catch (err) {
       logger.error({ jid, filePath, err }, 'Failed to send Telegram file');

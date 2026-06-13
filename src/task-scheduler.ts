@@ -178,6 +178,9 @@ async function runTask(
     taskProfile?.model ||
     group.containerConfig?.model ||
     group.containerConfig?.models?.[effectiveProvider];
+  const fallbackPurpose = (taskProfile?.id ||
+    'default_automation') as ProviderPurpose;
+  const dryRun = task.tool_policy === 'dry-run';
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
@@ -208,6 +211,9 @@ async function runTask(
         allowedMcpServers: group.containerConfig?.allowedMcpServers,
         provider: effectiveProvider,
         model: effectiveModel,
+        providerFallbackPurpose: fallbackPurpose,
+        providerFallbackAction: 'automation-execution',
+        dryRun,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
@@ -215,7 +221,9 @@ async function runTask(
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          if (!dryRun) {
+            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          }
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {

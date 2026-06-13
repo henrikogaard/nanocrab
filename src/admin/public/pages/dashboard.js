@@ -17,11 +17,15 @@ async function renderDashboard(el) {
     renderLoading();
 
     try {
-      const d = await api('/system/dashboard');
+      const [d, cockpitData] = await Promise.all([
+        api('/system/dashboard'),
+        api('/sessions/cockpit').catch(() => []),
+      ]);
       const channels = Array.isArray(d.channels) ? d.channels : [];
       const containers = Array.isArray(d.containers) ? d.containers : [];
       const groups = Array.isArray(d.groups) ? d.groups : [];
       const messages = Array.isArray(d.messages) ? d.messages : [];
+      const cockpitSessions = Array.isArray(cockpitData) ? cockpitData : [];
       const failedLogins = d.failedLogins || 0;
       const blockedIps = d.blockedIps || 0;
       const stats = { daily: Array.isArray(d.daily) ? d.daily : [] };
@@ -220,6 +224,32 @@ async function renderDashboard(el) {
         )
         .join('');
 
+      const selectedCockpitId =
+        window._selectedCockpitSessionId ||
+        (cockpitSessions[0] ? cockpitSessions[0].id : '');
+      const cockpitRows =
+        cockpitSessions
+          .slice(0, 9)
+          .map((session, index) =>
+            renderCockpitSessionRow(session, index, selectedCockpitId),
+          )
+          .join('') ||
+        '<div class="dash-empty">No agent runs captured yet.</div>';
+      const selectedCockpit =
+        cockpitSessions.find((session) => session.id === selectedCockpitId) ||
+        cockpitSessions[0] ||
+        null;
+      const cockpitCounts = cockpitSessions.reduce(
+        (acc, session) => {
+          const status = session.status || 'completed';
+          if (status === 'running' || status === 'idle') acc.active += 1;
+          if (status === 'waiting_approval') acc.waiting += 1;
+          if (status === 'failed') acc.failed += 1;
+          return acc;
+        },
+        { active: 0, waiting: 0, failed: 0 },
+      );
+
       const latestCopy = latestMessage
         ? `${esc(latestMessage.sender_name || 'Latest')}: ${esc(truncate(latestMessage.content || '', 130))}`
         : 'No recent conversation activity.';
@@ -287,6 +317,27 @@ async function renderDashboard(el) {
           </section>
 
           <div class="dash-bento">
+            <section class="dash-panel dash-panel-cockpit dashboard-widget" data-widget-id="cockpit" style="${wVis('cockpit')}">
+              ${wBtn('cockpit')}
+              <div class="dash-panel-header">
+                <div>
+                  <span class="dash-kicker">Cockpit</span>
+                  <h3><span class="live-dot" style="${cockpitCounts.active > 0 ? '' : 'display:none'}"></span> Agent runs</h3>
+                </div>
+                <div class="cockpit-status-strip">
+                  <span class="dash-pill is-good">${cockpitCounts.active} active</span>
+                  <span class="dash-pill ${cockpitCounts.waiting > 0 ? 'is-warn' : 'is-muted'}">${cockpitCounts.waiting} approvals</span>
+                  <span class="dash-pill ${cockpitCounts.failed > 0 ? 'is-bad' : 'is-muted'}">${cockpitCounts.failed} failed</span>
+                </div>
+              </div>
+              <div class="cockpit-grid">
+                <div class="cockpit-list" id="cockpit-session-list">${cockpitRows}</div>
+                <div class="cockpit-detail" id="cockpit-detail">
+                  ${renderCockpitDetailShell(selectedCockpit)}
+                </div>
+              </div>
+            </section>
+
             <section class="dash-panel dash-panel-channels dashboard-widget" data-widget-id="channels" style="${wVis('channels')}">
               ${wBtn('channels')}
               <div class="dash-panel-header">
@@ -364,6 +415,9 @@ async function renderDashboard(el) {
           </div>
         </div>`;
 
+      window._cockpitSessions = cockpitSessions;
+      window._selectedCockpitSessionId = selectedCockpit?.id || '';
+      if (selectedCockpit) loadCockpitDetail(selectedCockpit.id);
       loadDashboardWeather();
     } catch (e) {
       el.innerHTML = `
@@ -387,7 +441,8 @@ async function renderDashboard(el) {
         api('/containers'),
         api('/system'),
       ]);
-      const hash = `${containers.length}|${sys.uptimeFormatted}|${Math.floor(Date.now() / 60000)}`;
+      const cockpit = await api('/sessions/cockpit').catch(() => []);
+      const hash = `${containers.length}|${Array.isArray(cockpit) ? cockpit.length : 0}|${sys.uptimeFormatted}|${Math.floor(Date.now() / 60000)}`;
       if (hash === lastDashHash) return;
       lastDashHash = hash;
     } catch {
@@ -399,6 +454,153 @@ async function renderDashboard(el) {
   await load();
   poll(smartLoad, 15000);
 }
+
+function cockpitStatusClass(status) {
+  if (status === 'running' || status === 'completed') return 'is-good';
+  if (status === 'waiting_approval' || status === 'queued') return 'is-warn';
+  if (status === 'failed' || status === 'cancelled') return 'is-bad';
+  return 'is-idle';
+}
+
+function renderCockpitSessionRow(session, index, selectedId) {
+  const status = session.status || 'completed';
+  const isActive = selectedId ? session.id === selectedId : index === 0;
+  const changed = Array.isArray(session.changedFiles)
+    ? session.changedFiles.length
+    : 0;
+  return `
+    <button class="cockpit-session-row dash-reveal ${isActive ? 'active' : ''}" style="--i:${index}" data-session-id="${esc(session.id)}" onclick="selectCockpitSession('${esc(session.id)}')">
+      <span class="cockpit-status-dot ${status}"></span>
+      <span class="cockpit-row-main">
+        <strong>${esc(session.group || session.id)}</strong>
+        <small>${esc(session.provider || 'provider')} / ${esc(session.model || 'model')}</small>
+      </span>
+      <span class="cockpit-row-meta">
+        <span class="dash-pill ${cockpitStatusClass(status)}">${esc(status.replace(/_/g, ' '))}</span>
+        <small>${timeAgo(session.lastEventAt || session.updatedAt || session.startedAt)}</small>
+      </span>
+      <span class="cockpit-row-step">${esc(truncate(session.currentStep || '', 96))}</span>
+      <span class="cockpit-row-counters">${session.approvalCount || 0} approvals · ${session.artifactCount || 0} artifacts · ${changed} files</span>
+    </button>`;
+}
+
+function renderCockpitDetailShell(session) {
+  if (!session)
+    return '<div class="dash-empty">Select a run to inspect details.</div>';
+  return `
+    <div class="cockpit-detail-head">
+      <div>
+        <span class="dash-kicker">Selected run</span>
+        <h4>${esc(session.group || session.id)}</h4>
+        <p>${esc(session.currentStep || 'No current step recorded.')}</p>
+      </div>
+      <span class="dash-pill ${cockpitStatusClass(session.status)}">${esc((session.status || '').replace(/_/g, ' '))}</span>
+    </div>
+    <div class="cockpit-detail-metrics">
+      <div><span>Started</span><strong>${session.startedAt ? formatTime(session.startedAt) : '-'}</strong></div>
+      <div><span>Updated</span><strong>${session.updatedAt ? timeAgo(session.updatedAt) : '-'}</strong></div>
+      <div><span>Events</span><strong>${session.messageCount || 0}</strong></div>
+      <div><span>Files</span><strong>${Array.isArray(session.changedFiles) ? session.changedFiles.length : 0}</strong></div>
+    </div>
+    <div class="cockpit-preview-loading">Loading cockpit detail</div>`;
+}
+
+window.selectCockpitSession = function (id) {
+  window._selectedCockpitSessionId = id;
+  document
+    .querySelectorAll('.cockpit-session-row')
+    .forEach((row) =>
+      row.classList.toggle('active', row.dataset.sessionId === id),
+    );
+  const session = (window._cockpitSessions || []).find(
+    (item) => item.id === id,
+  );
+  const detail = document.getElementById('cockpit-detail');
+  if (detail) detail.innerHTML = renderCockpitDetailShell(session);
+  loadCockpitDetail(id);
+};
+
+async function loadCockpitDetail(id) {
+  const detail = document.getElementById('cockpit-detail');
+  if (!detail || !id) return;
+  try {
+    const data = await api(`/sessions/cockpit/${encodeURIComponent(id)}`);
+    const timeline = (data.timeline || [])
+      .slice(-8)
+      .reverse()
+      .map(
+        (event) => `
+          <div class="cockpit-timeline-item">
+            <time>${event.timestamp ? timeAgo(event.timestamp) : '-'}</time>
+            <strong>${esc(event.title || event.type || 'event')}</strong>
+            <p>${esc(truncate(event.detail || '', 140))}</p>
+          </div>`,
+      )
+      .join('');
+    const artifacts = (data.artifacts || [])
+      .slice(0, 6)
+      .map(
+        (artifact) => `
+          <div class="cockpit-artifact">
+            <strong>${esc(artifact.name || artifact.path || 'artifact')}</strong>
+            <small>${esc(artifact.kind || 'file')}</small>
+          </div>`,
+      )
+      .join('');
+    const approvals = (data.approvals || [])
+      .slice(0, 5)
+      .map(
+        (approval) => `
+          <div class="cockpit-approval">
+            <strong>${esc(approval.title || approval.id)}</strong>
+            <span class="dash-pill ${cockpitStatusClass(approval.status === 'pending' ? 'waiting_approval' : approval.status)}">${esc(approval.status || 'pending')}</span>
+          </div>`,
+      )
+      .join('');
+    detail.innerHTML = `
+      ${renderCockpitDetailShell(data)}
+      <div class="cockpit-detail-sections">
+        <section>
+          <div class="dash-section-label">Timeline</div>
+          <div class="cockpit-timeline">${timeline || '<div class="dash-empty">No timeline events.</div>'}</div>
+        </section>
+        <section>
+          <div class="dash-section-label">Artifacts</div>
+          <div class="cockpit-artifacts">${artifacts || '<div class="dash-empty">No artifacts recorded.</div>'}</div>
+        </section>
+        <section>
+          <div class="dash-section-label">Approvals</div>
+          <div class="cockpit-approvals">${approvals || '<div class="dash-empty">No approvals for this run.</div>'}</div>
+        </section>
+      </div>`;
+    const loading = detail.querySelector('.cockpit-preview-loading');
+    if (loading) loading.remove();
+  } catch {
+    const loading = detail.querySelector('.cockpit-preview-loading');
+    if (loading) loading.textContent = 'Failed to load cockpit detail';
+  }
+}
+
+window.refreshCockpitDashboard = async function () {
+  const list = document.getElementById('cockpit-session-list');
+  if (!list) return;
+  const sessions = await api('/sessions/cockpit').catch(() => []);
+  window._cockpitSessions = Array.isArray(sessions) ? sessions : [];
+  const selectedId =
+    window._selectedCockpitSessionId ||
+    (window._cockpitSessions[0] ? window._cockpitSessions[0].id : '');
+  list.innerHTML =
+    window._cockpitSessions
+      .slice(0, 9)
+      .map((session, index) =>
+        renderCockpitSessionRow(session, index, selectedId),
+      )
+      .join('') || '<div class="dash-empty">No agent runs captured yet.</div>';
+  if (selectedId) {
+    window._selectedCockpitSessionId = selectedId;
+    loadCockpitDetail(selectedId);
+  }
+};
 
 async function loadDashboardWeather() {
   const slot = document.getElementById('weather-widget-slot');

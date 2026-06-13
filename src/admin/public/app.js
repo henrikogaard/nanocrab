@@ -77,7 +77,9 @@ function connectWs() {
     console.log('WS connected');
     const savedSessionId = localStorage.getItem('terminal_session_id');
     if (savedSessionId) {
-      ws.send(JSON.stringify({ type: 'terminal_attach', sessionId: savedSessionId }));
+      ws.send(
+        JSON.stringify({ type: 'terminal_attach', sessionId: savedSessionId }),
+      );
       ws.send(JSON.stringify({ type: 'terminal_spawn', data: savedSessionId }));
     }
   };
@@ -150,6 +152,9 @@ let handleWsMessage = function (msg) {
       if (feed.children.length > 20) feed.lastChild.remove();
       setTimeout(() => div.classList.remove('message-new'), 3000);
     }
+  }
+  if (msg.type === 'cockpit_session_update' && currentPage === 'dashboard') {
+    if (window.refreshCockpitDashboard) window.refreshCockpitDashboard();
   }
   if (msg.type === 'agent_question') {
     toast(
@@ -245,7 +250,10 @@ let handleWsMessage = function (msg) {
       const body = card.querySelector('.chat-tool-call-body');
       if (body) {
         const resultDiv = document.createElement('div');
-        resultDiv.innerHTML = '<div class="section-label" style="margin-top:8px">Result</div><pre>' + esc(prettyPrint(msg.data.output)) + '</pre>';
+        resultDiv.innerHTML =
+          '<div class="section-label" style="margin-top:8px">Result</div><pre>' +
+          esc(prettyPrint(msg.data.output)) +
+          '</pre>';
         body.appendChild(resultDiv);
       }
     }
@@ -261,6 +269,8 @@ let handleWsMessage = function (msg) {
     const card = document.createElement('div');
     card.id = 'approval-card-' + msg.data.id;
     card.className = 'chat-approval-card';
+    card.dataset.approvalId = msg.data.id;
+    card.dataset.groupJid = msg.data.groupJid;
     card.innerHTML = `
       <div class="chat-approval-header">&#x26A0;&#xFE0F; Approval Required</div>
       <div class="chat-approval-body">
@@ -269,14 +279,34 @@ let handleWsMessage = function (msg) {
         <div class="approval-input">${esc(prettyPrint(msg.data.input))}</div>
       </div>
       <div class="chat-approval-actions">
-        <button class="btn btn-sm btn-deny" onclick="denyApproval('${esc(msg.data.id)}', '${esc(msg.data.groupJid)}')">Deny</button>
-        <button class="btn btn-sm btn-primary" onclick="approveApproval('${esc(msg.data.id)}', '${esc(msg.data.groupJid)}')">Approve</button>
+        <button class="btn btn-sm btn-deny" data-chat-approval-action="deny">Deny</button>
+        <button class="btn btn-sm btn-primary" data-chat-approval-action="approve">Approve</button>
       </div>
     `;
     container.appendChild(card);
+    bindChatApprovalActions(container);
     container.scrollTop = container.scrollHeight;
   }
 };
+
+function bindChatApprovalActions(container) {
+  if (container.dataset.chatApprovalActionsBound === 'true') return;
+  container.dataset.chatApprovalActionsBound = 'true';
+  container.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest('[data-chat-approval-action]');
+    if (!button) return;
+    const card = button.closest('.chat-approval-card');
+    const id = card?.dataset.approvalId;
+    const groupJid = card?.dataset.groupJid;
+    if (!id || !groupJid) return;
+    if (button.dataset.chatApprovalAction === 'approve') {
+      approveApproval(id, groupJid);
+    } else {
+      denyApproval(id, groupJid);
+    }
+  });
+}
 
 // --- Auth ---
 async function checkAuth() {
@@ -365,6 +395,10 @@ const navIconPaths = {
     '<path d="M12 3.5 20.5 8v8L12 20.5 3.5 16V8L12 3.5Z"/><path d="M12 8.5v7"/><path d="M8.5 10.5 12 8.5l3.5 2"/><path d="M7.5 15.5 12 18l4.5-2.5"/>',
   messages:
     '<path d="M5 6.5h14v9H9l-4 3v-12Z"/><path d="M8 10h8"/><path d="M8 13h5"/>',
+  approvals:
+    '<path d="M12 3.5 18.5 6v5.3c0 4.2-2.5 7-6.5 9.2-4-2.2-6.5-5-6.5-9.2V6L12 3.5Z"/><path d="M9 12l2 2 4-5"/><path d="M8.5 6.5h7"/>',
+  audit:
+    '<path d="M6.5 4.5h11v15h-11z"/><path d="M9 8h6"/><path d="M9 11.5h6"/><path d="M9 15h3"/><path d="M15.5 15l2 2 3-4"/>',
   chat: '<path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3A7.5 7.5 0 0 1 12 19.5c-1.2 0-2.4-.3-3.4-.8L4.5 20l1.3-4A7.4 7.4 0 0 1 4.5 12Z"/><path d="M8.5 11.5h7"/><path d="M8.5 14.5h4.5"/>',
   groups:
     '<path d="M8 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M16 10a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"/><path d="M3.5 18.5c.4-3 2-5 4.5-5s4.1 2 4.5 5"/><path d="M13.2 14c2.9-.4 4.7 1.2 5.3 4.5"/>',
@@ -433,6 +467,8 @@ function showShell(page) {
     { id: 'dashboard', icon: 'dashboard', label: 'Dashboard', section: 'Home' },
     { id: 'agents', icon: 'agents', label: 'Agents' },
     { id: 'messages', icon: 'messages', label: 'Messages' },
+    { id: 'approvals', icon: 'approvals', label: 'Approvals' },
+    { id: 'audit', icon: 'audit', label: 'Audit' },
     { id: 'chat', icon: 'chat', label: 'Chat' },
     { id: 'groups', icon: 'groups', label: 'Groups', section: 'Workspace' },
     { id: 'tasks', icon: 'tasks', label: 'Tasks' },
@@ -483,6 +519,7 @@ function showShell(page) {
     'gitcode',
     'pipelines',
     'containers',
+    'audit',
     'security',
     'integrations',
     'marketplace',
@@ -657,6 +694,8 @@ const _pageMap = {
   agents: 'renderAgents',
   chat: 'renderChat',
   messages: 'renderMessages',
+  approvals: 'renderApprovals',
+  audit: 'renderAudit',
   memory: 'renderMemoryConsolidated',
   skills: 'renderSkillsPage',
   timeline: 'renderMemoryKnowledgeTimeline',
@@ -793,7 +832,9 @@ async function renderMemoryConsolidated(el) {
     embedded: true,
     returnPage: 'memory',
   });
-  await renderMemoryKnowledgeTimeline(document.getElementById('mem-tabs-timeline'));
+  await renderMemoryKnowledgeTimeline(
+    document.getElementById('mem-tabs-timeline'),
+  );
   await renderWiki(document.getElementById('mem-tabs-wiki'));
 }
 
@@ -880,6 +921,285 @@ async function renderUptimeStandalone(el) {
     '<div class="page-header"><h2>Uptime Monitor</h2></div><div id="uptime-content"></div>';
   await renderUptime(document.getElementById('uptime-content'));
 }
+
+const APPROVAL_KIND_LABELS = {
+  'provider-fallback': 'Provider fallback',
+  'coding-implement': 'Repo change',
+  'coding-open-pr': 'Open PR',
+  'coding-revert': 'Revert change',
+  'report-outline': 'Report outline',
+  'report-delivery': 'Report delivery',
+  publish: 'Publish',
+  'external-message': 'Outbound message',
+  upload: 'Upload',
+  'tool-action': 'Tool action',
+};
+
+const APPROVAL_STATUS_LABELS = {
+  pending: 'Pending',
+  approved: 'Approved',
+  denied: 'Denied',
+  expired: 'Expired',
+};
+
+function approvalKindLabel(kind) {
+  return APPROVAL_KIND_LABELS[kind] || kind || 'Approval';
+}
+
+function approvalStatusBadge(status) {
+  const cls =
+    status === 'approved'
+      ? 'badge-success'
+      : status === 'denied' || status === 'expired'
+        ? 'badge-error'
+        : 'badge-warning';
+  return `<span class="badge ${cls}">${esc(APPROVAL_STATUS_LABELS[status] || status)}</span>`;
+}
+
+function approvalRiskBadge(risk) {
+  const cls =
+    risk === 'high'
+      ? 'badge-error'
+      : risk === 'medium'
+        ? 'badge-warning'
+        : 'badge-success';
+  return `<span class="badge ${cls}">${esc(risk || 'medium')}</span>`;
+}
+
+function approvalQueryFromFilters() {
+  const filters = window._approvalFilters || {};
+  const params = new URLSearchParams();
+  ['status', 'risk', 'kind', 'requester', 'targetType', 'correlationId'].forEach(
+    (key) => {
+      if (filters[key]) params.set(key, filters[key]);
+    },
+  );
+  if (filters.createdFrom)
+    params.set('createdFrom', `${filters.createdFrom}T00:00:00.000Z`);
+  if (filters.createdTo)
+    params.set('createdTo', `${filters.createdTo}T23:59:59.999Z`);
+  params.set('limit', '200');
+  return params.toString();
+}
+
+function renderApprovalCard(approval) {
+  const expires =
+    approval.expiresAt && approval.status === 'pending'
+      ? `<span class="approval-meta-item">Expires ${timeAgo(approval.expiresAt)}</span>`
+      : '';
+  const preview = approval.actionPreview
+    ? `<pre class="approval-preview">${esc(approval.actionPreview)}</pre>`
+    : '';
+  const disabled = approval.status !== 'pending' ? ' disabled' : '';
+  const selected = approval.id === window._selectedApprovalId ? ' selected' : '';
+  return `
+    <article class="approval-card${selected}" data-id="${esc(approval.id)}">
+      <div class="approval-card-main">
+        <div class="approval-card-title">
+          <span>${esc(approval.title)}</span>
+          ${approvalRiskBadge(approval.risk)}
+        </div>
+        <div class="approval-summary">${esc(approval.summary)}</div>
+        <div class="approval-meta-row">
+          <span class="approval-meta-item">${esc(approvalKindLabel(approval.kind))}</span>
+          <span class="approval-meta-item">${esc(approval.requester || 'system')}</span>
+          ${approval.targetType ? `<span class="approval-meta-item">${esc(approval.targetType)}</span>` : ''}
+          ${approval.correlationId ? `<span class="approval-meta-item">${esc(approval.correlationId)}</span>` : ''}
+          ${expires}
+        </div>
+        ${preview}
+      </div>
+      <div class="approval-card-actions">
+        ${approvalStatusBadge(approval.status)}
+        <button class="btn btn-sm btn-ghost" data-action="deny"${disabled}>Deny</button>
+        <button class="btn btn-sm btn-primary" data-action="approve"${disabled}>Approve</button>
+      </div>
+    </article>`;
+}
+
+function renderApprovalPanel(approval) {
+  if (!approval) {
+    return '<div class="approval-panel empty">Select an approval to inspect provenance.</div>';
+  }
+  const rows = [
+    ['Source', approval.source || 'legacy'],
+    ['Correlation', approval.correlationId || 'none'],
+    ['Policy', approval.policyDecisionId || 'none'],
+    ['Requester', approval.requester || 'system'],
+    ['Target', [approval.targetType, approval.targetId].filter(Boolean).join(' / ') || 'none'],
+    ['Created', approval.createdAt || 'unknown'],
+    ['Expires', approval.expiresAt || 'none'],
+    ['Reviewed', approval.reviewedAt || 'not reviewed'],
+    ['Reviewer', approval.reviewedBy || 'none'],
+  ];
+  return `
+    <aside class="approval-panel">
+      <div class="approval-panel-header">
+        <span>${esc(approvalKindLabel(approval.kind))}</span>
+        ${approvalStatusBadge(approval.status)}
+      </div>
+      <h3>${esc(approval.title)}</h3>
+      <p>${esc(approval.resourceSummary || approval.summary || '')}</p>
+      <div class="approval-provenance-list">
+        ${rows
+          .map(
+            ([label, value]) =>
+              `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`,
+          )
+          .join('')}
+      </div>
+      ${
+        approval.actionPreview
+          ? `<div class="section-label">Action Preview</div><pre class="approval-panel-pre">${esc(approval.actionPreview)}</pre>`
+          : ''
+      }
+      <div class="section-label">Payload</div>
+      <pre class="approval-panel-pre">${esc(prettyPrint(approval.payload || {}))}</pre>
+      ${
+        approval.decisionNote
+          ? `<div class="approval-decision-note">${esc(approval.decisionNote)}</div>`
+          : ''
+      }
+    </aside>`;
+}
+
+async function renderApprovals(el) {
+  const filters = window._approvalFilters || {
+    status: '',
+    risk: '',
+    kind: '',
+    requester: '',
+    targetType: '',
+    correlationId: '',
+    createdFrom: '',
+    createdTo: '',
+  };
+  window._approvalFilters = filters;
+  const query = approvalQueryFromFilters();
+  const approvals = await api(`/approvals?${query}`);
+  const selected =
+    approvals.find((item) => item.id === window._selectedApprovalId) ||
+    approvals.find((item) => item.status === 'pending') ||
+    approvals[0];
+  if (selected) window._selectedApprovalId = selected.id;
+  const pending = approvals.filter((approval) => approval.status === 'pending');
+  const history = approvals.filter((approval) => approval.status !== 'pending');
+  const grouped = pending.reduce((acc, approval) => {
+    const key = `${approval.risk || 'medium'}:${approval.kind}`;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(approval);
+    return acc;
+  }, {});
+  const groupedHtml = Object.entries(grouped)
+    .map(([key, items]) => {
+      const [risk, kind] = key.split(':');
+      return `<section class="approval-group">
+        <div class="approval-group-header">
+          <div><strong>${esc(approvalKindLabel(kind))}</strong><span>${items.length} pending</span></div>
+          ${approvalRiskBadge(risk)}
+        </div>
+        ${items.map(renderApprovalCard).join('')}
+      </section>`;
+    })
+    .join('');
+
+  el.innerHTML = `
+    <div class="page-header">
+      <h2>Approval Inbox</h2>
+      <button class="btn btn-sm btn-ghost" onclick="navigate('approvals')">Refresh</button>
+    </div>
+    <form class="approval-filters" id="approval-filters">
+      <select name="status">
+        <option value="">Any status</option>
+        ${['pending', 'approved', 'denied', 'expired'].map((status) => `<option value="${status}" ${filters.status === status ? 'selected' : ''}>${APPROVAL_STATUS_LABELS[status]}</option>`).join('')}
+      </select>
+      <select name="risk">
+        <option value="">Any risk</option>
+        ${['low', 'medium', 'high'].map((risk) => `<option value="${risk}" ${filters.risk === risk ? 'selected' : ''}>${risk}</option>`).join('')}
+      </select>
+      <select name="kind">
+        <option value="">Any kind</option>
+        ${Object.entries(APPROVAL_KIND_LABELS).map(([kind, label]) => `<option value="${kind}" ${filters.kind === kind ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+      </select>
+      <input name="requester" value="${esc(filters.requester || '')}" placeholder="Requester">
+      <input name="targetType" value="${esc(filters.targetType || '')}" placeholder="Target type">
+      <input name="correlationId" value="${esc(filters.correlationId || '')}" placeholder="Correlation ID">
+      <input name="createdFrom" type="date" value="${esc(filters.createdFrom || '')}" aria-label="Created from">
+      <input name="createdTo" type="date" value="${esc(filters.createdTo || '')}" aria-label="Created to">
+      <button class="btn btn-sm btn-primary" type="submit">Filter</button>
+      <button class="btn btn-sm btn-ghost" type="button" onclick="resetApprovalFilters()">Reset</button>
+    </form>
+    <div class="approval-inbox">
+      <div class="approval-main">
+        <div class="approval-section-head">
+          <h3>Pending</h3>
+          <span>${pending.length} awaiting review</span>
+        </div>
+        ${pending.length ? groupedHtml : '<div class="card empty">No pending approvals match these filters.</div>'}
+        <div class="approval-section-head">
+          <h3>History</h3>
+          <span>${history.length} reviewed</span>
+        </div>
+        ${
+          history.length
+            ? `<div class="approval-history">${history.map(renderApprovalCard).join('')}</div>`
+            : '<div class="card empty">No reviewed approvals match these filters.</div>'
+        }
+      </div>
+      ${renderApprovalPanel(selected)}
+    </div>`;
+
+  document.getElementById('approval-filters').onsubmit = (event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    window._approvalFilters = Object.fromEntries(data.entries());
+    navigate('approvals');
+  };
+  el.querySelector('.approval-inbox').addEventListener('click', (event) => {
+    if (!(event.target instanceof Element)) return;
+    const actionButton = event.target.closest('[data-action]');
+    if (actionButton) {
+      const card = actionButton.closest('.approval-card');
+      const id = card?.dataset.id;
+      if (!id) return;
+      reviewInboxApproval(id, actionButton.dataset.action);
+      return;
+    }
+    const card = event.target.closest('.approval-card');
+    if (card?.dataset.id) selectApproval(card.dataset.id);
+  });
+}
+
+window.selectApproval = function (id) {
+  window._selectedApprovalId = id;
+  document
+    .querySelectorAll('.approval-card')
+    .forEach((card) => card.classList.toggle('selected', card.dataset.id === id));
+  if (currentPage === 'approvals') navigate('approvals');
+};
+
+window.resetApprovalFilters = function () {
+  window._approvalFilters = {};
+  navigate('approvals');
+};
+
+async function reviewInboxApproval(id, decision) {
+  const note = prompt(`${decision === 'approve' ? 'Approve' : 'Deny'} note`, '');
+  try {
+    const data = await api(`/approvals/${encodeURIComponent(id)}/${decision}`, {
+      method: 'POST',
+      body: JSON.stringify({ note: note || undefined }),
+    });
+    if (data.error) throw new Error(data.error);
+    toast(`Approval ${decision === 'approve' ? 'approved' : 'denied'}`, 'success');
+    navigate('approvals');
+  } catch (e) {
+    toast('Approval review failed: ' + e.message, 'error');
+  }
+}
+
+window.approveInboxApproval = (id) => reviewInboxApproval(id, 'approve');
+window.denyInboxApproval = (id) => reviewInboxApproval(id, 'deny');
 
 async function renderUptime(el) {
   const [monitors, groups] = await Promise.all([
@@ -1279,8 +1599,13 @@ async function renderChat(el) {
       const history = document.getElementById('chat-progress-history');
       if (history) {
         const entry = document.createElement('div');
-        entry.className = 'phase-entry' + (msg.data.pct >= 100 ? ' done' : ' active');
-        entry.innerHTML = '<span style="font-size:10px">' + (msg.data.pct >= 100 ? '\u2713' : '\u25CF') + '</span> ' + esc(msg.data.message || msg.data.phase);
+        entry.className =
+          'phase-entry' + (msg.data.pct >= 100 ? ' done' : ' active');
+        entry.innerHTML =
+          '<span style="font-size:10px">' +
+          (msg.data.pct >= 100 ? '\u2713' : '\u25CF') +
+          '</span> ' +
+          esc(msg.data.message || msg.data.phase);
         history.appendChild(entry);
         history.classList.add('visible');
       }
@@ -1358,7 +1683,10 @@ function updateProviderBadge(groupJid) {
 
 window.toggleProviderPopover = function () {
   const existing = document.getElementById('chat-provider-popover');
-  if (existing) { existing.remove(); return; }
+  if (existing) {
+    existing.remove();
+    return;
+  }
 
   const groupJid = document.getElementById('chat-group-select')?.value;
   if (!groupJid) return;
@@ -1426,13 +1754,22 @@ window.saveProvider = async function () {
   if (!groupJid || !provider) return;
 
   try {
-    const group = window._chatGroups?.find(g => g.jid === groupJid);
+    const group = window._chatGroups?.find((g) => g.jid === groupJid);
     const existingConfig = group?.containerConfig || {};
     await api('/groups/' + encodeURIComponent(groupJid), {
       method: 'PUT',
-      body: JSON.stringify({ containerConfig: { ...existingConfig, provider, model: model || undefined } }),
+      body: JSON.stringify({
+        containerConfig: {
+          ...existingConfig,
+          provider,
+          model: model || undefined,
+        },
+      }),
     });
-    toast('Provider updated to ' + provider + '/' + (model || 'auto'), 'success');
+    toast(
+      'Provider updated to ' + provider + '/' + (model || 'auto'),
+      'success',
+    );
     document.getElementById('chat-provider-popover')?.remove();
     updateProviderBadge(groupJid);
   } catch (e) {
@@ -1453,7 +1790,8 @@ window.approveApproval = async function (id, groupJid) {
     });
     const card = document.getElementById('approval-card-' + id);
     if (card) {
-      card.querySelector('.chat-approval-header').textContent = '\u2713 Approved';
+      card.querySelector('.chat-approval-header').textContent =
+        '\u2713 Approved';
       card.querySelector('.chat-approval-actions')?.remove();
       card.style.borderColor = 'var(--success, #22c55e)';
     }
@@ -1893,7 +2231,14 @@ async function renderTasks(el) {
       'claude-sonnet-4-6',
       'claude-haiku-4-5-20251001',
     ],
-    codex: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2', 'o4-mini', 'o3-mini', 'gpt-4.1'],
+    codex: [
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.2',
+      'o4-mini',
+      'o3-mini',
+      'gpt-4.1',
+    ],
     opencode: ['opencode/grok-code-fast-1'],
     ollama: ['llama3', 'llama3.1', 'mistral', 'codestral', 'gemma4:e2b'],
     openrouter: [
@@ -2033,7 +2378,7 @@ async function renderTasks(el) {
 
   const form = document.getElementById('task-create-form');
   if (form)
-      form.onsubmit = async (e) => {
+    form.onsubmit = async (e) => {
       e.preventDefault();
       const [groupFolder, chatJid] = document
         .getElementById('task-group')
@@ -3067,7 +3412,12 @@ window.viewConversation = async (folder, filename) => {
   }
 };
 
-function memoryKnowledgeTimelineItems({ auditData, memories, drafts, limit = 25 }) {
+function memoryKnowledgeTimelineItems({
+  auditData,
+  memories,
+  drafts,
+  limit = 25,
+}) {
   const items = [];
   const seen = new Set();
   const addItem = (item) => {
@@ -3233,15 +3583,21 @@ async function renderMemoryKnowledgeTimeline(el) {
 
 // Memory
 async function renderMemory(el) {
-  const [memData, groups, auditData, structuredMemories, journalEntries, drafts] =
-    await Promise.all([
-      api('/files/memory'),
-      api('/groups'),
-      api('/audit?limit=50').catch(() => []),
-      api('/memory?limit=100').catch(() => []),
-      api('/journal/entries?limit=10').catch(() => []),
-      api('/skills/drafts').catch(() => []),
-    ]);
+  const [
+    memData,
+    groups,
+    auditData,
+    structuredMemories,
+    journalEntries,
+    drafts,
+  ] = await Promise.all([
+    api('/files/memory'),
+    api('/groups'),
+    api('/audit?limit=50').catch(() => []),
+    api('/memory?limit=100').catch(() => []),
+    api('/journal/entries?limit=10').catch(() => []),
+    api('/skills/drafts').catch(() => []),
+  ]);
 
   const timelineItems = memoryKnowledgeTimelineItems({
     auditData,
@@ -3696,7 +4052,8 @@ window.clearWebhookEvents = async () => {
 // Terminal
 async function renderTerminal(el) {
   if ((window._userRole || 'owner') !== 'owner') {
-    el.innerHTML = '<div class="card"><div class="empty">Terminal access requires owner role.</div></div>';
+    el.innerHTML =
+      '<div class="card"><div class="empty">Terminal access requires owner role.</div></div>';
     return;
   }
 
@@ -3804,10 +4161,18 @@ async function renderTerminal(el) {
   }
 
   // --- Load xterm.js ---
-  await loadCss('https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css');
-  await loadScript('https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js');
-  await loadScript('https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js');
-  await loadScript('https://cdn.jsdelivr.net/npm/@xterm/addon-search@0.16.0/lib/addon-search.min.js');
+  await loadCss(
+    'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css',
+  );
+  await loadScript(
+    'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js',
+  );
+  await loadScript(
+    'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js',
+  );
+  await loadScript(
+    'https://cdn.jsdelivr.net/npm/@xterm/addon-search@0.16.0/lib/addon-search.min.js',
+  );
 
   const term = new window.Terminal({
     cursorBlink: true,
@@ -3826,7 +4191,11 @@ async function renderTerminal(el) {
 
   // Ctrl+Shift+F inline search
   term.onKey((e) => {
-    if (e.key === 'F' && (e.domEvent.ctrlKey || e.domEvent.metaKey) && e.domEvent.shiftKey) {
+    if (
+      e.key === 'F' &&
+      (e.domEvent.ctrlKey || e.domEvent.metaKey) &&
+      e.domEvent.shiftKey
+    ) {
       const query = prompt('Search terminal (Ctrl+G next, Shift+Ctrl+G prev):');
       if (query) searchAddon.findNext(query);
     }
@@ -3881,13 +4250,17 @@ async function renderTerminal(el) {
 window.switchTermPane = function (side, tabId) {
   const tabs = document.getElementById(`pane-${side}-tabs`);
   if (!tabs) return;
-  tabs.querySelectorAll('.pane-tab').forEach(t => t.classList.remove('active'));
+  tabs
+    .querySelectorAll('.pane-tab')
+    .forEach((t) => t.classList.remove('active'));
   const tab = tabs.querySelector(`[data-tab="${tabId}"]`);
   if (tab) tab.classList.add('active');
 
   const contents = document.getElementById(`pane-${side}-content`);
   if (!contents) return;
-  contents.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+  contents
+    .querySelectorAll('.tab-content')
+    .forEach((c) => (c.style.display = 'none'));
   const target = document.getElementById(`${side}-${tabId}`);
   if (target) {
     target.style.display = '';
@@ -3902,26 +4275,30 @@ async function loadTerminalFileTree() {
   try {
     const repos = await api('/files/repos');
     if (repos.length === 0) {
-      el.innerHTML = '<div style="padding:8px;color:var(--text-muted)">No repos mounted</div>';
+      el.innerHTML =
+        '<div style="padding:8px;color:var(--text-muted)">No repos mounted</div>';
       return;
     }
     const repo = repos[0].name;
     const tree = await api(`/files/repos/${encodeURIComponent(repo)}/tree`);
     el.innerHTML = `<div class="repo-header">${esc(repo)}</div>${renderTermTree(tree, '', repo)}`;
   } catch {
-    el.innerHTML = '<div style="padding:8px;color:var(--text-muted)">Failed to load</div>';
+    el.innerHTML =
+      '<div style="padding:8px;color:var(--text-muted)">Failed to load</div>';
   }
 }
 
 function renderTermTree(items, prefix, repo) {
   if (!items || !Array.isArray(items)) return '';
-  return items.map(item => {
-    const fullPath = prefix ? `${prefix}/${item.name}` : item.name;
-    if (item.type === 'dir') {
-      return `<details style="padding-left:10px"><summary style="cursor:pointer;padding:2px 0;font-size:12px;color:var(--text-secondary);list-style:none">${esc(item.name)}/</summary>${renderTermTree(item.children || [], fullPath, repo)}</details>`;
-    }
-    return `<div class="tree-item" onclick="openTermFile('${esc(repo)}','${esc(fullPath)}')">${esc(item.name)}</div>`;
-  }).join('');
+  return items
+    .map((item) => {
+      const fullPath = prefix ? `${prefix}/${item.name}` : item.name;
+      if (item.type === 'dir') {
+        return `<details style="padding-left:10px"><summary style="cursor:pointer;padding:2px 0;font-size:12px;color:var(--text-secondary);list-style:none">${esc(item.name)}/</summary>${renderTermTree(item.children || [], fullPath, repo)}</details>`;
+      }
+      return `<div class="tree-item" onclick="openTermFile('${esc(repo)}','${esc(fullPath)}')">${esc(item.name)}</div>`;
+    })
+    .join('');
 }
 
 window.openTermFile = function (repo, path) {
@@ -3939,9 +4316,10 @@ async function loadTerminalLogs() {
   if (!el) return;
   try {
     const logs = await api('/logs/system?lines=100');
-    el.innerHTML = logs.lines && logs.lines.length
-      ? logs.lines.map(l => colorizeLog([l])).join('\n')
-      : 'No log entries';
+    el.innerHTML =
+      logs.lines && logs.lines.length
+        ? logs.lines.map((l) => colorizeLog([l])).join('\n')
+        : 'No log entries';
     el.scrollTop = el.scrollHeight;
   } catch {
     el.innerHTML = 'Failed to load logs';
@@ -4186,6 +4564,206 @@ async function renderSystem(el) {
     </div>`;
 }
 
+function auditQueryFromFilters() {
+  const filters = window._auditFilters || {};
+  const params = new URLSearchParams();
+  for (const key of [
+    'actor',
+    'actionType',
+    'resource',
+    'decision',
+    'correlationId',
+    'from',
+    'to',
+  ]) {
+    if (filters[key]) params.set(key, filters[key]);
+  }
+  params.set('limit', filters.limit || '150');
+  return params.toString();
+}
+
+function auditDecisionBadge(decision) {
+  const value = decision || 'allowed';
+  const cls =
+    value === 'denied' || value === 'error'
+      ? 'badge-error'
+      : value === 'simulated'
+        ? 'badge-warning'
+        : value === 'approved' || value === 'allowed'
+          ? 'badge-success'
+          : 'badge-muted';
+  return `<span class="badge ${cls}">${esc(value)}</span>`;
+}
+
+function renderAuditEventRow(event, selectedId) {
+  const action = event.actionType || event.action || 'unknown';
+  const resource = event.resource || event.details || '';
+  return `<button class="audit-event ${event.id === selectedId ? 'selected' : ''}" data-id="${esc(event.id || event.timestamp)}">
+    <span>${formatTime(event.timestamp)}</span>
+    <strong>${esc(action)}</strong>
+    ${auditDecisionBadge(event.decision || (action.includes('fail') ? 'error' : 'allowed'))}
+    <small>${esc(resource)}</small>
+  </button>`;
+}
+
+function renderAuditDetail(event, replay) {
+  if (!event) return '<aside class="audit-detail empty">Select an audit event</aside>';
+  const context = event.context || {
+    ip: event.ip,
+    details: event.details,
+    userAgent: event.userAgent,
+  };
+  return `<aside class="audit-detail">
+    <div class="audit-detail-head">
+      <div>
+        <h3>${esc(event.actionType || event.action || 'Audit event')}</h3>
+        <span>${esc(event.resource || event.details || '')}</span>
+      </div>
+      ${auditDecisionBadge(event.decision || 'allowed')}
+    </div>
+    <div class="audit-meta-grid">
+      ${[
+        ['Actor', event.actor || event.ip || 'dashboard'],
+        ['Actor ID', event.actorId || '-'],
+        ['Correlation', event.correlationId || '-'],
+        ['Duration', event.durationMs != null ? `${event.durationMs}ms` : '-'],
+        ['Error', event.error || '-'],
+      ]
+        .map(([label, value]) => `<div><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`)
+        .join('')}
+    </div>
+    <div class="section-label">Context</div>
+    <pre class="audit-json">${esc(prettyPrint(context))}</pre>
+    ${
+      replay?.events?.length
+        ? `<div class="section-label">Correlation Replay</div>
+          <div class="audit-replay">
+            ${replay.events
+              .map(
+                (item) => `<div><span>${formatTime(item.timestamp)}</span><strong>${esc(item.actionType)}</strong>${auditDecisionBadge(item.decision)}</div>`,
+              )
+              .join('')}
+          </div>`
+        : ''
+    }
+  </aside>`;
+}
+
+async function renderAudit(el) {
+  const filters = window._auditFilters || {
+    actor: '',
+    actionType: '',
+    resource: '',
+    decision: '',
+    correlationId: '',
+    from: '',
+    to: '',
+    limit: '150',
+  };
+  window._auditFilters = filters;
+  const events = await api(`/runtime-audit?${auditQueryFromFilters()}`);
+  const selected =
+    events.find((event) => event.id === window._selectedAuditId) || events[0];
+  if (selected?.id) window._selectedAuditId = selected.id;
+  const replay =
+    selected?.correlationId && selected.correlationId !== '-'
+      ? await api(`/runtime-audit/replay/${encodeURIComponent(selected.correlationId)}`).catch(() => null)
+      : null;
+
+  el.innerHTML = `
+    <div class="page-header">
+      <h2>Audit</h2>
+      <div class="page-actions">
+        <button class="btn btn-sm btn-ghost" onclick="navigate('audit')">Refresh</button>
+        <button class="btn btn-sm btn-primary" onclick="exportAuditJson()">Export JSON</button>
+      </div>
+    </div>
+    <form class="audit-filters" id="audit-filters">
+      <input name="actor" value="${esc(filters.actor || '')}" placeholder="Actor">
+      <input name="actionType" value="${esc(filters.actionType || '')}" placeholder="Action type">
+      <input name="resource" value="${esc(filters.resource || '')}" placeholder="Resource">
+      <select name="decision">
+        <option value="">Any decision</option>
+        ${['allowed', 'approved', 'requires_approval', 'denied', 'simulated', 'error'].map((decision) => `<option value="${decision}" ${filters.decision === decision ? 'selected' : ''}>${decision}</option>`).join('')}
+      </select>
+      <input name="correlationId" value="${esc(filters.correlationId || '')}" placeholder="Correlation ID">
+      <input name="from" type="datetime-local" value="${esc(filters.from || '')}" aria-label="From">
+      <input name="to" type="datetime-local" value="${esc(filters.to || '')}" aria-label="To">
+      <button class="btn btn-sm btn-primary" type="submit">Filter</button>
+      <button class="btn btn-sm btn-ghost" type="button" onclick="resetAuditFilters()">Reset</button>
+    </form>
+    <div class="audit-layout">
+      <section class="audit-list">
+        ${events.length ? events.map((event) => renderAuditEventRow(event, selected?.id)).join('') : '<div class="empty">No audit events match these filters.</div>'}
+      </section>
+      ${renderAuditDetail(selected, replay)}
+    </div>
+    <div class="audit-simulator">
+      <div class="card-title">Policy Simulator</div>
+      <form id="policy-simulator-form" class="audit-sim-grid">
+        <input name="actor" placeholder="Actor" value="dashboard">
+        <input name="actionType" placeholder="Action type" value="coding.open_pr">
+        <input name="resource" placeholder="Resource" value="henrikogaard/nanocrab">
+        <label class="audit-checkbox"><input type="checkbox" name="dryRun"> Dry-run</label>
+        <textarea name="context" placeholder='{"branch":"nanocrab/task"}'>{"branch":"nanocrab/task"}</textarea>
+        <button class="btn btn-sm btn-primary" type="submit">Simulate</button>
+      </form>
+      <pre class="audit-json" id="policy-simulator-output"></pre>
+    </div>`;
+
+  document.getElementById('audit-filters').onsubmit = (event) => {
+    event.preventDefault();
+    window._auditFilters = Object.fromEntries(new FormData(event.currentTarget).entries());
+    navigate('audit');
+  };
+  document.querySelector('.audit-list')?.addEventListener('click', (event) => {
+    const row = event.target.closest('.audit-event');
+    if (!row) return;
+    window._selectedAuditId = row.dataset.id;
+    navigate('audit');
+  });
+  document.getElementById('policy-simulator-form').onsubmit = async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    let context = {};
+    try {
+      context = data.context ? JSON.parse(data.context) : {};
+    } catch {
+      toast('Simulator context must be valid JSON', 'error');
+      return;
+    }
+    const result = await api('/runtime-audit/simulate', {
+      method: 'POST',
+      body: JSON.stringify({
+        actor: data.actor,
+        actionType: data.actionType,
+        resource: data.resource,
+        dryRun: data.dryRun === 'on',
+        context,
+      }),
+    });
+    document.getElementById('policy-simulator-output').textContent = prettyPrint(result);
+  };
+}
+
+window.resetAuditFilters = function () {
+  window._auditFilters = {};
+  navigate('audit');
+};
+
+window.exportAuditJson = async function () {
+  const payload = await api(`/runtime-audit/export?${auditQueryFromFilters()}`);
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `nanocrab-audit-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
 async function renderSecurity(el) {
   const [allowlist, audit, health] = await Promise.all([
     api('/allowlist'),
@@ -4223,7 +4801,7 @@ async function renderSecurity(el) {
     {
       name: 'Audit Logging',
       status: audit.length > 0 || true,
-      desc: 'All admin actions logged to logs/admin-audit.log',
+      desc: 'Admin and high-impact runtime actions are available in the Audit dashboard',
     },
     {
       name: 'IP Allowlist',
@@ -4262,8 +4840,12 @@ async function renderSecurity(el) {
   const score = Math.round((passCount / totalCount) * 100);
 
   // Failed login attempts from audit
-  const failedLogins = audit.filter((a) => a.action === 'login_failed');
-  const recentBlocked = audit.filter((a) => a.action === 'ip_blocked');
+  const failedLogins = audit.filter(
+    (a) => (a.action || a.actionType) === 'login_failed',
+  );
+  const recentBlocked = audit.filter(
+    (a) => (a.action || a.actionType) === 'ip_blocked',
+  );
 
   el.innerHTML = `
     <div class="page-header"><h2>Security</h2></div>
@@ -4337,9 +4919,9 @@ async function renderSecurity(el) {
             .map(
               (a) => `<tr>
             <td style="white-space:nowrap;font-size:11px">${formatTime(a.timestamp)}</td>
-            <td><span class="badge ${a.action.includes('fail') || a.action.includes('block') ? 'badge-error' : a.action.includes('success') || a.action.includes('changed') || a.action.includes('enabled') ? 'badge-success' : 'badge-muted'}">${esc(a.action)}</span></td>
-            <td style="font-family:var(--mono);font-size:11px">${esc(a.ip)}</td>
-            <td style="font-size:11px;max-width:250px;overflow:hidden;text-overflow:ellipsis">${esc(a.details || '')}</td>
+            <td><span class="badge ${(a.action || a.actionType || '').includes('fail') || (a.action || a.actionType || '').includes('block') ? 'badge-error' : (a.action || a.actionType || '').includes('success') || (a.action || a.actionType || '').includes('changed') || (a.action || a.actionType || '').includes('enabled') ? 'badge-success' : 'badge-muted'}">${esc(a.action || a.actionType)}</span></td>
+            <td style="font-family:var(--mono);font-size:11px">${esc(a.ip || a.actor || '')}</td>
+            <td style="font-size:11px;max-width:250px;overflow:hidden;text-overflow:ellipsis">${esc(a.details || a.resource || '')}</td>
             <td style="font-size:10px;max-width:150px;overflow:hidden;text-overflow:ellipsis;color:var(--text-muted)">${esc((a.userAgent || '').slice(0, 60))}</td>
           </tr>`,
             )
@@ -5016,7 +5598,8 @@ window.viewSession = async function (group, sessionId) {
 window.renderSessionDetail = async function (el) {
   const params = window._sessionDetailParams;
   if (!params || !params.group || !params.sessionId) {
-    el.innerHTML = '<div class="card"><div class="empty">No session specified</div></div>';
+    el.innerHTML =
+      '<div class="card"><div class="empty">No session specified</div></div>';
     return;
   }
 
@@ -5036,7 +5619,9 @@ window.renderSessionDetail = async function (el) {
   `;
 
   try {
-    const data = await api(`/sessions/${encodeURIComponent(params.group)}/${encodeURIComponent(params.sessionId)}/detail`);
+    const data = await api(
+      `/sessions/${encodeURIComponent(params.group)}/${encodeURIComponent(params.sessionId)}/detail`,
+    );
     const transcriptEl = document.getElementById('session-transcript');
     if (transcriptEl) transcriptEl.dataset.stats = JSON.stringify(data.stats);
     renderSessionStats(data.stats);
@@ -5062,7 +5647,9 @@ const DEFAULT_STATS_VISIBILITY = {
 function getStatVisibility() {
   try {
     const saved = localStorage.getItem('session_stat_visibility');
-    return saved ? { ...DEFAULT_STATS_VISIBILITY, ...JSON.parse(saved) } : DEFAULT_STATS_VISIBILITY;
+    return saved
+      ? { ...DEFAULT_STATS_VISIBILITY, ...JSON.parse(saved) }
+      : DEFAULT_STATS_VISIBILITY;
   } catch {
     return DEFAULT_STATS_VISIBILITY;
   }
@@ -5082,16 +5669,31 @@ function renderSessionStats(stats) {
     duration: { label: 'Duration', value: formatDuration(stats.duration) },
     tools: { label: 'Tools', value: stats.toolCount },
     model: { label: 'Model', value: stats.model },
-    tokens: { label: 'Tokens', value: stats.tokenCount ? stats.tokenCount.toLocaleString() : null },
-    cost: { label: 'Cost', value: stats.cost ? '$' + stats.cost.toFixed(2) : null },
+    tokens: {
+      label: 'Tokens',
+      value: stats.tokenCount ? stats.tokenCount.toLocaleString() : null,
+    },
+    cost: {
+      label: 'Cost',
+      value: stats.cost ? '$' + stats.cost.toFixed(2) : null,
+    },
     errors: { label: 'Errors', value: stats.errorCount || null },
-    sessionId: { label: 'Session', value: stats.id ? stats.id.slice(0, 8) + '...' : null },
-    created: { label: 'Created', value: stats.createdAt ? formatTime(stats.createdAt) : null },
+    sessionId: {
+      label: 'Session',
+      value: stats.id ? stats.id.slice(0, 8) + '...' : null,
+    },
+    created: {
+      label: 'Created',
+      value: stats.createdAt ? formatTime(stats.createdAt) : null,
+    },
   };
 
   const visibleStats = Object.entries(statDefs)
     .filter(([key, def]) => visibility[key] && def.value !== null)
-    .map(([key, def]) => `<span class="session-stat"><span class="session-stat-label">${def.label}:</span><span class="session-stat-value">${esc(String(def.value))}</span></span>`)
+    .map(
+      ([key, def]) =>
+        `<span class="session-stat"><span class="session-stat-label">${def.label}:</span><span class="session-stat-value">${esc(String(def.value))}</span></span>`,
+    )
     .join('');
 
   el.innerHTML = `
@@ -5112,17 +5714,24 @@ function formatDuration(seconds) {
 
 window.toggleStatsMenu = function () {
   const existing = document.getElementById('session-stats-menu');
-  if (existing) { existing.remove(); return; }
+  if (existing) {
+    existing.remove();
+    return;
+  }
 
   const visibility = getStatVisibility();
   const menu = document.createElement('div');
   menu.id = 'session-stats-menu';
   menu.className = 'session-stats-menu';
-  menu.innerHTML = Object.keys(DEFAULT_STATS_VISIBILITY).map(key =>
-    `<label><input type="checkbox" ${visibility[key] ? 'checked' : ''} data-key="${key}"> ${key.charAt(0).toUpperCase() + key.slice(1)}</label>`
-  ).join('') +
-  '<div style="padding:4px 8px 0;display:flex;gap:6px;justify-content:flex-end;border-top:1px solid var(--border);margin-top:4px;padding-top:6px">' +
-  '<button class="btn btn-sm btn-primary" onclick="saveStatsMenu()">Done</button></div>';
+  menu.innerHTML =
+    Object.keys(DEFAULT_STATS_VISIBILITY)
+      .map(
+        (key) =>
+          `<label><input type="checkbox" ${visibility[key] ? 'checked' : ''} data-key="${key}"> ${key.charAt(0).toUpperCase() + key.slice(1)}</label>`,
+      )
+      .join('') +
+    '<div style="padding:4px 8px 0;display:flex;gap:6px;justify-content:flex-end;border-top:1px solid var(--border);margin-top:4px;padding-top:6px">' +
+    '<button class="btn btn-sm btn-primary" onclick="saveStatsMenu()">Done</button></div>';
 
   const bar = document.getElementById('session-stats-bar-inner');
   if (bar) bar.appendChild(menu);
@@ -5130,9 +5739,11 @@ window.toggleStatsMenu = function () {
 
 window.saveStatsMenu = function () {
   const v = {};
-  document.querySelectorAll('#session-stats-menu input[type="checkbox"]').forEach(cb => {
-    v[cb.dataset.key] = cb.checked;
-  });
+  document
+    .querySelectorAll('#session-stats-menu input[type="checkbox"]')
+    .forEach((cb) => {
+      v[cb.dataset.key] = cb.checked;
+    });
   saveStatVisibility(v);
   const menu = document.getElementById('session-stats-menu');
   if (menu) menu.remove();
@@ -5151,9 +5762,12 @@ function renderSessionTranscript(messages, stats) {
     return;
   }
 
-  el.innerHTML = '<div class="session-transcript">' + messages.map((m, idx) => {
-    if (m.role === 'user') {
-      return `
+  el.innerHTML =
+    '<div class="session-transcript">' +
+    messages
+      .map((m, idx) => {
+        if (m.role === 'user') {
+          return `
         <div class="session-msg session-msg-user">
           <div class="session-msg-header" style="justify-content:flex-end;padding-right:4px">
             ${m.timestamp ? `<span style="font-size:11px;color:var(--text-muted)">${formatTime(m.timestamp)}</span>` : ''}
@@ -5161,8 +5775,10 @@ function renderSessionTranscript(messages, stats) {
           </div>
           <div class="session-msg-content">${esc(m.content)}</div>
         </div>`;
-    } else if (m.role === 'assistant') {
-      const toolCards = (m.toolCalls || []).map(tc => `
+        } else if (m.role === 'assistant') {
+          const toolCards = (m.toolCalls || [])
+            .map(
+              (tc) => `
         <div class="chat-tool-call" style="margin:6px 0" onclick="this.querySelector('.chat-tool-call-body').classList.toggle('expanded')">
           <div class="chat-tool-call-header">
             <span class="tool-icon">&#x1F527;</span>
@@ -5175,9 +5791,11 @@ function renderSessionTranscript(messages, stats) {
             ${tc.output ? `<div class="section-label" style="margin-top:8px">Result</div><pre>${esc(prettyPrint(tc.output))}</pre>` : ''}
           </div>
         </div>
-      `).join('');
+      `,
+            )
+            .join('');
 
-      return `
+          return `
         <div class="session-msg session-msg-assistant">
           <div class="session-msg-header">
             <span class="session-msg-role">Assistant</span>
@@ -5187,13 +5805,15 @@ function renderSessionTranscript(messages, stats) {
           <div class="session-msg-content">${m.content ? esc(m.content) : ''}</div>
           ${toolCards}
         </div>`;
-    } else {
-      return `
+        } else {
+          return `
         <div class="session-msg session-msg-system">
           <div class="session-msg-content" style="font-size:11px;color:var(--text-muted);text-align:center;padding:4px 14px;border:1px solid var(--border);border-radius:12px;display:inline-block;background:var(--surface)">${esc(m.content || m.type || '')}</div>
         </div>`;
-    }
-  }).join('') + '</div>';
+        }
+      })
+      .join('') +
+    '</div>';
 }
 
 // Backup
@@ -5417,7 +6037,10 @@ window.editTask = async (id) => {
   const models = window._taskProviderModels || {};
   const providerOptions = Object.values(defs)
     .filter((p) => p && p.selectable !== false)
-    .map((p) => `<option value="${esc(p.id)}" ${task.provider === p.id ? 'selected' : ''}>${esc(p.name || p.id)}</option>`)
+    .map(
+      (p) =>
+        `<option value="${esc(p.id)}" ${task.provider === p.id ? 'selected' : ''}>${esc(p.name || p.id)}</option>`,
+    )
     .join('');
   const modelsForProvider = models[task.provider || ''] || [];
   const modelOptions = `<option value="">Inherit</option>${modelsForProvider.map((m) => `<option value="${esc(m)}" ${task.model === m ? 'selected' : ''}>${esc(m)}</option>`).join('')}`;
@@ -6578,7 +7201,9 @@ async function renderMonitoring(el) {
               </div>
               <div class="table-wrap"><table>
                 <thead><tr><th>Profile</th><th>Provider</th><th>Model</th><th>Status</th><th>Last Probe</th><th>Capabilities</th></tr></thead>
-                <tbody>${health.entries.map((e) => `
+                <tbody>${health.entries
+                  .map(
+                    (e) => `
                   <tr>
                     <td style="font-weight:500;color:var(--text)">${esc(e.purpose)}</td>
                     <td><span class="badge badge-accent">${esc(e.provider)}</span></td>
@@ -6586,12 +7211,16 @@ async function renderMonitoring(el) {
                     <td><span class="status-dot ${e.ok ? 'online' : 'offline'}" style="margin-right:4px"></span><span class="badge ${e.ok ? 'badge-success' : 'badge-error'}" style="font-size:10px">${e.ok ? 'Ready' : 'Failed'}</span>${e.errorMessage ? `<div style="font-size:10px;color:var(--error);margin-top:2px">${esc(e.errorMessage)}</div>` : ''}</td>
                     <td style="font-size:11px;color:var(--text-muted)">${e.lastProbeAt ? formatTime(e.lastProbeAt) : '-'}</td>
                     <td>${e.capabilities.length > 0 ? e.capabilities.map((c) => `<span class="badge badge-info" style="font-size:9px">${esc(c)}</span>`).join(' ') : '<span class="badge badge-muted" style="font-size:9px">unprobed</span>'}</td>
-                  </tr>`).join('')}
+                  </tr>`,
+                  )
+                  .join('')}
                 </tbody>
               </table></div>
             </div>`;
         }
-      } catch { /* provider health not available */ }
+      } catch {
+        /* provider health not available */
+      }
     } catch {}
 
     // Load history
@@ -7236,11 +7865,15 @@ window.runTerminalSearch = async function () {
   const query = input?.value?.trim();
 
   if (!query) {
-    if (resultsEl) resultsEl.innerHTML = '<div style="color:var(--text-muted);padding:12px;text-align:center;font-size:12px">Enter a query to search</div>';
+    if (resultsEl)
+      resultsEl.innerHTML =
+        '<div style="color:var(--text-muted);padding:12px;text-align:center;font-size:12px">Enter a query to search</div>';
     return;
   }
 
-  if (resultsEl) resultsEl.innerHTML = '<div style="padding:12px;text-align:center;font-size:12px;color:var(--text-muted)">Searching...</div>';
+  if (resultsEl)
+    resultsEl.innerHTML =
+      '<div style="padding:12px;text-align:center;font-size:12px;color:var(--text-muted)">Searching...</div>';
 
   try {
     const body = { query };
@@ -7257,11 +7890,17 @@ window.runTerminalSearch = async function () {
     if (!resultsEl) return;
 
     if (results.length === 0) {
-      resultsEl.innerHTML = '<div style="color:var(--text-muted);padding:16px;text-align:center;font-size:12px">No results found for <strong>' + esc(query) + '</strong></div>';
+      resultsEl.innerHTML =
+        '<div style="color:var(--text-muted);padding:16px;text-align:center;font-size:12px">No results found for <strong>' +
+        esc(query) +
+        '</strong></div>';
       return;
     }
 
-    resultsEl.innerHTML = results.map((r, i) => `
+    resultsEl.innerHTML =
+      results
+        .map(
+          (r, i) => `
       <div class="search-result-item" onclick="viewTerminalTranscript('${esc(r.sessionId)}')">
         <div class="search-result-line">${esc(truncate(r.text, 100))}</div>
         <div class="search-result-meta">
@@ -7269,23 +7908,37 @@ window.runTerminalSearch = async function () {
         </div>
         <div class="search-result-context">${esc(truncate(r.context, 200))}</div>
       </div>
-    `).join('') +
-    '<div style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted)">' + results.length + ' result' + (results.length !== 1 ? 's' : '') + '</div>';
+    `,
+        )
+        .join('') +
+      '<div style="padding:8px;text-align:center;font-size:11px;color:var(--text-muted)">' +
+      results.length +
+      ' result' +
+      (results.length !== 1 ? 's' : '') +
+      '</div>';
   } catch (e) {
-    if (resultsEl) resultsEl.innerHTML = '<div style="color:var(--error);padding:12px;text-align:center;font-size:12px">Search failed: ' + esc(e.message) + '</div>';
+    if (resultsEl)
+      resultsEl.innerHTML =
+        '<div style="color:var(--error);padding:12px;text-align:center;font-size:12px">Search failed: ' +
+        esc(e.message) +
+        '</div>';
   }
 };
 
 window.viewTerminalTranscript = async function (sessionId) {
   try {
-    const data = await api('/sessions/terminal/' + encodeURIComponent(sessionId) + '/transcript');
+    const data = await api(
+      '/sessions/terminal/' + encodeURIComponent(sessionId) + '/transcript',
+    );
     // Switch to left pane terminal tab
     window.switchTermPane('left', 'terminal');
     const container = document.getElementById('terminal-container');
     if (activeTerminal && activeTerminal.term) {
       activeTerminal.term.reset();
       activeTerminal.term.write((data.content || '').slice(-50000));
-      activeTerminal.term.write('\r\n\r\n[END OF SESSION — ' + esc(sessionId) + ']\r\n');
+      activeTerminal.term.write(
+        '\r\n\r\n[END OF SESSION — ' + esc(sessionId) + ']\r\n',
+      );
     }
     toast('Loaded session: ' + sessionId, 'info');
   } catch (e) {
@@ -7295,7 +7948,10 @@ window.viewTerminalTranscript = async function (sessionId) {
 
 // Enter key to search from search input
 document.addEventListener('keydown', function (e) {
-  if (e.key === 'Enter' && document.activeElement === document.getElementById('term-search-input')) {
+  if (
+    e.key === 'Enter' &&
+    document.activeElement === document.getElementById('term-search-input')
+  ) {
     window.runTerminalSearch();
   }
 });

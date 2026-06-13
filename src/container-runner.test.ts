@@ -74,6 +74,25 @@ vi.mock('./env.js', () => ({
   readEnvFile: vi.fn(() => ({})),
 }));
 
+vi.mock('./provider-router.js', () => ({
+  resolveProviderFallbackForAction: vi.fn(() => ({
+    approved: true,
+    provider: 'codex',
+    model: 'gpt-5.4',
+  })),
+}));
+
+vi.mock('./skill-registry.js', async () => {
+  const actual = await vi.importActual<typeof import('./skill-registry.js')>(
+    './skill-registry.js',
+  );
+  return {
+    ...actual,
+    prepareActiveSkillsDirectory: vi.fn(() => '/tmp/nanocrab-runtime-skills'),
+    recordSkillRoutingDecision: vi.fn(),
+  };
+});
+
 // Create a controllable fake ChildProcess
 function createFakeProcess() {
   const proc = new EventEmitter() as EventEmitter & {
@@ -112,6 +131,11 @@ vi.mock('child_process', async () => {
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import { spawn } from 'child_process';
 import { readEnvFile } from './env.js';
+import { resolveProviderFallbackForAction } from './provider-router.js';
+import {
+  prepareActiveSkillsDirectory,
+  recordSkillRoutingDecision,
+} from './skill-registry.js';
 import type { RegisteredGroup } from './types.js';
 
 const mockedReadEnvFile = vi.mocked(readEnvFile);
@@ -143,6 +167,9 @@ describe('container-runner timeout behavior', () => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
     mockedReadEnvFile.mockReturnValue({});
+    vi.mocked(resolveProviderFallbackForAction).mockClear();
+    vi.mocked(prepareActiveSkillsDirectory).mockClear();
+    vi.mocked(recordSkillRoutingDecision).mockClear();
   });
 
   afterEach(() => {
@@ -235,6 +262,152 @@ describe('container-runner timeout behavior', () => {
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
   });
+
+  it('simulates dry-run container execution without spawning and keeps mounts read-only', async () => {
+    const onOutput = vi.fn(async () => {});
+    vi.mocked(spawn).mockClear();
+
+    const result = await runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        isScheduledTask: true,
+        dryRun: true,
+      },
+      () => {
+        throw new Error('dry-run should not register a spawned process');
+      },
+      onOutput,
+    );
+
+    expect(result.status).toBe('success');
+    expect(result.result).toContain('Dry-run simulated');
+    expect(onOutput).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'success' }),
+    );
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe('container-runner skill routing provenance', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    mockedReadEnvFile.mockReturnValue({});
+    vi.mocked(prepareActiveSkillsDirectory).mockClear();
+    vi.mocked(recordSkillRoutingDecision).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('passes request context to skill selection and records routing decisions', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        prompt: 'Please remember the release workflow',
+        sessionId: 'session-routing',
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(prepareActiveSkillsDirectory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupFolder: 'test-group',
+        isMain: false,
+        request: 'Please remember the release workflow',
+      }),
+    );
+    expect(recordSkillRoutingDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupFolder: 'test-group',
+        isMain: false,
+        request: 'Please remember the release workflow',
+        sessionId: 'session-routing',
+      }),
+    );
+  });
+});
+
+describe('container-runner provider fallback metadata', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    mockedReadEnvFile.mockReturnValue({});
+    vi.mocked(resolveProviderFallbackForAction).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('resolves fallback before spawning when workflow metadata is supplied', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        provider: 'openrouter',
+        model: 'openrouter/auto',
+        providerFallbackPurpose: 'default_chat',
+        providerFallbackAction: 'external-message',
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(resolveProviderFallbackForAction).toHaveBeenCalledWith({
+      purpose: 'default_chat',
+      action: 'external-message',
+      requester: 'test-group',
+      correlationId: null,
+      sourceProvider: 'openrouter',
+      sourceModel: 'openrouter/auto',
+    });
+    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
+      '/tmp/nanocrab-env-test/env',
+      expect.stringContaining('AGENT_PROVIDER=codex'),
+      { mode: 0o600 },
+    );
+    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
+      '/tmp/nanocrab-env-test/env',
+      expect.stringContaining('DEFAULT_MODEL=gpt-5.4'),
+      { mode: 0o600 },
+    );
+  });
+
+  it('denies provider fallback purposes outside the agent boundary', async () => {
+    vi.mocked(spawn).mockClear();
+
+    const result = await runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        providerFallbackPurpose: 'default_coding',
+        providerFallbackAction: 'coding-implementation',
+      },
+      () => {
+        throw new Error('disallowed provider profile should not spawn');
+      },
+    );
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('Agent boundary denied provider profile');
+    expect(resolveProviderFallbackForAction).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
 });
 
 describe('container-runner MCP env forwarding', () => {
@@ -252,6 +425,20 @@ describe('container-runner MCP env forwarding', () => {
             command: 'npx',
             args: ['-y', '@example/infomaniak-mcp'],
             envVars: ['MAIL_USER', 'MAIL_PASSWORD'],
+          },
+        ]);
+      }
+      if (String(file).endsWith('connector-permissions.json')) {
+        return JSON.stringify([
+          {
+            connectorId: 'infomaniak',
+            scope: 'all',
+            allowedActions: ['tools.expose', '*.read'],
+            requiresApproval: false,
+            groups: [],
+            agents: [],
+            createdAt: '2026-06-13T10:00:00.000Z',
+            updatedAt: '2026-06-13T10:00:00.000Z',
           },
         ]);
       }
@@ -293,6 +480,88 @@ describe('container-runner MCP env forwarding', () => {
       { mode: 0o600 },
     );
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
+      '/tmp/nanocrab-env-test/env',
+      expect.stringContaining('MAIL_PASSWORD=secret'),
+      { mode: 0o600 },
+    );
+  });
+
+  it('does not pass MCP env vars for connectors outside the agent boundary', async () => {
+    const restrictedGroup: RegisteredGroup = {
+      ...testGroup,
+      containerConfig: { allowedMcpServers: ['github'] },
+    };
+    vi.mocked(spawn).mockClear();
+    vi.mocked(fs.writeFileSync).mockClear();
+
+    const resultPromise = runContainerAgent(
+      restrictedGroup,
+      {
+        ...testInput,
+        groupFolder: restrictedGroup.folder,
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalledWith(
+      '/tmp/nanocrab-env-test/env',
+      expect.stringContaining('MAIL_PASSWORD=secret'),
+      { mode: 0o600 },
+    );
+  });
+
+  it('does not pass MCP env vars for approval-required connectors without executable tools', async () => {
+    vi.mocked(fs.readFileSync).mockImplementation((file) => {
+      if (String(file).endsWith('mcp-servers.json')) {
+        return JSON.stringify([
+          {
+            name: 'infomaniak',
+            command: 'npx',
+            args: ['-y', '@example/infomaniak-mcp'],
+            envVars: ['MAIL_USER', 'MAIL_PASSWORD'],
+          },
+        ]);
+      }
+      if (String(file).endsWith('connector-permissions.json')) {
+        return JSON.stringify([
+          {
+            connectorId: 'infomaniak',
+            scope: 'all',
+            allowedActions: ['*.read'],
+            requiresApproval: true,
+            groups: [],
+            agents: [],
+            createdAt: '2026-06-13T10:00:00.000Z',
+            updatedAt: '2026-06-13T10:00:00.000Z',
+          },
+        ]);
+      }
+      return '';
+    });
+    vi.mocked(fs.writeFileSync).mockClear();
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        allowedMcpServers: ['infomaniak'],
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalledWith(
       '/tmp/nanocrab-env-test/env',
       expect.stringContaining('MAIL_PASSWORD=secret'),
       { mode: 0o600 },

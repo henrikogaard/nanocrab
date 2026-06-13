@@ -5,27 +5,288 @@ import readline from 'readline';
 
 import { DATA_DIR, SESSIONS_DIR } from '../../config.js';
 import { listTerminalSessions } from '../websocket.js';
+import { getAgentProviderConfig } from '../../agent-provider.js';
+import { listApprovals } from '../../approvals.js';
+import { loadCodingJobs } from '../../coding-jobs.js';
+import { getState } from '../state.js';
 
 const router = Router();
 
 interface SessionInfo {
+  id: string;
   sessionId: string;
+  source: 'transcript' | 'coding-job' | 'active-container';
+  approvalTargetType: string;
+  approvalTargetId: string;
   group: string;
+  provider: string;
+  model: string;
+  status: CockpitSessionStatus;
   startedAt: string;
+  updatedAt: string;
+  lastEventAt: string;
   lastActivity: string;
   messageCount: number;
+  approvalCount: number;
+  artifactCount: number;
+  changedFiles: string[];
+  currentStep: string;
   filePath: string;
 }
 
-router.get('/', async (_req: Request, res: Response) => {
+type CockpitSessionStatus =
+  | 'queued'
+  | 'running'
+  | 'waiting_approval'
+  | 'failed'
+  | 'completed'
+  | 'cancelled'
+  | 'idle';
+
+interface CockpitTimelineEvent {
+  id: string;
+  timestamp: string;
+  type: string;
+  title: string;
+  detail: string;
+}
+
+interface CockpitSessionDetail extends SessionInfo {
+  timeline: CockpitTimelineEvent[];
+  artifacts: Array<{ id: string; name: string; path: string; kind: string }>;
+  approvals: Array<{
+    id: string;
+    title: string;
+    status: string;
+    risk: string;
+    createdAt: string;
+  }>;
+}
+
+const TRANSCRIPT_PROJECT_DIRS = [
+  ['.agents', 'projects', '-workspace-group'],
+  ['.claude', 'projects', '-workspace-group'],
+];
+const transcriptSummaryCache = new Map<
+  string,
+  { mtimeMs: number; size: number; summary: SessionInfo }
+>();
+
+function activeContainerId(group: string, taskId?: string | null): string {
+  return taskId || `active-${group.replace(/[^A-Za-z0-9_.-]+/g, '-')}`;
+}
+
+function transcriptCockpitId(group: string, sessionId: string): string {
+  return `transcript:${encodeURIComponent(group)}:${encodeURIComponent(sessionId)}`;
+}
+
+function activeContainerCockpitId(
+  group: string,
+  taskId?: string | null,
+): string {
+  return `container:${encodeURIComponent(activeContainerId(group, taskId))}`;
+}
+
+function readJsonLines(filePath: string): unknown[] {
   try {
-    const sessionsDir = path.join(DATA_DIR, 'sessions');
-    if (!fs.existsSync(sessionsDir)) {
-      res.json([]);
-      return;
+    return fs
+      .readFileSync(filePath, 'utf8')
+      .split('\n')
+      .filter((line) => line.trim())
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function asRecord(value: unknown): Record<string, any> {
+  return value && typeof value === 'object'
+    ? (value as Record<string, any>)
+    : {};
+}
+
+function contentBlocks(obj: Record<string, any>): Array<Record<string, any>> {
+  if (Array.isArray(obj.message?.content)) return obj.message.content;
+  if (Array.isArray(obj.content)) return obj.content;
+  return [];
+}
+
+function extractText(obj: Record<string, any>): string {
+  if (typeof obj.content === 'string') return obj.content;
+  if (typeof obj.message === 'string') return obj.message;
+  return contentBlocks(obj)
+    .filter((block) => block.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text)
+    .join(' ')
+    .trim();
+}
+
+function compactStep(text: string, fallback: string): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim();
+  return (oneLine || fallback).slice(0, 180);
+}
+
+function inferStatus(summary: {
+  isActive: boolean;
+  failed: boolean;
+  approvalCount: number;
+}): CockpitSessionStatus {
+  if (summary.failed) return 'failed';
+  if (summary.approvalCount > 0) return 'waiting_approval';
+  if (summary.isActive) return 'running';
+  return 'completed';
+}
+
+function transcriptSummary(input: {
+  group: string;
+  sessionId: string;
+  filePath: string;
+  stat: fs.Stats;
+  isActive?: boolean;
+}): SessionInfo {
+  const providerConfig = getAgentProviderConfig();
+  const events = readJsonLines(input.filePath).map(asRecord);
+  const first = events[0] || {};
+  const last = events[events.length - 1] || {};
+  const startedAt = first.timestamp || '';
+  const lastEventAt = last.timestamp || '';
+  let provider: string = providerConfig.provider;
+  let model: string = providerConfig.model;
+  let toolCount = 0;
+  let approvalCount = 0;
+  let artifactCount = 0;
+  let failed = false;
+  let currentStep = '';
+  const changedFiles = new Set<string>();
+
+  for (const obj of events) {
+    if (typeof obj.provider === 'string') provider = obj.provider;
+    if (typeof obj.model === 'string') model = obj.model;
+    if (typeof obj.message?.model === 'string') model = obj.message.model;
+    if (
+      obj.type === 'error' ||
+      typeof obj.error === 'string' ||
+      obj.status === 'failed' ||
+      obj.status === 'error'
+    ) {
+      failed = true;
+    }
+    if (
+      obj.type === 'approval_request' ||
+      obj.status === 'waiting_approval' ||
+      obj.status === 'pending_approval'
+    ) {
+      approvalCount++;
     }
 
-    const sessions: SessionInfo[] = [];
+    const text = extractText(obj);
+    if (text)
+      currentStep = compactStep(text, currentStep || 'Transcript event');
+
+    for (const block of contentBlocks(obj)) {
+      if (block.type !== 'tool_use') continue;
+      toolCount++;
+      const name = String(block.name || '');
+      const inputRecord = asRecord(block.input);
+      const maybePath =
+        inputRecord.file_path || inputRecord.path || inputRecord.filename;
+      if (typeof maybePath === 'string' && maybePath.trim()) {
+        changedFiles.add(maybePath.trim());
+      }
+      if (/write|edit|patch|artifact|create/i.test(name)) artifactCount++;
+      if (/approval/i.test(name)) approvalCount++;
+    }
+  }
+
+  if (!currentStep) {
+    currentStep =
+      toolCount > 0
+        ? `${toolCount} tool events captured`
+        : 'Transcript captured';
+  }
+
+  const status = inferStatus({
+    isActive: Boolean(input.isActive),
+    failed,
+    approvalCount,
+  });
+
+  return {
+    id: transcriptCockpitId(input.group, input.sessionId),
+    sessionId: input.sessionId,
+    source: 'transcript',
+    approvalTargetType: 'transcript-session',
+    approvalTargetId: transcriptCockpitId(input.group, input.sessionId),
+    group: input.group,
+    provider,
+    model,
+    status,
+    startedAt,
+    updatedAt: lastEventAt,
+    lastEventAt,
+    lastActivity: lastEventAt,
+    messageCount: events.length,
+    approvalCount,
+    artifactCount,
+    changedFiles: [...changedFiles].slice(0, 24),
+    currentStep,
+    filePath: path.basename(input.filePath),
+  };
+}
+
+function cachedTranscriptSummary(input: {
+  group: string;
+  sessionId: string;
+  filePath: string;
+  stat: fs.Stats;
+}): SessionInfo {
+  const cached = transcriptSummaryCache.get(input.filePath);
+  if (
+    cached &&
+    cached.mtimeMs === input.stat.mtimeMs &&
+    cached.size === input.stat.size
+  ) {
+    return {
+      ...cached.summary,
+      changedFiles: [...cached.summary.changedFiles],
+    };
+  }
+  const summary = transcriptSummary(input);
+  transcriptSummaryCache.set(input.filePath, {
+    mtimeMs: input.stat.mtimeMs,
+    size: input.stat.size,
+    summary,
+  });
+  return { ...summary, changedFiles: [...summary.changedFiles] };
+}
+
+function transcriptPath(group: string, sessionId: string): string | null {
+  for (const parts of TRANSCRIPT_PROJECT_DIRS) {
+    const filePath = path.join(
+      DATA_DIR,
+      'sessions',
+      group,
+      ...parts,
+      `${sessionId}.jsonl`,
+    );
+    if (fs.existsSync(filePath)) return filePath;
+  }
+  return null;
+}
+
+export function listCockpitSessions(): SessionInfo[] {
+  const sessionsDir = path.join(DATA_DIR, 'sessions');
+  const sessions: SessionInfo[] = [];
+  const seen = new Set<string>();
+
+  if (fs.existsSync(sessionsDir)) {
     const groupDirs = fs.readdirSync(sessionsDir).filter((d) => {
       try {
         return fs.statSync(path.join(sessionsDir, d)).isDirectory();
@@ -35,93 +296,261 @@ router.get('/', async (_req: Request, res: Response) => {
     });
 
     for (const group of groupDirs) {
-      let transcriptDir = path.join(
-        sessionsDir,
-        group,
-        '.agents',
-        'projects',
-        '-workspace-group',
-      );
-      if (!fs.existsSync(transcriptDir)) {
-        transcriptDir = path.join(
-          sessionsDir,
-          group,
-          '.claude',
-          'projects',
-          '-workspace-group',
-        );
-      }
-      if (!fs.existsSync(transcriptDir)) continue;
-
-      const files = fs
-        .readdirSync(transcriptDir)
-        .filter((f) => f.endsWith('.jsonl'));
-
-      for (const file of files) {
-        const filePath = path.join(transcriptDir, file);
-        try {
+      for (const parts of TRANSCRIPT_PROJECT_DIRS) {
+        const transcriptDir = path.join(sessionsDir, group, ...parts);
+        if (!fs.existsSync(transcriptDir)) continue;
+        for (const file of fs.readdirSync(transcriptDir)) {
+          if (!file.endsWith('.jsonl')) continue;
+          const filePath = path.join(transcriptDir, file);
           const stat = fs.statSync(filePath);
           if (stat.size === 0) continue;
-
-          // Read first and last line for timestamps
-          const fd = fs.openSync(filePath, 'r');
-          const buf = Buffer.alloc(Math.min(stat.size, 2048));
-          fs.readSync(fd, buf, 0, buf.length, 0);
-          const firstChunk = buf.toString('utf8');
-          const firstLine = firstChunk.split('\n')[0];
-
-          // Read last chunk for last line
-          const tailBuf = Buffer.alloc(Math.min(stat.size, 2048));
-          const tailOffset = Math.max(0, stat.size - tailBuf.length);
-          fs.readSync(fd, tailBuf, 0, tailBuf.length, tailOffset);
-          fs.closeSync(fd);
-          const tailChunk = tailBuf.toString('utf8');
-          const tailLines = tailChunk.split('\n').filter(Boolean);
-          const lastLine = tailLines[tailLines.length - 1];
-
-          let startedAt = '';
-          let lastActivity = '';
-          try {
-            const first = JSON.parse(firstLine);
-            startedAt = first.timestamp || '';
-          } catch {}
-          try {
-            const last = JSON.parse(lastLine);
-            lastActivity = last.timestamp || '';
-          } catch {}
-
-          // Count lines for message count
-          let lineCount = 0;
-          const content = fs.readFileSync(filePath, 'utf8');
-          for (let i = 0; i < content.length; i++) {
-            if (content[i] === '\n') lineCount++;
-          }
-          if (content.length > 0 && content[content.length - 1] !== '\n')
-            lineCount++;
-
           const sessionId = file.replace('.jsonl', '');
-          sessions.push({
-            sessionId,
-            group,
-            startedAt,
-            lastActivity,
-            messageCount: lineCount,
-            filePath: file,
-          });
-        } catch {
-          // skip unreadable files
+          const key = `${group}:${sessionId}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          sessions.push(
+            cachedTranscriptSummary({ group, sessionId, filePath, stat }),
+          );
         }
       }
     }
+  }
 
-    // Sort by last activity, newest first
-    sessions.sort((a, b) =>
-      (b.lastActivity || '').localeCompare(a.lastActivity || ''),
-    );
+  for (const job of loadCodingJobs()) {
+    const statusMap: Record<string, CockpitSessionStatus> = {
+      queued: 'queued',
+      await_approval: 'waiting_approval',
+      await_pr_approval: 'waiting_approval',
+      completed: 'completed',
+      failed: 'failed',
+      cancelled: 'cancelled',
+    };
+    const approvalCount =
+      (job.approvalHistory?.length || 0) +
+      listApprovals({ targetType: 'coding-job', targetId: job.id }).length;
+    const artifactCount =
+      (job.changedFiles?.length || 0) +
+      [job.prUrl, job.commitSha, job.testSummary].filter(Boolean).length;
+    sessions.push({
+      id: job.id,
+      sessionId: job.id,
+      source: 'coding-job',
+      approvalTargetType: 'coding-job',
+      approvalTargetId: job.id,
+      group: job.repo,
+      provider: job.provider,
+      model: job.model,
+      status: statusMap[job.status] || 'running',
+      startedAt: job.createdAt,
+      updatedAt: job.completedAt || job.createdAt,
+      lastEventAt: job.completedAt || job.createdAt,
+      lastActivity: job.completedAt || job.createdAt,
+      messageCount: job.output
+        ? job.output.split('\n').filter(Boolean).length
+        : 1,
+      approvalCount,
+      artifactCount,
+      changedFiles: job.changedFiles || [],
+      currentStep:
+        job.testSummary ||
+        job.issueTitle ||
+        compactStep(job.prompt || '', `Coding job ${job.status}`),
+      filePath: '',
+    });
+  }
 
-    res.json(sessions);
+  try {
+    const providerConfig = getAgentProviderConfig();
+    for (const container of getState().queue.getActiveContainers()) {
+      const group = container.groupFolder || container.groupJid;
+      const id = activeContainerCockpitId(group, container.taskId);
+      if (sessions.some((session) => session.id === id)) continue;
+      sessions.push({
+        id,
+        sessionId: activeContainerId(group, container.taskId),
+        source: 'active-container',
+        approvalTargetType: 'container-session',
+        approvalTargetId: id,
+        group,
+        provider: providerConfig.provider,
+        model: providerConfig.model,
+        status: container.idleWaiting ? 'idle' : 'running',
+        startedAt: '',
+        updatedAt: '',
+        lastEventAt: '',
+        lastActivity: '',
+        messageCount: 0,
+        approvalCount: 0,
+        artifactCount: 0,
+        changedFiles: [],
+        currentStep: container.isTask
+          ? 'Running scheduled task'
+          : 'Agent container active',
+        filePath: '',
+      });
+    }
+  } catch {
+    // State is not initialized in some tests and scripts.
+  }
+
+  sessions.sort((a, b) =>
+    (b.lastEventAt || b.updatedAt || '').localeCompare(
+      a.lastEventAt || a.updatedAt || '',
+    ),
+  );
+  return sessions;
+}
+
+export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
+  const summary = listCockpitSessions().find((session) => session.id === id);
+  if (!summary) return null;
+
+  const persistedApprovals = listApprovals({
+    targetType: summary.approvalTargetType,
+    targetId: summary.approvalTargetId,
+  }).map((approval) => ({
+    id: approval.id,
+    title: approval.title,
+    status: approval.status,
+    risk: approval.risk,
+    createdAt: approval.createdAt,
+  }));
+  const codingJob = loadCodingJobs().find((job) => job.id === summary.id);
+  const jobApprovals =
+    codingJob?.approvalHistory?.map((approval, index) => ({
+      id: `${codingJob.id}-approval-history-${index + 1}`,
+      title: approval.action || 'Coding job approval',
+      status: approval.action.includes('den')
+        ? 'denied'
+        : approval.action.includes('approve')
+          ? 'approved'
+          : 'pending',
+      risk: 'medium',
+      createdAt: approval.at,
+    })) || [];
+  const approvals = [...jobApprovals, ...persistedApprovals];
+
+  const timeline: CockpitTimelineEvent[] = [];
+  const artifacts: CockpitSessionDetail['artifacts'] = [];
+  const filePath = transcriptPath(summary.group, summary.sessionId);
+  if (filePath) {
+    readJsonLines(filePath)
+      .map(asRecord)
+      .slice(-80)
+      .forEach((obj, index) => {
+        const ts = obj.timestamp || summary.lastEventAt;
+        const text = extractText(obj);
+        const toolBlocks = contentBlocks(obj).filter(
+          (block) => block.type === 'tool_use',
+        );
+        timeline.push({
+          id: `${summary.id}-${index}`,
+          timestamp: ts,
+          type: String(obj.type || 'event'),
+          title:
+            toolBlocks.length > 0
+              ? `${toolBlocks.length} tool call${toolBlocks.length === 1 ? '' : 's'}`
+              : String(obj.type || 'event'),
+          detail: compactStep(
+            text,
+            toolBlocks.map((block) => block.name).join(', '),
+          ),
+        });
+        for (const block of toolBlocks) {
+          const inputRecord = asRecord(block.input);
+          const maybePath =
+            inputRecord.file_path || inputRecord.path || inputRecord.filename;
+          if (typeof maybePath === 'string' && maybePath.trim()) {
+            artifacts.push({
+              id: `${summary.id}-artifact-${artifacts.length}`,
+              name: path.basename(maybePath),
+              path: maybePath,
+              kind: String(block.name || 'file'),
+            });
+          }
+        }
+      });
+  }
+
+  if (codingJob) {
+    for (const file of codingJob.changedFiles || []) {
+      artifacts.push({
+        id: `${codingJob.id}-changed-file-${artifacts.length}`,
+        name: path.basename(file),
+        path: file,
+        kind: 'changed-file',
+      });
+    }
+    if (codingJob.prUrl) {
+      artifacts.push({
+        id: `${codingJob.id}-pull-request`,
+        name: 'Pull request',
+        path: codingJob.prUrl,
+        kind: 'pull-request',
+      });
+    }
+    if (codingJob.commitSha) {
+      artifacts.push({
+        id: `${codingJob.id}-commit`,
+        name: codingJob.commitSha.slice(0, 12),
+        path: codingJob.commitSha,
+        kind: 'commit',
+      });
+    }
+    if (codingJob.testSummary) {
+      artifacts.push({
+        id: `${codingJob.id}-test-summary`,
+        name: 'Test summary',
+        path: codingJob.testSummary,
+        kind: 'test-summary',
+      });
+    }
+  }
+
+  if (timeline.length === 0) {
+    timeline.push({
+      id: `${summary.id}-summary`,
+      timestamp: summary.lastEventAt || summary.startedAt,
+      type: summary.status,
+      title: summary.status.replace(/_/g, ' '),
+      detail: summary.currentStep,
+    });
+  }
+
+  return {
+    ...summary,
+    timeline,
+    artifacts: artifacts.slice(0, 24),
+    approvals,
+  };
+}
+
+router.get('/', async (_req: Request, res: Response) => {
+  try {
+    res.json(listCockpitSessions());
   } catch (err) {
     res.status(500).json({ error: 'Failed to list sessions' });
+  }
+});
+
+router.get('/cockpit', (_req: Request, res: Response) => {
+  try {
+    res.json(listCockpitSessions());
+  } catch {
+    res.status(500).json({ error: 'Failed to list cockpit sessions' });
+  }
+});
+
+router.get('/cockpit/:id', (req: Request, res: Response) => {
+  try {
+    const detail = buildCockpitDetail(req.params.id as string);
+    if (!detail) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    res.json(detail);
+  } catch {
+    res.status(500).json({ error: 'Failed to read cockpit session' });
   }
 });
 
@@ -139,12 +568,16 @@ router.get('/terminal/history', async (_req: Request, res: Response) => {
     }
     const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
     const activeSessions = listTerminalSessions();
-    const activeIds = new Set(activeSessions.filter(s => s.active).map(s => s.id));
+    const activeIds = new Set(
+      activeSessions.filter((s) => s.active).map((s) => s.id),
+    );
     const history = index.map((entry: any) => ({
       ...entry,
       active: activeIds.has(entry.id),
     }));
-    history.sort((a: any, b: any) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    history.sort((a: any, b: any) =>
+      (b.createdAt || '').localeCompare(a.createdAt || ''),
+    );
     res.json(history);
   } catch (err) {
     res.status(500).json({ error: 'Failed to read session history' });
@@ -196,12 +629,13 @@ router.post('/terminal/search', async (req: Request, res: Response) => {
     }> = [];
 
     const sessionsToSearch = sessionId
-      ? index.filter(e => e.id === sessionId)
+      ? index.filter((e) => e.id === sessionId)
       : index;
 
     for (const entry of sessionsToSearch) {
       if (dateFrom && entry.createdAt && entry.createdAt < dateFrom) continue;
-      if (dateTo && entry.createdAt && entry.createdAt > dateTo + 'T23:59:59Z') continue;
+      if (dateTo && entry.createdAt && entry.createdAt > dateTo + 'T23:59:59Z')
+        continue;
 
       const logPath = path.join(SESSIONS_DIR, `${entry.id}.log`);
       if (!fs.existsSync(logPath)) continue;
@@ -344,7 +778,10 @@ router.get('/:group/:sessionId/detail', async (req: Request, res: Response) => {
                   id: toolId,
                   name: pending.name,
                   input: pending.input,
-                  output: typeof block.content === 'string' ? block.content : JSON.stringify(block.content || ''),
+                  output:
+                    typeof block.content === 'string'
+                      ? block.content
+                      : JSON.stringify(block.content || ''),
                   duration: block.duration || '',
                 });
               }
@@ -374,9 +811,10 @@ router.get('/:group/:sessionId/detail', async (req: Request, res: Response) => {
                   id: toolId,
                   name: pending.name,
                   input: pending.input,
-                  output: typeof obj.message.content === 'string'
-                    ? obj.message.content
-                    : JSON.stringify(obj.message.content || ''),
+                  output:
+                    typeof obj.message.content === 'string'
+                      ? obj.message.content
+                      : JSON.stringify(obj.message.content || ''),
                   duration: obj.message.duration || '',
                 });
                 break;
@@ -396,9 +834,14 @@ router.get('/:group/:sessionId/detail', async (req: Request, res: Response) => {
       }
     }
 
-    const duration = firstTimestamp && lastTimestamp
-      ? Math.round((new Date(lastTimestamp).getTime() - new Date(firstTimestamp).getTime()) / 1000)
-      : 0;
+    const duration =
+      firstTimestamp && lastTimestamp
+        ? Math.round(
+            (new Date(lastTimestamp).getTime() -
+              new Date(firstTimestamp).getTime()) /
+              1000,
+          )
+        : 0;
 
     res.json({
       id: sessionId,

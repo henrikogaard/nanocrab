@@ -14,6 +14,7 @@ import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
+import { auditUploadSend } from '../upload-audit.js';
 import { transcribeAudio } from '../transcription.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Channel, NewMessage } from '../types.js';
@@ -483,11 +484,23 @@ export class SignalChannel implements Channel {
 
     try {
       const target = this.parseRecipient(jid);
-      await this.rpc('send', {
-        ...target,
-        message: caption || '',
-        attachment: [filePath],
-      });
+      const stat = fs.statSync(filePath);
+      await auditUploadSend(
+        {
+          channel: this.name,
+          jid,
+          filename,
+          filePath,
+          sizeBytes: stat.size,
+          caption,
+        },
+        () =>
+          this.rpc('send', {
+            ...target,
+            message: caption || '',
+            attachment: [filePath],
+          }),
+      );
       logger.info({ jid, filePath, filename }, 'Signal file sent');
     } catch (err) {
       logger.error({ jid, filePath, err }, 'Failed to send Signal file');

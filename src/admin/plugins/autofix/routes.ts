@@ -26,6 +26,20 @@ import { readEnvFile } from '../../../env.js';
 import { auditLog } from '../../security.js';
 import { getState } from '../../state.js';
 import { logger } from '../../../logger.js';
+import {
+  approveCodingJob,
+  approveCodingJobPr,
+  cancelCodingJob,
+  denyCodingJob,
+  getCodingJob,
+  listGitHubIssues,
+  loadCodingJobs,
+  openCodingJobPr,
+  refreshCodingJobCi,
+  registerCodingRepo,
+  retryCodingJob,
+  startCodingJob,
+} from '../../../coding-jobs.js';
 
 const router = Router();
 const PROJECTS_PATH = path.join(STORE_DIR, 'autofix-projects.json');
@@ -116,7 +130,7 @@ router.get('/projects', (_req: Request, res: Response) => {
   res.json(loadProjects());
 });
 
-router.post('/projects', (req: Request, res: Response) => {
+router.post('/projects', async (req: Request, res: Response) => {
   const { owner, repo, workDir, triggerLabel, model, notifyJid, autoReview } =
     req.body;
   if (!owner || !repo) {
@@ -141,6 +155,17 @@ router.post('/projects', (req: Request, res: Response) => {
   const projects = loadProjects();
   projects.push(project);
   saveProjects(projects);
+  try {
+    await registerCodingRepo({
+      repo: `${owner}/${repo}`,
+      labels: [project.triggerLabel],
+    });
+  } catch (err) {
+    logger.warn(
+      { err, repo: `${owner}/${repo}` },
+      'Could not register coding repo for autofix project',
+    );
+  }
   auditLog(req, 'autofix_project_created', `${owner}/${repo}`);
   res.json({ ok: true, project });
 });
@@ -182,6 +207,25 @@ router.delete('/projects/:id', (req: Request, res: Response) => {
 // --- Jobs ---
 
 router.get('/jobs', (_req: Request, res: Response) => {
+  const codingJobs = loadCodingJobs()
+    .filter((job) => job.type === 'issue')
+    .sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )
+    .slice(0, 30)
+    .map((job) => ({
+      ...job,
+      issueTitle: job.issueTitle || job.prompt,
+      output:
+        job.output.length > 1200 ? `${job.output.slice(-1200)}` : job.output,
+      startedAt: job.createdAt,
+    }));
+  if (codingJobs.length > 0) {
+    res.json(codingJobs);
+    return;
+  }
+
   const jobs = loadJobs();
   res.json(
     jobs
@@ -198,12 +242,56 @@ router.get('/jobs', (_req: Request, res: Response) => {
 });
 
 router.get('/jobs/:id', (req: Request, res: Response) => {
-  const job = loadJobs().find((j) => j.id === req.params.id);
+  const jobId = String(req.params.id);
+  const codingJob = getCodingJob(jobId);
+  if (codingJob) {
+    res.json({ ...codingJob, startedAt: codingJob.createdAt });
+    return;
+  }
+  const job = loadJobs().find((j) => j.id === jobId);
   if (!job) {
     res.status(404).json({ error: 'Job not found' });
     return;
   }
   res.json(job);
+});
+
+router.get('/issues', async (req: Request, res: Response) => {
+  try {
+    const repo = String(req.query.repo || '');
+    const labels =
+      typeof req.query.labels === 'string' && req.query.labels.trim()
+        ? req.query.labels
+            .split(',')
+            .map((label) => label.trim())
+            .filter(Boolean)
+        : undefined;
+    const assignee =
+      typeof req.query.assignee === 'string' && req.query.assignee.trim()
+        ? req.query.assignee.trim()
+        : undefined;
+    const milestone =
+      typeof req.query.milestone === 'string' && req.query.milestone.trim()
+        ? req.query.milestone.trim()
+        : undefined;
+    const issueNumber =
+      typeof req.query.issueNumber === 'string' && req.query.issueNumber.trim()
+        ? Number(req.query.issueNumber)
+        : undefined;
+    const issues = await listGitHubIssues({
+      repo,
+      labels,
+      assignee,
+      milestone,
+      issueNumber:
+        issueNumber && Number.isInteger(issueNumber) ? issueNumber : undefined,
+    });
+    res.json(issues);
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 // --- Run an autofix ---
@@ -487,16 +575,14 @@ router.post('/run', async (req: Request, res: Response) => {
 
   // Fetch issue details
   try {
-    const issue = await githubApi(
-      `/repos/${project.owner}/${project.repo}/issues/${issueNumber}`,
-    );
-    const job = await runAutofix(
-      project,
-      issueNumber,
-      issue.title,
-      issue.body || '',
-      model,
-    );
+    const job = await startCodingJob({
+      repo: `${project.owner}/${project.repo}`,
+      issueNumber: Number(issueNumber),
+      provider: 'claude',
+      model: typeof model === 'string' && model.trim() ? model : undefined,
+      createPr: true,
+      requestedBy: req.user?.username || 'autofix-dashboard',
+    });
     auditLog(
       req,
       'autofix_triggered',
@@ -505,6 +591,120 @@ router.post('/run', async (req: Request, res: Response) => {
     res.json({ ok: true, jobId: job.id });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.post(
+  '/jobs/:id/approve-implementation',
+  (req: Request, res: Response) => {
+    try {
+      const jobId = String(req.params.id);
+      const job = approveCodingJob(
+        jobId,
+        req.user?.username || 'autofix-dashboard',
+      );
+      auditLog(req, 'autofix_implementation_approved', job.id);
+      res.json({ ok: true, job });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
+
+router.post('/jobs/:id/deny-implementation', (req: Request, res: Response) => {
+  try {
+    const jobId = String(req.params.id);
+    const job = denyCodingJob(
+      jobId,
+      req.user?.username || 'autofix-dashboard',
+      typeof req.body?.note === 'string' ? req.body.note : undefined,
+    );
+    auditLog(req, 'autofix_implementation_denied', job.id);
+    res.json({ ok: true, job });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post('/jobs/:id/open-pr', async (req: Request, res: Response) => {
+  try {
+    const jobId = String(req.params.id);
+    const job = await openCodingJobPr(
+      jobId,
+      req.user?.username || 'autofix-dashboard',
+    );
+    auditLog(req, 'autofix_pr_opened', job.id);
+    res.json({ ok: true, job });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post('/jobs/:id/approve-pr', async (req: Request, res: Response) => {
+  try {
+    const jobId = String(req.params.id);
+    approveCodingJobPr(jobId, req.user?.username || 'autofix-dashboard');
+    const job = await openCodingJobPr(
+      jobId,
+      req.user?.username || 'autofix-dashboard',
+    );
+    auditLog(req, 'autofix_pr_approved', job.id);
+    res.json({ ok: true, job });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post('/jobs/:id/refresh-ci', async (req: Request, res: Response) => {
+  try {
+    const jobId = String(req.params.id);
+    const job = await refreshCodingJobCi(jobId);
+    auditLog(req, 'autofix_ci_refreshed', job.id);
+    res.json({ ok: true, job });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post('/jobs/:id/retry', async (req: Request, res: Response) => {
+  try {
+    const jobId = String(req.params.id);
+    const job = await retryCodingJob(
+      jobId,
+      req.user?.username || 'autofix-dashboard',
+    );
+    auditLog(req, 'autofix_job_retried', job.id);
+    res.json({ ok: true, job });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post('/jobs/:id/cancel', (req: Request, res: Response) => {
+  try {
+    const jobId = String(req.params.id);
+    const job = cancelCodingJob(
+      jobId,
+      req.user?.username || 'autofix-dashboard',
+    );
+    auditLog(req, 'autofix_job_cancelled', job.id);
+    res.json({ ok: true, job });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 });
 
@@ -627,7 +827,20 @@ export async function handleAutofixWebhook(payload: any): Promise<void> {
         { repo: fullName, issue: issue.number, label },
         'Autofix triggered by label',
       );
-      await runAutofix(project, issue.number, issue.title, issue.body || '');
+      try {
+        await startCodingJob({
+          repo: fullName,
+          issueNumber: issue.number,
+          provider: 'claude',
+          createPr: true,
+          requestedBy: 'github-webhook',
+        });
+      } catch (err) {
+        logger.warn(
+          { err, repo: fullName, issue: issue.number },
+          'Autofix webhook skipped coding job',
+        );
+      }
     }
   }
 
@@ -641,7 +854,20 @@ export async function handleAutofixWebhook(payload: any): Promise<void> {
         { repo: fullName, issue: issue.number },
         'Autofix triggered by new issue with label',
       );
-      await runAutofix(project, issue.number, issue.title, issue.body || '');
+      try {
+        await startCodingJob({
+          repo: fullName,
+          issueNumber: issue.number,
+          provider: 'claude',
+          createPr: true,
+          requestedBy: 'github-webhook',
+        });
+      } catch (err) {
+        logger.warn(
+          { err, repo: fullName, issue: issue.number },
+          'Autofix webhook skipped coding job',
+        );
+      }
     }
   }
 

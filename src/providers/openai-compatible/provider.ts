@@ -78,9 +78,7 @@ export class OpenAICompatibleProvider implements Provider {
   readonly id = PROVIDER_ID;
   readonly name = DEFINITION.name;
 
-  async getCapabilities(
-    _model: string,
-  ): Promise<ProviderCapabilitiesResult> {
+  async getCapabilities(_model: string): Promise<ProviderCapabilitiesResult> {
     return { ...DEFAULT_CAPABILITIES };
   }
 

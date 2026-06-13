@@ -15,6 +15,11 @@ import {
 } from './agent-provider.js';
 import { STORE_DIR } from './config.js';
 import { readEnvFile } from './env.js';
+import {
+  createApproval,
+  findPendingApprovalForTarget,
+  listApprovals,
+} from './approvals.js';
 import { liveProbeService } from './providers/live-probe.js';
 import type { ProviderCapabilitiesResult } from './providers/openai-responses/provider.js';
 import {
@@ -82,9 +87,32 @@ export interface ProviderProbeResult {
   checks: ProviderProbeCheck[];
   live?: boolean;
   lastProbeAt?: string;
+  latencyMs?: number;
   capabilities?: ProviderCapabilities;
   errors?: string[];
+  errorDetail?: string;
   recommendedPurposes?: ProviderPurpose[];
+}
+
+export interface ProviderProbeHistoryEntry {
+  profileId?: ProviderPurpose;
+  provider: AgentProvider;
+  model: string;
+  ok: boolean;
+  latencyMs?: number;
+  streaming?: boolean;
+  streamingSupport: boolean;
+  toolSupport: boolean;
+  schemaSupport: boolean;
+  visionSupport: boolean;
+  contextWindow: number;
+  errorDetail?: string;
+  timestamp: string;
+}
+
+interface ProviderProbeStore {
+  latestByProfile: Record<string, ProviderProbeResult>;
+  history: ProviderProbeHistoryEntry[];
 }
 
 const PROFILE_PATH = path.join(STORE_DIR, 'provider-profiles.json');
@@ -257,20 +285,146 @@ function writeStoredProfiles(
   fs.writeFileSync(PROFILE_PATH, `${JSON.stringify(profiles, null, 2)}\n`);
 }
 
-function readStoredProbes(): Record<string, ProviderProbeResult> {
+const MAX_PROBE_HISTORY_PER_MODEL = 20;
+
+function readProbeStore(): ProviderProbeStore {
   try {
-    return JSON.parse(fs.readFileSync(PROBE_PATH, 'utf-8')) as Record<
-      string,
-      ProviderProbeResult
-    >;
+    const parsed = JSON.parse(fs.readFileSync(PROBE_PATH, 'utf-8'));
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      parsed.latestByProfile &&
+      typeof parsed.latestByProfile === 'object'
+    ) {
+      return {
+        latestByProfile: parsed.latestByProfile as Record<
+          string,
+          ProviderProbeResult
+        >,
+        history: Array.isArray(parsed.history)
+          ? parsed.history.map(normalizeProviderProbeHistoryEntry)
+          : [],
+      };
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const latestByProfile = {
+        ...(parsed as Record<string, ProviderProbeResult>),
+      };
+      delete (latestByProfile as Record<string, unknown>).history;
+      delete (latestByProfile as Record<string, unknown>).__history;
+      return {
+        latestByProfile,
+        history: Array.isArray((parsed as Record<string, unknown>).__history)
+          ? ((parsed as Record<string, unknown>).__history as unknown[]).map(
+              normalizeProviderProbeHistoryEntry,
+            )
+          : [],
+      };
+    }
+    return { latestByProfile: {}, history: [] };
   } catch {
-    return {};
+    return { latestByProfile: {}, history: [] };
   }
+}
+
+function normalizeProviderProbeHistoryEntry(
+  entry: unknown,
+): ProviderProbeHistoryEntry {
+  const raw = entry as Partial<
+    ProviderProbeHistoryEntry & {
+      providerId?: string;
+      result?: {
+        ok?: boolean;
+        latencyMs?: number;
+        errorMessage?: string;
+        capabilities?: ProviderCapabilitiesResult;
+        timestamp?: Date | string;
+      };
+    }
+  >;
+  const caps = raw.result?.capabilities;
+  return {
+    profileId: raw.profileId,
+    provider: (raw.provider || raw.providerId || 'unknown') as AgentProvider,
+    model: String(raw.model || ''),
+    ok: Boolean(raw.ok ?? raw.result?.ok),
+    latencyMs: raw.latencyMs ?? raw.result?.latencyMs,
+    streaming: Boolean(raw.streaming ?? caps?.streaming),
+    streamingSupport: Boolean(
+      raw.streamingSupport ?? raw.streaming ?? caps?.streaming,
+    ),
+    toolSupport: Boolean(raw.toolSupport ?? caps?.toolCalls),
+    schemaSupport: Boolean(raw.schemaSupport ?? caps?.structuredOutput),
+    visionSupport: Boolean(raw.visionSupport ?? caps?.vision),
+    contextWindow: Number(raw.contextWindow ?? caps?.contextWindow ?? 0),
+    errorDetail: raw.errorDetail || raw.result?.errorMessage,
+    timestamp: String(
+      raw.timestamp || raw.result?.timestamp || new Date(0).toISOString(),
+    ),
+  };
 }
 
 function writeStoredProbes(probes: Record<string, ProviderProbeResult>): void {
   fs.mkdirSync(path.dirname(PROBE_PATH), { recursive: true });
-  fs.writeFileSync(PROBE_PATH, `${JSON.stringify(probes, null, 2)}\n`);
+  const store = readProbeStore();
+  fs.writeFileSync(
+    PROBE_PATH,
+    `${JSON.stringify({ ...store, latestByProfile: probes }, null, 2)}\n`,
+  );
+}
+
+function readStoredProbes(): Record<string, ProviderProbeResult> {
+  return readProbeStore().latestByProfile;
+}
+
+function writeProbeStore(store: ProviderProbeStore): void {
+  fs.mkdirSync(path.dirname(PROBE_PATH), { recursive: true });
+  fs.writeFileSync(PROBE_PATH, `${JSON.stringify(store, null, 2)}\n`);
+}
+
+function appendProbeHistory(result: ProviderProbeResult): void {
+  const timestamp = result.lastProbeAt || new Date().toISOString();
+  const capabilities = result.capabilities;
+  const entry: ProviderProbeHistoryEntry = {
+    profileId: result.profileId,
+    provider: result.provider,
+    model: result.model,
+    ok: result.ok,
+    latencyMs: result.latencyMs,
+    streaming: capabilities?.streaming ?? false,
+    streamingSupport: capabilities?.streaming ?? false,
+    toolSupport: capabilities?.tool_calls ?? false,
+    schemaSupport: capabilities?.structured_output ?? false,
+    visionSupport: capabilities?.vision ?? false,
+    contextWindow: capabilities?.context_window ?? 0,
+    errorDetail: result.errorDetail || result.errors?.join('; '),
+    timestamp,
+  };
+  const store = readProbeStore();
+  const other = store.history.filter(
+    (item) => item.provider !== entry.provider || item.model !== entry.model,
+  );
+  const same = store.history
+    .filter(
+      (item) => item.provider === entry.provider && item.model === entry.model,
+    )
+    .slice(-(MAX_PROBE_HISTORY_PER_MODEL - 1));
+  writeProbeStore({
+    latestByProfile: store.latestByProfile,
+    history: [...other, ...same, entry],
+  });
+}
+
+function failedCheckErrorDetail(
+  checks: ProviderProbeCheck[],
+): string | undefined {
+  const failed = checks.filter((check) => !check.ok);
+  if (failed.length === 0) return undefined;
+  return failed
+    .map((check) => check.detail || check.label)
+    .filter(Boolean)
+    .join('; ');
 }
 
 function providerApiKey(provider: AgentProvider): string {
@@ -347,9 +501,6 @@ function validateProfile(input: ProviderProfile): ProviderProfile {
   }
   if (!isAgentProvider(input.provider)) {
     throw new Error(`provider must be one of: ${AGENT_PROVIDERS.join(', ')}`);
-  }
-  if (!isValidAgentModel(input.provider, input.model)) {
-    throw new Error(`model is not valid for ${input.provider}`);
   }
   if (
     input.fallbackProfileId &&
@@ -516,6 +667,7 @@ export function probeProviderProfile(
 export async function runLiveProviderProbe(
   profile: ProviderProfile,
 ): Promise<ProviderProbeResult> {
+  const startedAt = Date.now();
   const staticProbe = probeProviderProfile(profile);
   const capabilities = { ...getProviderCapabilities(profile.provider) };
   const checks = [...staticProbe.checks];
@@ -597,19 +749,24 @@ export async function runLiveProviderProbe(
     // Live capability probe is non-critical; fall through with static capabilities
   }
 
+  const errorDetail =
+    errors.length > 0 ? errors.join('; ') : failedCheckErrorDetail(checks);
   const result: ProviderProbeResult = {
     ...staticProbe,
     ok: checks.every((check) => check.ok),
     checks,
     live: true,
     lastProbeAt: new Date().toISOString(),
+    latencyMs: Date.now() - startedAt,
     capabilities,
     errors,
+    errorDetail,
     recommendedPurposes: recommendedPurposes(capabilities),
   };
   const probes = readStoredProbes();
   probes[profile.id] = result;
   writeStoredProbes(probes);
+  appendProbeHistory(result);
   return result;
 }
 
@@ -621,8 +778,7 @@ function probeCapabilitiesToRouter(
     structured_output: caps.structuredOutput,
     streaming: caps.streaming,
     vision: caps.vision,
-    code_strength:
-      caps.codeStrength === 'high' ? 'agentic' : 'basic',
+    code_strength: caps.codeStrength === 'high' ? 'agentic' : 'basic',
     context_window: caps.contextWindow,
     cost_tier: caps.costTier === 'low' ? 'local' : caps.costTier,
     privacy_tier:
@@ -631,9 +787,7 @@ function probeCapabilitiesToRouter(
         : caps.privacyTier === 'low'
           ? 'local'
           : 'hosted',
-    supports_mcp_strategy: caps.supportsMcpStrategy
-      ? 'container-loop'
-      : 'none',
+    supports_mcp_strategy: caps.supportsMcpStrategy ? 'container-loop' : 'none',
   };
 }
 
@@ -728,6 +882,27 @@ export function getStoredProviderProbes(): Record<string, ProviderProbeResult> {
   return readStoredProbes();
 }
 
+export function getProviderProbeHistory(
+  provider?: AgentProvider | string,
+  model?: string,
+  limit?: number,
+): ProviderProbeHistoryEntry[] {
+  let history = readProbeStore().history;
+  if (provider) {
+    history = history.filter(
+      (entry) =>
+        entry.provider === provider ||
+        (entry as ProviderProbeHistoryEntry & { providerId?: string })
+          .providerId === provider,
+    );
+  }
+  if (model) {
+    history = history.filter((entry) => entry.model === model);
+  }
+  const cap = Math.min(Math.max(limit || MAX_PROBE_HISTORY_PER_MODEL, 1), 200);
+  return history.slice(-cap);
+}
+
 export function probeAllProviderProfiles(): ProviderProbeResult[] {
   const stored = readStoredProbes();
   return loadProviderProfiles().map(
@@ -737,6 +912,14 @@ export function probeAllProviderProfiles(): ProviderProbeResult[] {
 
 export function providerModels(provider: AgentProvider): string[] {
   return AGENT_PROVIDER_MODELS[provider] || [];
+}
+
+export function fallbackActionForProviderPurpose(
+  purpose: ProviderPurpose,
+): FallbackAction {
+  if (purpose === 'default_automation') return 'automation-execution';
+  if (purpose === 'default_skill_factory') return 'skill-installation';
+  return 'read';
 }
 
 export function providerCanFallbackAutomatically(input: {
@@ -767,10 +950,12 @@ export function providerCanFallback(input: {
       providerId: input.source.provider,
       model: input.source.model,
       toolPolicy: input.source.toolPolicy,
+      privacyTier: getProviderCapabilities(input.source.provider).privacy_tier,
     },
     {
       providerId: input.target.provider,
       model: input.target.model,
+      privacyTier: getProviderCapabilities(input.target.provider).privacy_tier,
     },
     {
       toolCalls: input.capabilities?.tool_calls ?? false,
@@ -779,4 +964,214 @@ export function providerCanFallback(input: {
     },
     hasFallbackConfigured,
   );
+}
+
+function profileUnavailabilityReason(profile: ProviderProfile): string | null {
+  if (!getProviderAvailability()[profile.provider]) {
+    return `provider ${profile.provider}/${profile.model} is unavailable`;
+  }
+  if (!isValidAgentModel(profile.provider, profile.model)) {
+    return `invalid model ${profile.provider}/${profile.model}`;
+  }
+  const storedProbe = readStoredProbes()[profile.id];
+  if (
+    storedProbe?.live &&
+    storedProbe.provider === profile.provider &&
+    storedProbe.model === profile.model &&
+    storedProbe.ok === false
+  ) {
+    const detail =
+      storedProbe.errorDetail ||
+      storedProbe.errors?.join('; ') ||
+      storedProbe.checks.find((check) => !check.ok)?.detail ||
+      'probe failed';
+    return `failed stored probe for ${profile.provider}/${profile.model}: ${detail}`;
+  }
+  return null;
+}
+
+function providerFallbackTargetId(input: {
+  source: ProviderProfile;
+  target: ProviderProfile;
+  action: FallbackAction;
+}): string {
+  return `${input.source.id}:${input.source.provider}/${input.source.model}->${input.target.id}:${input.target.provider}/${input.target.model}:${input.action}`;
+}
+
+function hasApprovedProviderFallback(input: {
+  source: ProviderProfile;
+  target: ProviderProfile;
+  action: FallbackAction;
+  targetId: string;
+}): boolean {
+  return listApprovals({
+    kind: 'provider-fallback',
+    status: 'approved',
+    targetType: 'provider-profile',
+    targetId: input.targetId,
+  }).some((approval) => {
+    const payload = approval.payload || {};
+    return (
+      payload.sourceProfileId === input.source.id &&
+      payload.targetProfileId === input.target.id &&
+      payload.sourceProvider === input.source.provider &&
+      payload.sourceModel === input.source.model &&
+      payload.targetProvider === input.target.provider &&
+      payload.targetModel === input.target.model &&
+      payload.action === input.action
+    );
+  });
+}
+
+export function resolveProviderFallbackForAction(input: {
+  purpose: ProviderPurpose;
+  action: FallbackAction;
+  requester: string;
+  correlationId?: string | null;
+  sourceProvider?: AgentProvider;
+  sourceModel?: string;
+}):
+  | {
+      approved: true;
+      profile: ProviderProfile;
+      provider: AgentProvider;
+      model: string;
+    }
+  | { approved: false; approvalId?: string; reason: string } {
+  const source = getProviderProfile(input.purpose);
+  if (!source) {
+    return {
+      approved: false,
+      reason: `provider profile not found: ${input.purpose}`,
+    };
+  }
+
+  const requestedSource: ProviderProfile = {
+    ...source,
+    provider: input.sourceProvider || source.provider,
+    model:
+      input.sourceModel ||
+      (input.sourceProvider
+        ? DEFAULT_AGENT_MODELS[input.sourceProvider]
+        : source.model),
+  };
+
+  const sourceUnavailableReason = profileUnavailabilityReason(requestedSource);
+  if (!sourceUnavailableReason) {
+    return {
+      approved: true,
+      profile: requestedSource,
+      provider: requestedSource.provider,
+      model: requestedSource.model,
+    };
+  }
+
+  if (!requestedSource.fallbackProfileId) {
+    return {
+      approved: false,
+      reason: `${sourceUnavailableReason} and no fallback profile is configured`,
+    };
+  }
+
+  const target = getProviderProfile(requestedSource.fallbackProfileId);
+  if (!target) {
+    return {
+      approved: false,
+      reason: `fallback profile not found: ${requestedSource.fallbackProfileId}`,
+    };
+  }
+  const targetUnavailableReason = profileUnavailabilityReason(target);
+  if (targetUnavailableReason) {
+    return {
+      approved: false,
+      reason: `fallback ${targetUnavailableReason}`,
+    };
+  }
+
+  const decision = providerCanFallback({
+    source: requestedSource,
+    target,
+    action: input.action,
+    capabilities: getProviderCapabilities(target.provider),
+  });
+
+  if (decision.allowed && !decision.requiresApproval) {
+    return {
+      approved: true,
+      profile: target,
+      provider: target.provider,
+      model: target.model,
+    };
+  }
+
+  if (!decision.requiresApproval) {
+    return {
+      approved: false,
+      reason: `${sourceUnavailableReason}; ${decision.reason}`,
+    };
+  }
+
+  const targetId = providerFallbackTargetId({
+    source: requestedSource,
+    target,
+    action: input.action,
+  });
+  if (
+    hasApprovedProviderFallback({
+      source: requestedSource,
+      target,
+      action: input.action,
+      targetId,
+    })
+  ) {
+    return {
+      approved: true,
+      profile: target,
+      provider: target.provider,
+      model: target.model,
+    };
+  }
+
+  const pending = findPendingApprovalForTarget(
+    'provider-fallback',
+    'provider-profile',
+    targetId,
+  );
+  if (pending) {
+    return {
+      approved: false,
+      approvalId: pending.id,
+      reason: `${sourceUnavailableReason}; ${decision.reason}`,
+    };
+  }
+
+  const approval = createApproval({
+    kind: 'provider-fallback',
+    title: 'Approve provider fallback',
+    summary: `Allow ${requestedSource.label} to fall back from ${requestedSource.provider}/${requestedSource.model} to ${target.provider}/${target.model} for ${input.action}.`,
+    risk: input.action === 'read' ? 'medium' : 'high',
+    requester: input.requester,
+    targetType: 'provider-profile',
+    targetId,
+    source: 'provider-router',
+    correlationId: input.correlationId || null,
+    actionPreview: `${requestedSource.provider}/${requestedSource.model} -> ${target.provider}/${target.model}`,
+    resourceSummary: `${input.purpose} provider fallback`,
+    payload: {
+      sourceProfileId: requestedSource.id,
+      targetProfileId: target.id,
+      sourceProvider: requestedSource.provider,
+      sourceModel: requestedSource.model,
+      targetProvider: target.provider,
+      targetModel: target.model,
+      action: input.action,
+      reason: `${sourceUnavailableReason}; ${decision.reason}`,
+    },
+  });
+
+  return {
+    approved: false,
+    approvalId: approval.id,
+    reason: `${sourceUnavailableReason}; ${decision.reason}`,
+  };
 }

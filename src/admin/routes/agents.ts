@@ -17,16 +17,24 @@ import {
   DEFAULT_AGENT_MODELS,
   getProviderAvailability,
 } from '../../agent-provider.js';
+import { getAllRegisteredGroups } from '../../db.js';
+import {
+  deriveRuntimeCapabilities,
+  resolveAgentBoundary,
+} from '../../agent-boundaries.js';
 import {
   getCodingJob,
   approveCodingJob,
+  approveCodingJobPr,
   cancelCodingJob,
   closeCodingJobPr,
+  denyCodingJob,
   listGitHubIssues,
   loadCodingJobs,
   loadCodingRepos,
   openCodingJobPr,
   pickGitHubIssue,
+  refreshCodingJobCi,
   registerCodingRepo,
   retryCodingJob,
   revertCodingJob,
@@ -35,6 +43,22 @@ import {
 
 const router = Router();
 const TASKS_PATH = path.join(STORE_DIR, 'agent-tasks.json');
+
+function loadConfiguredConnectorIds(): string[] {
+  const ids = new Set(['nanocrab', 'github']);
+  try {
+    const mcpConfigPath = path.join(STORE_DIR, 'mcp-servers.json');
+    if (fs.existsSync(mcpConfigPath)) {
+      const servers = JSON.parse(
+        fs.readFileSync(mcpConfigPath, 'utf-8'),
+      ) as Array<{ name?: string }>;
+      for (const server of servers) {
+        if (server.name) ids.add(server.name);
+      }
+    }
+  } catch {}
+  return Array.from(ids);
+}
 
 interface AgentTask {
   id: string;
@@ -81,6 +105,29 @@ router.get('/providers', (_req: Request, res: Response) => {
       })),
       defaultModel: DEFAULT_AGENT_MODELS[provider.id],
     })),
+  );
+});
+
+router.get('/boundaries', (_req: Request, res: Response) => {
+  const connectorIds = loadConfiguredConnectorIds();
+  const groups = getAllRegisteredGroups();
+  res.json(
+    Object.entries(groups).map(([jid, group]) => {
+      const boundary = resolveAgentBoundary({
+        group,
+        isMain: group.isMain === true,
+        agentId: group.folder,
+        availableConnectorIds: connectorIds,
+      });
+      return {
+        jid,
+        name: group.name,
+        folder: group.folder,
+        isMain: boundary.isMain,
+        boundary,
+        capabilities: deriveRuntimeCapabilities(boundary, { connectorIds }),
+      };
+    }),
   );
 });
 
@@ -144,6 +191,25 @@ router.post('/coding/jobs/:id/approve', (req: Request, res: Response) => {
   }
 });
 
+router.post(
+  '/coding/jobs/:id/deny-implementation',
+  (req: Request, res: Response) => {
+    try {
+      const job = denyCodingJob(
+        req.params.id as string,
+        req.user?.username || 'dashboard',
+        typeof req.body?.note === 'string' ? req.body.note : undefined,
+      );
+      auditLog(req, 'coding_job_denied', job.id);
+      res.json({ ok: true, job });
+    } catch (err) {
+      res
+        .status(400)
+        .json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+);
+
 router.post('/coding/jobs/:id/cancel', (req: Request, res: Response) => {
   try {
     const job = cancelCodingJob(
@@ -188,6 +254,43 @@ router.post('/coding/jobs/:id/open-pr', async (req: Request, res: Response) => {
       .json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
+
+router.post(
+  '/coding/jobs/:id/approve-pr',
+  async (req: Request, res: Response) => {
+    try {
+      approveCodingJobPr(
+        req.params.id as string,
+        req.user?.username || 'dashboard',
+      );
+      const job = await openCodingJobPr(
+        req.params.id as string,
+        req.user?.username || 'dashboard',
+      );
+      auditLog(req, 'coding_job_pr_approved', job.id);
+      res.json({ ok: true, job });
+    } catch (err) {
+      res
+        .status(400)
+        .json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+);
+
+router.post(
+  '/coding/jobs/:id/refresh-ci',
+  async (req: Request, res: Response) => {
+    try {
+      const job = await refreshCodingJobCi(req.params.id as string);
+      auditLog(req, 'coding_job_ci_refreshed', job.id);
+      res.json({ ok: true, job });
+    } catch (err) {
+      res
+        .status(400)
+        .json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+);
 
 router.post('/coding/jobs/:id/revert', async (req: Request, res: Response) => {
   try {

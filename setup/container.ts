@@ -6,6 +6,8 @@ import { execSync } from 'child_process';
 import path from 'path';
 
 import { logger } from '../src/logger.js';
+import { detectContainerRuntime } from '../src/setup-preflight.js';
+import { SetupStepResult } from '../src/setup-state.js';
 import { commandExists } from './platform.js';
 import { emitStatus } from './status.js';
 
@@ -20,11 +22,12 @@ function parseArgs(args: string[]): { runtime: string } {
   return { runtime };
 }
 
-export async function run(args: string[]): Promise<void> {
+export async function run(args: string[]): Promise<SetupStepResult> {
   const projectRoot = process.cwd();
-  const { runtime } = parseArgs(args);
+  let { runtime } = parseArgs(args);
   const image = 'nanocrab-agent:latest';
   const logFile = path.join(projectRoot, 'logs', 'setup.log');
+  if (!runtime) runtime = detectContainerRuntime();
 
   if (!runtime) {
     emitStatus('SETUP_CONTAINER', {
@@ -36,7 +39,11 @@ export async function run(args: string[]): Promise<void> {
       ERROR: 'missing_runtime_flag',
       LOG: 'logs/setup.log',
     });
-    process.exit(4);
+    return {
+      status: 'input_required',
+      message:
+        'No container runtime detected. Install/start Docker or pass --runtime apple-container.',
+    };
   }
 
   // Validate runtime availability
@@ -50,7 +57,7 @@ export async function run(args: string[]): Promise<void> {
       ERROR: 'runtime_not_available',
       LOG: 'logs/setup.log',
     });
-    process.exit(2);
+    return { status: 'failed', message: 'Apple Container is not available' };
   }
 
   if (runtime === 'docker') {
@@ -64,7 +71,7 @@ export async function run(args: string[]): Promise<void> {
         ERROR: 'runtime_not_available',
         LOG: 'logs/setup.log',
       });
-      process.exit(2);
+      return { status: 'failed', message: 'Docker is not installed' };
     }
     try {
       execSync('docker info', { stdio: 'ignore' });
@@ -78,7 +85,7 @@ export async function run(args: string[]): Promise<void> {
         ERROR: 'runtime_not_available',
         LOG: 'logs/setup.log',
       });
-      process.exit(2);
+      return { status: 'failed', message: 'Docker is installed but not running' };
     }
   }
 
@@ -92,7 +99,7 @@ export async function run(args: string[]): Promise<void> {
       ERROR: 'unknown_runtime',
       LOG: 'logs/setup.log',
     });
-    process.exit(4);
+    return { status: 'input_required', message: `Unknown runtime: ${runtime}` };
   }
 
   const buildCmd =
@@ -140,5 +147,8 @@ export async function run(args: string[]): Promise<void> {
     LOG: 'logs/setup.log',
   });
 
-  if (status === 'failed') process.exit(1);
+  if (status === 'failed') {
+    return { status: 'failed', message: 'Container build or test failed' };
+  }
+  return { status: 'success' };
 }

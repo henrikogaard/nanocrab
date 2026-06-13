@@ -45,6 +45,7 @@ Full web dashboard at your domain with 7-layer security (firewall, TLS, IP allow
 - **Overview** — live stats, weather, channel status, message feed
 - **Agents** — bot agents, coding agents, GitHub issue pickup, coding-job output, and task launcher
 - **Messages** — search, filter, export conversations across all channels
+- **Approvals** — unified inbox for pending and reviewed risky actions with provenance, filters, and approve/deny controls
 - **Memory** — shared cross-channel memory + wiki knowledge base
 - **Settings** — 2FA (TOTP), themes, API tokens, bot personality editor, plugin management
 
@@ -66,10 +67,10 @@ Additional plugins can be installed from git URLs via the Marketplace page, or c
 ### Autonomous Coding
 
 - **Coding Task Launcher** — pick tool (Claude Code / Codex / Copilot), model, working directory, and describe the task
-- **GitHub Coding Jobs** — register repos, list/pick issues, start dedicated coding containers, inspect diffs/output, request approval, open PRs, retry, cancel, and revert
+- **GitHub Coding Jobs** — register enabled repos, pick issues by repo/label/assignee/milestone/number, inspect diffs/output/tests/CI, approve implementation, approve PRs, retry, cancel, and revert
 - **Isolated Coding Jobs** — WhatsApp/Signal/Telegram agents can request repo coding jobs through MCP; an ephemeral coding container clones and edits inside `data/coding-workspaces`
 - **Scheduled Tasks** — recurring coding jobs (hourly, daily, weekly)
-- **GitHub Autofix Pipeline** — webhook-driven: issue created → agent fixes → PR opened → bot notifies you
+- **GitHub Autofix Pipeline** — webhook-driven: issue created/labeled → approval-gated coding job → reviewed PR publish → bot notifies you
 - **PR Review** — an agent reviews every new PR and posts comments
 
 Coding jobs are available only from the main group. Add
@@ -87,12 +88,23 @@ Create a scheduled task that periodically asks the main agent to pick an autofix
 The agent calls MCP tools such as `register_coding_repo`,
 `list_github_issues`, `start_coding_job`, `pick_github_issue`, and
 the scheduled-task tools. The dashboard exposes the same flow under
-**Agents -> GitHub Coding Jobs**. The host creates job metadata and launches a
-short-lived agent container with only that job directory mounted at
-`/workspace/coding-job`. The container performs clone/edit/commit/push work;
-the host then creates the GitHub PR through the API after approval. Job metadata is stored in
-`store/coding-jobs.json`, registered repos live in `store/coding-repos.json`,
-and workspaces live under `data/coding-workspaces/jobs/`.
+**Agents -> GitHub Coding Jobs** and **Autofix**. Issue pickup only runs for
+enabled repo configs and supports repo, label, assignee, milestone, and direct
+issue-number filters. Jobs move through `queued -> investigate -> plan ->
+await_approval -> implement -> test -> await_pr_approval -> open_pr ->
+ci_running -> completed`, with transition timestamps and failure reasons stored
+on the job record.
+
+The host creates job metadata and launches a short-lived agent container with
+only that job directory mounted at `/workspace/coding-job`. The container clones
+and edits the repo, then emits diff, changed-file, and test summaries for
+dashboard review. Implementation requires an approved `coding-implement` record
+tied to the job id before the container can mutate the workspace. Commit, push,
+and GitHub PR creation require an approved `coding-open-pr` record tied to the
+same job id before the host performs those repo mutations. Job metadata is
+stored in `store/coding-jobs.json`, registered repos live in
+`store/coding-repos.json`, and workspaces live under
+`data/coding-workspaces/jobs/`.
 
 Coding runtimes are limited to `claude`, `codex`, and `opencode`; chat-only
 providers such as Ollama/OpenRouter/Google stay in the normal agent path unless
@@ -121,8 +133,8 @@ the same dashboard frontend as production, but intercepts `/api/*` and `/ws`
 with sample data. The dashboard auto-authenticates as a mock owner, shows a
 visible mock-mode banner, and includes placeholder content for the main
 surfaces: Dashboard, Agents, Chat, Messages, Groups, Tasks, Memory,
-Integrations, Developer tools, Git & Code, Monitoring, Containers, Security,
-Settings, Marketplace, Uptime, Wiki, Workflows, Autofix, and Copilot.
+Approvals, Integrations, Developer tools, Git & Code, Monitoring, Containers,
+Security, Settings, Marketplace, Uptime, Wiki, Workflows, Autofix, and Copilot.
 
 To use another port:
 
@@ -148,7 +160,7 @@ success responses and do not mutate live files or services.
 - **Suggested Skills** — the dashboard Skills page highlights reusable workflow candidates from recent history, such as private operations planning or dashboard design review. Suggestions become inactive drafts first and still require approval.
 - **Skill Registry** — skills can be enabled/disabled and scoped to all agents, main-only, or channel agents. Visibility can be shared, private, or system. Agents can also call `list_skills` and `search_skills` to find skills related to a user request.
 - **Reports And Research** — agents and admins can request report jobs, outline approval, Markdown/HTML/DOCX/PDF exports, Playwright-backed research notes, and optional official NotebookLM Enterprise configuration.
-- **Unified Approvals** — risky actions such as provider fallback, PR creation, report delivery, publishing, uploads, external messages, and shell-like work flow through `/api/approvals`.
+- **Unified Approvals** — risky actions such as provider fallback, repo changes, PR creation, report delivery, publishing, uploads, external messages, and tool actions flow through `/api/approvals` and the dashboard Approvals inbox. Approval records include provenance (`source`, `correlationId`, `policyDecisionId`), action/resource previews, expiry metadata, and server-side filters for status, risk, kind, requester, target type, correlation ID, and created date range. Expired pending approvals are marked `expired` and cannot be approved or denied later.
 
 ### Default Integrations
 
@@ -328,6 +340,9 @@ chat commands, host/operator commands, setup steps, and agent MCP tools.
 ### Dashboard Setup
 
 ```bash
+# Report first-run readiness without writing secrets
+npm run setup -- --dry-run
+
 # Configure admin credentials
 npx tsx setup/index.ts --step admin -- \
   --username youruser \
@@ -339,6 +354,17 @@ npx tsx setup/index.ts --step admin -- \
 sudo cp Caddyfile /etc/caddy/Caddyfile
 sudo systemctl restart caddy
 ```
+
+The setup preflight checks Node.js, npm, Docker or Apple Container, required
+ports, writable runtime directories, `.env` writability, admin auth, provider
+credentials, and channel credentials before the container build step. Setup
+state is persisted in `.setup-state.json` with `pending`, `running`,
+`completed`, and `failed` statuses so reruns resume at the failed or next
+incomplete step.
+
+Setup logs are written to `logs/setup.log`; credential-looking material is
+redacted before it is logged. For a disposable VPS rehearsal, see
+[docs/FIRST_RUN_VPS_TEST.md](docs/FIRST_RUN_VPS_TEST.md).
 
 ### Configuration
 
@@ -413,7 +439,7 @@ npm run mock:admin:build
 
 ## Roadmap
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the Hermes/OpenClaw-inspired roadmap and the remaining polish areas after 2.0-Beta1.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the Hermes/OpenClaw-inspired roadmap. The non-epic P0 closure sweep is complete; the remaining P0-labeled GitHub issues are roadmap epics that still track lower-priority follow-up children.
 
 ### Plugin Architecture
 
@@ -449,8 +475,8 @@ Before releasing or deploying a roadmap-sized change, refresh the README, roadma
 ## Requirements
 
 - Linux or macOS (Windows via WSL2)
-- Node.js 20+
-- Docker
+- Node.js 20+ and npm
+- Docker or Apple Container
 - [Claude Code](https://claude.ai/download) or [OpenAI Codex CLI](https://developers.openai.com/codex)
 
 ## License

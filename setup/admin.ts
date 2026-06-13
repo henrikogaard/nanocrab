@@ -11,6 +11,7 @@ import path from 'path';
 import bcrypt from 'bcryptjs';
 
 import { logger } from '../src/logger.js';
+import { SetupStepResult } from '../src/setup-state.js';
 import { emitStatus } from './status.js';
 
 function parseArgs(args: string[]): {
@@ -55,7 +56,7 @@ function updateEnvFile(key: string, value: string): void {
   fs.writeFileSync(envPath, content);
 }
 
-export async function run(args: string[]): Promise<void> {
+export async function run(args: string[]): Promise<SetupStepResult> {
   const { username, password, domain, port } = parseArgs(args);
   const projectRoot = process.cwd();
 
@@ -76,7 +77,7 @@ export async function run(args: string[]): Promise<void> {
       STATUS: 'already_configured',
       USERNAME: envContent.match(/^ADMIN_USERNAME=(.+)$/m)?.[1] || '',
     });
-    return;
+    return { status: 'already_configured' };
   }
 
   if (!username || !password) {
@@ -85,7 +86,11 @@ export async function run(args: string[]): Promise<void> {
       MESSAGE:
         'Admin username and password needed. Use --username and --password flags.',
     });
-    return;
+    return {
+      status: 'input_required',
+      message:
+        'Admin username and password needed. Use --username and --password flags.',
+    };
   }
 
   // Set credentials
@@ -134,10 +139,12 @@ ${domain}:${port} {
       CADDY_CONFIG: caddyPath,
       MESSAGE: `Credentials set. Caddy config written to ${caddyPath}. Run: sudo cp ${caddyPath} /etc/caddy/Caddyfile && sudo systemctl reload caddy`,
     });
+    return { status: 'success' };
   } else {
     emitStatus('ADMIN', {
       STATUS: 'success',
       USERNAME: username,
     });
+    return { status: 'success' };
   }
 }

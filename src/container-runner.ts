@@ -37,8 +37,29 @@ import {
 } from './agent-provider.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { prepareActiveSkillsDirectory } from './skill-registry.js';
+import {
+  prepareActiveSkillsDirectory,
+  recordSkillRoutingDecision,
+  selectSkillsForRequest,
+} from './skill-registry.js';
 import { RegisteredGroup } from './types.js';
+import {
+  resolveProviderFallbackForAction,
+  type ProviderPurpose,
+} from './provider-router.js';
+import type { FallbackAction } from './providers/fallback-policy.js';
+import { logAuditEvent } from './audit-log.js';
+import { evaluatePolicy } from './policy-engine.js';
+import {
+  canUseProviderProfile,
+  deriveRuntimeCapabilities,
+  resolveAgentBoundary,
+  type AgentBoundary,
+} from './agent-boundaries.js';
+import {
+  filterAllowedConnectorIds,
+  getAllowedConnectorToolPatterns,
+} from './connector-permissions.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCRAB_OUTPUT_START---';
@@ -54,8 +75,12 @@ export interface ContainerInput {
   assistantName?: string;
   script?: string;
   allowedMcpServers?: string[];
+  allowedMcpToolPatterns?: string[];
   model?: string;
   provider?: AgentProvider;
+  providerFallbackPurpose?: ProviderPurpose;
+  providerFallbackAction?: FallbackAction;
+  dryRun?: boolean;
 }
 
 export interface ContainerOutput {
@@ -131,17 +156,60 @@ function latestMtimeMs(dir: string): number {
   return latest;
 }
 
+function loadConfiguredConnectorIds(): string[] {
+  const ids = new Set(['nanocrab', 'github']);
+  try {
+    const mcpConfigPath = path.join(STORE_DIR, 'mcp-servers.json');
+    if (fs.existsSync(mcpConfigPath)) {
+      const servers = JSON.parse(
+        fs.readFileSync(mcpConfigPath, 'utf-8'),
+      ) as Array<{ name?: string }>;
+      for (const server of servers) {
+        if (server.name) ids.add(server.name);
+      }
+    }
+  } catch {}
+  return Array.from(ids);
+}
+
+function connectorIdsFromMcpToolPatterns(patterns: string[]): string[] {
+  return Array.from(
+    new Set(
+      patterns
+        .map((pattern) => pattern.match(/^mcp__([^_]+)__/)?.[1])
+        .filter((connectorId): connectorId is string => Boolean(connectorId)),
+    ),
+  );
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  request?: string,
+  sessionId?: string,
+  agentBoundary?: AgentBoundary,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
+  const skillSelection = request
+    ? selectSkillsForRequest(request, { isMain, agentBoundary })
+    : undefined;
   const skillsSrc = prepareActiveSkillsDirectory({
     groupFolder: group.folder,
     isMain,
+    request,
+    agentBoundary,
   });
+  if (request) {
+    recordSkillRoutingDecision({
+      groupFolder: group.folder,
+      isMain,
+      request,
+      sessionId,
+      selection: skillSelection,
+    });
+  }
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
@@ -376,6 +444,12 @@ function buildContainerArgs(
     defaults.modelsByProvider[effectiveProvider] ||
     DEFAULT_AGENT_MODELS[effectiveProvider];
   const providerDefinition = getAgentProviderDefinition(effectiveProvider);
+  const allowedMcpServerSet = new Set(
+    (allowedMcpServers || []).map((server) => server.toLowerCase()),
+  );
+  const isMcpAllowed = (serverName: string): boolean =>
+    allowedMcpServers === undefined ||
+    allowedMcpServerSet.has(serverName.toLowerCase());
   const providerEnvKeys = [
     providerDefinition.envKey,
     providerDefinition.baseUrlEnvKey,
@@ -442,8 +516,13 @@ function buildContainerArgs(
     setEnv(key, envValue(key));
   }
 
-  // Pass GitHub token to container
-  setEnv('GITHUB_TOKEN', envValue('GITHUB_TOKEN') || process.env.GITHUB_TOKEN);
+  // Pass GitHub token only when the GitHub connector is inside the boundary.
+  if (isMcpAllowed('github')) {
+    setEnv(
+      'GITHUB_TOKEN',
+      envValue('GITHUB_TOKEN') || process.env.GITHUB_TOKEN,
+    );
+  }
 
   // Pass admin API token for container skills
   setEnv(
@@ -457,11 +536,12 @@ function buildContainerArgs(
     if (fs.existsSync(mcpConfigPath)) {
       const servers = JSON.parse(
         fs.readFileSync(mcpConfigPath, 'utf-8'),
-      ) as Array<{ envVars?: string[] }>;
+      ) as Array<{ name?: string; envVars?: string[] }>;
       const envKeys = [...new Set(servers.flatMap((srv) => srv.envVars || []))];
       const envFileValues = readEnvFile(envKeys);
       const passedKeys = new Set<string>();
       for (const srv of servers) {
+        if (!srv.name || !isMcpAllowed(srv.name)) continue;
         for (const key of srv.envVars || []) {
           const value = process.env[key] || envFileValues[key];
           if (
@@ -566,15 +646,162 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const connectorIds = loadConfiguredConnectorIds();
+  const agentBoundary = resolveAgentBoundary({
+    group,
+    isMain: input.isMain,
+    agentId: input.groupFolder,
+    availableConnectorIds: connectorIds,
+  });
+  const runtimeCapabilities = deriveRuntimeCapabilities(agentBoundary, {
+    connectorIds,
+    requestedConnectorIds: input.allowedMcpServers
+      ? ['nanocrab', ...input.allowedMcpServers]
+      : undefined,
+  });
+  const allowedConnectorIds = filterAllowedConnectorIds({
+    connectorIds: runtimeCapabilities.allowedConnectorIds,
+    groupFolder: input.groupFolder,
+    agentId: agentBoundary.agentId,
+    isMain: input.isMain,
+    action: 'tools.expose',
+  });
+  const allowedMcpToolPatterns = getAllowedConnectorToolPatterns({
+    connectorIds: allowedConnectorIds,
+    groupFolder: input.groupFolder,
+    agentId: agentBoundary.agentId,
+    isMain: input.isMain,
+    dryRun: input.dryRun,
+  });
+  const executableConnectorIds = connectorIdsFromMcpToolPatterns(
+    allowedMcpToolPatterns,
+  );
+  const runtimeConnectorIds = Array.from(
+    new Set(['nanocrab', ...executableConnectorIds]),
+  );
+
+  const mounts = buildVolumeMounts(
+    group,
+    input.isMain,
+    input.prompt,
+    input.sessionId,
+    agentBoundary,
+  );
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanocrab-${safeName}-${Date.now()}`;
+  const policy = evaluatePolicy({
+    actor: input.groupFolder,
+    actorId: input.sessionId || null,
+    actionType: 'container.spawn',
+    resource: group.folder,
+    dryRun: input.dryRun === true,
+    context: {
+      containerName,
+      chatJid: input.chatJid,
+      isMain: input.isMain,
+      isScheduledTask: input.isScheduledTask,
+      mountCount: mounts.length,
+      boundary: {
+        agentId: agentBoundary.agentId,
+        channelScopes: agentBoundary.channelScopes,
+        connectorIds: allowedConnectorIds,
+        connectorToolPatterns: allowedMcpToolPatterns,
+        providerProfiles: agentBoundary.providerProfiles,
+        externalWrites: agentBoundary.externalWrites,
+      },
+      mounts: mounts.map((mount) => ({
+        containerPath: mount.containerPath,
+        readonly: input.dryRun ? true : mount.readonly,
+      })),
+    },
+  });
+  logAuditEvent({
+    actor: input.groupFolder,
+    actorId: input.sessionId || null,
+    actionType: 'container.spawn',
+    resource: group.folder,
+    decision: policy.decision,
+    correlationId: input.sessionId || null,
+    context: policy,
+  });
+  if (policy.decision === 'denied' || policy.decision === 'requires_approval') {
+    return {
+      status: 'error',
+      result: null,
+      error: `Container spawn ${policy.decision}: ${policy.explanation}`,
+    };
+  }
+  if (policy.decision === 'simulated') {
+    const simulated: ContainerOutput = {
+      status: 'success',
+      result: `Dry-run simulated container execution for ${group.name}. No container was spawned and all mounts were treated as read-only.`,
+      newSessionId: input.sessionId,
+    };
+    if (onOutput) await onOutput(simulated);
+    return simulated;
+  }
+  let effectiveProvider = isAgentProvider(input.provider)
+    ? input.provider
+    : undefined;
+  let effectiveModel = input.model;
+  if (input.providerFallbackPurpose && input.providerFallbackAction) {
+    if (!canUseProviderProfile(agentBoundary, input.providerFallbackPurpose)) {
+      logAuditEvent({
+        actor: input.groupFolder,
+        actorId: input.sessionId || null,
+        actionType: 'agent_boundary.provider_profile',
+        resource: input.providerFallbackPurpose,
+        decision: 'denied',
+        correlationId: input.sessionId || null,
+        context: {
+          agentId: agentBoundary.agentId,
+          allowedProviderProfiles: agentBoundary.providerProfiles,
+        },
+      });
+      return {
+        status: 'error',
+        result: null,
+        error: `Agent boundary denied provider profile: ${input.providerFallbackPurpose}`,
+      };
+    }
+    const fallback = resolveProviderFallbackForAction({
+      purpose: input.providerFallbackPurpose,
+      action: input.providerFallbackAction,
+      requester: input.groupFolder,
+      correlationId: input.sessionId || null,
+      sourceProvider: effectiveProvider,
+      sourceModel: effectiveModel,
+    });
+    logAuditEvent({
+      actor: input.groupFolder,
+      actorId: input.sessionId || null,
+      actionType: 'provider.fallback',
+      resource: input.providerFallbackPurpose,
+      decision: fallback.approved ? 'approved' : 'requires_approval',
+      correlationId: input.sessionId || null,
+      context: {
+        action: input.providerFallbackAction,
+        ...(fallback.approved
+          ? { provider: fallback.provider, model: fallback.model }
+          : { reason: fallback.reason, approvalId: fallback.approvalId }),
+      },
+    });
+    if (!fallback.approved) {
+      return {
+        status: 'error',
+        result: null,
+        error: `Provider fallback approval required: ${fallback.reason}`,
+      };
+    }
+    effectiveProvider = fallback.provider;
+    effectiveModel = fallback.model;
+  }
   const builtContainerArgs = buildContainerArgs(
     mounts,
     containerName,
-    input.isMain ? undefined : input.allowedMcpServers,
-    isAgentProvider(input.provider) ? input.provider : undefined,
-    input.model,
+    runtimeConnectorIds,
+    effectiveProvider,
+    effectiveModel,
   );
   const containerArgs = builtContainerArgs.args;
 
@@ -618,7 +845,23 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    container.stdin.write(JSON.stringify(input));
+    container.stdin.write(
+      JSON.stringify({
+        ...input,
+        allowedMcpServers: allowedConnectorIds.filter(
+          (connectorId) =>
+            connectorId !== 'nanocrab' &&
+            executableConnectorIds.includes(connectorId),
+        ),
+        allowedMcpToolPatterns,
+        agentBoundary,
+        runtimeCapabilities: {
+          ...runtimeCapabilities,
+          allowedConnectorIds,
+          allowedMcpToolPatterns,
+        },
+      }),
+    );
     container.stdin.end();
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
@@ -785,6 +1028,17 @@ export async function runContainerAgent(
           result: null,
           error: `Container timed out after ${configTimeout}ms`,
         });
+        logAuditEvent({
+          actor: input.groupFolder,
+          actorId: input.sessionId || null,
+          actionType: 'container.spawn',
+          resource: group.folder,
+          decision: 'error',
+          correlationId: input.sessionId || null,
+          durationMs: duration,
+          error: `Container timed out after ${configTimeout}ms`,
+          context: { containerName, code },
+        });
         return;
       }
 
@@ -880,6 +1134,17 @@ export async function runContainerAgent(
           result: null,
           error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
         });
+        logAuditEvent({
+          actor: input.groupFolder,
+          actorId: input.sessionId || null,
+          actionType: 'container.spawn',
+          resource: group.folder,
+          decision: 'error',
+          correlationId: input.sessionId || null,
+          durationMs: duration,
+          error: stderr.slice(-500),
+          context: { containerName, code, logFile },
+        });
         return;
       }
 
@@ -894,6 +1159,16 @@ export async function runContainerAgent(
             status: 'success',
             result: null,
             newSessionId,
+          });
+          logAuditEvent({
+            actor: input.groupFolder,
+            actorId: input.sessionId || null,
+            actionType: 'container.spawn',
+            resource: group.folder,
+            decision: 'allowed',
+            correlationId: input.sessionId || null,
+            durationMs: duration,
+            context: { containerName, streaming: true, newSessionId },
           });
         });
         return;
@@ -929,6 +1204,21 @@ export async function runContainerAgent(
         );
 
         resolve(output);
+        logAuditEvent({
+          actor: input.groupFolder,
+          actorId: input.sessionId || null,
+          actionType: 'container.spawn',
+          resource: group.folder,
+          decision: output.status === 'success' ? 'allowed' : 'error',
+          correlationId: input.sessionId || null,
+          durationMs: duration,
+          error: output.error,
+          context: {
+            containerName,
+            status: output.status,
+            hasResult: !!output.result,
+          },
+        });
       } catch (err) {
         logger.error(
           {
@@ -945,6 +1235,17 @@ export async function runContainerAgent(
           result: null,
           error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
         });
+        logAuditEvent({
+          actor: input.groupFolder,
+          actorId: input.sessionId || null,
+          actionType: 'container.spawn',
+          resource: group.folder,
+          decision: 'error',
+          correlationId: input.sessionId || null,
+          durationMs: duration,
+          error: err,
+          context: { containerName },
+        });
       }
     });
 
@@ -959,6 +1260,17 @@ export async function runContainerAgent(
         status: 'error',
         result: null,
         error: `Container spawn error: ${err.message}`,
+      });
+      logAuditEvent({
+        actor: input.groupFolder,
+        actorId: input.sessionId || null,
+        actionType: 'container.spawn',
+        resource: group.folder,
+        decision: 'error',
+        correlationId: input.sessionId || null,
+        durationMs: Date.now() - startTime,
+        error: err,
+        context: { containerName },
       });
     });
   });

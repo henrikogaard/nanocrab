@@ -3,6 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import { auditLog } from '../security.js';
 import { readEnvFile } from '../../env.js';
+import {
+  loadConnectorPermissions,
+  normalizeConnectorPermission,
+  saveConnectorPermissions,
+  type ConnectorPermission,
+} from '../../connector-permissions.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -69,6 +75,57 @@ function saveConfig(config: McpServerConfig[]): void {
   fs.writeFileSync(MCP_CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
+function permissionForServer(
+  server: McpServerConfig,
+  permissions = loadConnectorPermissions(),
+): ConnectorPermission {
+  const existing = permissions.find(
+    (permission) => permission.connectorId === server.name,
+  );
+  return (
+    existing ||
+    normalizeConnectorPermission({
+      connectorId: server.name,
+      scope: server.core ? 'all' : 'main',
+      allowedActions: server.core ? ['*'] : ['*.read', 'tools.expose'],
+      requiresApproval: !server.core,
+      groups: [],
+      agents: [],
+    })
+  );
+}
+
+function upsertPermission(
+  connectorId: string,
+  patch: Partial<ConnectorPermission>,
+): ConnectorPermission {
+  const permissions = loadConnectorPermissions();
+  const idx = permissions.findIndex(
+    (permission) => permission.connectorId === connectorId,
+  );
+  const existing =
+    idx >= 0
+      ? permissions[idx]
+      : normalizeConnectorPermission({
+          connectorId,
+          scope: 'main',
+          allowedActions: ['*.read', 'tools.expose'],
+          requiresApproval: true,
+          groups: [],
+          agents: [],
+        });
+  const next = normalizeConnectorPermission({
+    ...existing,
+    ...patch,
+    connectorId,
+    updatedAt: new Date().toISOString(),
+  });
+  if (idx >= 0) permissions[idx] = next;
+  else permissions.push(next);
+  saveConnectorPermissions(permissions);
+  return next;
+}
+
 function serverStatus(s: McpServerConfig, envVars: Record<string, string>) {
   const envStatus = s.envVars.map((key) => ({
     key,
@@ -78,6 +135,7 @@ function serverStatus(s: McpServerConfig, envVars: Record<string, string>) {
     s.envVars.length === 0 || envStatus.every((status) => status.isSet);
   return {
     ...s,
+    permission: permissionForServer(s),
     envStatus,
     allEnvSet,
     toolPattern: `mcp__${s.name}__*`,
@@ -125,6 +183,23 @@ router.get('/presets', (_req: Request, res: Response) => {
   );
 });
 
+router.get('/permissions', (_req: Request, res: Response) => {
+  res.json(loadConnectorPermissions());
+});
+
+router.put('/permissions/:connectorId', (req: Request, res: Response) => {
+  const connectorId = req.params.connectorId as string;
+  try {
+    const permission = upsertPermission(connectorId, req.body || {});
+    auditLog(req, 'connector_permission_updated', connectorId);
+    res.json({ ok: true, permission });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 router.post('/presets/:name/install', (req: Request, res: Response) => {
   const presetName = req.params.name as string;
   const preset = MCP_PRESETS.find((server) => server.name === presetName);
@@ -141,6 +216,11 @@ router.post('/presets/:name/install', (req: Request, res: Response) => {
 
   config.push(preset);
   saveConfig(config);
+  upsertPermission(preset.name, {
+    scope: 'main',
+    allowedActions: ['*.read', 'tools.expose'],
+    requiresApproval: true,
+  });
   auditLog(req, 'mcp_preset_installed', preset.name);
   res.json({
     ok: true,
@@ -182,6 +262,13 @@ router.post('/', (req: Request, res: Response) => {
   });
 
   saveConfig(config);
+  upsertPermission(safeName, {
+    scope: req.body.scope,
+    allowedActions: req.body.allowedActions || ['*.read', 'tools.expose'],
+    requiresApproval: req.body.requiresApproval !== false,
+    groups: req.body.groups || [],
+    agents: req.body.agents || [],
+  });
   auditLog(req, 'mcp_server_added', safeName);
   res.json({
     ok: true,

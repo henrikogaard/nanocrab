@@ -94,9 +94,7 @@ describe('LiveProbeService', () => {
       const throwingProvider = {
         id: 'openai-responses',
         name: 'OpenAI Responses',
-        validateModel: vi
-          .fn()
-          .mockRejectedValue(new Error('API timeout')),
+        validateModel: vi.fn().mockRejectedValue(new Error('API timeout')),
         getCapabilities: vi.fn(),
       };
       vi.mocked(getProviderById).mockReturnValue(throwingProvider as never);
@@ -118,14 +116,8 @@ describe('LiveProbeService', () => {
       };
       vi.mocked(getProviderById).mockReturnValue(cachedProvider as never);
 
-      const result1 = await service.probeModel(
-        'openai-responses',
-        'gpt-5.4',
-      );
-      const result2 = await service.probeModel(
-        'openai-responses',
-        'gpt-5.4',
-      );
+      const result1 = await service.probeModel('openai-responses', 'gpt-5.4');
+      const result2 = await service.probeModel('openai-responses', 'gpt-5.4');
 
       expect(result1.timestamp).toEqual(result2.timestamp);
       expect(cachedProvider.validateModel).toHaveBeenCalledTimes(1);
@@ -143,9 +135,7 @@ describe('LiveProbeService', () => {
           .mockResolvedValueOnce(true)
           .mockResolvedValueOnce(false)
           .mockRejectedValueOnce(new Error('timeout')),
-        getCapabilities: vi
-          .fn()
-          .mockResolvedValue(SAMPLE_CAPABILITIES),
+        getCapabilities: vi.fn().mockResolvedValue(SAMPLE_CAPABILITIES),
       };
       vi.mocked(getProviderById).mockReturnValue(multiProvider as never);
 
@@ -190,10 +180,7 @@ describe('LiveProbeService', () => {
     it('returns null capabilities when provider not found', async () => {
       vi.mocked(getProviderById).mockReturnValue(undefined);
 
-      const status = await service.getLiveProbeStatus(
-        'unknown',
-        'gpt-5.4',
-      );
+      const status = await service.getLiveProbeStatus('unknown', 'gpt-5.4');
 
       expect(status.validated).toBe(false);
       expect(status.capabilities).toBeNull();
@@ -264,10 +251,7 @@ describe('LiveProbeService', () => {
       vi.mocked(getProviderById).mockReturnValue(cachedProvider as never);
 
       await service.probeModel('openai-responses', 'gpt-5.4');
-      const cached = service.getCachedProbe(
-        'openai-responses',
-        'gpt-5.4',
-      );
+      const cached = service.getCachedProbe('openai-responses', 'gpt-5.4');
 
       expect(cached).not.toBeNull();
       expect(cached!.model).toBe('gpt-5.4');
@@ -299,11 +283,27 @@ describe('LiveProbeService', () => {
 
       const history = service.getProbeHistory();
       expect(history.length).toBeGreaterThanOrEqual(1);
-      expect(history[0].providerId).toBe('openai-responses');
+      expect(history[0].provider).toBe('openai-responses');
       expect(history[0].model).toBe('gpt-5.4');
-      expect(history[0].result.ok).toBe(true);
-      expect(history[0].result.validated).toBe(true);
+      expect(history[0].ok).toBe(true);
+      expect(history[0].latencyMs).toEqual(expect.any(Number));
+      expect(history[0].toolSupport).toBe(true);
+      expect(history[0].schemaSupport).toBe(true);
+      expect(history[0].streamingSupport).toBe(true);
+      expect(history[0].visionSupport).toBe(true);
+      expect(history[0].contextWindow).toBe(200000);
+      expect(history[0]).not.toHaveProperty('result');
       expect(history[0].timestamp).toBeDefined();
+      expect(
+        fs.existsSync(
+          '/tmp/nanocrab-probe-history-test/store/provider-probes.json',
+        ),
+      ).toBe(false);
+      expect(
+        fs.existsSync(
+          '/tmp/nanocrab-probe-history-test/store/provider-probe-history.json',
+        ),
+      ).toBe(false);
     });
 
     it('records failed probes in history', async () => {
@@ -313,8 +313,8 @@ describe('LiveProbeService', () => {
 
       const history = service.getProbeHistory('unknown');
       expect(history.length).toBeGreaterThanOrEqual(1);
-      expect(history[0].result.ok).toBe(false);
-      expect(history[0].result.errorMessage).toContain('not found');
+      expect(history[0].ok).toBe(false);
+      expect(history[0].errorDetail).toContain('not found');
     });
 
     it('filters history by providerId', async () => {
@@ -331,7 +331,7 @@ describe('LiveProbeService', () => {
 
       const history = service.getProbeHistory('openai-responses');
       expect(history.length).toBeGreaterThanOrEqual(2);
-      expect(history.every((e) => e.providerId === 'openai-responses')).toBe(
+      expect(history.every((e) => e.provider === 'openai-responses')).toBe(
         true,
       );
     });
@@ -348,15 +348,11 @@ describe('LiveProbeService', () => {
       await service.probeModel('openai-responses', 'gpt-5.4');
       await service.probeModel('openai-responses', 'gpt-4.1');
 
-      const history = service.getProbeHistory(
-        'openai-responses',
-        'gpt-5.4',
-      );
+      const history = service.getProbeHistory('openai-responses', 'gpt-5.4');
       expect(history.length).toBeGreaterThanOrEqual(1);
       expect(
         history.every(
-          (e) =>
-            e.providerId === 'openai-responses' && e.model === 'gpt-5.4',
+          (e) => e.provider === 'openai-responses' && e.model === 'gpt-5.4',
         ),
       ).toBe(true);
     });
@@ -373,6 +369,32 @@ describe('LiveProbeService', () => {
       await service.probeModel('openai-responses', 'gpt-5.4');
       const history = service.getProbeHistory(undefined, undefined, 1);
       expect(history.length).toBeLessThanOrEqual(1);
+    });
+
+    it('bounds persisted history per provider and model', async () => {
+      const hp = {
+        id: 'openai-responses',
+        name: 'OpenAI Responses',
+        validateModel: vi.fn().mockResolvedValue(true),
+        getCapabilities: vi.fn().mockResolvedValue(SAMPLE_CAPABILITIES),
+      };
+      vi.mocked(getProviderById).mockReturnValue(hp as never);
+      service = new LiveProbeService({ cacheTtlMs: 0 });
+
+      for (let i = 0; i < 25; i++) {
+        await service.probeModel('openai-responses', 'gpt-5.4');
+      }
+
+      const history = service.getProbeHistory(
+        'openai-responses',
+        'gpt-5.4',
+        50,
+      );
+      expect(history).toHaveLength(20);
+      expect(history.every((e) => e.provider === 'openai-responses')).toBe(
+        true,
+      );
+      expect(history.every((e) => !('result' in e))).toBe(true);
     });
   });
 

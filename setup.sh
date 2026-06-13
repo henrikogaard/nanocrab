@@ -7,10 +7,29 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$PROJECT_ROOT/logs/setup.log"
+APP_VERSION="$(cd "$PROJECT_ROOT" && node -p "require('./package.json').version" 2>/dev/null || echo unknown)"
 
 mkdir -p "$PROJECT_ROOT/logs"
 
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [bootstrap] $*" >> "$LOG_FILE"; }
+redact() {
+  perl -pe 's/(Bearer\s+)[A-Za-z0-9._~+\/=-]+/${1}[REDACTED]/g; s/(sk-)[A-Za-z0-9._-]+/${1}[REDACTED]/g; s/((?:authorization|cookie|password|secret|token|api[_-]?key|credential[_-]?proxy)[^=:\n]{0,20}[=:]\s*)[^ \t\r\n"&]+/${1}[REDACTED]/ig; s#(/__nanocrab/providers/)[^ \t\r\n"&]+#${1}[REDACTED]#g'
+}
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [bootstrap] $*" | redact >> "$LOG_FILE"; }
+
+print_brand() {
+  cat <<EOF
+       _     _     _     _     _     _
+      / \___/ \___/ \___/ \___/ \___/ \\
+     (  o   o   N A N O C R A B   o   o )
+      \_/---\_/---\_/---\_/---\_/---\_/
+          \_V_/                 \_V_/
+
+      NanoCrab - NanoCrab Edition
+      Edition 2.0-Beta1 | App $APP_VERSION
+      Standalone Personal AI Assistant
+EOF
+}
 
 # --- Platform detection ---
 
@@ -80,7 +99,7 @@ install_deps() {
   fi
 
   log "Running npm ci $npm_flags"
-  if npm ci $npm_flags >> "$LOG_FILE" 2>&1; then
+  if npm ci $npm_flags 2>&1 | redact >> "$LOG_FILE"; then
     DEPS_OK="true"
     log "npm install succeeded"
   else
@@ -90,7 +109,7 @@ install_deps() {
 
   # Verify native module (better-sqlite3)
   log "Verifying native modules"
-  if node -e "require('better-sqlite3')" >> "$LOG_FILE" 2>&1; then
+  if node -e "require('better-sqlite3')" 2>&1 | redact >> "$LOG_FILE"; then
     NATIVE_OK="true"
     log "better-sqlite3 loads OK"
   else
@@ -118,6 +137,7 @@ check_build_tools() {
 
 # --- Main ---
 
+print_brand
 log "=== Bootstrap started ==="
 
 detect_platform
@@ -138,6 +158,9 @@ fi
 
 cat <<EOF
 === NANOCRAB SETUP: BOOTSTRAP ===
+BRAND: NanoCrab
+EDITION: 2.0-Beta1
+APP_VERSION: $APP_VERSION
 PLATFORM: $PLATFORM
 IS_WSL: $IS_WSL
 IS_ROOT: $IS_ROOT

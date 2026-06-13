@@ -653,7 +653,7 @@ router.get('/guide', (_req: Request, res: Response) => {
       },
       {
         title: 'GitHub Integration',
-        content: `## Setup\n\n1. Add your \`GITHUB_TOKEN\` in **Credentials** (needs repo scope)\n2. Set up a webhook in **Webhooks** pointing to your server\n3. The bot will auto-review pushes and PRs\n\n## What You Can Ask\n\n- "List open issues on my-org/my-repo"\n- "Create an issue: login page has a bug"\n- "Review PR #42 and suggest improvements"\n- "Merge PR #42 after CI passes"`,
+        content: `## Setup\n\n1. Add your \`GITHUB_TOKEN\` in **Credentials** (needs repo scope)\n2. Register enabled coding repos before using issue pickup or autofix\n3. Set up a webhook in **Webhooks** pointing to your server\n\n## Coding Job Reviews\n\nGitHub issue jobs move through staged states: queued, investigate, plan, await_approval, implement, test, await_pr_approval, open_pr, ci_running, completed. Implementation, pushes, and PR creation require job-scoped approval records before mutation.\n\n## What You Can Ask\n\n- "List open issues on my-org/my-repo"\n- "Pick the next autofix issue assigned to me in milestone P0"\n- "Review PR #42 and suggest improvements"\n- "Merge PR #42 after CI passes"`,
       },
       {
         title: 'Code Review Rules',

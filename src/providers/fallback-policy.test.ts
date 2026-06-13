@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { FallbackPolicyManager } from './fallback-policy.js';
+import { FallbackPolicyManager, isFallbackAction } from './fallback-policy.js';
 import type { FallbackAction, FallbackDecision } from './fallback-policy.js';
 
 function makePolicy(
@@ -80,6 +80,20 @@ describe('FallbackPolicyManager', () => {
         expect(result.reason).toContain('read fallback');
       });
 
+      it('requires approval when read fallback crosses local/private to hosted boundary', () => {
+        const result = manager.evaluateFallback(
+          'read',
+          { ...readSource, providerId: 'ollama', privacyTier: 'local' },
+          { ...target, providerId: 'openrouter', privacyTier: 'third-party' },
+          fullCapabilities,
+          true,
+        );
+
+        expect(result.allowed).toBe(false);
+        expect(result.requiresApproval).toBe(true);
+        expect(result.reason).toContain('local/private');
+      });
+
       it('returns allowed=false when toolPolicy is deny', () => {
         const result = manager.evaluateFallback(
           'read',
@@ -144,6 +158,10 @@ describe('FallbackPolicyManager', () => {
         'upload',
         'shell',
         'pr',
+        'coding-implementation',
+        'pr-creation',
+        'automation-execution',
+        'skill-installation',
       ];
 
       for (const action of dangerous) {
@@ -245,6 +263,26 @@ describe('FallbackPolicyManager', () => {
         expect(result.allowed).toBe(false);
       });
     });
+
+    it('requires approval when fallback moves local or private work to a hosted provider', () => {
+      const result = manager.evaluateFallback(
+        'provider-fallback',
+        {
+          ...writeSource,
+          privacyTier: 'local',
+        },
+        {
+          ...target,
+          privacyTier: 'third-party',
+        },
+        fullCapabilities,
+        true,
+      );
+
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.reason).toContain('local/private');
+    });
   });
 
   describe('approveFallback', () => {
@@ -312,5 +350,14 @@ describe('FallbackPolicyManager', () => {
       expect(result.allowed).toBe(false);
       expect(result.requiresApproval).toBe(true);
     });
+  });
+});
+
+describe('isFallbackAction', () => {
+  it('accepts known fallback actions and rejects arbitrary route input', () => {
+    expect(isFallbackAction('pr-creation')).toBe(true);
+    expect(isFallbackAction('external-message')).toBe(true);
+    expect(isFallbackAction('delete-everything')).toBe(false);
+    expect(isFallbackAction(null)).toBe(false);
   });
 });

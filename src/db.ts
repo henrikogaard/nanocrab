@@ -157,6 +157,24 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_journal_events_timestamp ON journal_events(timestamp);
     CREATE INDEX IF NOT EXISTS idx_journal_events_group ON journal_events(group_folder);
+
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id TEXT PRIMARY KEY,
+      timestamp TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      actor_id TEXT,
+      action_type TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      context_json TEXT NOT NULL,
+      correlation_id TEXT,
+      duration_ms INTEGER,
+      error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp ON audit_events(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_audit_events_correlation ON audit_events(correlation_id, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_audit_events_action ON audit_events(action_type);
+    CREATE INDEX IF NOT EXISTS idx_audit_events_decision ON audit_events(decision);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -330,6 +348,11 @@ export function _initTestDatabase(): void {
 /** @internal - for tests only. */
 export function _closeDatabase(): void {
   db.close();
+}
+
+/** @internal - used by audit logging to avoid noisy writes before init. */
+export function isDatabaseInitialized(): boolean {
+  return Boolean(db);
 }
 
 /**
@@ -734,6 +757,115 @@ export function logTaskRun(log: TaskRunLog): void {
     log.result,
     log.error,
   );
+}
+
+export interface AuditEventRow {
+  id: string;
+  timestamp: string;
+  actor: string;
+  actor_id: string | null;
+  action_type: string;
+  resource: string;
+  decision: string;
+  context_json: string;
+  correlation_id: string | null;
+  duration_ms: number | null;
+  error: string | null;
+}
+
+export interface AuditEventInsert {
+  id: string;
+  timestamp: string;
+  actor: string;
+  actorId?: string | null;
+  actionType: string;
+  resource: string;
+  decision: string;
+  contextJson: string;
+  correlationId?: string | null;
+  durationMs?: number | null;
+  error?: string | null;
+}
+
+export interface AuditEventQuery {
+  actor?: string;
+  actorId?: string;
+  actionType?: string;
+  resource?: string;
+  decision?: string;
+  correlationId?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export function insertAuditEvent(event: AuditEventInsert): void {
+  db.prepare(
+    `
+    INSERT INTO audit_events (
+      id, timestamp, actor, actor_id, action_type, resource, decision,
+      context_json, correlation_id, duration_ms, error
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `,
+  ).run(
+    event.id,
+    event.timestamp,
+    event.actor,
+    event.actorId || null,
+    event.actionType,
+    event.resource,
+    event.decision,
+    event.contextJson,
+    event.correlationId || null,
+    event.durationMs ?? null,
+    event.error || null,
+  );
+}
+
+export function queryAuditEvents(query: AuditEventQuery = {}): AuditEventRow[] {
+  const where: string[] = [];
+  const values: unknown[] = [];
+  const add = (clause: string, value: unknown) => {
+    where.push(clause);
+    values.push(value);
+  };
+  if (query.actor) add('actor = ?', query.actor);
+  if (query.actorId) add('actor_id = ?', query.actorId);
+  if (query.actionType) add('action_type = ?', query.actionType);
+  if (query.resource) add('resource = ?', query.resource);
+  if (query.decision) add('decision = ?', query.decision);
+  if (query.correlationId) add('correlation_id = ?', query.correlationId);
+  if (query.from) add('timestamp >= ?', query.from);
+  if (query.to) add('timestamp <= ?', query.to);
+  const limit = Math.min(Math.max(query.limit || 100, 1), 1000);
+  return db
+    .prepare(
+      `
+      SELECT id, timestamp, actor, actor_id, action_type, resource, decision,
+             context_json, correlation_id, duration_ms, error
+      FROM audit_events
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY timestamp DESC
+      LIMIT ?
+    `,
+    )
+    .all(...values, limit) as AuditEventRow[];
+}
+
+export function queryAuditEventsByCorrelation(
+  correlationId: string,
+): AuditEventRow[] {
+  return db
+    .prepare(
+      `
+      SELECT id, timestamp, actor, actor_id, action_type, resource, decision,
+             context_json, correlation_id, duration_ms, error
+      FROM audit_events
+      WHERE correlation_id = ?
+      ORDER BY timestamp ASC, id ASC
+    `,
+    )
+    .all(correlationId) as AuditEventRow[];
 }
 
 // --- Memory accessors ---

@@ -13,6 +13,7 @@ import {
   GROUPS_DIR,
   DATA_DIR,
   CONTAINER_IMAGE,
+  CREDENTIAL_PROXY_PORT,
 } from '../../config.js';
 import { readEnvFile, writeEnvValue } from '../../env.js';
 import { getState } from '../state.js';
@@ -26,6 +27,7 @@ import {
   EDITION_VERSION,
 } from '../../edition.js';
 import { ensureCodexOAuth, getCodexAuthStatus } from '../../codex-auth.js';
+import { runSetupPreflight } from '../../setup-preflight.js';
 import { CONTAINER_RUNTIME_BIN } from '../../container-runtime.js';
 import {
   AGENT_PROVIDER_DEFINITIONS,
@@ -47,12 +49,14 @@ import {
 } from '../../agent-instructions.js';
 import {
   getProviderCapabilityMatrix,
+  getProviderProbeHistory,
   getProviderPurposeMetadata,
   loadProviderProfiles,
   probeAllProviderProfiles,
   probeProviderProfile,
   ProviderPurpose,
   PROVIDER_PURPOSES,
+  runLiveProviderProbe,
   saveProviderProfile,
 } from '../../provider-router.js';
 
@@ -370,6 +374,29 @@ router.get('/health', (_req: Request, res: Response) => {
   });
 });
 
+router.get('/setup/preflight', requireRole('owner'), async (_req, res) => {
+  try {
+    const env = readEnvFile(['ADMIN_PORT', 'CREDENTIAL_PROXY_PORT']);
+    const adminPort = Number(process.env.ADMIN_PORT || env.ADMIN_PORT || 9744);
+    const proxyPort = Number(
+      process.env.CREDENTIAL_PROXY_PORT ||
+        env.CREDENTIAL_PROXY_PORT ||
+        CREDENTIAL_PROXY_PORT,
+    );
+    const result = await runSetupPreflight({
+      dryRun: true,
+      occupiedPortsOk: [adminPort, proxyPort],
+    });
+    res.json(result);
+  } catch (err) {
+    logger.error({ err }, 'Setup preflight failed');
+    res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 // Usage stats
 router.get('/stats', (_req: Request, res: Response) => {
   const db = new Database(path.join(STORE_DIR, 'messages.db'), {
@@ -560,6 +587,7 @@ router.get('/provider', (_req: Request, res: Response) => {
     purposes: getProviderPurposeMetadata(),
     capabilityMatrix: getProviderCapabilityMatrix(),
     profileProbes: probeAllProviderProfiles(),
+    probeHistory: getProviderProbeHistory(undefined, undefined, 100),
     auth: { codex: codexAuth },
   });
 });
@@ -690,21 +718,31 @@ router.put(
   },
 );
 
-router.get('/provider/profiles/:id/probe', (req: Request, res: Response) => {
-  const id = req.params.id as ProviderPurpose;
-  if (!PROVIDER_PURPOSES.includes(id)) {
-    res.status(400).json({
-      error: `profile id must be one of: ${PROVIDER_PURPOSES.join(', ')}`,
-    });
-    return;
-  }
-  const profile = loadProviderProfiles().find((item) => item.id === id);
-  if (!profile) {
-    res.status(404).json({ error: 'profile not found' });
-    return;
-  }
-  res.json(probeProviderProfile(profile));
-});
+router.get(
+  '/provider/profiles/:id/probe',
+  async (req: Request, res: Response) => {
+    const id = req.params.id as ProviderPurpose;
+    if (!PROVIDER_PURPOSES.includes(id)) {
+      res.status(400).json({
+        error: `profile id must be one of: ${PROVIDER_PURPOSES.join(', ')}`,
+      });
+      return;
+    }
+    const profile = loadProviderProfiles().find((item) => item.id === id);
+    if (!profile) {
+      res.status(404).json({ error: 'profile not found' });
+      return;
+    }
+    try {
+      const probe = await runLiveProviderProbe(profile);
+      res.json(probe);
+    } catch (err) {
+      res.status(500).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
 
 router.get(
   '/provider/preflight/:provider',

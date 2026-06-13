@@ -37,7 +37,8 @@ describe('OpenAIResponsesProvider', () => {
     });
 
     it('returns model-specific context window and cost tier', async () => {
-      const mini = await openaiResponsesProvider.getCapabilities('gpt-5.4-mini');
+      const mini =
+        await openaiResponsesProvider.getCapabilities('gpt-5.4-mini');
       const gpt52 = await openaiResponsesProvider.getCapabilities('gpt-5.2');
 
       expect(mini.contextWindow).toBe(200000);

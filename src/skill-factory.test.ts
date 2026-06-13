@@ -11,7 +11,10 @@ vi.mock('./config.js', () => ({
 }));
 
 import {
+  approveSkillSuggestion,
   approveSkillDraft,
+  detectAndQueueSkillSuggestions,
+  listSkillSuggestions,
   listSkillDrafts,
   proposeSkillDraft,
   rejectSkillDraft,
@@ -94,6 +97,144 @@ describe('skill factory', () => {
     expect(rejected.status).toBe('rejected');
     expect(fs.existsSync(path.join(TEST_ROOT, 'container', 'skills'))).toBe(
       false,
+    );
+  });
+
+  it('queues repeated skill suggestions and approval creates an uninstalled draft', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      messages: [
+        'When I ask for release notes, summarize commits and risks.',
+        'Please summarize commits and risks for release notes.',
+        'Always summarize commits and risks in release notes.',
+      ],
+      createdBy: 'test',
+    });
+
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]).toMatchObject({
+      proposedSkillName: 'summarize-commits-risks-release-notes',
+      status: 'pending',
+      sourceExamples: expect.arrayContaining([
+        expect.stringContaining('release notes'),
+      ]),
+    });
+    expect(listSkillDrafts()).toHaveLength(0);
+
+    const approved = approveSkillSuggestion(suggestions[0].id, {
+      decidedBy: 'owner',
+      decision: 'create-draft',
+    });
+
+    expect(approved.status).toBe('approved');
+    expect(approved.ownerDecision).toBe('create-draft');
+    expect(approved.draftId).toBeTruthy();
+    expect(listSkillDrafts('pending')).toHaveLength(1);
+    expect(fs.existsSync(path.join(TEST_ROOT, 'container', 'skills'))).toBe(
+      false,
+    );
+    expect(listSkillSuggestions({ status: 'approved' })).toHaveLength(1);
+  });
+
+  it('rejects invalid suggestion decisions without creating a draft', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      messages: [
+        'When I ask for release notes, summarize commits and risks.',
+        'Please summarize commits and risks for release notes.',
+        'Always summarize commits and risks in release notes.',
+      ],
+      createdBy: 'test',
+    });
+
+    expect(() =>
+      approveSkillSuggestion(suggestions[0].id, {
+        decidedBy: 'owner',
+        decision: 'ship-it' as any,
+      }),
+    ).toThrow('decision');
+    expect(listSkillDrafts()).toHaveLength(0);
+    expect(listSkillSuggestions({ status: 'pending' })).toHaveLength(1);
+  });
+
+  it('rejects duplicate suggestion approval without creating another draft', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      messages: [
+        'When I ask for release notes, summarize commits and risks.',
+        'Please summarize commits and risks for release notes.',
+        'Always summarize commits and risks in release notes.',
+      ],
+      createdBy: 'test',
+    });
+    approveSkillSuggestion(suggestions[0].id, {
+      decidedBy: 'owner',
+      decision: 'create-draft',
+    });
+
+    expect(() =>
+      approveSkillSuggestion(suggestions[0].id, {
+        decidedBy: 'owner',
+        decision: 'create-draft',
+      }),
+    ).toThrow('pending');
+    expect(listSkillDrafts('pending')).toHaveLength(1);
+  });
+
+  it('does not lower the skill suggestion threshold below three examples', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      messages: [
+        'Please summarize commits and risks for release notes.',
+        'Always summarize commits and risks in release notes.',
+      ],
+      createdBy: 'test',
+      minExamples: 2,
+    });
+
+    expect(suggestions).toHaveLength(0);
+    expect(listSkillSuggestions()).toHaveLength(0);
+  });
+
+  it('requires three skill-worthy repeated examples before queueing', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      messages: [
+        'Always summarize commits and risks in release notes.',
+        'Summarize commits and risks release notes.',
+        'Summarize commits and risks release notes.',
+      ],
+      createdBy: 'test',
+    });
+
+    expect(suggestions).toHaveLength(0);
+    expect(listSkillSuggestions()).toHaveLength(0);
+  });
+
+  it('queues when three repeated examples are skill-worthy', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      messages: [
+        'Please summarize commits and risks for release notes.',
+        'Always summarize commits and risks in release notes.',
+        'Use this workflow to summarize commits and risks for release notes.',
+      ],
+      createdBy: 'test',
+    });
+
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0].proposedSkillName).toBe(
+      'summarize-commits-risks-release-notes',
+    );
+  });
+
+  it('queues repeated journal workflow examples recognized by journal detection', () => {
+    const suggestions = detectAndQueueSkillSuggestions({
+      journal: [
+        'Prepare a concise weekly alliance digest for the team.',
+        'Prepare a concise weekly alliance digest from journal notes.',
+        'Prepare a concise weekly alliance digest for Monday.',
+      ],
+      createdBy: 'test',
+    });
+
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0].proposedSkillName).toBe(
+      'prepare-concise-weekly-alliance-digest',
     );
   });
 });

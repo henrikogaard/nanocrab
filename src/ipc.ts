@@ -38,7 +38,11 @@ import {
 } from './skill-factory.js';
 import { createReportJob, listReportJobs } from './report-jobs.js';
 import { createResearchJob, listResearchJobs } from './research-jobs.js';
-import { listSkillRegistry, scoreSkillsForRequest } from './skill-registry.js';
+import {
+  isSkillVisibleForGroup,
+  listSkillRegistry,
+  scoreSkillsForRequest,
+} from './skill-registry.js';
 import { ProviderPurpose, PROVIDER_PURPOSES } from './provider-router.js';
 import { RegisteredGroup } from './types.js';
 
@@ -64,6 +68,13 @@ export interface IpcDeps {
 }
 
 let ipcWatcherRunning = false;
+
+export function isSkillVisibleForIpc(
+  skill: Parameters<typeof isSkillVisibleForGroup>[0],
+  isMain: boolean,
+): boolean {
+  return isSkillVisibleForGroup(skill, isMain);
+}
 
 function writeIpcResponse(
   sourceGroup: string,
@@ -976,13 +987,9 @@ export async function processTaskIpc(
       writeIpcOk(
         sourceGroup,
         data.requestId,
-        listSkillRegistry().filter((skill) => {
-          if (!skill.enabled) return false;
-          if (!isMain && skill.visibility === 'private') return false;
-          if (!isMain && skill.scope === 'main') return false;
-          if (isMain && skill.scope === 'channels') return false;
-          return true;
-        }),
+        listSkillRegistry().filter((skill) =>
+          isSkillVisibleForIpc(skill, isMain),
+        ),
       );
       break;
 

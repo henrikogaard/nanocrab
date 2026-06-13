@@ -1,7 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-
-import { STORE_DIR } from '../config.js';
 import { getProviderById } from './index.js';
 import type { ProviderCapabilitiesResult } from './openai-responses/provider.js';
 
@@ -11,6 +7,7 @@ export interface LiveProbeResult {
   validated: boolean;
   ok: boolean;
   status: 'success' | 'failed' | 'timeout';
+  latencyMs?: number;
   errorMessage?: string;
   timestamp: Date;
 }
@@ -31,9 +28,18 @@ export interface LiveProbeStatus {
 }
 
 export interface ProbeHistoryEntry {
-  providerId: string;
+  provider: string;
   model: string;
-  result: LiveProbeResult;
+  profileId?: string;
+  ok: boolean;
+  latencyMs?: number;
+  streaming?: boolean;
+  streamingSupport: boolean;
+  toolSupport: boolean;
+  schemaSupport: boolean;
+  visionSupport: boolean;
+  contextWindow: number;
+  errorDetail?: string;
   timestamp: string;
 }
 
@@ -43,23 +49,7 @@ interface CacheEntry {
 }
 
 const DEFAULT_CACHE_TTL_MS = 60_000;
-const PROBE_HISTORY_PATH = path.join(STORE_DIR, 'provider-probe-history.json');
 const MAX_HISTORY_PER_MODEL = 20;
-
-function readProbeHistory(): ProbeHistoryEntry[] {
-  try {
-    const raw = fs.readFileSync(PROBE_HISTORY_PATH, 'utf-8');
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeProbeHistory(entries: ProbeHistoryEntry[]): void {
-  fs.mkdirSync(path.dirname(PROBE_HISTORY_PATH), { recursive: true });
-  fs.writeFileSync(PROBE_HISTORY_PATH, `${JSON.stringify(entries, null, 2)}\n`);
-}
 
 function pruneHistory(
   entries: ProbeHistoryEntry[],
@@ -67,16 +57,17 @@ function pruneHistory(
   model: string,
 ): ProbeHistoryEntry[] {
   const other = entries.filter(
-    (e) => e.providerId !== providerId || e.model !== model,
+    (e) => e.provider !== providerId || e.model !== model,
   );
   const self = entries
-    .filter((e) => e.providerId === providerId && e.model === model)
+    .filter((e) => e.provider === providerId && e.model === model)
     .slice(-(MAX_HISTORY_PER_MODEL - 1));
   return [...other, ...self];
 }
 
 export class LiveProbeService {
   private cache = new Map<string, CacheEntry>();
+  private history: ProbeHistoryEntry[] = [];
   private cacheTtlMs: number;
 
   constructor(options?: { cacheTtlMs?: number }) {
@@ -98,7 +89,11 @@ export class LiveProbeService {
     return entry.result;
   }
 
-  private setCache(providerId: string, model: string, result: LiveProbeResult): void {
+  private setCache(
+    providerId: string,
+    model: string,
+    result: LiveProbeResult,
+  ): void {
     const key = this.cacheKey(providerId, model);
     this.cache.set(key, { result, expiresAt: Date.now() + this.cacheTtlMs });
   }
@@ -108,16 +103,23 @@ export class LiveProbeService {
     model: string,
     result: LiveProbeResult,
   ): void {
-    const entries = readProbeHistory();
     const entry: ProbeHistoryEntry = {
-      providerId,
+      provider: providerId,
       model,
-      result,
+      ok: result.ok,
+      latencyMs: result.latencyMs,
+      streaming: result.capabilities.streaming,
+      streamingSupport: result.capabilities.streaming,
+      toolSupport: result.capabilities.toolCalls,
+      schemaSupport: result.capabilities.structuredOutput,
+      visionSupport: result.capabilities.vision,
+      contextWindow: result.capabilities.contextWindow,
+      errorDetail: result.errorMessage,
       timestamp: new Date().toISOString(),
     };
-    const pruned = pruneHistory(entries, providerId, model);
+    const pruned = pruneHistory(this.history, providerId, model);
     pruned.push(entry);
-    writeProbeHistory(pruned);
+    this.history = pruned;
   }
 
   getCachedProbe(providerId: string, model: string): LiveProbeResult | null {
@@ -129,10 +131,10 @@ export class LiveProbeService {
     model?: string,
     limit?: number,
   ): ProbeHistoryEntry[] {
-    const entries = readProbeHistory();
+    const entries = this.history;
     let filtered = entries;
     if (providerId) {
-      filtered = filtered.filter((e) => e.providerId === providerId);
+      filtered = filtered.filter((e) => e.provider === providerId);
     }
     if (model) {
       filtered = filtered.filter((e) => e.model === model);
@@ -158,11 +160,13 @@ export class LiveProbeService {
     providerId: string,
     model: string,
   ): Promise<LiveProbeResult> {
+    const startedAt = Date.now();
     const cached = this.getCached(providerId, model);
     if (cached) return cached;
 
     const provider = getProviderById(providerId);
     if (!provider) {
+      const timestamp = new Date();
       const result: LiveProbeResult = {
         model,
         capabilities: {
@@ -180,7 +184,8 @@ export class LiveProbeService {
         ok: false,
         status: 'failed',
         errorMessage: `Provider '${providerId}' not found in registry`,
-        timestamp: new Date(),
+        timestamp,
+        latencyMs: Date.now() - startedAt,
       };
       this.setCache(providerId, model, result);
       this.appendHistory(providerId, model, result);
@@ -200,12 +205,14 @@ export class LiveProbeService {
         ok: validated,
         status: 'success',
         timestamp: new Date(),
+        latencyMs: Date.now() - startedAt,
       };
       this.setCache(providerId, model, result);
       this.appendHistory(providerId, model, result);
       return result;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
+      const timestamp = new Date();
       const result: LiveProbeResult = {
         model,
         capabilities: {
@@ -223,7 +230,8 @@ export class LiveProbeService {
         ok: false,
         status: 'failed',
         errorMessage,
-        timestamp: new Date(),
+        timestamp,
+        latencyMs: Date.now() - startedAt,
       };
       this.appendHistory(providerId, model, result);
       const key = this.cacheKey(providerId, model);
@@ -251,7 +259,8 @@ export class LiveProbeService {
         validated: false,
         ok: false,
         status: 'failed' as const,
-        errorMessage: r.reason instanceof Error ? r.reason.message : String(r.reason),
+        errorMessage:
+          r.reason instanceof Error ? r.reason.message : String(r.reason),
         timestamp: new Date(),
       };
     });

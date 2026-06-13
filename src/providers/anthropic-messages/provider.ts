@@ -88,9 +88,7 @@ export class AnthropicMessagesProvider implements Provider {
   readonly id = PROVIDER_ID;
   readonly name = DEFINITION.name;
 
-  async getCapabilities(
-    model: string,
-  ): Promise<ProviderCapabilitiesResult> {
+  async getCapabilities(model: string): Promise<ProviderCapabilitiesResult> {
     const modelSpec = MODEL_SPECS[model];
     if (!modelSpec) return { ...DEFAULT_CAPABILITIES };
     return { ...DEFAULT_CAPABILITIES, ...modelSpec };
@@ -125,8 +123,7 @@ export class AnthropicMessagesProvider implements Provider {
     options?: { model?: string },
   ): Promise<ProviderOutput> {
     const apiKey = getApiKey();
-    if (!apiKey)
-      throw new Error(`${DEFINITION.envKey} is not configured`);
+    if (!apiKey) throw new Error(`${DEFINITION.envKey} is not configured`);
 
     const baseUrl = getBaseUrl();
     const model = options?.model || 'claude-sonnet-4-6';

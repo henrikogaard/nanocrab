@@ -7,15 +7,20 @@ import { auditLog } from '../security.js';
 import { getCodexAuthStatus } from '../../codex-auth.js';
 import { isAgentProvider } from '../../agent-provider.js';
 import { createApproval } from '../../approvals.js';
-import { liveProbeService } from '../../providers/live-probe.js';
 import {
   getProviderProfile,
   loadProviderProfiles,
   providerModels,
   runLiveProviderProbe,
   getStoredProviderProbes,
+  getProviderProbeHistory,
 } from '../../provider-router.js';
-import { runAllProbes, getProbeHealth, refreshProbeHealth } from '../../probe-scheduler.js';
+import { isFallbackAction } from '../../providers/fallback-policy.js';
+import {
+  runAllProbes,
+  getProbeHealth,
+  refreshProbeHealth,
+} from '../../probe-scheduler.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -410,7 +415,7 @@ router.get('/probe-history', (req: Request, res: Response) => {
       typeof req.query.limit === 'string'
         ? parseInt(req.query.limit, 10) || undefined
         : undefined;
-    const history = liveProbeService.getProbeHistory(providerId, model, limit);
+    const history = getProviderProbeHistory(providerId, model, limit);
     res.json({ ok: true, history });
   } catch (err) {
     res.status(400).json({
@@ -440,15 +445,40 @@ router.post('/fallback-approval', (req: Request, res: Response) => {
       .json({ error: 'sourceProfileId and targetProfileId required' });
     return;
   }
+  if (!isFallbackAction(action)) {
+    res.status(400).json({ error: 'action must be a known fallback action' });
+    return;
+  }
+  const profiles = loadProviderProfiles();
+  const sourceProfile = profiles.find(
+    (profile) => profile.id === sourceProfileId,
+  );
+  const targetProfile = profiles.find(
+    (profile) => profile.id === targetProfileId,
+  );
+  if (!sourceProfile || !targetProfile) {
+    res.status(400).json({ error: 'source and target profiles must exist' });
+    return;
+  }
+  const targetId = `${sourceProfile.id}:${sourceProfile.provider}/${sourceProfile.model}->${targetProfile.id}:${targetProfile.provider}/${targetProfile.model}:${action}`;
   const approval = createApproval({
     kind: 'provider-fallback',
     title: 'Approve provider fallback',
-    summary: `Allow ${sourceProfileId} to fall back to ${targetProfileId} for ${action} work.`,
+    summary: `Allow ${sourceProfile.label} to fall back from ${sourceProfile.provider}/${sourceProfile.model} to ${targetProfile.provider}/${targetProfile.model} for ${action} work.`,
     risk: action === 'read' ? 'low' : 'high',
     requester: req.user?.username || 'dashboard',
     targetType: 'provider-profile',
-    targetId: sourceProfileId,
-    payload: { sourceProfileId, targetProfileId, action },
+    targetId,
+    source: 'dashboard',
+    payload: {
+      sourceProfileId: sourceProfile.id,
+      targetProfileId: targetProfile.id,
+      sourceProvider: sourceProfile.provider,
+      sourceModel: sourceProfile.model,
+      targetProvider: targetProfile.provider,
+      targetModel: targetProfile.model,
+      action,
+    },
   });
   auditLog(req, 'provider_fallback_approval_requested', approval.id);
   res.json({ ok: true, approval });
@@ -465,7 +495,11 @@ router.get('/health', (_req: Request, res: Response) => {
 router.post('/probe-all', async (_req: Request, res: Response) => {
   try {
     const data = await runAllProbes();
-    auditLog(_req, 'provider_probe_all', `${data.entries.length} profiles probed`);
+    auditLog(
+      _req,
+      'provider_probe_all',
+      `${data.entries.length} profiles probed`,
+    );
     res.json(data);
   } catch (err) {
     res.status(500).json({

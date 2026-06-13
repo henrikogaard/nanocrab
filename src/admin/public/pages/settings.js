@@ -32,6 +32,17 @@ async function renderSettings(el) {
   try {
     providerInfo = await api('/system/provider');
   } catch {}
+  let agentBoundaries = [];
+  try {
+    agentBoundaries = await api('/agents/boundaries');
+  } catch {}
+  const isOwner = (window._userRole || 'owner') === 'owner';
+  let setupPreflight = null;
+  if (isOwner) {
+    try {
+      setupPreflight = await api('/system/setup/preflight');
+    } catch {}
+  }
   const providerModels = providerInfo.models || {
     claude: [
       'claude-sonnet-4-6',
@@ -160,6 +171,15 @@ async function renderSettings(el) {
     },
     {},
   );
+  const profileHistoryById = (providerInfo.probeHistory || []).reduce(
+    (acc, entry) => {
+      if (!entry.profileId) return acc;
+      if (!acc[entry.profileId]) acc[entry.profileId] = [];
+      acc[entry.profileId].push(entry);
+      return acc;
+    },
+    {},
+  );
   const profileOptions = Object.values(providerDefinitions)
     .filter((p) => p && p.selectable !== false)
     .map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`)
@@ -170,14 +190,36 @@ async function renderSettings(el) {
       <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Choose the default provider/model for each NanoCrab capability. Write-capable work still follows approval and container isolation rules.</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Purpose</th><th>Provider</th><th>Model</th><th>Tool Policy</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Purpose</th><th>Provider</th><th>Model</th><th>Tool Policy</th><th>Fallback</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             ${providerProfiles
               .map((profile) => {
                 const probe = profileProbeById[profile.id];
+                const history = profileHistoryById[profile.id] || [];
+                const recentOk = history.filter((entry) => entry.ok).length;
+                const reliability = history.length
+                  ? `${recentOk}/${history.length} recent`
+                  : 'No live history';
+                const lastError =
+                  probe?.errorDetail ||
+                  probe?.errors?.[0] ||
+                  history
+                    .slice()
+                    .reverse()
+                    .find((entry) => entry.errorDetail)?.errorDetail ||
+                  '';
                 const models = providerModels[profile.provider] || [
                   profile.model,
                 ];
+                const fallbackOptions = [
+                  '<option value="">None</option>',
+                  ...providerProfiles
+                    .filter((item) => item.id !== profile.id)
+                    .map(
+                      (item) =>
+                        `<option value="${esc(item.id)}" ${profile.fallbackProfileId === item.id ? 'selected' : ''}>${esc(providerPurposeLabels[item.id] || item.label || item.id)}</option>`,
+                    ),
+                ].join('');
                 return `<tr>
                   <td style="color:var(--text);font-weight:600">${esc(providerPurposeLabels[profile.id] || profile.label || profile.id)}</td>
                   <td>
@@ -202,12 +244,19 @@ async function renderSettings(el) {
                     </select>
                   </td>
                   <td>
+                    <select class="search-input" id="profile-fallback-${esc(profile.id)}" style="min-width:145px;padding:5px 8px;font-size:12px">
+                      ${fallbackOptions}
+                    </select>
+                  </td>
+                  <td>
                     ${
                       probe?.ok
                         ? '<span class="badge badge-success">Ready</span>'
                         : '<span class="badge badge-warning">Needs review</span>'
                     }
                     <div id="profile-probe-${esc(profile.id)}" style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(probe?.checks?.find((c) => !c.ok)?.detail || profile.provider + '/' + profile.model)}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${esc(reliability)}${probe?.lastProbeAt ? ` · ${esc(timeAgo(probe.lastProbeAt))}` : ''}</div>
+                    ${lastError ? `<div style="font-size:10px;color:var(--error);margin-top:3px">${esc(lastError)}</div>` : ''}
                   </td>
                   <td style="white-space:nowrap">
                     <button class="btn btn-sm btn-primary" onclick="saveProviderProfile('${esc(profile.id)}')">Save</button>
@@ -220,8 +269,63 @@ async function renderSettings(el) {
         </table>
       </div>
     </div>`;
-
-  const isOwner = (window._userRole || 'owner') === 'owner';
+  const agentBoundaryCard = `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">Agent Boundaries</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Runtime scopes are derived before containers receive mounts, provider profiles, skills, channels, or connector tools.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Agent</th><th>Channels</th><th>Connectors</th><th>Provider Profiles</th><th>External Writes</th></tr></thead>
+          <tbody>
+            ${
+              (agentBoundaries || [])
+                .map((item) => {
+                  const boundary = item.boundary || {};
+                  return `<tr>
+                  <td style="font-weight:600;color:var(--text)">${esc(item.name || item.folder || boundary.agentId || '')}</td>
+                  <td>${(boundary.channelScopes || []).map((scope) => `<span class="badge badge-muted">${esc(scope)}</span>`).join(' ')}</td>
+                  <td>${(boundary.connectorIds || [])
+                    .slice(0, 5)
+                    .map(
+                      (connector) =>
+                        `<span class="badge badge-info">${esc(connector)}</span>`,
+                    )
+                    .join(' ')}</td>
+                  <td style="font-size:11px;color:var(--text-muted)">${esc((boundary.providerProfiles || []).join(', '))}</td>
+                  <td><span class="badge ${boundary.externalWrites?.allowed ? 'badge-warning' : 'badge-success'}">${boundary.externalWrites?.allowed ? 'approval gated' : 'denied'}</span></td>
+                </tr>`;
+                })
+                .join('') ||
+              '<tr><td colspan="5" style="color:var(--text-muted)">No registered agents.</td></tr>'
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  const setupPreflightCard =
+    isOwner && setupPreflight
+      ? `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px">
+        <div class="card-title" style="margin:0">First-Run Preflight</div>
+        <button class="btn btn-sm btn-ghost" onclick="refreshSetupPreflight()">Refresh</button>
+      </div>
+      <div id="setup-preflight-list" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">
+        ${setupPreflight.checks
+          .map(
+            (check) => `
+          <div style="padding:9px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface)">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+              <strong style="font-size:12px;color:var(--text)">${esc(check.label)}</strong>
+              <span class="badge ${check.ok ? 'badge-success' : 'badge-error'}">${check.ok ? 'OK' : 'Fail'}</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:5px;line-height:1.35">${esc(check.detail || '')}</div>
+          </div>`,
+          )
+          .join('')}
+      </div>
+    </div>`
+      : '';
 
   el.innerHTML = `
     <div class="page-header"><h2>Settings</h2></div>
@@ -280,7 +384,9 @@ async function renderSettings(el) {
     ${providerProfilesCard}`
         : ''
     }
+    ${setupPreflightCard}
     ${isOwner ? '<div id="users-section"></div>' : ''}
+    ${isOwner ? agentBoundaryCard : ''}
     <div class="grid grid-2">
       <div class="card">
         <div class="card-title">Appearance</div>
@@ -353,6 +459,10 @@ async function renderSettings(el) {
       <div id="personality-area"><div class="empty">Loading...</div></div>
     </div>
     <div class="card" style="margin-top:16px">
+      <div class="card-title">Provenance Timeline</div>
+      <div id="provenance-timeline"><div class="empty">Loading...</div></div>
+    </div>
+    <div class="card" style="margin-top:16px">
       <div style="display:flex;align-items:center;gap:20px">
         <img src="/static/nanocrab-mark.png" style="width:64px;height:64px" alt="NanoCrab">
         <div>
@@ -383,6 +493,9 @@ async function renderSettings(el) {
 
   // Load personality editor
   loadPersonalityEditor();
+
+  // Load memory/skill provenance timeline
+  loadProvenanceTimeline();
 
   // Notifications controls may be absent in stripped-down dashboards.
   const notifToggle = document.getElementById('notif-toggle');
@@ -651,6 +764,29 @@ window.preflightProvider = async function (provider) {
   }
 };
 
+window.refreshSetupPreflight = async function () {
+  const target = document.getElementById('setup-preflight-list');
+  if (!target) return;
+  target.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Checking...</div>';
+  try {
+    const result = await api('/system/setup/preflight');
+    target.innerHTML = result.checks
+      .map(
+        (check) => `
+        <div style="padding:9px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface)">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+            <strong style="font-size:12px;color:var(--text)">${esc(check.label)}</strong>
+            <span class="badge ${check.ok ? 'badge-success' : 'badge-error'}">${check.ok ? 'OK' : 'Fail'}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:5px;line-height:1.35">${esc(check.detail || '')}</div>
+        </div>`,
+      )
+      .join('');
+  } catch (e) {
+    target.innerHTML = `<span class="badge badge-error">Fail</span> ${esc(e.message)}`;
+  }
+};
+
 window.saveProviderProfile = async function (profileId) {
   const provider = document.getElementById(
     `profile-provider-${profileId}`,
@@ -659,12 +795,15 @@ window.saveProviderProfile = async function (profileId) {
   const toolPolicy = document.getElementById(
     `profile-policy-${profileId}`,
   )?.value;
+  const fallbackProfileId = document.getElementById(
+    `profile-fallback-${profileId}`,
+  )?.value;
   const target = document.getElementById(`profile-probe-${profileId}`);
   if (target) target.textContent = 'Saving...';
   try {
     const r = await api(`/system/provider/profiles/${profileId}`, {
       method: 'PUT',
-      body: JSON.stringify({ provider, model, toolPolicy }),
+      body: JSON.stringify({ provider, model, toolPolicy, fallbackProfileId }),
     });
     if (!r.ok) {
       toast(r.error || 'Failed', 'error');
@@ -690,12 +829,19 @@ window.probeProviderProfile = async function (profileId) {
   try {
     const r = await api(`/system/provider/profiles/${profileId}/probe`);
     if (!target) return;
+    if (r.error) {
+      target.innerHTML = `<span class="badge badge-error">Fail</span> ${esc(r.error)}`;
+      return;
+    }
     target.innerHTML = r.checks
       .map(
         (c) =>
           `<div>${c.ok ? '<span class="badge badge-success">OK</span>' : '<span class="badge badge-error">Fail</span>'} ${esc(c.label)}${c.detail ? ` <span style="color:var(--text-muted)">${esc(c.detail)}</span>` : ''}</div>`,
       )
       .join('');
+    if (r.errorDetail) {
+      target.innerHTML += `<div style="color:var(--error);margin-top:4px">${esc(r.errorDetail)}</div>`;
+    }
   } catch (e) {
     if (target) target.textContent = e.message;
   }
@@ -866,6 +1012,41 @@ window.togglePlugin = async function (id, enabled) {
     toast('Failed: ' + e.message, 'error');
   }
 };
+
+async function loadProvenanceTimeline() {
+  const el = document.getElementById('provenance-timeline');
+  if (!el) return;
+  try {
+    const events = await api('/skills/timeline?limit=25');
+    if (!events || events.length === 0) {
+      el.innerHTML = '<div class="empty">No provenance events yet</div>';
+      return;
+    }
+    el.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${events
+          .map((event) => {
+            const type = event.type || 'event';
+            const subject = event.subjectName || event.subjectId || '';
+            const summary = event.summary || '';
+            const actor = event.actor ? ` · ${esc(event.actor)}` : '';
+            return `
+              <div style="display:grid;grid-template-columns:150px 1fr;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+                <div style="font-size:11px;color:var(--text-muted)">${esc(timeAgo(event.timestamp || ''))}${actor}</div>
+                <div>
+                  <span class="badge badge-info" style="font-size:10px">${esc(type)}</span>
+                  <span style="font-size:12px;font-weight:600;color:var(--text);margin-left:6px">${esc(subject)}</span>
+                  <div style="font-size:12px;color:var(--text-muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(summary)}</div>
+                </div>
+              </div>`;
+          })
+          .join('')}
+      </div>`;
+  } catch {
+    el.innerHTML =
+      '<div class="empty">Failed to load provenance timeline</div>';
+  }
+}
 
 // --- 2FA Management ---
 async function load2faStatus() {
@@ -1091,6 +1272,7 @@ async function loadReportConfig() {
     const sourceOptions = [
       'journal',
       'memory',
+      'skill-suggestions',
       'github',
       'wiki',
       'kdrive',

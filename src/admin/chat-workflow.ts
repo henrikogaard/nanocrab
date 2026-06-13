@@ -29,9 +29,14 @@ export interface ProgressMarker {
   message: string;
 }
 
-export type ParsedMarker = ToolCallMarker | ToolResultMarker | ApprovalRequestMarker | ProgressMarker;
+export type ParsedMarker =
+  | ToolCallMarker
+  | ToolResultMarker
+  | ApprovalRequestMarker
+  | ProgressMarker;
 
-const MARKER_RE = /<(tool_call|tool_result|approval_request|progress)\s+([^>]*?)(?:\/>|(>)([\s\S]*?)<\/\1>)/g;
+const MARKER_RE =
+  /<(tool_call|tool_result|approval_request|progress)\s+([^>]*?)(?:\/>|(>)([\s\S]*?)<\/\1>)/g;
 const ATTR_RE = /(\w+)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g;
 
 function parseAttributes(attrsStr: string): Record<string, string> {
@@ -53,16 +58,37 @@ export function extractStructuredMarkers(text: string): ParsedMarker[] {
     try {
       switch (tagName) {
         case 'tool_call':
-          markers.push({ type: 'tool_call', id: attrs.id, name: attrs.name, input: attrs.input || '{}' });
+          markers.push({
+            type: 'tool_call',
+            id: attrs.id,
+            name: attrs.name,
+            input: attrs.input || '{}',
+          });
           break;
         case 'tool_result':
-          markers.push({ type: 'tool_result', id: attrs.id, output: attrs.output || '{}', duration: attrs.duration || '0' });
+          markers.push({
+            type: 'tool_result',
+            id: attrs.id,
+            output: attrs.output || '{}',
+            duration: attrs.duration || '0',
+          });
           break;
         case 'approval_request':
-          markers.push({ type: 'approval_request', id: attrs.id, tool: attrs.tool, reason: attrs.reason || '', input: attrs.input || '{}' });
+          markers.push({
+            type: 'approval_request',
+            id: attrs.id,
+            tool: attrs.tool,
+            reason: attrs.reason || '',
+            input: attrs.input || '{}',
+          });
           break;
         case 'progress':
-          markers.push({ type: 'progress', phase: attrs.phase, pct: parseInt(attrs.pct || '0', 10), message: innerText || attrs.message || '' });
+          markers.push({
+            type: 'progress',
+            phase: attrs.phase,
+            pct: parseInt(attrs.pct || '0', 10),
+            message: innerText || attrs.message || '',
+          });
           break;
       }
     } catch (err) {
@@ -73,5 +99,8 @@ export function extractStructuredMarkers(text: string): ParsedMarker[] {
 }
 
 export function stripStructuredMarkers(text: string): string {
-  return text.replace(/<(tool_call|tool_result|approval_request|progress)\s+[^>]*?(?:\/>|>[\s\S]*?<\/\1>)/g, '');
+  return text.replace(
+    /<(tool_call|tool_result|approval_request|progress)\s+[^>]*?(?:\/>|>[\s\S]*?<\/\1>)/g,
+    '',
+  );
 }

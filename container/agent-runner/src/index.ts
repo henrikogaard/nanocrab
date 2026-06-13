@@ -34,6 +34,7 @@ interface ContainerInput {
   assistantName?: string;
   script?: string;
   allowedMcpServers?: string[];
+  allowedMcpToolPatterns?: string[];
   provider?:
     | 'claude'
     | 'codex'
@@ -150,9 +151,13 @@ function readActiveSkillRegistry(skillsDir: string): SkillRegistryEntry[] {
   const registryPath = path.join(skillsDir, 'registry.json');
   if (fs.existsSync(registryPath)) {
     try {
-      return JSON.parse(fs.readFileSync(registryPath, 'utf-8')) as SkillRegistryEntry[];
+      return JSON.parse(
+        fs.readFileSync(registryPath, 'utf-8'),
+      ) as SkillRegistryEntry[];
     } catch (err) {
-      log(`Skill registry parse failed: ${err instanceof Error ? err.message : String(err)}`);
+      log(
+        `Skill registry parse failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
   const entries: SkillRegistryEntry[] = [];
@@ -212,7 +217,8 @@ function readProviderNeutralSkillsContext(request = ''): string | undefined {
   const fallback = ranked.slice(0, 12);
   const selected = likely.length ? likely : fallback;
   const entries = selected.map((skill) => {
-    const label = skill.name === skill.path ? skill.path : `${skill.path} (${skill.name})`;
+    const label =
+      skill.name === skill.path ? skill.path : `${skill.path} (${skill.name})`;
     const risk = skill.riskLevel ? ` risk:${skill.riskLevel}` : '';
     return skill.description
       ? `- ${label}:${risk} ${skill.description}`
@@ -528,9 +534,42 @@ function waitForIpcMessage(): Promise<string | null> {
  * The nanocrab server is always included (core IPC).
  * Main groups always get all servers.
  */
+function connectorNameFromToolPattern(pattern: string): string | null {
+  const match = pattern.match(/^mcp__([^_]+)__/);
+  return match ? match[1] : null;
+}
+
+function explicitMcpToolPatterns(
+  containerInput: ContainerInput,
+): string[] | null {
+  if (!Array.isArray(containerInput.allowedMcpToolPatterns)) return null;
+  return Array.from(
+    new Set(
+      containerInput.allowedMcpToolPatterns.filter((pattern) =>
+        /^mcp__[A-Za-z0-9-]+__/.test(pattern),
+      ),
+    ),
+  );
+}
+
+function isMcpServerAllowedByToolPatterns(
+  serverName: string,
+  patterns: string[] | null,
+  requireWildcardToolAccess: boolean,
+): boolean {
+  if (!patterns) return true;
+  const serverPatterns = patterns.filter(
+    (pattern) => connectorNameFromToolPattern(pattern) === serverName,
+  );
+  if (serverPatterns.length === 0) return false;
+  if (!requireWildcardToolAccess) return true;
+  return serverPatterns.includes(`mcp__${serverName}__*`);
+}
+
 function buildMcpServers(
   containerInput: ContainerInput,
   mcpServerPath: string,
+  options: { requireWildcardToolAccess?: boolean } = {},
 ): Record<
   string,
   { command: string; args: string[]; env: Record<string, string> }
@@ -585,17 +624,36 @@ function buildMcpServers(
     );
   }
 
-  // Main always gets everything
-  if (containerInput.isMain) return allServers;
+  const toolPatterns = explicitMcpToolPatterns(containerInput);
+  const requireWildcardToolAccess = options.requireWildcardToolAccess === true;
+
+  // Main gets everything only when the host has not provided an explicit
+  // connector tool allowlist. Once present, the allowlist is authoritative.
+  if (containerInput.isMain && !toolPatterns) return allServers;
 
   // No restriction defined = all servers (backward compatible)
   const allowed = containerInput.allowedMcpServers;
-  if (allowed === undefined) return allServers;
+  if (allowed === undefined && !toolPatterns) return allServers;
 
   // Filter: nanocrab is always included, others must be in allowlist
   const filtered: typeof allServers = { nanocrab: allServers.nanocrab };
-  for (const name of allowed) {
+  const allowedNames = new Set([
+    ...(allowed || []),
+    ...(toolPatterns || [])
+      .map((pattern) => connectorNameFromToolPattern(pattern))
+      .filter((name): name is string => Boolean(name)),
+  ]);
+  for (const name of allowedNames) {
     if (name !== 'nanocrab' && allServers[name]) {
+      if (
+        !isMcpServerAllowedByToolPatterns(
+          name,
+          toolPatterns,
+          requireWildcardToolAccess,
+        )
+      ) {
+        continue;
+      }
       filtered[name] = allServers[name];
     }
   }
@@ -605,7 +663,7 @@ function buildMcpServers(
 /**
  * Build allowedTools list, including MCP tool wildcards only for allowed servers.
  */
-function buildAllowedTools(containerInput: ContainerInput): string[] {
+export function buildAllowedTools(containerInput: ContainerInput): string[] {
   const baseTools = [
     'Bash',
     'Read',
@@ -627,6 +685,8 @@ function buildAllowedTools(containerInput: ContainerInput): string[] {
     'NotebookEdit',
     'mcp__nanocrab__*',
   ];
+  const explicitTools = explicitMcpToolPatterns(containerInput);
+  if (explicitTools) return [...baseTools, ...explicitTools];
 
   const allMcpTools = ['mcp__github__*'];
 
@@ -885,7 +945,9 @@ async function runQueryCodex(
       .map(([key, value]) => `${key} = ${tomlString(value)}`)
       .join(', ')} }`;
   const mcpConfigArgs: string[] = [];
-  const mcpServers = buildMcpServers(containerInput, mcpServerPath);
+  const mcpServers = buildMcpServers(containerInput, mcpServerPath, {
+    requireWildcardToolAccess: true,
+  });
   log(
     `Codex MCP servers: ${Object.entries(mcpServers)
       .map(([name, server]) => `${name}(env:${Object.keys(server.env).length})`)
@@ -1072,7 +1134,9 @@ function buildOpenCodeConfig(
   containerInput: ContainerInput,
   mcpServerPath: string,
 ): string {
-  const mcpServers = buildMcpServers(containerInput, mcpServerPath);
+  const mcpServers = buildMcpServers(containerInput, mcpServerPath, {
+    requireWildcardToolAccess: true,
+  });
   const mcp: Record<
     string,
     {
@@ -1168,7 +1232,10 @@ async function runQueryOpenCode(
     containerInput.model ||
     process.env.DEFAULT_MODEL ||
     'opencode/grok-code-fast-1';
-  const systemPrompt = buildSharedSystemContext(undefined, containerInput.prompt);
+  const systemPrompt = buildSharedSystemContext(
+    undefined,
+    containerInput.prompt,
+  );
   const effectivePrompt = systemPrompt.trim()
     ? `${systemPrompt.trim()}\n\nUser request:\n${prompt}`
     : prompt;
@@ -1378,4 +1445,6 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main();
+}

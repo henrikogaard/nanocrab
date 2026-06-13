@@ -25,7 +25,15 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { logger } from './logger.js';
-import { createApproval, hasApprovedTarget } from './approvals.js';
+import {
+  createApproval,
+  findPendingApprovalForTarget,
+  hasApprovedTarget,
+  reviewApproval,
+} from './approvals.js';
+import { resolveProviderFallbackForAction } from './provider-router.js';
+import { logAuditEvent } from './audit-log.js';
+import { evaluatePolicy } from './policy-engine.js';
 
 const CODING_REPOS_PATH = path.join(STORE_DIR, 'coding-repos.json');
 const CODING_JOBS_PATH = path.join(STORE_DIR, 'coding-jobs.json');
@@ -35,6 +43,27 @@ const CODING_JOB_PROVIDERS = new Set<AgentProvider>([
   'opencode',
 ]);
 type CodingProvider = Extract<AgentProvider, 'claude' | 'codex' | 'opencode'>;
+
+export type CodingJobStatus =
+  | 'queued'
+  | 'investigate'
+  | 'plan'
+  | 'await_approval'
+  | 'implement'
+  | 'test'
+  | 'await_pr_approval'
+  | 'open_pr'
+  | 'ci_running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface CodingJobTransition {
+  from: CodingJobStatus;
+  to: CodingJobStatus;
+  at: string;
+  failureReason?: string;
+}
 
 export interface CodingRepo {
   id: string;
@@ -55,6 +84,7 @@ export interface GitHubIssueSummary {
   body: string;
   labels: string[];
   assignees: string[];
+  milestone: string | null;
   author: string;
   htmlUrl: string;
   updatedAt: string;
@@ -69,27 +99,21 @@ export interface CodingJob {
   issueTitle: string | null;
   provider: CodingProvider;
   model: string;
-  status:
-    | 'queued'
-    | 'investigate'
-    | 'plan'
-    | 'await_approval'
-    | 'implement'
-    | 'test'
-    | 'await_pr_approval'
-    | 'open_pr'
-    | 'ci_running'
-    | 'completed'
-    | 'failed'
-    | 'cancelled';
+  status: CodingJobStatus;
   branch: string;
   workspace: string;
   createPr: boolean;
+  dryRun: boolean;
   prUrl: string | null;
   commitSha: string | null;
   changedFiles: string[];
+  diffSummary: string | null;
   testSummary: string | null;
   ciStatus: 'unknown' | 'pending' | 'success' | 'failure';
+  lastCiError: string | null;
+  transitionedAt: Partial<Record<CodingJobStatus, string>>;
+  transitionHistory: CodingJobTransition[];
+  failureReason: string | null;
   approvalHistory: Array<{
     action: string;
     at: string;
@@ -109,6 +133,7 @@ export interface StartCodingJobInput {
   provider?: string;
   model?: string;
   createPr?: boolean;
+  dryRun?: boolean;
   branchName?: string;
   requestedBy: string;
 }
@@ -210,11 +235,22 @@ function ensureJobDefaults(job: CodingJob): CodingJob {
   const defaults = {
     commitSha: null,
     changedFiles: [],
+    diffSummary: null,
     testSummary: null,
     ciStatus: 'unknown',
+    lastCiError: null,
+    transitionedAt: {},
+    transitionHistory: [],
+    failureReason: null,
     approvalHistory: [],
+    dryRun: false,
   };
-  return { ...defaults, ...job };
+  const normalized = { ...defaults, ...job };
+  if (!normalized.transitionedAt[normalized.status]) {
+    normalized.transitionedAt[normalized.status] =
+      normalized.completedAt || normalized.createdAt || nowIso();
+  }
+  return normalized;
 }
 
 export async function githubApi(
@@ -294,10 +330,31 @@ export function getCodingRepo(fullName: string): CodingRepo | undefined {
   );
 }
 
+function isMilestoneApiValue(value: string): boolean {
+  return value === '*' || value === 'none' || /^\d+$/.test(value);
+}
+
+async function resolveMilestoneQueryValue(
+  repo: string,
+  milestone?: string,
+): Promise<string | undefined> {
+  const value = milestone?.trim();
+  if (!value) return undefined;
+  if (isMilestoneApiValue(value)) return value;
+
+  const milestones = (await githubApi(
+    `/repos/${repo}/milestones?state=all&per_page=100`,
+  )) as Array<{ number?: number; title?: string }>;
+  const match = milestones.find((item) => item.title === value);
+  return match?.number != null ? String(match.number) : undefined;
+}
+
 export async function listGitHubIssues(input: {
   repo: string;
   labels?: string[];
   assignee?: string;
+  milestone?: string;
+  issueNumber?: number;
   limit?: number;
 }): Promise<GitHubIssueSummary[]> {
   assertRepoFullName(input.repo);
@@ -306,13 +363,70 @@ export async function listGitHubIssues(input: {
     throw new Error(`Repo ${input.repo} is not registered for coding jobs`);
   }
 
+  const labels = input.labels?.length ? input.labels : repo.labels;
+  const milestoneQueryValue = input.issueNumber
+    ? undefined
+    : await resolveMilestoneQueryValue(input.repo, input.milestone);
+  const milestoneTitleFilter =
+    input.milestone && !isMilestoneApiValue(input.milestone)
+      ? input.milestone
+      : null;
+
+  const summarizeIssue = (issue: {
+    number: number;
+    title: string;
+    body?: string | null;
+    html_url: string;
+    updated_at: string;
+    pull_request?: unknown;
+    labels?: Array<{ name: string } | string>;
+    assignees?: Array<{ login: string }>;
+    milestone?: { title?: string | null } | null;
+    user?: { login: string };
+  }): GitHubIssueSummary | null => {
+    if (issue.pull_request) return null;
+    const issueLabels = (issue.labels || []).map((label) =>
+      typeof label === 'string' ? label : label.name,
+    );
+    const assignees = (issue.assignees || []).map((assignee) => assignee.login);
+    const milestone = issue.milestone?.title || null;
+    if (
+      labels.length > 0 &&
+      !labels.every((label) => issueLabels.includes(label))
+    ) {
+      return null;
+    }
+    if (input.assignee && !assignees.includes(input.assignee)) return null;
+    if (milestoneTitleFilter && milestone !== milestoneTitleFilter) return null;
+    if (input.milestone === 'none' && milestone !== null) return null;
+    return {
+      number: issue.number,
+      title: issue.title,
+      body: issue.body || '',
+      labels: issueLabels,
+      assignees,
+      milestone,
+      author: issue.user?.login || 'unknown',
+      htmlUrl: issue.html_url,
+      updatedAt: issue.updated_at,
+    };
+  };
+
+  if (input.issueNumber) {
+    const issue = (await githubApi(
+      `/repos/${input.repo}/issues/${input.issueNumber}`,
+    )) as Parameters<typeof summarizeIssue>[0];
+    const summary = summarizeIssue(issue);
+    return summary ? [summary] : [];
+  }
+
   const params = new URLSearchParams({
     state: 'open',
     per_page: String(Math.min(Math.max(input.limit || 20, 1), 50)),
   });
-  const labels = input.labels?.length ? input.labels : repo.labels;
   if (labels.length > 0) params.set('labels', labels.join(','));
   if (input.assignee) params.set('assignee', input.assignee);
+  if (milestoneQueryValue) params.set('milestone', milestoneQueryValue);
 
   const issues = (await githubApi(
     `/repos/${input.repo}/issues?${params.toString()}`,
@@ -325,23 +439,13 @@ export async function listGitHubIssues(input: {
     pull_request?: unknown;
     labels?: Array<{ name: string } | string>;
     assignees?: Array<{ login: string }>;
+    milestone?: { title?: string | null } | null;
     user?: { login: string };
   }>;
 
   return issues
-    .filter((issue) => !issue.pull_request)
-    .map((issue) => ({
-      number: issue.number,
-      title: issue.title,
-      body: issue.body || '',
-      labels: (issue.labels || []).map((label) =>
-        typeof label === 'string' ? label : label.name,
-      ),
-      assignees: (issue.assignees || []).map((assignee) => assignee.login),
-      author: issue.user?.login || 'unknown',
-      htmlUrl: issue.html_url,
-      updatedAt: issue.updated_at,
-    }));
+    .map((issue) => summarizeIssue(issue))
+    .filter((issue): issue is GitHubIssueSummary => issue !== null);
 }
 
 function isCodingProvider(provider: AgentProvider): provider is CodingProvider {
@@ -360,6 +464,102 @@ function codingProvider(inputProvider?: string): CodingProvider {
 function defaultModelForProvider(provider: CodingProvider): string {
   const config = getAgentProviderConfig();
   return config.modelsByProvider[provider] || DEFAULT_AGENT_MODELS[provider];
+}
+
+const CODING_JOB_TRANSITIONS: Record<CodingJobStatus, CodingJobStatus[]> = {
+  queued: ['investigate', 'cancelled', 'failed'],
+  investigate: ['plan', 'cancelled', 'failed'],
+  plan: ['await_approval', 'cancelled', 'failed'],
+  await_approval: ['implement', 'cancelled', 'failed'],
+  implement: ['test', 'cancelled', 'failed'],
+  test: ['await_pr_approval', 'completed', 'cancelled', 'failed'],
+  await_pr_approval: ['open_pr', 'cancelled', 'failed'],
+  open_pr: ['ci_running', 'cancelled', 'failed'],
+  ci_running: ['completed', 'cancelled', 'failed'],
+  completed: [],
+  failed: ['queued'],
+  cancelled: ['queued'],
+};
+
+function failTransition(job: CodingJob, reason: string): never {
+  job.failureReason = reason;
+  upsertCodingJob(job);
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'coding.transition',
+    resource: job.id,
+    decision: 'error',
+    correlationId: job.id,
+    error: reason,
+    context: { status: job.status },
+  });
+  throw new Error(reason);
+}
+
+function applyCodingJobTransition(
+  job: CodingJob,
+  to: CodingJobStatus,
+  failureReason?: string,
+): CodingJob {
+  const from = job.status;
+  if (!CODING_JOB_TRANSITIONS[from]?.includes(to)) {
+    return failTransition(
+      job,
+      `Invalid coding job transition: ${from} -> ${to}`,
+    );
+  }
+  if (
+    to === 'implement' &&
+    !job.dryRun &&
+    !hasApprovedTarget('coding-implement', 'coding-job', job.id)
+  ) {
+    return failTransition(job, 'Implementation approval is required');
+  }
+  if (
+    to === 'open_pr' &&
+    !job.dryRun &&
+    !hasApprovedTarget('coding-open-pr', 'coding-job', job.id)
+  ) {
+    return failTransition(job, 'PR approval is required');
+  }
+
+  const at = nowIso();
+  job.status = to;
+  job.transitionedAt[to] = at;
+  job.transitionHistory.push({ from, to, at, failureReason });
+  job.failureReason = failureReason || null;
+  if (to === 'completed' || to === 'failed' || to === 'cancelled') {
+    job.completedAt = at;
+  }
+  upsertCodingJob(job);
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'coding.transition',
+    resource: job.id,
+    decision: job.dryRun ? 'simulated' : failureReason ? 'error' : 'allowed',
+    correlationId: job.id,
+    error: failureReason,
+    context: {
+      from,
+      to,
+      repo: job.repo,
+      branch: job.branch,
+      dryRun: job.dryRun,
+    },
+  });
+  return job;
+}
+
+export function transitionCodingJob(
+  jobId: string,
+  to: CodingJobStatus,
+  failureReason?: string,
+): CodingJob {
+  const job = getCodingJob(jobId);
+  if (!job) throw new Error(`Coding job not found: ${jobId}`);
+  return applyCodingJobTransition(job, to, failureReason);
 }
 
 function updateJobOutput(job: CodingJob, text: string): void {
@@ -438,10 +638,7 @@ function buildCodingContainerEnv(
     JOB_BRANCH: job.branch,
     JOB_PROVIDER: job.provider,
     JOB_MODEL: job.model,
-    CREATE_PR:
-      job.createPr && hasApprovedTarget('coding-open-pr', 'coding-job', job.id)
-        ? 'true'
-        : 'false',
+    CREATE_PR: 'false',
     CODING_JOB_MAX_BUDGET_USD:
       envValue(envFileValues, 'CODING_JOB_MAX_BUDGET_USD') || '5',
     GIT_AUTHOR_NAME:
@@ -545,14 +742,9 @@ function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
       '    ;;',
       'esac',
       'git diff --stat HEAD > /workspace/coding-job/.nanocrab/diff-stat.txt',
+      'git diff --name-only HEAD > /workspace/coding-job/.nanocrab/changed-files.txt',
       'git ls-files --others --exclude-standard > /workspace/coding-job/.nanocrab/untracked.txt',
-      'if [ "$CREATE_PR" = "true" ] && { [ -s /workspace/coding-job/.nanocrab/diff-stat.txt ] || [ -s /workspace/coding-job/.nanocrab/untracked.txt ]; }; then',
-      '  git config user.name "$GIT_AUTHOR_NAME"',
-      '  git config user.email "$GIT_AUTHOR_EMAIL"',
-      '  git add -A',
-      '  git commit -F /workspace/coding-job/.nanocrab/commit-message.txt',
-      '  git push origin "$JOB_BRANCH:refs/heads/$JOB_BRANCH" --force-with-lease',
-      'fi',
+      'printf "Review job output for tests run by the coding agent.\\n" > /workspace/coding-job/.nanocrab/test-summary.txt',
       '',
     ].join('\n'),
     { mode: 0o700 },
@@ -595,6 +787,33 @@ function codingContainerMounts(job: CodingJob): Array<{
 }
 
 function runCodingContainer(job: CodingJob, repo: CodingRepo): Promise<number> {
+  const policy = evaluatePolicy({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'coding.implement',
+    resource: job.repo,
+    dryRun: job.dryRun,
+    context: { branch: job.branch, provider: job.provider, model: job.model },
+  });
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'coding.implement',
+    resource: job.repo,
+    decision:
+      policy.decision === 'denied'
+        ? 'denied'
+        : job.dryRun
+          ? 'simulated'
+          : 'approved',
+    correlationId: job.id,
+    context: policy,
+  });
+  if (policy.decision === 'denied') {
+    throw new Error(
+      `Coding implementation denied by policy: ${policy.explanation}`,
+    );
+  }
   const jobRoot = writeCodingJobFiles(job, repo);
   const envFilePath = writeDockerEnvFile(buildCodingContainerEnv(job, repo));
   const safeName = job.id.replace(/[^a-zA-Z0-9_.-]/g, '-');
@@ -632,6 +851,19 @@ function runCodingContainer(job: CodingJob, repo: CodingRepo): Promise<number> {
     job,
     `\n\nStarting coding container ${containerName} with workspace ${jobRoot}\n`,
   );
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'container.spawn',
+    resource: job.repo,
+    decision: 'allowed',
+    correlationId: job.id,
+    context: {
+      containerName,
+      workspace: jobRoot,
+      mounts: codingContainerMounts(job).map((mount) => mount.containerPath),
+    },
+  });
 
   return new Promise((resolve, reject) => {
     const proc = spawn(CONTAINER_RUNTIME_BIN, args, {
@@ -654,29 +886,226 @@ function runCodingContainer(job: CodingJob, repo: CodingRepo): Promise<number> {
   });
 }
 
-async function runCodingJob(job: CodingJob): Promise<void> {
-  job.status = 'investigate';
+function requirePrProviderFallbackApproval(
+  job: CodingJob,
+  requester: string,
+): boolean {
+  const fallback = resolveProviderFallbackForAction({
+    purpose: 'default_coding',
+    action: 'pr-creation',
+    requester,
+    correlationId: job.id,
+  });
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'provider.fallback',
+    resource: job.repo,
+    decision: fallback.approved ? 'approved' : 'requires_approval',
+    correlationId: job.id,
+    context: {
+      action: 'pr-creation',
+      requester,
+      ...(fallback.approved
+        ? { provider: fallback.provider, model: fallback.model }
+        : { reason: fallback.reason, approvalId: fallback.approvalId }),
+    },
+  });
+  if (fallback.approved) return true;
+  job.status = 'await_pr_approval';
+  updateJobOutput(
+    job,
+    `\n\nProvider fallback for PR creation is awaiting approval: ${fallback.reason}${fallback.approvalId ? ` (${fallback.approvalId})` : ''}\n`,
+  );
   upsertCodingJob(job);
+  return false;
+}
 
+async function runCodingJob(job: CodingJob): Promise<void> {
   const repo = getCodingRepo(job.repo);
   if (!repo?.enabled) throw new Error(`Repo ${job.repo} is not registered`);
 
-  job.status = 'implement';
-  upsertCodingJob(job);
+  if (job.status === 'queued') {
+    applyCodingJobTransition(job, 'investigate');
+    updateJobOutput(job, '\n\nInvestigating repository and issue context.\n');
+  }
+
+  if (job.status === 'investigate') {
+    applyCodingJobTransition(job, 'plan');
+    updateJobOutput(
+      job,
+      [
+        '\n\nImplementation plan:',
+        `- Prepare isolated workspace for ${job.repo}.`,
+        job.issueNumber
+          ? `- Fix GitHub issue #${job.issueNumber}: ${job.issueTitle || 'untitled issue'}.`
+          : '- Complete the requested coding task.',
+        '- Run the coding provider in a local workspace and capture diff/test output.',
+        job.createPr
+          ? '- Wait for PR approval before committing, pushing, and opening a pull request.'
+          : '- Keep changes local for dashboard review.',
+        '',
+      ].join('\n'),
+    );
+  }
+
+  if (job.status === 'plan') {
+    applyCodingJobTransition(job, 'await_approval');
+  }
+
+  if (job.dryRun) {
+    const policy = evaluatePolicy({
+      actor: job.requestedBy,
+      actorId: job.id,
+      actionType: 'coding.implement',
+      resource: job.repo,
+      dryRun: true,
+      context: { branch: job.branch, createPr: job.createPr },
+    });
+    if (policy.decision === 'denied') {
+      logAuditEvent({
+        actor: job.requestedBy,
+        actorId: job.id,
+        actionType: 'coding.implement',
+        resource: job.repo,
+        decision: 'denied',
+        correlationId: job.id,
+        context: policy,
+      });
+      throw new Error(`Dry-run denied by policy: ${policy.explanation}`);
+    }
+    updateJobOutput(
+      job,
+      [
+        '\n\nDry-run simulation:',
+        `- Classified implementation as ${policy.risk} risk.`,
+        '- Skipped container spawn and external repository writes.',
+        job.createPr
+          ? '- Simulated pull request creation without GitHub API calls.'
+          : '',
+        '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    );
+    logAuditEvent({
+      actor: job.requestedBy,
+      actorId: job.id,
+      actionType: 'coding.implement',
+      resource: job.repo,
+      decision: 'simulated',
+      correlationId: job.id,
+      context: policy,
+    });
+    applyCodingJobTransition(job, 'implement');
+    applyCodingJobTransition(job, 'test');
+    job.diffSummary = 'Dry-run only; no files were modified.';
+    job.testSummary = 'Dry-run simulation; tests were not executed.';
+    job.changedFiles = [];
+    if (job.createPr) {
+      logAuditEvent({
+        actor: job.requestedBy,
+        actorId: job.id,
+        actionType: 'coding.open_pr',
+        resource: job.repo,
+        decision: 'simulated',
+        correlationId: job.id,
+        context: { branch: job.branch, dryRun: true },
+      });
+    }
+    applyCodingJobTransition(job, 'completed');
+    upsertCodingJob(job);
+    return;
+  }
+
+  const fallback = resolveProviderFallbackForAction({
+    purpose: 'default_coding',
+    action: 'coding-implementation',
+    requester: job.requestedBy,
+    correlationId: job.id,
+  });
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'provider.fallback',
+    resource: job.repo,
+    decision: fallback.approved ? 'approved' : 'requires_approval',
+    correlationId: job.id,
+    context: {
+      action: 'coding-implementation',
+      ...(fallback.approved
+        ? { provider: fallback.provider, model: fallback.model }
+        : { reason: fallback.reason, approvalId: fallback.approvalId }),
+    },
+  });
+  if (!fallback.approved) {
+    updateJobOutput(
+      job,
+      `\n\nProvider fallback is awaiting approval: ${fallback.reason}${fallback.approvalId ? ` (${fallback.approvalId})` : ''}\n`,
+    );
+    upsertCodingJob(job);
+    return;
+  }
+  if (fallback.provider && fallback.provider !== job.provider) {
+    if (!isCodingProvider(fallback.provider)) {
+      throw new Error(`${fallback.provider} is not a coding-job runtime`);
+    }
+    updateJobOutput(
+      job,
+      `\n\nUsing approved provider fallback ${job.provider}/${job.model} -> ${fallback.provider}/${fallback.model}\n`,
+    );
+    job.provider = fallback.provider;
+    job.model = fallback.model;
+    upsertCodingJob(job);
+  }
+
+  if (
+    job.status === 'await_approval' &&
+    !hasApprovedTarget('coding-implement', 'coding-job', job.id)
+  ) {
+    const pending = findPendingApprovalForTarget(
+      'coding-implement',
+      'coding-job',
+      job.id,
+    );
+    if (!pending) {
+      createApproval({
+        kind: 'coding-implement',
+        title: `Approve implementation for ${job.repo}`,
+        summary: `Approve running a coding agent for ${job.repo} on branch ${job.branch}.\n\n${job.issueNumber ? `Issue #${job.issueNumber}: ${job.issueTitle || ''}` : job.prompt.slice(0, 1000)}`,
+        risk: 'high',
+        requester: job.requestedBy,
+        targetType: 'coding-job',
+        targetId: job.id,
+        payload: { jobId: job.id, repo: job.repo, branch: job.branch },
+      });
+    }
+    updateJobOutput(job, '\n\nImplementation is awaiting approval.\n');
+    upsertCodingJob(job);
+    return;
+  }
+
+  if (job.status === 'await_approval') {
+    applyCodingJobTransition(job, 'implement');
+  }
   const exitCode = await runCodingContainer(job, repo);
   if (exitCode !== 0) {
     throw new Error(
       `${job.provider} coding container exited with code ${exitCode}`,
     );
   }
+  applyCodingJobTransition(job, 'test');
 
   const metadataDir = path.join(path.dirname(job.workspace), '.nanocrab');
   const diffStat = readTextFile(path.join(metadataDir, 'diff-stat.txt'));
+  const changedFiles = readTextFile(
+    path.join(metadataDir, 'changed-files.txt'),
+  );
   const untracked = readTextFile(path.join(metadataDir, 'untracked.txt'));
+  const testSummary = readTextFile(path.join(metadataDir, 'test-summary.txt'));
   if (!diffStat && !untracked) {
     updateJobOutput(job, '\n\nNo repository changes were produced.\n');
-    job.status = 'completed';
-    job.completedAt = nowIso();
+    applyCodingJobTransition(job, 'completed');
     upsertCodingJob(job);
     return;
   }
@@ -685,70 +1114,53 @@ async function runCodingJob(job: CodingJob): Promise<void> {
     job,
     `\n\nDiff stat:\n${diffStat || '(untracked files only)'}\n`,
   );
-  job.changedFiles = diffStat
-    .split('\n')
-    .map((line) => line.split('|')[0]?.trim())
-    .filter(Boolean);
-  job.testSummary = 'See job output for tests run by the coding agent.';
+  job.diffSummary = diffStat || '(untracked files only)';
+  job.changedFiles = Array.from(
+    new Set(
+      [
+        ...changedFiles.split('\n'),
+        ...untracked.split('\n'),
+        ...diffStat.split('\n').map((line) => line.split('|')[0]?.trim()),
+      ].filter(Boolean),
+    ),
+  );
+  job.testSummary =
+    testSummary || 'See job output for tests run by the coding agent.';
   if (!job.createPr) {
-    job.status = 'completed';
-    job.completedAt = nowIso();
+    applyCodingJobTransition(job, 'completed');
     upsertCodingJob(job);
     return;
   }
 
+  if (job.status === 'test') {
+    applyCodingJobTransition(job, 'await_pr_approval');
+  }
   if (!hasApprovedTarget('coding-open-pr', 'coding-job', job.id)) {
-    job.status = 'await_pr_approval';
-    createApproval({
-      kind: 'coding-open-pr',
-      title: `Open PR for ${job.repo}`,
-      summary: `Approve opening a pull request for ${job.branch}.\n\n${diffStat}`,
-      risk: 'high',
-      requester: job.requestedBy,
-      targetType: 'coding-job',
-      targetId: job.id,
-      payload: { jobId: job.id, repo: job.repo, branch: job.branch },
-    });
+    const pending = findPendingApprovalForTarget(
+      'coding-open-pr',
+      'coding-job',
+      job.id,
+    );
+    if (!pending) {
+      createApproval({
+        kind: 'coding-open-pr',
+        title: `Open PR for ${job.repo}`,
+        summary: `Approve opening a pull request for ${job.branch}.\n\n${diffStat}`,
+        risk: 'high',
+        requester: job.requestedBy,
+        targetType: 'coding-job',
+        targetId: job.id,
+        payload: { jobId: job.id, repo: job.repo, branch: job.branch },
+      });
+    }
     upsertCodingJob(job);
     updateJobOutput(job, '\n\nPR creation is awaiting approval.\n');
     return;
   }
-
-  const commitTitle = job.issueNumber
-    ? `fix: ${job.issueTitle || `issue ${job.issueNumber}`}`
-    : `chore: ${slug(job.prompt).replace(/-/g, ' ') || 'coding job'}`;
-
-  const pr = (await githubApi(`/repos/${job.repo}/pulls`, {
-    method: 'POST',
-    body: JSON.stringify({
-      title: commitTitle,
-      body: [
-        '## NanoCrab Coding Job',
-        '',
-        job.issueNumber ? `Resolves #${job.issueNumber}` : '',
-        '',
-        `Job: \`${job.id}\``,
-        `Provider: \`${job.provider}/${job.model}\``,
-        '',
-        '### Changes',
-        '```',
-        diffStat,
-        '```',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-      head: job.branch,
-      base: repo.defaultBranch,
-    }),
-  })) as { html_url?: string };
-
-  job.prUrl = pr.html_url || null;
-  job.status = 'ci_running';
-  job.ciStatus = 'pending';
-  updateJobOutput(job, `\n\nPR created: ${job.prUrl}\n`);
-  job.status = 'completed';
-  job.ciStatus = 'unknown';
-  job.completedAt = nowIso();
+  updateJobOutput(
+    job,
+    '\n\nPR approval is recorded. Use Open PR to publish.\n',
+  );
   upsertCodingJob(job);
 }
 
@@ -816,11 +1228,17 @@ export async function startCodingJob(
     branch,
     workspace,
     createPr: input.createPr === true,
+    dryRun: input.dryRun === true,
     prUrl: null,
     commitSha: null,
     changedFiles: [],
+    diffSummary: null,
     testSummary: null,
     ciStatus: 'unknown',
+    lastCiError: null,
+    transitionedAt: { queued: nowIso() },
+    transitionHistory: [],
+    failureReason: null,
     approvalHistory: [],
     output: '',
     requestedBy: input.requestedBy,
@@ -831,12 +1249,9 @@ export async function startCodingJob(
 
   setImmediate(() => {
     void runCodingJob(job).catch((err) => {
-      job.status = 'failed';
-      job.completedAt = nowIso();
-      updateJobOutput(
-        job,
-        `\n\nCoding job failed: ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      const failureReason = err instanceof Error ? err.message : String(err);
+      applyCodingJobTransition(job, 'failed', failureReason);
+      updateJobOutput(job, `\n\nCoding job failed: ${failureReason}\n`);
       logger.error({ err, jobId: job.id }, 'Coding job failed');
     });
   });
@@ -849,12 +1264,18 @@ export async function pickGitHubIssue(input: {
   labels?: string[];
   provider?: string;
   model?: string;
+  assignee?: string;
+  milestone?: string;
+  issueNumber?: number;
   createPr?: boolean;
   requestedBy: string;
 }): Promise<{ issue: GitHubIssueSummary; job: CodingJob } | null> {
   const issues = await listGitHubIssues({
     repo: input.repo,
     labels: input.labels,
+    assignee: input.assignee,
+    milestone: input.milestone,
+    issueNumber: input.issueNumber,
     limit: 10,
   });
   if (issues.length === 0) return null;
@@ -886,9 +1307,8 @@ function recordJobApproval(
 export function cancelCodingJob(jobId: string, by = 'dashboard'): CodingJob {
   const job = getCodingJob(jobId);
   if (!job) throw new Error(`Coding job not found: ${jobId}`);
-  job.status = 'cancelled';
-  job.completedAt = nowIso();
   recordJobApproval(job, 'cancel', by);
+  applyCodingJobTransition(job, 'cancelled');
   upsertCodingJob(job);
   return job;
 }
@@ -899,19 +1319,19 @@ export async function retryCodingJob(
 ): Promise<CodingJob> {
   const job = getCodingJob(jobId);
   if (!job) throw new Error(`Coding job not found: ${jobId}`);
-  job.status = 'queued';
+  if (job.status !== 'failed' && job.status !== 'cancelled') {
+    throw new Error(`Cannot retry coding job from ${job.status}`);
+  }
+  applyCodingJobTransition(job, 'queued');
   job.completedAt = null;
   job.output += '\n\nRetry requested.\n';
   recordJobApproval(job, 'retry', by);
   upsertCodingJob(job);
   setImmediate(() => {
     void runCodingJob(job).catch((err) => {
-      job.status = 'failed';
-      job.completedAt = nowIso();
-      updateJobOutput(
-        job,
-        `\n\nCoding job failed: ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      const failureReason = err instanceof Error ? err.message : String(err);
+      applyCodingJobTransition(job, 'failed', failureReason);
+      updateJobOutput(job, `\n\nCoding job failed: ${failureReason}\n`);
     });
   });
   return job;
@@ -920,8 +1340,103 @@ export async function retryCodingJob(
 export function approveCodingJob(jobId: string, by = 'dashboard'): CodingJob {
   const job = getCodingJob(jobId);
   if (!job) throw new Error(`Coding job not found: ${jobId}`);
-  recordJobApproval(job, 'approve', by);
-  if (job.status === 'await_approval') job.status = 'queued';
+  if (
+    [
+      'implement',
+      'test',
+      'await_pr_approval',
+      'open_pr',
+      'ci_running',
+    ].includes(job.status)
+  ) {
+    return job;
+  }
+  if (job.status !== 'await_approval') {
+    throw new Error(`Cannot approve implementation from ${job.status}`);
+  }
+  const pending = findPendingApprovalForTarget(
+    'coding-implement',
+    'coding-job',
+    job.id,
+  );
+  if (pending) {
+    reviewApproval(pending.id, 'approved', by);
+  } else if (!hasApprovedTarget('coding-implement', 'coding-job', job.id)) {
+    const approval = createApproval({
+      kind: 'coding-implement',
+      title: `Approve implementation for ${job.repo}`,
+      summary: `Approve running a coding agent for ${job.repo} on branch ${job.branch}.`,
+      risk: 'high',
+      requester: by,
+      targetType: 'coding-job',
+      targetId: job.id,
+      payload: { jobId: job.id, repo: job.repo, branch: job.branch },
+    });
+    reviewApproval(approval.id, 'approved', by);
+  }
+  recordJobApproval(job, 'approve-implementation', by);
+  applyCodingJobTransition(job, 'implement');
+  setImmediate(() => {
+    const latest = getCodingJob(job.id);
+    if (!latest) return;
+    void runCodingJob(latest).catch((err) => {
+      const failureReason = err instanceof Error ? err.message : String(err);
+      applyCodingJobTransition(latest, 'failed', failureReason);
+      updateJobOutput(latest, `\n\nCoding job failed: ${failureReason}\n`);
+    });
+  });
+  return job;
+}
+
+export function denyCodingJob(
+  jobId: string,
+  by = 'dashboard',
+  note?: string,
+): CodingJob {
+  const job = getCodingJob(jobId);
+  if (!job) throw new Error(`Coding job not found: ${jobId}`);
+  if (job.status !== 'await_approval') {
+    throw new Error(`Cannot deny implementation from ${job.status}`);
+  }
+  const pending = findPendingApprovalForTarget(
+    'coding-implement',
+    'coding-job',
+    job.id,
+  );
+  if (pending) reviewApproval(pending.id, 'denied', by, note);
+  recordJobApproval(job, 'deny-implementation', by, note);
+  applyCodingJobTransition(job, 'cancelled', note || 'Implementation denied');
+  upsertCodingJob(job);
+  return job;
+}
+
+export function approveCodingJobPr(jobId: string, by = 'dashboard'): CodingJob {
+  const job = getCodingJob(jobId);
+  if (!job) throw new Error(`Coding job not found: ${jobId}`);
+  if (job.status !== 'await_pr_approval') {
+    throw new Error(`Cannot approve PR from ${job.status}`);
+  }
+  const pending = findPendingApprovalForTarget(
+    'coding-open-pr',
+    'coding-job',
+    job.id,
+  );
+  if (pending) {
+    reviewApproval(pending.id, 'approved', by);
+  } else if (!hasApprovedTarget('coding-open-pr', 'coding-job', job.id)) {
+    const approval = createApproval({
+      kind: 'coding-open-pr',
+      title: `Open PR for ${job.repo}`,
+      summary: `Approve committing, pushing, and opening a pull request for ${job.branch}.`,
+      risk: 'high',
+      requester: by,
+      targetType: 'coding-job',
+      targetId: job.id,
+      payload: { jobId: job.id, repo: job.repo, branch: job.branch },
+    });
+    reviewApproval(approval.id, 'approved', by);
+  }
+  recordJobApproval(job, 'approve-pr', by);
   upsertCodingJob(job);
   return job;
 }
@@ -934,82 +1449,282 @@ export async function openCodingJobPr(
   if (!job) throw new Error(`Coding job not found: ${jobId}`);
   const repo = getCodingRepo(job.repo);
   if (!repo) throw new Error(`Repo not found: ${job.repo}`);
-  if (!hasApprovedTarget('coding-open-pr', 'coding-job', job.id)) {
-    createApproval({
-      kind: 'coding-open-pr',
-      title: `Open PR for ${job.repo}`,
-      summary: `Approve opening a pull request for branch ${job.branch}.`,
-      risk: 'high',
-      requester: by,
-      targetType: 'coding-job',
-      targetId: job.id,
-      payload: { jobId: job.id, repo: job.repo, branch: job.branch },
+  if (job.status !== 'await_pr_approval') {
+    throw new Error(`Cannot open PR from ${job.status}`);
+  }
+  if (job.dryRun) {
+    logAuditEvent({
+      actor: by,
+      actorId: job.id,
+      actionType: 'coding.open_pr',
+      resource: job.repo,
+      decision: 'simulated',
+      correlationId: job.id,
+      context: { branch: job.branch },
     });
-    job.status = 'await_pr_approval';
+    applyCodingJobTransition(job, 'completed');
     upsertCodingJob(job);
     return job;
   }
-
-  const repoPath = job.workspace;
-  const metadataDir = path.join(path.dirname(job.workspace), '.nanocrab');
-  const diffStat = readTextFile(path.join(metadataDir, 'diff-stat.txt'));
-  const commitMessage =
-    readTextFile(path.join(metadataDir, 'commit-message.txt')) ||
-    `chore: NanoCrab coding job ${job.id}`;
-  const { execFileSync } = await import('child_process');
-  execFileSync('git', ['add', '-A'], { cwd: repoPath, stdio: 'pipe' });
-  execFileSync('git', ['commit', '-m', commitMessage], {
-    cwd: repoPath,
-    stdio: 'pipe',
+  if (!hasApprovedTarget('coding-open-pr', 'coding-job', job.id)) {
+    const pending = findPendingApprovalForTarget(
+      'coding-open-pr',
+      'coding-job',
+      job.id,
+    );
+    if (!pending) {
+      createApproval({
+        kind: 'coding-open-pr',
+        title: `Open PR for ${job.repo}`,
+        summary: `Approve opening a pull request for branch ${job.branch}.`,
+        risk: 'high',
+        requester: by,
+        targetType: 'coding-job',
+        targetId: job.id,
+        payload: { jobId: job.id, repo: job.repo, branch: job.branch },
+      });
+    }
+    job.failureReason = 'PR approval is required';
+    upsertCodingJob(job);
+    throw new Error('PR approval is required');
+  }
+  if (!requirePrProviderFallbackApproval(job, by)) {
+    return job;
+  }
+  const policy = evaluatePolicy({
+    actor: by,
+    actorId: job.id,
+    actionType: 'coding.open_pr',
+    resource: job.repo,
+    context: { branch: job.branch, changedFiles: job.changedFiles },
   });
-  const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: repoPath,
-    encoding: 'utf-8',
-  }).trim();
-  execFileSync(
-    'git',
-    [
-      'push',
-      'origin',
-      `${job.branch}:refs/heads/${job.branch}`,
-      '--force-with-lease',
-    ],
-    {
+  logAuditEvent({
+    actor: by,
+    actorId: job.id,
+    actionType: 'coding.open_pr',
+    resource: job.repo,
+    decision: policy.decision === 'denied' ? 'denied' : 'approved',
+    correlationId: job.id,
+    context: policy,
+  });
+  if (policy.decision === 'denied') {
+    throw new Error(`PR creation denied by policy: ${policy.explanation}`);
+  }
+  applyCodingJobTransition(job, 'open_pr');
+
+  try {
+    const repoPath = job.workspace;
+    const metadataDir = path.join(path.dirname(job.workspace), '.nanocrab');
+    const diffStat = readTextFile(path.join(metadataDir, 'diff-stat.txt'));
+    const changedFiles = readTextFile(
+      path.join(metadataDir, 'changed-files.txt'),
+    );
+    const untracked = readTextFile(path.join(metadataDir, 'untracked.txt'));
+    const testSummary = readTextFile(
+      path.join(metadataDir, 'test-summary.txt'),
+    );
+    const commitMessage =
+      readTextFile(path.join(metadataDir, 'commit-message.txt')) ||
+      `chore: NanoCrab coding job ${job.id}`;
+    const { execFileSync } = await import('child_process');
+    execFileSync('git', ['add', '-A'], { cwd: repoPath, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', commitMessage], {
       cwd: repoPath,
       stdio: 'pipe',
-    },
+    });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: repoPath,
+      encoding: 'utf-8',
+    }).trim();
+    execFileSync(
+      'git',
+      [
+        'push',
+        'origin',
+        `${job.branch}:refs/heads/${job.branch}`,
+        '--force-with-lease',
+      ],
+      {
+        cwd: repoPath,
+        stdio: 'pipe',
+      },
+    );
+    const pr = (await githubApi(`/repos/${job.repo}/pulls`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: job.issueNumber
+          ? `fix: ${job.issueTitle || `issue ${job.issueNumber}`}`
+          : `chore: ${slug(job.prompt).replace(/-/g, ' ') || 'coding job'}`,
+        body: [
+          '## NanoCrab Coding Job',
+          '',
+          job.issueNumber ? `Resolves #${job.issueNumber}` : '',
+          '',
+          `Job: \`${job.id}\``,
+          `Provider: \`${job.provider}/${job.model}\``,
+          '',
+          '### Changes',
+          '```',
+          diffStat,
+          '```',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        head: job.branch,
+        base: repo.defaultBranch,
+      }),
+    })) as { html_url?: string };
+    job.commitSha = sha;
+    job.prUrl = pr.html_url || null;
+    job.diffSummary = diffStat || job.diffSummary;
+    job.changedFiles = Array.from(
+      new Set(
+        [
+          ...changedFiles.split('\n'),
+          ...untracked.split('\n'),
+          ...(job.changedFiles || []),
+        ].filter(Boolean),
+      ),
+    );
+    job.testSummary = testSummary || job.testSummary;
+    applyCodingJobTransition(job, 'ci_running');
+    job.ciStatus = 'pending';
+    recordJobApproval(job, 'open-pr', by);
+    upsertCodingJob(job);
+    return job;
+  } catch (err) {
+    const failureReason = err instanceof Error ? err.message : String(err);
+    applyCodingJobTransition(job, 'failed', failureReason);
+    updateJobOutput(job, `\n\nPR creation failed: ${failureReason}\n`);
+    throw err;
+  }
+}
+
+function summarizeCiError(statusPayload: {
+  state?: string;
+  statuses?: Array<{
+    state?: string;
+    context?: string;
+    description?: string | null;
+    target_url?: string | null;
+  }>;
+}): string | null {
+  const failingStatus = (statusPayload.statuses || []).find((status) =>
+    ['failure', 'error'].includes(String(status.state || '').toLowerCase()),
   );
-  const pr = (await githubApi(`/repos/${job.repo}/pulls`, {
-    method: 'POST',
-    body: JSON.stringify({
-      title: job.issueNumber
-        ? `fix: ${job.issueTitle || `issue ${job.issueNumber}`}`
-        : `chore: ${slug(job.prompt).replace(/-/g, ' ') || 'coding job'}`,
-      body: [
-        '## NanoCrab Coding Job',
-        '',
-        job.issueNumber ? `Resolves #${job.issueNumber}` : '',
-        '',
-        `Job: \`${job.id}\``,
-        `Provider: \`${job.provider}/${job.model}\``,
-        '',
-        '### Changes',
-        '```',
-        diffStat,
-        '```',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-      head: job.branch,
-      base: repo.defaultBranch,
-    }),
-  })) as { html_url?: string };
-  job.commitSha = sha;
-  job.prUrl = pr.html_url || null;
-  job.status = 'ci_running';
-  job.ciStatus = 'pending';
-  recordJobApproval(job, 'open-pr', by);
-  upsertCodingJob(job);
+  if (!failingStatus) {
+    if (['failure', 'error'].includes(String(statusPayload.state || ''))) {
+      return 'CI reported failure';
+    }
+    return null;
+  }
+  const context = failingStatus.context || 'CI';
+  const description = failingStatus.description || failingStatus.state || '';
+  return `${context}: ${description}`.trim();
+}
+
+function summarizeCheckRunError(
+  checkRuns: GitHubCheckRunSummary[],
+): string | null {
+  const failingRun = checkRuns.find((run) =>
+    [
+      'failure',
+      'timed_out',
+      'cancelled',
+      'action_required',
+      'startup_failure',
+    ].includes(run.conclusion || ''),
+  );
+  if (!failingRun) return null;
+  return `${failingRun.name || 'GitHub Actions'}: ${failingRun.conclusion}`;
+}
+
+interface GitHubCheckRunSummary {
+  name?: string;
+  status?: string;
+  conclusion?: string | null;
+  html_url?: string | null;
+}
+
+function evaluateCheckRuns(checkRuns: GitHubCheckRunSummary[]): {
+  status: 'pending' | 'success' | 'failure' | 'none';
+  error: string | null;
+} {
+  if (checkRuns.length === 0) return { status: 'none', error: null };
+  const failed = summarizeCheckRunError(checkRuns);
+  if (failed) return { status: 'failure', error: failed };
+  const pending = checkRuns.some(
+    (run) =>
+      run.status !== 'completed' ||
+      (run.status === 'completed' && !run.conclusion),
+  );
+  if (pending) return { status: 'pending', error: null };
+  return { status: 'success', error: null };
+}
+
+export async function refreshCodingJobCi(jobId: string): Promise<CodingJob> {
+  const job = getCodingJob(jobId);
+  if (!job) throw new Error(`Coding job not found: ${jobId}`);
+  if (!job.commitSha) {
+    throw new Error(`Coding job ${jobId} has no commit SHA for CI lookup`);
+  }
+  if (job.status !== 'ci_running' && job.status !== 'completed') {
+    throw new Error(`Cannot refresh CI from ${job.status}`);
+  }
+
+  const statusPayload = (await githubApi(
+    `/repos/${job.repo}/commits/${job.commitSha}/status`,
+  )) as {
+    state?: 'pending' | 'success' | 'failure' | 'error';
+    statuses?: Array<{
+      state?: string;
+      context?: string;
+      description?: string | null;
+      target_url?: string | null;
+    }>;
+  };
+  const checkRunsPayload = (await githubApi(
+    `/repos/${job.repo}/commits/${job.commitSha}/check-runs?per_page=100`,
+  )) as {
+    check_runs?: GitHubCheckRunSummary[];
+  };
+  const checkRunResult = evaluateCheckRuns(
+    Array.isArray(checkRunsPayload.check_runs)
+      ? checkRunsPayload.check_runs
+      : [],
+  );
+  const state = statusPayload.state || 'pending';
+  const statusCount = Array.isArray(statusPayload.statuses)
+    ? statusPayload.statuses.length
+    : 0;
+  if (state === 'failure' || state === 'error') {
+    job.ciStatus = 'failure';
+    job.lastCiError = summarizeCiError(statusPayload);
+  } else if (checkRunResult.status === 'failure') {
+    job.ciStatus = 'failure';
+    job.lastCiError = checkRunResult.error;
+  } else if (
+    (state === 'pending' && statusCount > 0) ||
+    checkRunResult.status === 'pending'
+  ) {
+    job.ciStatus = 'pending';
+    job.lastCiError = null;
+  } else if (state === 'success' || checkRunResult.status === 'success') {
+    job.ciStatus = 'success';
+    job.lastCiError = null;
+  } else {
+    job.ciStatus = 'pending';
+    job.lastCiError = null;
+  }
+
+  if (
+    job.status === 'ci_running' &&
+    (job.ciStatus === 'success' || job.ciStatus === 'failure')
+  ) {
+    applyCodingJobTransition(job, 'completed');
+  } else {
+    upsertCodingJob(job);
+  }
   return job;
 }
 

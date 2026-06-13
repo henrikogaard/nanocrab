@@ -10,6 +10,7 @@ vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 
 // Mock config
 vi.mock('../config.js', () => ({
+  STORE_DIR: '/tmp/nanocrab-test-store',
   ASSISTANT_NAME: 'Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
 }));

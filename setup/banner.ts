@@ -1,19 +1,27 @@
+import {
+  APP_VERSION,
+  EDITION_NAME,
+  EDITION_SHORT,
+  EDITION_VERSION,
+} from '../src/edition.js';
+
 const CRAB_ART = `
-                 ╱|、
-               (˚ˎ 。7
-                |、˜〵
-                じしˍ,)ノ
-    ╔══════════════════════════════════════╗
-    ║        🦀  N A N O C R A B          ║
-    ║   Standalone Personal AI Assistant   ║
-    ╚══════════════════════════════════════╝
+       _     _     _     _     _     _
+      / \\___/ \\___/ \\___/ \\___/ \\___/ \\
+     (  o   o   N A N O C R A B   o   o )
+      \\_/---\\_/---\\_/---\\_/---\\_/---\\_/
+          \\_V_/                 \\_V_/
+
+      ${EDITION_SHORT} - ${EDITION_NAME}
+      Edition ${EDITION_VERSION} | App ${APP_VERSION}
+      Standalone Personal AI Assistant
 `;
 
 const CRAB_SMALL = `
-  ╱|、
- (˚ˎ 。7   N A N O C R A B
-  |、˜〵   Personal AI Assistant
-  じしˍ,)ノ
+  /\\___/\\___/\\
+ ( o  NanoCrab o )
+  \\/---\\_/---\\/
+  ${EDITION_VERSION} | ${APP_VERSION}
 `;
 
 export function printBanner(): void {
@@ -23,10 +31,10 @@ export function printBanner(): void {
 export function printFooter(elapsedMs?: number): void {
   const time = elapsedMs != null ? ` (${(elapsedMs / 1000).toFixed(1)}s)` : '';
   console.log(`
-  ╔══════════════════════════════════════╗
-  ║   Setup complete${time.padEnd(14)}║
-  ║   Run  npm run start  to launch      ║
-  ╚══════════════════════════════════════╝
+  +--------------------------------------+
+  |   Setup complete${time.padEnd(14)}|
+  |   Run  npm run start  to launch      |
+  +--------------------------------------+
 `);
 }
 

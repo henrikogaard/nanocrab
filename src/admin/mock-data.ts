@@ -73,6 +73,76 @@ const channels = [
   { name: 'signal', connected: true, status: 'healthy', lastSeen: iso(1) },
 ];
 
+const agentBoundaries = [
+  {
+    jid: 'wa:alliance-command',
+    name: 'Alliance Command',
+    folder: 'main',
+    isMain: true,
+    boundary: {
+      agentId: 'main',
+      groupFolder: 'main',
+      isMain: true,
+      channelScopes: ['own', 'all'],
+      filesystemScopes: [
+        { containerPath: '/workspace/project', access: 'read-only' },
+        { containerPath: '/workspace/project/store', access: 'read-write' },
+        { containerPath: '/workspace/group', access: 'read-write' },
+      ],
+      skillScopes: {
+        allowedScopes: ['all', 'main', 'channels'],
+        allowedVisibility: ['shared', 'private', 'system'],
+      },
+      providerProfiles: ['default_chat', 'default_coding', 'default_reports'],
+      connectorIds: ['nanocrab', 'github', 'kdrive'],
+      externalWrites: { allowed: true, requiresApproval: true },
+    },
+    capabilities: {
+      allowedConnectorIds: ['nanocrab', 'github', 'kdrive'],
+      allowedChannelScopes: ['own', 'all'],
+      allowedProviderProfiles: [
+        'default_chat',
+        'default_coding',
+        'default_reports',
+      ],
+      allowExternalWrites: true,
+      externalWritesRequireApproval: true,
+      allowedToolActions: ['read', 'mcp.call', 'external.write'],
+    },
+  },
+  {
+    jid: 'tg:operations-room',
+    name: 'Operations Room',
+    folder: 'operations',
+    isMain: false,
+    boundary: {
+      agentId: 'operations',
+      groupFolder: 'operations',
+      isMain: false,
+      channelScopes: ['own'],
+      filesystemScopes: [
+        { containerPath: '/workspace/group', access: 'read-write' },
+        { containerPath: '/workspace/global', access: 'read-only' },
+      ],
+      skillScopes: {
+        allowedScopes: ['all', 'channels'],
+        allowedVisibility: ['shared'],
+      },
+      providerProfiles: ['default_chat', 'default_automation'],
+      connectorIds: ['nanocrab', 'github'],
+      externalWrites: { allowed: false, requiresApproval: true },
+    },
+    capabilities: {
+      allowedConnectorIds: ['nanocrab', 'github'],
+      allowedChannelScopes: ['own'],
+      allowedProviderProfiles: ['default_chat', 'default_automation'],
+      allowExternalWrites: false,
+      externalWritesRequireApproval: true,
+      allowedToolActions: ['read', 'mcp.call'],
+    },
+  },
+];
+
 const containers = [
   {
     id: 'mock-main-agent',
@@ -83,6 +153,7 @@ const containers = [
     isTask: false,
     idleWaiting: false,
     status: 'running',
+    currentStep: 'Summarizing latest operation requests',
   },
   {
     id: 'mock-coding-job',
@@ -93,6 +164,326 @@ const containers = [
     isTask: true,
     idleWaiting: true,
     status: 'running',
+    currentStep: 'Waiting for operator approval before opening PR',
+  },
+];
+
+const cockpitSessions = [
+  {
+    id: 'cockpit-running-001',
+    sessionId: 'cockpit-running-001',
+    group: 'main',
+    provider: 'codex',
+    model: 'gpt-5.4',
+    status: 'running',
+    startedAt: iso(18),
+    updatedAt: iso(1),
+    lastEventAt: iso(1),
+    lastActivity: iso(1),
+    messageCount: 42,
+    approvalCount: 0,
+    artifactCount: 2,
+    changedFiles: [
+      'src/admin/routes/sessions.ts',
+      'src/admin/public/pages/dashboard.js',
+    ],
+    currentStep:
+      'Parsing transcript metadata and building cockpit session summaries.',
+    filePath: 'cockpit-running-001.jsonl',
+  },
+  {
+    id: 'cockpit-approval-002',
+    sessionId: 'cockpit-approval-002',
+    group: 'operations',
+    provider: 'claude',
+    model: 'claude-sonnet-4-6',
+    status: 'waiting_approval',
+    startedAt: iso(54),
+    updatedAt: iso(7),
+    lastEventAt: iso(7),
+    lastActivity: iso(7),
+    messageCount: 27,
+    approvalCount: 2,
+    artifactCount: 1,
+    changedFiles: ['docs/ops/nightfall-orders.md'],
+    currentStep: 'Waiting for approval to publish revised operation orders.',
+    filePath: 'cockpit-approval-002.jsonl',
+  },
+  {
+    id: 'cockpit-failed-003',
+    sessionId: 'cockpit-failed-003',
+    group: 'scouts',
+    provider: 'openrouter',
+    model: 'openrouter/auto',
+    status: 'failed',
+    startedAt: iso(148),
+    updatedAt: iso(132),
+    lastEventAt: iso(132),
+    lastActivity: iso(132),
+    messageCount: 13,
+    approvalCount: 0,
+    artifactCount: 0,
+    changedFiles: [],
+    currentStep:
+      'Provider request failed after retrying scout report extraction.',
+    filePath: 'cockpit-failed-003.jsonl',
+  },
+  {
+    id: 'cockpit-complete-004',
+    sessionId: 'cockpit-complete-004',
+    group: 'HenrikOrg/nanocrab',
+    provider: 'codex',
+    model: 'gpt-5.4',
+    status: 'completed',
+    startedAt: iso(360),
+    updatedAt: iso(295),
+    lastEventAt: iso(295),
+    lastActivity: iso(295),
+    messageCount: 58,
+    approvalCount: 1,
+    artifactCount: 3,
+    changedFiles: ['src/admin/routes/containers.ts', 'src/admin/websocket.ts'],
+    currentStep: 'Completed implementation and recorded focused test results.',
+    filePath: '',
+  },
+];
+
+const approvals = [
+  {
+    id: 'approval-message-risk',
+    kind: 'external-message',
+    title: 'Send outbound operation update',
+    summary:
+      'Post revised rally timing to Alliance Command with player names and target windows.',
+    risk: 'high',
+    requester: 'main',
+    targetType: 'message',
+    targetId: 'msg-outbound-418',
+    source: 'chat',
+    correlationId: 'corr-nightfall-ops',
+    expiresAt: iso(-16),
+    actionPreview:
+      'Send to wa:alliance-command: Rally window moved to 21:30. Confirm leaders: Mira, Henrik, Scout-7.',
+    resourceSummary: 'WhatsApp outbound message to Alliance Command',
+    policyDecisionId: 'policy-outbound-sensitive',
+    payload: { channel: 'whatsapp', groupJid: 'wa:alliance-command' },
+    status: 'pending',
+    createdAt: iso(7),
+    reviewedAt: null,
+    reviewedBy: null,
+    decisionNote: null,
+  },
+  {
+    id: 'approval-upload-risk',
+    kind: 'upload',
+    title: 'Process uploaded scout archive',
+    summary:
+      'Extract text and images from a large uploaded archive before sharing findings with scouts.',
+    risk: 'medium',
+    requester: 'scouts',
+    targetType: 'upload',
+    targetId: 'upload-scout-archive',
+    source: 'attachment',
+    correlationId: 'corr-scout-upload',
+    expiresAt: iso(-60),
+    actionPreview: 'Unpack scout-intel.zip and run OCR on 18 image files.',
+    resourceSummary: 'ZIP upload with screenshots and notes',
+    policyDecisionId: 'policy-upload-review',
+    payload: { filename: 'scout-intel.zip', sizeMb: 42 },
+    status: 'pending',
+    createdAt: iso(18),
+    reviewedAt: null,
+    reviewedBy: null,
+    decisionNote: null,
+  },
+  {
+    id: 'approval-repo-risk',
+    kind: 'coding-open-pr',
+    title: 'Open PR for provider routing fix',
+    summary:
+      'Publish branch issue-42-provider-routing with changes to provider fallback policy.',
+    risk: 'high',
+    requester: 'coding-agent',
+    targetType: 'coding-job',
+    targetId: 'af-job-1',
+    source: 'autofix',
+    correlationId: 'corr-gh-42',
+    expiresAt: iso(-45),
+    actionPreview:
+      'git push origin issue-42-provider-routing && gh pr create --fill',
+    resourceSummary: 'Repository change touching provider fallback code',
+    policyDecisionId: 'policy-repo-write',
+    payload: { issue: 42, branch: 'issue-42-provider-routing' },
+    status: 'pending',
+    createdAt: iso(24),
+    reviewedAt: null,
+    reviewedBy: null,
+    decisionNote: null,
+  },
+  {
+    id: 'approval-provider-risk',
+    kind: 'provider-fallback',
+    title: 'Fallback from Codex to OpenRouter',
+    summary:
+      'Primary provider failed preflight; route the current operation summary to OpenRouter.',
+    risk: 'medium',
+    requester: 'provider-router',
+    targetType: 'provider',
+    targetId: 'openrouter',
+    source: 'provider-router',
+    correlationId: 'corr-provider-fallback',
+    expiresAt: iso(-20),
+    actionPreview: 'Retry operation summary with openrouter/auto.',
+    resourceSummary: 'Provider fallback for Operations Room',
+    policyDecisionId: 'policy-provider-fallback',
+    payload: { from: 'codex', to: 'openrouter', group: 'operations' },
+    status: 'pending',
+    createdAt: iso(32),
+    reviewedAt: null,
+    reviewedBy: null,
+    decisionNote: null,
+  },
+  {
+    id: 'approval-tool-risk',
+    kind: 'tool-action',
+    title: 'Run deployment health probe',
+    summary:
+      'Call a configured tool that reaches the deployment endpoint and records freshness state.',
+    risk: 'low',
+    requester: 'uptime',
+    targetType: 'tool',
+    targetId: 'deployment-probe',
+    source: 'tool-runner',
+    correlationId: 'corr-uptime-probe',
+    expiresAt: iso(-90),
+    actionPreview: 'probe https://nanocrab.example/health --record',
+    resourceSummary: 'External HTTP probe tool action',
+    policyDecisionId: 'policy-tool-network',
+    payload: { url: 'https://nanocrab.example/health', method: 'GET' },
+    status: 'pending',
+    createdAt: iso(45),
+    reviewedAt: null,
+    reviewedBy: null,
+    decisionNote: null,
+  },
+  {
+    id: 'approval-history-1',
+    kind: 'report-outline',
+    title: 'Approve weekly alliance digest outline',
+    summary: 'Situation summary, notable events, risks, next actions.',
+    risk: 'low',
+    requester: 'operations',
+    targetType: 'report-job',
+    targetId: 'report-mock-1',
+    source: 'report-writer',
+    correlationId: 'corr-weekly-digest',
+    expiresAt: null,
+    actionPreview:
+      'Create digest outline with situation summary, notable events, risks, and next actions.',
+    resourceSummary: 'Weekly alliance digest outline',
+    policyDecisionId: 'policy-report-outline',
+    payload: { jobId: 'report-mock-1' },
+    status: 'approved',
+    createdAt: iso(180),
+    reviewedAt: iso(120),
+    reviewedBy: 'mock-owner',
+    decisionNote: 'Outline approved for drafting.',
+  },
+];
+
+const auditEvents = [
+  {
+    id: 'audit-code-plan',
+    timestamp: iso(22),
+    actor: 'coding-agent',
+    actorId: 'code-mock-1',
+    actionType: 'coding.transition',
+    resource: 'code-mock-1',
+    decision: 'allowed',
+    context: { from: 'queued', to: 'plan', repo: 'henrikogaard/nanocrab' },
+    correlationId: 'code-mock-1',
+    durationMs: 12,
+    error: null,
+  },
+  {
+    id: 'audit-code-dry-run',
+    timestamp: iso(21),
+    actor: 'coding-agent',
+    actorId: 'code-mock-1',
+    actionType: 'coding.implement',
+    resource: 'henrikogaard/nanocrab',
+    decision: 'simulated',
+    context: {
+      branch: 'nanocrab/p0-policy-engine',
+      dryRun: true,
+      explanation: 'Repository write simulated with read-only mounts.',
+    },
+    correlationId: 'code-mock-1',
+    durationMs: 41,
+    error: null,
+  },
+  {
+    id: 'audit-pr-approval',
+    timestamp: iso(19),
+    actor: 'mock-owner',
+    actorId: 'approval-repo-risk',
+    actionType: 'approval.coding-open-pr.approved',
+    resource: 'coding-job/af-job-1',
+    decision: 'approved',
+    context: {
+      approvalId: 'approval-repo-risk',
+      policyDecisionId: 'policy-repo-write',
+    },
+    correlationId: 'corr-gh-42',
+    durationMs: 4,
+    error: null,
+  },
+  {
+    id: 'audit-provider-fallback',
+    timestamp: iso(32),
+    actor: 'provider-router',
+    actorId: null,
+    actionType: 'provider.fallback',
+    resource: 'default_coding',
+    decision: 'requires_approval',
+    context: {
+      from: 'codex/gpt-5.4',
+      to: 'openrouter/auto',
+      reason: 'Primary provider preflight failed.',
+    },
+    correlationId: 'corr-provider-fallback',
+    durationMs: 8,
+    error: null,
+  },
+  {
+    id: 'audit-channel-send',
+    timestamp: iso(11),
+    actor: 'router',
+    actorId: null,
+    actionType: 'channel.send',
+    resource: 'wa:alliance-command',
+    decision: 'allowed',
+    context: { channel: 'whatsapp', textLength: 184 },
+    correlationId: 'corr-nightfall-ops',
+    durationMs: 73,
+    error: null,
+  },
+  {
+    id: 'audit-upload-denied',
+    timestamp: iso(45),
+    actor: 'attachment-handler',
+    actorId: 'upload-scout-archive',
+    actionType: 'upload.process',
+    resource: 'scout-intel.zip',
+    decision: 'denied',
+    context: {
+      filename: 'scout-intel.zip',
+      reason: 'Archive processing denied by policy simulator.',
+      apiKey: '[REDACTED]',
+    },
+    correlationId: 'corr-scout-upload',
+    durationMs: 2,
+    error: 'Upload policy denied archive extraction',
   },
 ];
 
@@ -369,6 +760,7 @@ const providerInfo = {
       provider: 'openrouter',
       model: 'openrouter/auto',
       toolPolicy: 'read-only',
+      fallbackProfileId: 'default_memory',
       updatedAt: iso(120),
     },
     {
@@ -378,6 +770,7 @@ const providerInfo = {
       provider: 'codex',
       model: 'gpt-5.4',
       toolPolicy: 'approval-required',
+      fallbackProfileId: 'default_automation',
       updatedAt: iso(180),
     },
     {
@@ -387,6 +780,7 @@ const providerInfo = {
       provider: 'claude',
       model: 'claude-sonnet-4-6',
       toolPolicy: 'approval-required',
+      fallbackProfileId: null,
       updatedAt: iso(240),
     },
     {
@@ -396,6 +790,7 @@ const providerInfo = {
       provider: 'google',
       model: 'gemini-2.5-flash',
       toolPolicy: 'read-only',
+      fallbackProfileId: null,
       updatedAt: iso(300),
     },
     {
@@ -405,6 +800,7 @@ const providerInfo = {
       provider: 'google',
       model: 'gemini-2.5-flash',
       toolPolicy: 'read-only',
+      fallbackProfileId: null,
       updatedAt: iso(360),
     },
     {
@@ -414,6 +810,7 @@ const providerInfo = {
       provider: 'codex',
       model: 'gpt-5.4',
       toolPolicy: 'approval-required',
+      fallbackProfileId: 'default_automation',
       updatedAt: iso(420),
     },
     {
@@ -423,6 +820,7 @@ const providerInfo = {
       provider: 'google',
       model: 'gemini-2.5-pro',
       toolPolicy: 'read-only',
+      fallbackProfileId: 'default_chat',
       updatedAt: iso(480),
     },
     {
@@ -432,6 +830,7 @@ const providerInfo = {
       provider: 'google',
       model: 'gemini-2.5-pro',
       toolPolicy: 'read-only',
+      fallbackProfileId: 'default_reports',
       updatedAt: iso(540),
     },
     {
@@ -441,6 +840,7 @@ const providerInfo = {
       provider: 'google',
       model: 'gemini-2.5-pro',
       toolPolicy: 'read-only',
+      fallbackProfileId: 'default_chat',
       updatedAt: iso(600),
     },
   ],
@@ -500,7 +900,81 @@ const providerInfo = {
       provider: 'openrouter',
       model: 'openrouter/auto',
       ok: true,
+      live: true,
+      lastProbeAt: iso(8),
+      latencyMs: 184,
+      capabilities: {
+        tool_calls: true,
+        structured_output: true,
+        streaming: true,
+        vision: true,
+        context_window: 128000,
+      },
       checks: [{ id: 'mock', label: 'Mock profile check', ok: true }],
+    },
+    {
+      profileId: 'default_automation',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      ok: false,
+      live: true,
+      lastProbeAt: iso(16),
+      latencyMs: 2400,
+      errorDetail: 'API key expired; update Claude credentials.',
+      errors: ['API key expired; update Claude credentials.'],
+      checks: [
+        {
+          id: 'mock-auth',
+          label: 'Mock credentials',
+          ok: false,
+          detail: 'API key expired; update Claude credentials.',
+        },
+      ],
+    },
+  ],
+  probeHistory: [
+    {
+      profileId: 'default_chat',
+      provider: 'openrouter',
+      model: 'openrouter/auto',
+      ok: true,
+      latencyMs: 184,
+      streaming: true,
+      streamingSupport: true,
+      toolSupport: true,
+      schemaSupport: true,
+      visionSupport: true,
+      contextWindow: 128000,
+      timestamp: iso(8),
+    },
+    {
+      profileId: 'default_chat',
+      provider: 'openrouter',
+      model: 'openrouter/auto',
+      ok: true,
+      latencyMs: 211,
+      streaming: true,
+      streamingSupport: true,
+      toolSupport: true,
+      schemaSupport: true,
+      visionSupport: true,
+      contextWindow: 128000,
+      timestamp: iso(24),
+    },
+    {
+      profileId: 'default_automation',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      ok: false,
+      latencyMs: 2400,
+      streaming: true,
+      streamingSupport: true,
+      toolSupport: true,
+      schemaSupport: true,
+      visionSupport: true,
+      contextWindow: 200000,
+      errorDetail: 'API key expired; update Claude credentials.',
+      timestamp: iso(16),
     },
   ],
   auth: { codex: { configured: true, hasHostAuth: true } },
@@ -879,22 +1353,49 @@ function usage(): JsonValue {
 }
 
 function sessions(): JsonValue[] {
-  return [
-    {
-      group: 'main',
-      sessionId: 'sess-main-001',
-      startedAt: iso(85),
-      lastActivity: iso(5),
-      messageCount: 18,
-    },
-    {
-      group: 'operations',
-      sessionId: 'sess-ops-002',
-      startedAt: iso(280),
-      lastActivity: iso(18),
-      messageCount: 31,
-    },
-  ];
+  return cockpitSessions;
+}
+
+function cockpitDetail(id: string): JsonValue | undefined {
+  const session = cockpitSessions.find((item) => item.id === id);
+  if (!session) return undefined;
+  return {
+    ...session,
+    timeline: [
+      {
+        id: `${id}-start`,
+        timestamp: session.startedAt,
+        type: 'started',
+        title: 'Session started',
+        detail: `${session.provider}/${session.model} run started for ${session.group}.`,
+      },
+      {
+        id: `${id}-step`,
+        timestamp: session.lastEventAt,
+        type: session.status,
+        title: session.status.replace(/_/g, ' '),
+        detail: session.currentStep,
+      },
+    ],
+    artifacts: session.changedFiles.map((file, index) => ({
+      id: `${id}-artifact-${index}`,
+      name: file.split('/').pop(),
+      path: file,
+      kind: 'changed-file',
+    })),
+    approvals:
+      session.approvalCount > 0
+        ? Array.from({ length: session.approvalCount }, (_, index) => ({
+            id: `${id}-approval-${index + 1}`,
+            title:
+              index === 0 ? 'Approve file changes' : 'Approve outbound message',
+            status:
+              session.status === 'waiting_approval' ? 'pending' : 'approved',
+            risk: index === 0 ? 'medium' : 'low',
+            createdAt: iso(12 + index),
+          }))
+        : [],
+  };
 }
 
 function routeJson(pathname: string, req: Request): JsonValue | undefined {
@@ -927,6 +1428,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       models: providerInfo.models,
       definitions: providerInfo.definitions,
       probes: providerInfo.profileProbes,
+      probeHistory: providerInfo.probeHistory,
     };
   }
   if (pathname.startsWith('/system/provider/profiles/')) {
@@ -1026,7 +1528,8 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           purpose: 'Reports',
           ok: false,
           lastProbeAt: new Date(Date.now() - 1800000).toISOString(),
-          errorMessage: 'API reached max capacity: this model is temporarily unavailable',
+          errorMessage:
+            'API reached max capacity: this model is temporarily unavailable',
           capabilities: ['tools', 'json', 'stream'],
         },
       ],
@@ -1059,7 +1562,12 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         {
           providerId: 'gemini',
           model: 'gemini-2.5-flash',
-          result: { ok: false, validated: false, status: 'failed', errorMessage: 'API rate limited' },
+          result: {
+            ok: false,
+            validated: false,
+            status: 'failed',
+            errorMessage: 'API rate limited',
+          },
           timestamp: hrs(4),
         },
         {
@@ -1077,47 +1585,31 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         {
           providerId: 'openai-compatible',
           model: 'model-id',
-          result: { ok: false, validated: false, status: 'failed', errorMessage: 'Base URL not configured' },
+          result: {
+            ok: false,
+            validated: false,
+            status: 'failed',
+            errorMessage: 'Base URL not configured',
+          },
           timestamp: hrs(8),
         },
       ],
     };
   }
   if (pathname === '/approvals') {
-    return [
-      {
-        id: 'approval-mock-1',
-        kind: 'coding-open-pr',
-        title: 'Open PR for henrikogaard/nanocrab',
-        summary: 'Approve publishing branch nanocrab/issue-42-code-mock-1.',
-        risk: 'high',
-        requester: 'main',
-        targetType: 'coding-job',
-        targetId: 'code-mock-1',
-        payload: { jobId: 'code-mock-1' },
-        status: 'pending',
-        createdAt: iso(14),
-        reviewedAt: null,
-        reviewedBy: null,
-        decisionNote: null,
-      },
-      {
-        id: 'approval-mock-2',
-        kind: 'report-outline',
-        title: 'Approve weekly alliance digest outline',
-        summary: 'Situation summary, notable events, risks, next actions.',
-        risk: 'low',
-        requester: 'operations',
-        targetType: 'report-job',
-        targetId: 'report-mock-1',
-        payload: { jobId: 'report-mock-1' },
-        status: 'pending',
-        createdAt: iso(55),
-        reviewedAt: null,
-        reviewedBy: null,
-        decisionNote: null,
-      },
-    ];
+    const q = req.query as Record<string, string | undefined>;
+    return approvals
+      .filter((item) => !q.status || item.status === q.status)
+      .filter((item) => !q.risk || item.risk === q.risk)
+      .filter((item) => !q.kind || item.kind === q.kind)
+      .filter((item) => !q.requester || item.requester === q.requester)
+      .filter((item) => !q.targetType || item.targetType === q.targetType)
+      .filter(
+        (item) => !q.correlationId || item.correlationId === q.correlationId,
+      )
+      .filter((item) => !q.createdFrom || item.createdAt >= q.createdFrom)
+      .filter((item) => !q.createdTo || item.createdAt <= q.createdTo)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
   if (pathname === '/system/alerts') {
     return [
@@ -1277,6 +1769,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname === '/messages/pinned') return [messages[1]];
   if (pathname.startsWith('/messages/')) return messages;
   if (pathname === '/tasks') return tasks;
+  if (pathname === '/agents/boundaries') return agentBoundaries;
   if (pathname.startsWith('/tasks/')) {
     const id = decodeURIComponent(pathname.split('/')[2] || '');
     return tasks.find((t) => t.id === id) || tasks[0];
@@ -1309,6 +1802,16 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           envVars: [],
           envStatus: [],
           toolPattern: 'mcp__nanocrab__*',
+          permission: {
+            connectorId: 'nanocrab',
+            scope: 'all',
+            allowedActions: ['*'],
+            requiresApproval: false,
+            groups: [],
+            agents: [],
+            createdAt: iso(120),
+            updatedAt: iso(20),
+          },
           status: 'healthy',
           notes: 'Core mock server exposed to every sample agent container.',
         },
@@ -1322,6 +1825,16 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           envVars: ['GITHUB_TOKEN'],
           envStatus: [{ key: 'GITHUB_TOKEN', isSet: true }],
           toolPattern: 'mcp__github__*',
+          permission: {
+            connectorId: 'github',
+            scope: 'groups',
+            allowedActions: ['issues.read', 'pulls.read', 'pulls.write'],
+            requiresApproval: true,
+            groups: ['main', 'operations'],
+            agents: [],
+            createdAt: iso(120),
+            updatedAt: iso(20),
+          },
           status: 'healthy',
           notes: 'Sample GitHub issue and pull request tooling.',
         },
@@ -1335,6 +1848,16 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           envVars: ['KDRIVE_TOKEN'],
           envStatus: [{ key: 'KDRIVE_TOKEN', isSet: false }],
           toolPattern: 'mcp__kdrive__*',
+          permission: {
+            connectorId: 'kdrive',
+            scope: 'main',
+            allowedActions: ['files.read', 'files.write'],
+            requiresApproval: true,
+            groups: [],
+            agents: [],
+            createdAt: iso(120),
+            updatedAt: iso(20),
+          },
           status: 'not_configured',
           notes: 'Placeholder document source for report generation.',
         },
@@ -1404,6 +1927,44 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         sensitivity: 'normal',
         source_links_json: '[]',
         contradicts_memory_id: null,
+        stale_after: iso(120),
+      },
+      {
+        id: 'mem-mock-3',
+        scope: 'group',
+        type: 'preference',
+        content: 'Operations summaries should not include speculative targets.',
+        source: 'mock message',
+        confidence: 0.91,
+        visibility: 'group',
+        status: 'contradicted',
+        created_by: 'operations',
+        created_at: iso(480),
+        updated_at: iso(35),
+        reviewed_at: iso(35),
+        expires_at: null,
+        sensitivity: 'normal',
+        source_links_json: '[]',
+        contradicts_memory_id: 'mem-mock-4',
+        stale_after: null,
+      },
+      {
+        id: 'mem-mock-4',
+        scope: 'group',
+        type: 'preference',
+        content: 'Operations summaries should include speculative targets.',
+        source: 'mock message',
+        confidence: 0.84,
+        visibility: 'group',
+        status: 'approved',
+        created_by: 'operations',
+        created_at: iso(55),
+        updated_at: iso(35),
+        reviewed_at: iso(35),
+        expires_at: null,
+        sensitivity: 'normal',
+        source_links_json: '[]',
+        contradicts_memory_id: 'mem-mock-3',
         stale_after: null,
       },
     ];
@@ -1550,28 +2111,42 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname === '/skills/suggestions') {
     return [
       {
-        name: 'operation-planning',
+        id: 'skill-suggestion-mock-1',
+        proposedSkillName: 'operation-planning',
         description:
-          'Plan recurring operations from chat requests, participant counts, orders, and journal context.',
-        reason:
-          'Recent mock messages include operation requests, orders, and participant planning.',
+          'Reusable workflow for operation planning from chat requests, participant counts, orders, and journal context.',
         confidence: 0.86,
-        evidenceCount: 7,
-        instructions:
-          'Extract participants, resources, timing, target, constraints, open questions, and risks. Require approval before publishing orders.',
-        provenance: ['source:mock-history', 'kind:history-suggestion'],
+        status: 'pending',
+        ownerDecision: null,
+        sourceExamples: [
+          'Prepare operation plan from orders and scout notes.',
+          'Prepare operation plan with participant counts.',
+          'Prepare operation plan for tonight from journal context.',
+        ],
+        provenance: ['source:mock-history'],
+        createdBy: 'history-detector',
+        createdAt: iso(18),
+        reviewedAt: null,
+        draftId: null,
       },
       {
-        name: 'dashboard-design-review',
+        id: 'skill-suggestion-mock-2',
+        proposedSkillName: 'dashboard-design-review',
         description:
-          'Review dashboard screens for navigation, polish, and missing states.',
-        reason:
-          'Recent mock activity includes sidebar, icon, logo, and dashboard redesign work.',
+          'Reusable workflow for reviewing dashboard screens for navigation, polish, and missing states.',
         confidence: 0.78,
-        evidenceCount: 4,
-        instructions:
-          'Check navigation clarity, visual hierarchy, text fit, empty/loading/error states, responsiveness, and icon consistency.',
-        provenance: ['source:mock-history', 'kind:history-suggestion'],
+        status: 'approved',
+        ownerDecision: 'create-draft',
+        sourceExamples: [
+          'Review dashboard navigation and missing states.',
+          'Review dashboard visual hierarchy and icons.',
+          'Review dashboard responsive polish.',
+        ],
+        provenance: ['source:mock-history'],
+        createdBy: 'history-detector',
+        createdAt: iso(90),
+        reviewedAt: iso(20),
+        draftId: 'skill-mock-1',
       },
     ];
   }
@@ -1849,10 +2424,52 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         details: 'bad password',
         userAgent: 'Unknown',
       },
+      {
+        timestamp: iso(210),
+        action: 'ip_blocked',
+        ip: '203.0.113.22',
+        details: 'too many login attempts',
+        userAgent: 'Unknown',
+      },
     ];
+  }
+  if (pathname === '/runtime-audit') {
+    const q = req.query;
+    return auditEvents
+      .filter((event) => !q.actor || event.actor === q.actor)
+      .filter((event) => !q.actionType || event.actionType === q.actionType)
+      .filter((event) => !q.decision || event.decision === q.decision)
+      .filter(
+        (event) => !q.correlationId || event.correlationId === q.correlationId,
+      )
+      .slice(0, Math.min(parseInt(String(q.limit || '100'), 10), 1000));
+  }
+  if (pathname === '/runtime-audit/export') {
+    return { exportedAt: iso(0), events: auditEvents };
+  }
+  if (pathname.startsWith('/runtime-audit/replay/')) {
+    const correlationId = decodeURIComponent(pathname.split('/').pop() || '');
+    const events = auditEvents
+      .filter((event) => event.correlationId === correlationId)
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    return {
+      correlationId,
+      events,
+      summary: {
+        eventCount: events.length,
+        firstActionType: events[0]?.actionType || null,
+        lastActionType: events[events.length - 1]?.actionType || null,
+        lastDecision: events[events.length - 1]?.decision || null,
+        durationMs: events.length ? 120000 : null,
+      },
+    };
   }
   if (pathname === '/usage') return usage();
   if (pathname === '/sessions') return sessions();
+  if (pathname === '/sessions/cockpit') return sessions();
+  if (pathname.startsWith('/sessions/cockpit/')) {
+    return cockpitDetail(decodeURIComponent(pathname.split('/').pop() || ''));
+  }
   if (pathname.match(/^\/sessions\/[^/]+\/[^/]+$/)) {
     return [
       {
@@ -2370,11 +2987,62 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         repo: 'henrikogaard/nanocrab',
         issueNumber: 43,
         issueTitle: 'Add dashboard mock mode',
+        provider: 'codex',
         model: 'gpt-5.4',
-        status: 'running',
+        status: 'await_pr_approval',
+        branch: 'nanocrab/issue-43-af-job-1',
+        prUrl: null,
+        commitSha: null,
+        changedFiles: [
+          'src/admin/public/pages/autofix.js',
+          'src/admin/mock-data.ts',
+        ],
+        diffSummary:
+          'src/admin/public/pages/autofix.js | 82 +++++++++++++++++++++\nsrc/admin/mock-data.ts | 24 ++++++',
+        testSummary:
+          'rtk mise exec node@22 -- npx vitest run src/coding-jobs.test.ts\n11 tests passed',
+        ciStatus: 'pending',
+        lastCiError: null,
+        transitionedAt: {
+          queued: iso(25),
+          investigate: iso(24),
+          plan: iso(23),
+          await_approval: iso(22),
+          implement: iso(21),
+          test: iso(20),
+          await_pr_approval: iso(19),
+        },
+        failureReason: null,
         createdAt: iso(19),
         startedAt: iso(19),
-        output: 'Mock job is generating a patch...',
+        output:
+          'Investigating repository and issue context.\nImplementation approved by mock-owner.\nDiff stat captured. PR creation is awaiting approval.\n',
+      },
+    ];
+  }
+  if (pathname === '/autofix/issues') {
+    return [
+      {
+        number: 43,
+        title: 'Add dashboard mock mode',
+        body: 'The Autofix dashboard needs realistic review data.',
+        labels: ['autofix', 'ui'],
+        assignees: ['henrikogaard'],
+        milestone: 'P0 Closure',
+        author: 'henrikogaard',
+        htmlUrl: 'https://github.com/henrikogaard/nanocrab/issues/43',
+        updatedAt: iso(30),
+      },
+      {
+        number: 44,
+        title: 'Block PR creation without approval',
+        body: 'Opening PRs must be approval gated.',
+        labels: ['autofix', 'safety'],
+        assignees: [],
+        milestone: 'P0 Closure',
+        author: 'reviewer',
+        htmlUrl: 'https://github.com/henrikogaard/nanocrab/issues/44',
+        updatedAt: iso(44),
       },
     ];
   }
@@ -2384,11 +3052,36 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       repo: 'henrikogaard/nanocrab',
       issueNumber: 43,
       issueTitle: 'Add dashboard mock mode',
+      provider: 'codex',
       model: 'gpt-5.4',
-      status: 'running',
+      status: 'await_pr_approval',
+      branch: 'nanocrab/issue-43-af-job-1',
+      prUrl: null,
+      commitSha: null,
+      changedFiles: [
+        'src/admin/public/pages/autofix.js',
+        'src/admin/mock-data.ts',
+      ],
+      diffSummary:
+        'src/admin/public/pages/autofix.js | 82 +++++++++++++++++++++\nsrc/admin/mock-data.ts | 24 ++++++',
+      testSummary:
+        'rtk mise exec node@22 -- npx vitest run src/coding-jobs.test.ts\n11 tests passed',
+      ciStatus: 'pending',
+      lastCiError: null,
+      transitionedAt: {
+        queued: iso(25),
+        investigate: iso(24),
+        plan: iso(23),
+        await_approval: iso(22),
+        implement: iso(21),
+        test: iso(20),
+        await_pr_approval: iso(19),
+      },
+      failureReason: null,
       createdAt: iso(19),
       startedAt: iso(19),
-      output: 'Mock autofix output\nNo repository was cloned.\n',
+      output:
+        'Investigating repository and issue context.\nImplementation approved by mock-owner.\nDiff stat captured. PR creation is awaiting approval.\n',
     };
   }
   if (pathname === '/marketplace') {
@@ -2466,8 +3159,23 @@ function writeResponse(pathname: string): JsonValue {
     return ok({ message: 'Mock rebuild queued' });
   if (pathname.includes('/preflight'))
     return ok({ message: 'Mock preflight passed' });
-  if (pathname === '/providers/probe-all')
-    return { version: 2, entries: [] };
+  if (pathname === '/providers/probe-all') return { version: 2, entries: [] };
+  if (pathname === '/runtime-audit/simulate') {
+    return ok({
+      decision: {
+        id: 'policy-mock-simulation',
+        actionType: 'coding.open_pr',
+        resource: 'henrikogaard/nanocrab',
+        risk: 'high',
+        decision: 'requires_approval',
+        approvalRequired: true,
+        dryRunAllowed: true,
+        explanation: 'Repository-changing coding actions require approval.',
+        matchedRuleIds: ['coding-writes'],
+        context: { branch: 'nanocrab/task' },
+      },
+    });
+  }
   return ok({ message: 'Mock write accepted. No live data changed.' });
 }
 

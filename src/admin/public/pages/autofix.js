@@ -2,6 +2,26 @@
 
 // --- GitHub Autofix ---
 
+function autofixStatusBadge(status) {
+  if (status === 'completed') return 'badge-success';
+  if (
+    [
+      'queued',
+      'investigate',
+      'plan',
+      'implement',
+      'test',
+      'open_pr',
+      'ci_running',
+    ].includes(status)
+  )
+    return 'badge-warning';
+  if (['await_approval', 'await_pr_approval'].includes(status))
+    return 'badge-info';
+  if (status === 'cancelled') return 'badge-muted';
+  return 'badge-error';
+}
+
 async function renderAutofix(el) {
   el.innerHTML = '<div class="loading">Loading autofix</div>';
   try {
@@ -11,12 +31,16 @@ async function renderAutofix(el) {
       api('/groups').catch(() => []),
     ]);
 
-    const groupOpts = (Array.isArray(groups) ? groups : []).map(g => {
-      const ch = g.channel || 'unknown';
-      return `<option value="${esc(g.jid)}">${esc(ch)} (${esc(g.name)})</option>`;
-    }).join('');
+    const groupOpts = (Array.isArray(groups) ? groups : [])
+      .map((g) => {
+        const ch = g.channel || 'unknown';
+        return `<option value="${esc(g.jid)}">${esc(ch)} (${esc(g.name)})</option>`;
+      })
+      .join('');
 
-    const projectCards = projects.map(p => `
+    const projectCards = projects
+      .map(
+        (p) => `
       <div class="channel-card" style="padding:10px 0">
         <div style="flex:1">
           <strong>${esc(p.owner)}/${esc(p.repo)}</strong>
@@ -26,27 +50,31 @@ async function renderAutofix(el) {
           <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(p.workDir)}</div>
         </div>
         <div style="display:flex;gap:4px">
-          <button class="btn btn-sm btn-primary" onclick="autofixPickIssue('${esc(p.id)}','${esc(p.owner)}','${esc(p.repo)}')">Fix Issue</button>
+          <button class="btn btn-sm btn-primary" onclick="autofixPickIssue('${esc(p.id)}','${esc(p.owner)}','${esc(p.repo)}','${esc(p.triggerLabel)}')">Fix Issue</button>
           <button class="btn btn-sm btn-ghost" onclick="autofixDeleteProject('${esc(p.id)}',this)" style="color:var(--error)">Remove</button>
         </div>
       </div>
-    `).join('');
+    `,
+      )
+      .join('');
 
-    const jobRows = jobs.map(j => {
-      const sc = j.status === 'completed' ? 'badge-success' : j.status === 'running' ? 'badge-warning' : j.status === 'queued' ? 'badge-muted' : 'badge-error';
-      return `<div class="channel-card" style="padding:8px 0">
+    const jobRows = jobs
+      .map((j) => {
+        const sc = autofixStatusBadge(j.status);
+        return `<div class="channel-card" style="padding:8px 0">
         <div style="flex:1;min-width:0">
           <strong>${esc(j.repo)}#${j.issueNumber}</strong>
-          <span style="font-size:12px;color:var(--text-muted);margin-left:8px">${esc(j.issueTitle.slice(0, 60))}</span>
+          <span style="font-size:12px;color:var(--text-muted);margin-left:8px">${esc((j.issueTitle || '').slice(0, 60))}</span>
           ${j.prUrl ? `<a href="${esc(j.prUrl)}" target="_blank" style="font-size:11px;color:var(--accent);margin-left:8px">View PR</a>` : ''}
-          <div style="font-size:10px;color:var(--text-muted)">${esc(j.model)} \u2022 ${timeAgo(j.startedAt)}</div>
+          <div style="font-size:10px;color:var(--text-muted)">${esc(j.provider || 'claude')}/${esc(j.model || '')} \u2022 ${timeAgo(j.startedAt || j.createdAt)} \u2022 ${esc(j.branch || '')}</div>
         </div>
         <div style="display:flex;gap:4px;align-items:center">
           <span class="badge ${sc}" style="font-size:10px">${j.status}</span>
-          <button class="btn btn-sm btn-ghost" onclick="viewAutofixJob('${esc(j.id)}')">Log</button>
+          <button class="btn btn-sm btn-ghost" onclick="viewAutofixJob('${esc(j.id)}')">Review</button>
         </div>
       </div>`;
-    }).join('');
+      })
+      .join('');
 
     el.innerHTML = `
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -100,10 +128,14 @@ async function renderAutofix(el) {
         ${projects.length === 0 ? '<div class="empty">No projects registered. Add one to get started.</div>' : projectCards}
       </div>
 
-      ${jobs.length > 0 ? `<div class="card">
+      ${
+        jobs.length > 0
+          ? `<div class="card">
         <div class="card-title">Recent Jobs <span class="badge badge-muted" style="font-size:10px">${jobs.length}</span></div>
         ${jobRows}
-      </div>` : ''}
+      </div>`
+          : ''
+      }
     `;
   } catch (e) {
     el.innerHTML = `<div class="card empty">Failed to load: ${esc(e.message)}</div>`;
@@ -113,79 +145,192 @@ async function renderAutofix(el) {
 window.autofixAddProject = async function () {
   const owner = document.getElementById('af-owner').value.trim();
   const repo = document.getElementById('af-repo').value.trim();
-  const triggerLabel = document.getElementById('af-label').value.trim() || 'autofix';
+  const triggerLabel =
+    document.getElementById('af-label').value.trim() || 'autofix';
   const model = document.getElementById('af-model').value;
   const workDir = document.getElementById('af-workdir').value.trim();
   const notifyJid = document.getElementById('af-notify').value;
   const autoReview = document.getElementById('af-autoreview').checked;
-  if (!owner || !repo) { toast('Owner and repo required', 'warning'); return; }
+  if (!owner || !repo) {
+    toast('Owner and repo required', 'warning');
+    return;
+  }
   try {
-    const r = await api('/autofix/projects', { method: 'POST', body: JSON.stringify({ owner, repo, triggerLabel, model, workDir, notifyJid, autoReview }) });
-    if (r.ok) { toast('Project added', 'success'); navigate('autofix'); }
-    else toast(r.error || 'Failed', 'error');
-  } catch (e) { toast('Failed: ' + e.message, 'error'); }
+    const r = await api('/autofix/projects', {
+      method: 'POST',
+      body: JSON.stringify({
+        owner,
+        repo,
+        triggerLabel,
+        model,
+        workDir,
+        notifyJid,
+        autoReview,
+      }),
+    });
+    if (r.ok) {
+      toast('Project added', 'success');
+      navigate('autofix');
+    } else toast(r.error || 'Failed', 'error');
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
 };
 
 window.autofixDeleteProject = function (id, btn) {
   inlineConfirm(btn, 'Remove?', async () => {
-    try { await api('/autofix/projects/' + id, { method: 'DELETE' }); toast('Removed', 'success'); navigate('autofix'); }
-    catch (e) { toast('Failed: ' + e.message, 'error'); }
+    try {
+      await api('/autofix/projects/' + id, { method: 'DELETE' });
+      toast('Removed', 'success');
+      navigate('autofix');
+    } catch (e) {
+      toast('Failed: ' + e.message, 'error');
+    }
   });
 };
 
-window.autofixPickIssue = async function (projectId, owner, repo) {
+window.autofixPickIssue = async function (
+  projectId,
+  owner,
+  repo,
+  triggerLabel,
+) {
   const picker = document.getElementById('autofix-issue-picker');
   if (!picker) return;
   picker.style.display = 'block';
-  picker.innerHTML = '<div class="card"><div class="loading">Loading issues...</div></div>';
+  const fullRepo = `${owner}/${repo}`;
+  picker.innerHTML = `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div class="card-title">Pick an issue — ${esc(fullRepo)}</div>
+      <button class="btn btn-sm btn-ghost" onclick="document.getElementById('autofix-issue-picker').style.display='none'">\u2715</button>
+    </div>
+    <div class="autofix-filter-grid">
+      <input class="search-input" id="af-filter-number" placeholder="Issue #">
+      <input class="search-input" id="af-filter-labels" value="${esc(triggerLabel || 'autofix')}" placeholder="labels, comma-separated">
+      <input class="search-input" id="af-filter-assignee" placeholder="assignee">
+      <input class="search-input" id="af-filter-milestone" placeholder="milestone">
+      <button class="btn btn-sm btn-primary" onclick="autofixLoadIssues('${esc(projectId)}','${esc(owner)}','${esc(repo)}')">Search</button>
+    </div>
+    <div id="autofix-issue-results" style="margin-top:12px"><div class="loading">Loading issues...</div></div>
+  </div>`;
+  await autofixLoadIssues(projectId, owner, repo);
+};
+
+window.autofixLoadIssues = async function (projectId, owner, repo) {
+  const results = document.getElementById('autofix-issue-results');
+  if (!results) return;
+  results.innerHTML = '<div class="loading">Loading issues...</div>';
   try {
-    const issues = await api(`/copilot/issues/${projectId}/${owner}/${repo}`).catch(async () => {
-      // Fallback: use GitHub API directly via autofix
-      const token = ''; // Will use server-side token
-      return [];
-    });
-    // If copilot plugin isn't available, try fetching via gh CLI
+    const labels = document.getElementById('af-filter-labels')?.value?.trim();
+    const assignee = document
+      .getElementById('af-filter-assignee')
+      ?.value?.trim();
+    const milestone = document
+      .getElementById('af-filter-milestone')
+      ?.value?.trim();
+    const issueNumber = document
+      .getElementById('af-filter-number')
+      ?.value?.trim();
+    const params = new URLSearchParams({ repo: `${owner}/${repo}` });
+    if (labels) params.set('labels', labels);
+    if (assignee) params.set('assignee', assignee);
+    if (milestone) params.set('milestone', milestone);
+    if (issueNumber) params.set('issueNumber', issueNumber);
+    const issues = await api(`/autofix/issues?${params.toString()}`);
     if (!Array.isArray(issues) || issues.length === 0) {
-      picker.innerHTML = '<div class="card empty">No open issues found. <button class="btn btn-sm btn-ghost" onclick="document.getElementById(\'autofix-issue-picker\').style.display=\'none\'">Close</button></div>';
+      results.innerHTML =
+        '<div class="empty">No matching open issues found.</div>';
       return;
     }
-    picker.innerHTML = `<div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div class="card-title">Pick an issue \u2014 ${esc(owner)}/${esc(repo)}</div>
-        <button class="btn btn-sm btn-ghost" onclick="document.getElementById('autofix-issue-picker').style.display='none'">\u2715</button>
-      </div>
-      ${issues.map(i => `<div class="channel-card" style="padding:6px 0">
-        <div style="flex:1"><strong>#${i.number}</strong> ${esc(i.title)} ${i.labels.map(l => `<span class="badge badge-muted" style="font-size:9px">${esc(l)}</span>`).join(' ')}</div>
+    results.innerHTML = `
+      ${issues
+        .map(
+          (i) => `<div class="channel-card" style="padding:6px 0">
+        <div style="flex:1">
+          <strong>#${i.number}</strong> ${esc(i.title)}
+          ${(i.labels || []).map((l) => `<span class="badge badge-muted" style="font-size:9px">${esc(l)}</span>`).join(' ')}
+          <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${esc((i.assignees || []).join(', ') || 'unassigned')}${i.milestone ? ` \u2022 ${esc(i.milestone)}` : ''}</div>
+        </div>
         <button class="btn btn-sm btn-primary" onclick="autofixRun('${esc(projectId)}',${i.number},this)">Fix</button>
-      </div>`).join('')}
-    </div>`;
+      </div>`,
+        )
+        .join('')}`;
   } catch (e) {
-    picker.innerHTML = `<div class="card empty">Failed: ${esc(e.message)}</div>`;
+    results.innerHTML = `<div class="empty">Failed: ${esc(e.message)}</div>`;
   }
 };
 
 window.autofixRun = async function (projectId, issueNumber, btn) {
-  btn.disabled = true; btn.textContent = 'Starting...';
+  btn.disabled = true;
+  btn.textContent = 'Starting...';
   try {
-    const r = await api('/autofix/run', { method: 'POST', body: JSON.stringify({ projectId, issueNumber }) });
+    const r = await api('/autofix/run', {
+      method: 'POST',
+      body: JSON.stringify({ projectId, issueNumber }),
+    });
     if (r.ok) {
       toast('Autofix started', 'success');
-      btn.outerHTML = '<span class="badge badge-warning" style="font-size:10px">Running</span>';
+      btn.outerHTML =
+        '<span class="badge badge-warning" style="font-size:10px">Running</span>';
       document.getElementById('autofix-issue-picker').style.display = 'none';
       // Show output
       setTimeout(() => viewAutofixJob(r.jobId), 2000);
-    } else { toast(r.error || 'Failed', 'error'); btn.disabled = false; btn.textContent = 'Fix'; }
-  } catch (e) { toast('Failed: ' + e.message, 'error'); btn.disabled = false; btn.textContent = 'Fix'; }
+    } else {
+      toast(r.error || 'Failed', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Fix';
+    }
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = 'Fix';
+  }
 };
 
 window.viewAutofixJob = async function (id) {
   const panel = document.getElementById('autofix-job-output');
   if (!panel) return;
   panel.style.display = 'block';
-  panel.innerHTML = '<div class="card"><div class="loading">Loading...</div></div>';
+  panel.innerHTML =
+    '<div class="card"><div class="loading">Loading...</div></div>';
   try {
     const job = await api('/autofix/jobs/' + id);
-    const sc = job.status === 'completed' ? 'badge-success' : job.status === 'running' ? 'badge-warning' : 'badge-error';
+    const sc = autofixStatusBadge(job.status);
+    const diff =
+      job.diffSummary ||
+      (job.changedFiles || []).join('\n') ||
+      '(no diff captured yet)';
+    const tests = job.testSummary || '(no test summary captured yet)';
+    const ci = [
+      `Status: ${job.ciStatus || 'unknown'}`,
+      job.lastCiError ? `Last error: ${job.lastCiError}` : '',
+      job.commitSha ? `Commit: ${job.commitSha}` : '',
+      job.prUrl ? `PR: ${job.prUrl}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const actions = [
+      job.status === 'await_approval'
+        ? `<button class="btn btn-sm btn-primary" onclick="autofixJobAction('${esc(id)}','approve-implementation')">Approve implementation</button>`
+        : '',
+      job.status === 'await_approval'
+        ? `<button class="btn btn-sm btn-ghost" onclick="autofixDenyImplementation('${esc(id)}')">Deny implementation</button>`
+        : '',
+      job.status === 'await_pr_approval'
+        ? `<button class="btn btn-sm btn-primary" onclick="autofixJobAction('${esc(id)}','approve-pr')">Approve PR</button>`
+        : '',
+      job.commitSha && ['ci_running', 'completed'].includes(job.status)
+        ? `<button class="btn btn-sm btn-ghost" onclick="autofixJobAction('${esc(id)}','refresh-ci')">Refresh CI</button>`
+        : '',
+      ['failed', 'cancelled'].includes(job.status)
+        ? `<button class="btn btn-sm btn-ghost" onclick="autofixJobAction('${esc(id)}','retry')">Retry</button>`
+        : '',
+      !['completed', 'cancelled'].includes(job.status)
+        ? `<button class="btn btn-sm btn-ghost" onclick="autofixJobAction('${esc(id)}','cancel')">Cancel</button>`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('');
     panel.innerHTML = `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div>
@@ -194,14 +339,84 @@ window.viewAutofixJob = async function (id) {
           ${job.prUrl ? `<a href="${esc(job.prUrl)}" target="_blank" style="font-size:12px;color:var(--accent);margin-left:8px">View PR</a>` : ''}
         </div>
         <div style="display:flex;gap:6px">
-          ${job.status === 'running' ? `<button class="btn btn-sm btn-ghost" onclick="viewAutofixJob('${id}')">Refresh</button>` : ''}
+          ${actions}
+          ${['queued', 'investigate', 'plan', 'implement', 'test', 'open_pr', 'ci_running'].includes(job.status) ? `<button class="btn btn-sm btn-ghost" onclick="viewAutofixJob('${id}')">Refresh</button>` : ''}
           <button class="btn btn-sm btn-ghost" onclick="document.getElementById('autofix-job-output').style.display='none'">\u2715</button>
         </div>
       </div>
-      <pre style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;font-size:11px;max-height:400px;overflow:auto;white-space:pre-wrap;word-break:break-word;color:var(--text)">${esc(job.output || '(waiting for output...)')}</pre>
+      <div class="autofix-review-meta">
+        <span>Branch: <strong>${esc(job.branch || '')}</strong></span>
+        <span>Files: <strong>${(job.changedFiles || []).length}</strong></span>
+        <span>Commit: <strong>${esc(job.commitSha ? job.commitSha.slice(0, 12) : 'pending')}</strong></span>
+      </div>
+      <div class="autofix-review-grid">
+        <div class="autofix-review-pane"><div class="autofix-pane-title">Diff</div><pre>${esc(diff)}</pre></div>
+        <div class="autofix-review-pane"><div class="autofix-pane-title">Log</div><pre>${esc(job.output || '(waiting for output...)')}</pre></div>
+        <div class="autofix-review-pane"><div class="autofix-pane-title">Tests</div><pre>${esc(tests)}</pre></div>
+        <div class="autofix-review-pane"><div class="autofix-pane-title">CI</div><pre>${esc(ci || 'Status: unknown')}</pre></div>
+      </div>
     </div>`;
-    if (job.status === 'running') {
-      setTimeout(() => { if (document.getElementById('autofix-job-output')?.style.display !== 'none') viewAutofixJob(id); }, 5000);
+    if (
+      [
+        'queued',
+        'investigate',
+        'plan',
+        'implement',
+        'test',
+        'open_pr',
+        'ci_running',
+      ].includes(job.status)
+    ) {
+      setTimeout(() => {
+        if (
+          document.getElementById('autofix-job-output')?.style.display !==
+          'none'
+        )
+          viewAutofixJob(id);
+      }, 5000);
     }
-  } catch (e) { panel.innerHTML = `<div class="card empty">Failed: ${esc(e.message)}</div>`; }
+  } catch (e) {
+    panel.innerHTML = `<div class="card empty">Failed: ${esc(e.message)}</div>`;
+  }
 };
+
+window.autofixJobAction = async function (id, action) {
+  try {
+    const r = await api(`/autofix/jobs/${id}/${action}`, { method: 'POST' });
+    if (!r.ok) {
+      toast(r.error || 'Action failed', 'error');
+      return;
+    }
+    toast('Job updated', 'success');
+    await viewAutofixJob(id);
+    setTimeout(() => {
+      if (currentPage === 'autofix') navigate('autofix');
+    }, 800);
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
+window.autofixDenyImplementation = function (id) {
+  const note =
+    prompt('Reason for denying implementation?') ||
+    'Denied from Autofix dashboard';
+  autofixJobActionWithBody(id, 'deny-implementation', { note });
+};
+
+async function autofixJobActionWithBody(id, action, body) {
+  try {
+    const r = await api(`/autofix/jobs/${id}/${action}`, {
+      method: 'POST',
+      body: JSON.stringify(body || {}),
+    });
+    if (!r.ok) {
+      toast(r.error || 'Action failed', 'error');
+      return;
+    }
+    toast('Job updated', 'success');
+    await viewAutofixJob(id);
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+}

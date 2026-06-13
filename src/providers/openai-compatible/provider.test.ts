@@ -17,8 +17,7 @@ describe('OpenAICompatibleProvider', () => {
 
   describe('getCapabilities', () => {
     it('returns conservative defaults', async () => {
-      const caps =
-        await openaiCompatibleProvider.getCapabilities('any-model');
+      const caps = await openaiCompatibleProvider.getCapabilities('any-model');
       expect(caps.toolCalls).toBe(false);
       expect(caps.structuredOutput).toBe(false);
       expect(caps.streaming).toBe(true);
@@ -71,8 +70,7 @@ describe('OpenAICompatibleProvider', () => {
         })),
       );
 
-      const result =
-        await openaiCompatibleProvider.validateModel('gpt-5.4');
+      const result = await openaiCompatibleProvider.validateModel('gpt-5.4');
       expect(result).toBe(false);
     });
 
@@ -123,9 +121,7 @@ describe('OpenAICompatibleProvider', () => {
       const mockResponse = {
         id: 'cmpl_abc123',
         model: 'gpt-4-turbo',
-        choices: [
-          { message: { content: 'Hello!', role: 'assistant' } },
-        ],
+        choices: [{ message: { content: 'Hello!', role: 'assistant' } }],
         usage: {
           prompt_tokens: 10,
           completion_tokens: 5,
@@ -154,15 +150,11 @@ describe('OpenAICompatibleProvider', () => {
       const fetchMock = vi.mocked(fetch);
       const callUrl = fetchMock.mock.calls[0][0];
       const callInit = fetchMock.mock.calls[0][1] as RequestInit;
-      expect(callUrl).toBe(
-        'http://localhost:8080/v1/chat/completions',
-      );
+      expect(callUrl).toBe('http://localhost:8080/v1/chat/completions');
       expect(callInit.method).toBe('POST');
       const body = JSON.parse(callInit.body as string);
       expect(body.model).toBe('gpt-4-turbo');
-      expect(body.messages).toEqual([
-        { role: 'user', content: 'Say hello' },
-      ]);
+      expect(body.messages).toEqual([{ role: 'user', content: 'Say hello' }]);
       expect(body.max_tokens).toBe(4096);
     });
 
@@ -174,9 +166,7 @@ describe('OpenAICompatibleProvider', () => {
           json: async () => ({
             id: 'cmpl_1',
             model: 'gpt-4-turbo',
-            choices: [
-              { message: { content: 'Sure!', role: 'assistant' } },
-            ],
+            choices: [{ message: { content: 'Sure!', role: 'assistant' } }],
             usage: {
               prompt_tokens: 20,
               completion_tokens: 3,
@@ -216,9 +206,7 @@ describe('OpenAICompatibleProvider', () => {
           json: async () => ({
             id: 'cmpl_1',
             model: 'gpt-4-turbo',
-            choices: [
-              { message: { content: 'ok', role: 'assistant' } },
-            ],
+            choices: [{ message: { content: 'ok', role: 'assistant' } }],
           }),
         })),
       );
@@ -268,9 +256,7 @@ describe('OpenAICompatibleProvider', () => {
           json: async () => ({
             id: 'cmpl_1',
             model: 'gpt-4-turbo',
-            choices: [
-              { message: { content: 'ok', role: 'assistant' } },
-            ],
+            choices: [{ message: { content: 'ok', role: 'assistant' } }],
           }),
         })),
       );
@@ -297,9 +283,7 @@ describe('OpenAICompatibleProvider', () => {
 
       await expect(
         openaiCompatibleProvider.executeTask({ input: 'test' }),
-      ).rejects.toThrow(
-        'OPENAI_COMPATIBLE_BASE_URL is not configured',
-      );
+      ).rejects.toThrow('OPENAI_COMPATIBLE_BASE_URL is not configured');
 
       if (prevUrl) process.env.OPENAI_COMPATIBLE_BASE_URL = prevUrl;
     });

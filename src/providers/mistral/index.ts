@@ -1,7 +1,4 @@
-export {
-  MistralProvider,
-  mistralProvider,
-} from './provider.js';
+export { MistralProvider, mistralProvider } from './provider.js';
 export type {
   Provider,
   ProviderTask,

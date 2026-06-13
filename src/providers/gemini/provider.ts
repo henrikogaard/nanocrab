@@ -76,7 +76,8 @@ function getBaseUrl(): string {
   const envKey = DEFINITION.baseUrlEnvKey;
   if (!envKey)
     return (
-      DEFINITION.defaultBaseUrl || 'https://generativelanguage.googleapis.com/v1beta'
+      DEFINITION.defaultBaseUrl ||
+      'https://generativelanguage.googleapis.com/v1beta'
     );
   const env = readEnvFile([envKey]);
   return (
@@ -91,9 +92,7 @@ export class GeminiProvider implements Provider {
   readonly id = PROVIDER_ID;
   readonly name = DEFINITION.name;
 
-  async getCapabilities(
-    model: string,
-  ): Promise<ProviderCapabilitiesResult> {
+  async getCapabilities(model: string): Promise<ProviderCapabilitiesResult> {
     const modelSpec = MODEL_SPECS[model];
     if (!modelSpec) return { ...DEFAULT_CAPABILITIES };
     return { ...DEFAULT_CAPABILITIES, ...modelSpec };
@@ -131,8 +130,7 @@ export class GeminiProvider implements Provider {
     options?: { model?: string },
   ): Promise<ProviderOutput> {
     const apiKey = getApiKey();
-    if (!apiKey)
-      throw new Error(`${DEFINITION.envKey} is not configured`);
+    if (!apiKey) throw new Error(`${DEFINITION.envKey} is not configured`);
 
     const baseUrl = getBaseUrl();
     const model = options?.model || 'gemini-3.5-flash';
@@ -158,18 +156,15 @@ export class GeminiProvider implements Provider {
       body.generationConfig = generationConfig;
     }
 
-    const response = await fetch(
-      `${baseUrl}/models/${model}:generateContent`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(60000),
+    const response = await fetch(`${baseUrl}/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
       },
-    );
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60000),
+    });
 
     if (!response.ok) {
       const text = await response.text();

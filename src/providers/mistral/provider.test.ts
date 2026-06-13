@@ -17,7 +17,9 @@ describe('MistralProvider', () => {
 
   describe('getCapabilities', () => {
     it('returns capabilities for known models', async () => {
-      const caps = await mistralProvider.getCapabilities('mistral-large-latest');
+      const caps = await mistralProvider.getCapabilities(
+        'mistral-large-latest',
+      );
       expect(caps.toolCalls).toBe(true);
       expect(caps.structuredOutput).toBe(true);
       expect(caps.streaming).toBe(true);
@@ -39,8 +41,11 @@ describe('MistralProvider', () => {
     });
 
     it('returns model-specific context window and cost tier', async () => {
-      const codestral = await mistralProvider.getCapabilities('codestral-latest');
-      const medium = await mistralProvider.getCapabilities('mistral-medium-latest');
+      const codestral =
+        await mistralProvider.getCapabilities('codestral-latest');
+      const medium = await mistralProvider.getCapabilities(
+        'mistral-medium-latest',
+      );
 
       expect(codestral.contextWindow).toBe(256000);
       expect(codestral.costTier).toBe('medium');
@@ -55,12 +60,17 @@ describe('MistralProvider', () => {
       const fetchMock = vi.fn(async () => ({
         ok: true,
         json: async () => ({
-          data: [{ id: 'mistral-large-latest' }, { id: 'mistral-medium-latest' }],
+          data: [
+            { id: 'mistral-large-latest' },
+            { id: 'mistral-medium-latest' },
+          ],
         }),
       }));
       vi.stubGlobal('fetch', fetchMock);
 
-      const result = await mistralProvider.validateModel('mistral-large-latest');
+      const result = await mistralProvider.validateModel(
+        'mistral-large-latest',
+      );
       expect(result).toBe(true);
       expect(fetchMock).toHaveBeenCalledWith(
         'https://api.mistral.ai/v1/models',
@@ -91,7 +101,9 @@ describe('MistralProvider', () => {
         vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })),
       );
 
-      const result = await mistralProvider.validateModel('mistral-large-latest');
+      const result = await mistralProvider.validateModel(
+        'mistral-large-latest',
+      );
       expect(result).toBe(false);
     });
 
@@ -103,7 +115,9 @@ describe('MistralProvider', () => {
         }),
       );
 
-      const result = await mistralProvider.validateModel('mistral-large-latest');
+      const result = await mistralProvider.validateModel(
+        'mistral-large-latest',
+      );
       expect(result).toBe(false);
     });
   });
@@ -114,7 +128,12 @@ describe('MistralProvider', () => {
         id: 'cmpl_abc123',
         model: 'mistral-large-latest',
         choices: [
-          { message: { content: 'Hello! How can I help you?', role: 'assistant' } },
+          {
+            message: {
+              content: 'Hello! How can I help you?',
+              role: 'assistant',
+            },
+          },
         ],
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       };
@@ -131,7 +150,10 @@ describe('MistralProvider', () => {
       expect(result.id).toBe('cmpl_abc123');
       expect(result.model).toBe('mistral-large-latest');
       expect(result.output).toHaveLength(1);
-      expect(result.output[0]).toEqual({ type: 'message', content: 'Hello! How can I help you?' });
+      expect(result.output[0]).toEqual({
+        type: 'message',
+        content: 'Hello! How can I help you?',
+      });
       expect(result.usage?.total_tokens).toBe(15);
 
       const fetchMock = vi.mocked(fetch);
@@ -154,7 +176,11 @@ describe('MistralProvider', () => {
             id: 'cmpl_1',
             model: 'mistral-large-latest',
             choices: [{ message: { content: 'Sure!', role: 'assistant' } }],
-            usage: { prompt_tokens: 20, completion_tokens: 3, total_tokens: 23 },
+            usage: {
+              prompt_tokens: 20,
+              completion_tokens: 3,
+              total_tokens: 23,
+            },
           }),
         })),
       );

@@ -7,7 +7,17 @@ const router = Router();
 
 router.get('/', (_req: Request, res: Response) => {
   const state = getState();
-  const containers = state.queue.getActiveContainers();
+  const containers = state.queue.getActiveContainers().map((container) => ({
+    ...container,
+    id:
+      container.taskId ||
+      `active-${(container.groupFolder || container.groupJid).replace(/[^A-Za-z0-9_.-]+/g, '-')}`,
+    group: container.groupFolder || container.groupJid,
+    status: container.idleWaiting ? 'idle' : 'running',
+    currentStep: container.isTask
+      ? 'Running scheduled task'
+      : 'Agent container active',
+  }));
   res.json(containers);
 });
 

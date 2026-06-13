@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 
 import {
   approveMemory,
+  listMemoryProvenanceTimeline,
   listMemoryReviewQueue,
   listMemoryRecords,
   markMemoryContradicted,
@@ -14,29 +15,53 @@ import { auditLog } from '../security.js';
 
 const router = Router();
 
+function parseMemoryStatus(value: unknown): MemoryStatus | undefined {
+  return typeof value === 'string' &&
+    ['pending', 'approved', 'rejected', 'stale', 'contradicted'].includes(value)
+    ? (value as MemoryStatus)
+    : undefined;
+}
+
+function parseNumber(value: unknown): number | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 router.get('/', (req: Request, res: Response) => {
+  const filters = {
+    status: parseMemoryStatus(req.query.status),
+    scope: typeof req.query.scope === 'string' ? req.query.scope : undefined,
+    visibility:
+      typeof req.query.visibility === 'string'
+        ? req.query.visibility
+        : undefined,
+    source: typeof req.query.source === 'string' ? req.query.source : undefined,
+    confidenceMin: parseNumber(req.query.confidenceMin),
+    confidenceMax: parseNumber(req.query.confidenceMax),
+    staleBefore:
+      typeof req.query.staleBefore === 'string'
+        ? req.query.staleBefore
+        : undefined,
+    contradictionGroup:
+      typeof req.query.contradictionGroup === 'string'
+        ? req.query.contradictionGroup
+        : undefined,
+    limit: Math.min(parseInt(req.query.limit as string) || 100, 200),
+  };
   if (req.query.review === 'true') {
-    res.json(listMemoryReviewQueue());
+    res.json(listMemoryReviewQueue(filters));
     return;
   }
-  const status =
-    typeof req.query.status === 'string' &&
-    ['pending', 'approved', 'rejected', 'stale', 'contradicted'].includes(
-      req.query.status,
-    )
-      ? (req.query.status as MemoryStatus)
-      : undefined;
-  res.json(
-    listMemoryRecords({
-      status,
-      scope: typeof req.query.scope === 'string' ? req.query.scope : undefined,
-      visibility:
-        typeof req.query.visibility === 'string'
-          ? req.query.visibility
-          : undefined,
-      limit: Math.min(parseInt(req.query.limit as string) || 100, 200),
-    }),
-  );
+  res.json(listMemoryRecords(filters));
+});
+
+router.get('/timeline', (req: Request, res: Response) => {
+  const parsed = Number(req.query.limit);
+  const limit = Number.isFinite(parsed)
+    ? Math.min(Math.max(parsed, 1), 500)
+    : 100;
+  res.json(listMemoryProvenanceTimeline(limit));
 });
 
 router.post(
