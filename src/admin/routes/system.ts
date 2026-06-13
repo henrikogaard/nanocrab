@@ -13,6 +13,7 @@ import {
   GROUPS_DIR,
   DATA_DIR,
   CONTAINER_IMAGE,
+  CREDENTIAL_PROXY_PORT,
 } from '../../config.js';
 import { readEnvFile, writeEnvValue } from '../../env.js';
 import { getState } from '../state.js';
@@ -375,7 +376,17 @@ router.get('/health', (_req: Request, res: Response) => {
 
 router.get('/setup/preflight', requireRole('owner'), async (_req, res) => {
   try {
-    const result = await runSetupPreflight({ dryRun: true });
+    const env = readEnvFile(['ADMIN_PORT', 'CREDENTIAL_PROXY_PORT']);
+    const adminPort = Number(process.env.ADMIN_PORT || env.ADMIN_PORT || 9744);
+    const proxyPort = Number(
+      process.env.CREDENTIAL_PROXY_PORT ||
+        env.CREDENTIAL_PROXY_PORT ||
+        CREDENTIAL_PROXY_PORT,
+    );
+    const result = await runSetupPreflight({
+      dryRun: true,
+      occupiedPortsOk: [adminPort, proxyPort],
+    });
     res.json(result);
   } catch (err) {
     logger.error({ err }, 'Setup preflight failed');

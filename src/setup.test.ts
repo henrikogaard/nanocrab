@@ -6,12 +6,17 @@ import { describe, expect, it } from 'vitest';
 
 import { redactLogValue } from './logger.js';
 import {
+  applySetupStepResult,
   createInitialSetupState,
   getNextSetupStep,
   markSetupStep,
   readSetupState,
+  shouldMarkSetupStepCompleted,
 } from './setup-state.js';
-import { runSetupPreflight } from './setup-preflight.js';
+import {
+  detectContainerRuntime,
+  runSetupPreflight,
+} from './setup-preflight.js';
 
 function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'nanocrab-setup-test-'));
@@ -51,6 +56,70 @@ describe('setup state resume', () => {
     expect(resumed.steps.container.error).toContain('interrupted');
     expect(getNextSetupStep(resumed, ['environment', 'container'])).toBe(
       'container',
+    );
+  });
+
+  it('migrates legacy completed-list state and enforces 0600 permissions', () => {
+    const statePath = path.join(tempDir(), '.setup-state.json');
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({ version: 1, completed: ['environment'] }),
+      { mode: 0o644 },
+    );
+
+    const migrated = readSetupState(statePath, ['environment', 'admin']);
+    const persisted = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+    const mode = fs.statSync(statePath).mode & 0o777;
+
+    expect(migrated.steps.environment.status).toBe('completed');
+    expect(migrated.steps.admin.status).toBe('pending');
+    expect(persisted.version).toBe(2);
+    expect(mode).toBe(0o600);
+  });
+
+  it('does not complete steps that return input-required or failed semantic status', () => {
+    const statePath = path.join(tempDir(), '.setup-state.json');
+    const state = createInitialSetupState(['admin', 'provider']);
+
+    applySetupStepResult(
+      state,
+      'admin',
+      { status: 'input_required', message: 'credentials needed' },
+      statePath,
+    );
+    applySetupStepResult(
+      state,
+      'provider',
+      { status: 'failed', message: 'codex auth required' },
+      statePath,
+    );
+
+    const persisted = readSetupState(statePath, ['admin', 'provider']);
+    expect(shouldMarkSetupStepCompleted({ status: 'input_required' })).toBe(
+      false,
+    );
+    expect(shouldMarkSetupStepCompleted({ status: 'failed' })).toBe(false);
+    expect(persisted.steps.admin.status).toBe('failed');
+    expect(persisted.steps.provider.status).toBe('failed');
+    expect(getNextSetupStep(persisted, ['admin', 'provider'])).toBe('admin');
+  });
+
+  it('completes steps that return success-like semantic status', () => {
+    const statePath = path.join(tempDir(), '.setup-state.json');
+    const state = createInitialSetupState(['admin']);
+
+    applySetupStepResult(
+      state,
+      'admin',
+      { status: 'already_configured' },
+      statePath,
+    );
+
+    expect(shouldMarkSetupStepCompleted({ status: 'already_configured' })).toBe(
+      true,
+    );
+    expect(readSetupState(statePath, ['admin']).steps.admin.status).toBe(
+      'completed',
     );
   });
 });
@@ -119,6 +188,83 @@ describe('setup preflight', () => {
     expect(result.checks.find((c) => c.id === 'provider-credentials')?.ok).toBe(
       false,
     );
+  });
+
+  it('fails CLI dry-run when required ports are occupied and reports in-use detail', async () => {
+    const projectRoot = tempDir();
+    const result = await runSetupPreflight({
+      projectRoot,
+      env: {
+        ADMIN_USERNAME: 'owner',
+        ADMIN_PASSWORD_HASH: 'hash',
+        DEFAULT_PROVIDER: 'openai-responses',
+        OPENAI_API_KEY: 'sk-test',
+        TELEGRAM_BOT_TOKEN: 'token',
+      },
+      commandExists: (command) => ['node', 'npm', 'docker'].includes(command),
+      runCommand: () => ({ ok: true, detail: 'ok' }),
+      isPortAvailable: async () => false,
+      nodeVersion: 'v22.12.0',
+      dryRun: true,
+    });
+
+    const adminPort = result.checks.find((c) => c.id === 'admin-port');
+    expect(result.ok).toBe(false);
+    expect(adminPort?.ok).toBe(false);
+    expect(adminPort?.detail).toContain('in use');
+    expect(adminPort?.detail).not.toContain('available');
+  });
+
+  it('accepts occupied service ports for dashboard preflight', async () => {
+    const projectRoot = tempDir();
+    const result = await runSetupPreflight({
+      projectRoot,
+      env: {
+        ADMIN_USERNAME: 'owner',
+        ADMIN_PASSWORD_HASH: 'hash',
+        DEFAULT_PROVIDER: 'openai-responses',
+        OPENAI_API_KEY: 'sk-test',
+        TELEGRAM_BOT_TOKEN: 'token',
+        ADMIN_PORT: '9744',
+        CREDENTIAL_PROXY_PORT: '3001',
+      },
+      commandExists: (command) => ['node', 'npm', 'docker'].includes(command),
+      runCommand: () => ({ ok: true, detail: 'ok' }),
+      isPortAvailable: async () => false,
+      occupiedPortsOk: [9744, 3001],
+      nodeVersion: 'v22.12.0',
+      dryRun: true,
+    });
+
+    const adminPort = result.checks.find((c) => c.id === 'admin-port');
+    const proxyPort = result.checks.find(
+      (c) => c.id === 'credential-proxy-port',
+    );
+    expect(result.ok).toBe(true);
+    expect(adminPort?.ok).toBe(true);
+    expect(adminPort?.detail).toContain('running NanoCrab');
+    expect(proxyPort?.ok).toBe(true);
+  });
+
+  it('detects a default container runtime for full setup', () => {
+    expect(
+      detectContainerRuntime(
+        (command) => command === 'docker',
+        () => ({ ok: true, detail: 'ok' }),
+      ),
+    ).toBe('docker');
+    expect(
+      detectContainerRuntime(
+        (command) => command === 'container',
+        () => ({ ok: true, detail: 'ok' }),
+      ),
+    ).toBe('apple-container');
+    expect(
+      detectContainerRuntime(
+        () => false,
+        () => ({ ok: false, detail: 'missing' }),
+      ),
+    ).toBe('');
   });
 });
 

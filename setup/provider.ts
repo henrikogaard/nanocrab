@@ -10,6 +10,7 @@ import {
   writeAgentProviderConfig,
 } from '../src/agent-provider.js';
 import { logger } from '../src/logger.js';
+import { SetupStepResult } from '../src/setup-state.js';
 import { emitStatus } from './status.js';
 
 function argValue(args: string[], name: string): string | undefined {
@@ -17,7 +18,7 @@ function argValue(args: string[], name: string): string | undefined {
   return args.find((a) => a.startsWith(prefix))?.slice(prefix.length);
 }
 
-export async function run(args: string[]): Promise<void> {
+export async function run(args: string[]): Promise<SetupStepResult> {
   const provider = argValue(args, 'provider') || args[0] || 'claude';
   if (!isAgentProvider(provider)) {
     throw new Error(`provider must be one of: ${AGENT_PROVIDERS.join(', ')}`);
@@ -44,7 +45,10 @@ export async function run(args: string[]): Promise<void> {
         PERSISTED_DIR: codexAuth.persistedDir,
         NEXT_STEP: `Run CODEX_HOME=${codexAuth.persistedDir} codex login --device-auth, then rerun setup provider codex.`,
       });
-      return;
+      return {
+        status: 'failed',
+        message: 'Codex OAuth is not configured for containers',
+      };
     }
   }
 
@@ -58,4 +62,5 @@ export async function run(args: string[]): Promise<void> {
     CODEX_CONFIGURED: codexAuth?.configured,
     CODEX_IMPORTED: codexAuth?.imported,
   });
+  return { status: 'success' };
 }

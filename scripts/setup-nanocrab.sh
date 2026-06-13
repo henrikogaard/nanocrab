@@ -59,6 +59,7 @@ STEPS=(
 # ── State tracking ──
 load_state() {
   COMPLETED=$(node -e "const fs=require('fs'); const [statePath,...entries]=process.argv.slice(1); const names=entries.map((entry)=>entry.split(':')[0]); let state={version:2,updatedAt:new Date().toISOString(),steps:Object.fromEntries(names.map((name)=>[name,{status:'pending'}]))}; try{const raw=JSON.parse(fs.readFileSync(statePath,'utf8')); if(Array.isArray(raw.completed)){for(const name of raw.completed) if(state.steps[name]) state.steps[name]={status:'completed'};} if(raw.steps){for(const name of names) if(raw.steps[name]) state.steps[name]=raw.steps[name];}}catch{} let changed=false; for(const name of names){if(state.steps[name]?.status==='running'){state.steps[name]={...state.steps[name],status:'failed',failedAt:new Date().toISOString(),error:'Setup was interrupted while this step was running'}; changed=true;}} if(changed) fs.writeFileSync(statePath, JSON.stringify(state,null,2)+'\n', {mode:0o600}); console.log(names.filter((name)=>state.steps[name]?.status==='completed').join(','));" "$STATE_FILE" "${STEPS[@]}" 2>/dev/null || echo "")
+  [ -f "$STATE_FILE" ] && chmod 600 "$STATE_FILE" 2>/dev/null || true
 }
 
 save_state() {
@@ -66,12 +67,14 @@ save_state() {
   local status="$2"
   local error="${3:-}"
   node -e "const fs=require('fs'); const [statePath,step,status,error,...entries]=process.argv.slice(1); const names=entries.map((entry)=>entry.split(':')[0]); let state={version:2,updatedAt:new Date().toISOString(),steps:Object.fromEntries(names.map((name)=>[name,{status:'pending'}]))}; try{const raw=JSON.parse(fs.readFileSync(statePath,'utf8')); if(Array.isArray(raw.completed)){for(const name of raw.completed) if(state.steps[name]) state.steps[name]={status:'completed'};} if(raw.steps){for(const name of names) if(raw.steps[name]) state.steps[name]=raw.steps[name];}}catch{} const now=new Date().toISOString(); const next={...(state.steps[step]||{status:'pending'}),status}; if(status==='running'){next.startedAt=now; delete next.completedAt; delete next.failedAt; delete next.error;} if(status==='completed'){next.completedAt=now; delete next.failedAt; delete next.error;} if(status==='failed'){next.failedAt=now; next.error=error||'Step failed';} state.steps[step]=next; state.updatedAt=now; fs.writeFileSync(statePath, JSON.stringify(state,null,2)+'\n', {mode:0o600});" "$STATE_FILE" "$step" "$status" "$error" "${STEPS[@]}" 2>/dev/null || true
+  [ -f "$STATE_FILE" ] && chmod 600 "$STATE_FILE" 2>/dev/null || true
 }
 
 init_state() {
   if [ ! -f "$STATE_FILE" ]; then
     node -e "const fs=require('fs'); const [statePath,...entries]=process.argv.slice(1); const names=entries.map((entry)=>entry.split(':')[0]); const state={version:2,updatedAt:new Date().toISOString(),steps:Object.fromEntries(names.map((name)=>[name,{status:'pending'}]))}; fs.writeFileSync(statePath, JSON.stringify(state,null,2)+'\n', {mode:0o600});" "$STATE_FILE" "${STEPS[@]}" 2>/dev/null || echo "{\"completed\": [], \"version\": 1}" > "$STATE_FILE"
   fi
+  chmod 600 "$STATE_FILE" 2>/dev/null || true
   load_state
 }
 

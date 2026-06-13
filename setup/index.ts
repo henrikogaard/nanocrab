@@ -7,16 +7,19 @@ import { emitStatus } from './status.js';
 import { printBanner } from './banner.js';
 import { runSetupPreflight } from '../src/setup-preflight.js';
 import {
+  applySetupStepResult,
   getNextSetupStep,
   markSetupStep,
   readSetupState,
+  shouldMarkSetupStepCompleted,
+  SetupStepResult,
 } from '../src/setup-state.js';
 
 export const SETUP_STATE_FILE = '.setup-state.json';
 
 export const STEPS: Record<
   string,
-  () => Promise<{ run: (args: string[]) => Promise<void> }>
+  () => Promise<{ run: (args: string[]) => Promise<void | SetupStepResult> }>
 > = {
   timezone: () => import('./timezone.js'),
   environment: () => import('./environment.js'),
@@ -152,9 +155,18 @@ async function main(): Promise<void> {
     markSetupStep(state, stepName, 'running', SETUP_STATE_FILE);
     const mod = await loader();
     const startTime = Date.now();
-    await mod.run(stepArgs);
+    const result = await mod.run(stepArgs);
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    markSetupStep(state, stepName, 'completed', SETUP_STATE_FILE);
+    applySetupStepResult(state, stepName, result, SETUP_STATE_FILE);
+    if (!shouldMarkSetupStepCompleted(result)) {
+      const structured = result as SetupStepResult;
+      throw new Error(
+        structured?.message ||
+          structured?.error ||
+          structured?.status ||
+          'Setup step did not complete successfully',
+      );
+    }
     emitStatus(stepName.toUpperCase(), {
       STATUS: 'success',
       DURATION_SECS: elapsed,

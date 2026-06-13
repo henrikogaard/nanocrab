@@ -17,6 +17,18 @@ export interface SetupState {
   steps: Record<string, SetupStepRecord>;
 }
 
+export interface SetupStepResult {
+  status?: string;
+  message?: string;
+  error?: string;
+}
+
+const SUCCESS_STEP_STATUSES = new Set([
+  'success',
+  'already_configured',
+  'already_completed',
+]);
+
 function now(): string {
   return new Date().toISOString();
 }
@@ -78,6 +90,7 @@ export function readSetupState(
   stepNames: string[],
 ): SetupState {
   let raw: unknown = {};
+  const existed = fs.existsSync(statePath);
   try {
     raw = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
   } catch {
@@ -85,7 +98,7 @@ export function readSetupState(
   }
 
   const state = normalizeState(raw, stepNames);
-  let changed = false;
+  let shouldPersist = existed;
   for (const step of stepNames) {
     if (state.steps[step]?.status === 'running') {
       state.steps[step] = {
@@ -94,10 +107,10 @@ export function readSetupState(
         failedAt: now(),
         error: 'Setup was interrupted while this step was running',
       };
-      changed = true;
+      shouldPersist = true;
     }
   }
-  if (changed) writeSetupState(statePath, state);
+  if (shouldPersist) writeSetupState(statePath, state);
   return state;
 }
 
@@ -107,6 +120,7 @@ export function writeSetupState(statePath: string, state: SetupState): void {
   fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, {
     mode: 0o600,
   });
+  fs.chmodSync(statePath, 0o600);
 }
 
 export function markSetupStep(
@@ -140,6 +154,30 @@ export function markSetupStep(
   state.steps[step] = next;
   writeSetupState(statePath, state);
   return state;
+}
+
+export function shouldMarkSetupStepCompleted(result: unknown): boolean {
+  if (result == null) return true;
+  if (typeof result !== 'object') return true;
+  const status = (result as SetupStepResult).status;
+  if (!status) return true;
+  return SUCCESS_STEP_STATUSES.has(status);
+}
+
+export function applySetupStepResult(
+  state: SetupState,
+  step: string,
+  result: unknown,
+  statePath: string,
+): SetupState {
+  if (shouldMarkSetupStepCompleted(result)) {
+    return markSetupStep(state, step, 'completed', statePath);
+  }
+
+  const structured = result as SetupStepResult;
+  const status = structured?.status || 'failed';
+  const message = structured?.message || structured?.error || status;
+  return markSetupStep(state, step, 'failed', statePath, message);
 }
 
 export function getNextSetupStep(

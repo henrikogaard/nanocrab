@@ -39,6 +39,7 @@ export interface SetupPreflightOptions {
   isPortAvailable?: (port: number) => Promise<boolean>;
   nodeVersion?: string;
   dryRun?: boolean;
+  occupiedPortsOk?: number[];
 }
 
 const SECRET_ENV_KEYS = [
@@ -90,6 +91,20 @@ function defaultRunCommand(
       detail: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+export function detectContainerRuntime(
+  commandExists: (command: string) => boolean = defaultCommandExists,
+  runCommand: (
+    command: string,
+    args: string[],
+  ) => { ok: boolean; detail: string } = defaultRunCommand,
+): '' | 'docker' | 'apple-container' {
+  if (commandExists('docker') && runCommand('docker', ['info']).ok) {
+    return 'docker';
+  }
+  if (commandExists('container')) return 'apple-container';
+  return '';
 }
 
 async function defaultPortAvailable(port: number): Promise<boolean> {
@@ -310,19 +325,27 @@ export async function runSetupPreflight(
   const proxyPort = Number(
     env('CREDENTIAL_PROXY_PORT') || CREDENTIAL_PROXY_PORT,
   );
+  const occupiedPortsOk = new Set(options.occupiedPortsOk || []);
   for (const [id, label, port] of [
     ['admin-port', 'Admin dashboard port', adminPort],
     ['credential-proxy-port', 'Credential proxy port', proxyPort],
   ] as const) {
+    const validPort = Number.isInteger(port) && port > 0;
+    const available = validPort ? await isPortAvailable(port) : false;
+    const acceptedOccupied =
+      validPort && !available && occupiedPortsOk.has(port);
     checks.push({
       id,
       label,
-      ok: Number.isInteger(port) && port > 0 && (await isPortAvailable(port)),
+      ok: validPort && (available || acceptedOccupied),
       severity: 'required',
-      detail:
-        Number.isInteger(port) && port > 0
+      detail: !validPort
+        ? `Invalid port: ${String(port)}`
+        : available
           ? `Port ${port} is available`
-          : `Invalid port: ${String(port)}`,
+          : acceptedOccupied
+            ? `Port ${port} is in use by running NanoCrab`
+            : `Port ${port} is in use`,
       hint: `Free port ${port} or configure a different ${id}`,
     });
   }
