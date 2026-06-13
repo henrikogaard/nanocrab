@@ -13,6 +13,11 @@ import {
   buildInfomaniakWorkflows,
   infomaniakSkillPath,
 } from '../../infomaniak-workflows.js';
+import {
+  buildCalendarWorkflows,
+  calendarSkillPath,
+  meetingBriefingSkillPath,
+} from '../../calendar-workflows.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -187,6 +192,17 @@ router.get('/infomaniak-workflows', (_req: Request, res: Response) => {
         installed: configured.has(preset.name),
       })),
       skillPath: infomaniakSkillPath(PROJECT_ROOT),
+    }),
+  );
+});
+
+router.get('/calendar-workflows', (_req: Request, res: Response) => {
+  const status = getStatus();
+  res.json(
+    buildCalendarWorkflows({
+      servers: status.servers,
+      calendarSkillPath: calendarSkillPath(PROJECT_ROOT),
+      meetingSkillPath: meetingBriefingSkillPath(PROJECT_ROOT),
     }),
   );
 });
