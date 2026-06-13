@@ -4,6 +4,7 @@ import crypto from 'crypto';
 
 import { STORE_DIR, TIMEZONE } from './config.js';
 import { createTask as createScheduledTask } from './db.js';
+import { PROVIDER_PURPOSES, type ProviderPurpose } from './provider-router.js';
 import type { ScheduledTask } from './types.js';
 
 export type BriefingCadence = 'daily' | 'weekly';
@@ -22,6 +23,7 @@ export interface BriefingSchedule {
   scheduleValue: string;
   sourceScopes: string[];
   outputFormats: string[];
+  providerProfileId: ProviderPurpose;
   deliveryMode: BriefingDeliveryMode;
   requireDeliveryApproval: boolean;
   scheduledTaskId: string;
@@ -43,6 +45,7 @@ export interface CreateBriefingScheduleInput {
   timezone?: string;
   sourceScopes?: string[];
   outputFormats?: string[];
+  providerProfileId?: ProviderPurpose;
   deliveryMode?: BriefingDeliveryMode;
   requireDeliveryApproval?: boolean;
 }
@@ -117,6 +120,14 @@ function buildPrompt(briefing: BriefingSchedule): string {
   ].join('\n');
 }
 
+function normalizeProviderProfileId(value: unknown): ProviderPurpose {
+  if (!value) return 'default_reports';
+  if (PROVIDER_PURPOSES.includes(value as ProviderPurpose)) {
+    return value as ProviderPurpose;
+  }
+  throw new Error('providerProfileId must be a known provider profile');
+}
+
 export function loadBriefingStore(
   filePath = DEFAULT_BRIEFING_STORE,
 ): BriefingStore {
@@ -154,6 +165,7 @@ export function createBriefingSchedule(
   }
 
   const deliveryMode = input.deliveryMode || 'approval';
+  const providerProfileId = normalizeProviderProfileId(input.providerProfileId);
   const requireDeliveryApproval = input.requireDeliveryApproval !== false;
   if (deliveryMode === 'send' && !requireDeliveryApproval) {
     throw new Error('External-send briefings require delivery approval');
@@ -178,6 +190,7 @@ export function createBriefingSchedule(
     outputFormats: input.outputFormats?.length
       ? input.outputFormats
       : ['markdown'],
+    providerProfileId,
     deliveryMode,
     requireDeliveryApproval,
     scheduledTaskId: `${id}-task`,
@@ -197,7 +210,7 @@ export function createBriefingSchedule(
     chat_jid: briefing.chatJid,
     prompt: buildPrompt(briefing),
     script: null,
-    provider_profile_id: 'default_reports',
+    provider_profile_id: briefing.providerProfileId,
     provider: null,
     model: null,
     tool_policy: 'approval-required',

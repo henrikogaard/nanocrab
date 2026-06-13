@@ -70,6 +70,7 @@ describe('briefing admin routes', () => {
           groupFolder: 'main',
           chatJid: 'wa:alliance-command',
           localTime: '09:15',
+          providerProfileId: 'default_journal',
         }),
       });
 
@@ -79,8 +80,13 @@ describe('briefing admin routes', () => {
         title: 'Weekly Briefing',
         cadence: 'weekly',
         scheduleValue: '15 9 * * 1',
+        providerProfileId: 'default_journal',
       });
-      expect(createTask).toHaveBeenCalledOnce();
+      expect(createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider_profile_id: 'default_journal',
+        }),
+      );
 
       const list = await fetch(new URL('/briefings', baseUrl));
       expect(list.status).toBe(200);
@@ -108,6 +114,29 @@ describe('briefing admin routes', () => {
       expect(res.status).toBe(400);
       expect(await res.json()).toMatchObject({
         error: expect.stringMatching(/delivery approval/i),
+      });
+      expect(createTask).not.toHaveBeenCalled();
+    });
+  });
+
+  it('rejects unknown briefing provider profiles', async () => {
+    await withServer(async (baseUrl) => {
+      const res = await fetch(new URL('/briefings', baseUrl), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Bad Profile',
+          cadence: 'daily',
+          groupFolder: 'main',
+          chatJid: 'wa:alliance-command',
+          localTime: '08:00',
+          providerProfileId: 'external-writes',
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: expect.stringMatching(/providerProfileId/i),
       });
       expect(createTask).not.toHaveBeenCalled();
     });

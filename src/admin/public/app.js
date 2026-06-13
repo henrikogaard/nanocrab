@@ -3183,9 +3183,18 @@ function reportApprovalText(job) {
 }
 
 async function renderReports(el) {
-  const jobs = await api('/reports/jobs').catch(() => []);
-  const briefings = await api('/briefings').catch(() => []);
-  const groups = await api('/groups').catch(() => []);
+  const [jobs, briefings, groups, providerProfiles] = await Promise.all([
+    api('/reports/jobs').catch(() => []),
+    api('/briefings').catch(() => []),
+    api('/groups').catch(() => []),
+    api('/system/provider/profiles').catch(() => ({ profiles: [] })),
+  ]);
+  const reportProfileOptions = (providerProfiles.profiles || [])
+    .map(
+      (profile) =>
+        `<option value="${esc(profile.id)}" ${profile.id === 'default_reports' ? 'selected' : ''}>${esc(profile.label || profile.id)} — ${esc(profile.provider)}/${esc(profile.model)}</option>`,
+    )
+    .join('');
   el.innerHTML = `
     <div class="page-header"><h2>Report Studio</h2></div>
     <div class="grid grid-2">
@@ -3230,6 +3239,7 @@ async function renderReports(el) {
             <div class="form-group"><label>Target Group</label><select id="briefing-group">${groups.map((group) => `<option value="${esc(group.folder)}" data-jid="${esc(group.jid)}">${esc(group.name)}</option>`).join('')}</select></div>
             <div class="form-group"><label>Source Scopes</label><input id="briefing-sources" value="journal, memory"></div>
           </div>
+          <div class="form-group"><label>Provider Profile</label><select id="briefing-provider-profile">${reportProfileOptions}</select></div>
           <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 12px">
             ${['markdown', 'html', 'docx', 'pdf'].map((format) => `<label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text)"><input type="checkbox" class="briefing-format" value="${format}" ${format === 'markdown' ? 'checked' : ''}> ${format.toUpperCase()}</label>`).join('')}
           </div>
@@ -3256,6 +3266,7 @@ async function renderReports(el) {
               <span class="badge badge-info">${esc(briefing.scheduleValue)}</span>
               ${(briefing.sourceScopes || []).map((scope) => `<span class="badge badge-muted">${esc(scope)}</span>`).join('')}
               ${briefing.requireDeliveryApproval ? '<span class="badge badge-warning">delivery approval</span>' : ''}
+              <span class="badge badge-accent">${esc(briefing.providerProfileId || 'default_reports')}</span>
             </div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Task: ${esc(briefing.scheduledTaskId || '')}</div>
           </div>`,
@@ -3375,6 +3386,9 @@ async function renderReports(el) {
           localTime: document.getElementById('briefing-time').value,
           sourceScopes,
           outputFormats: formats.length ? formats : ['markdown'],
+          providerProfileId: document.getElementById(
+            'briefing-provider-profile',
+          )?.value,
           deliveryMode: 'approval',
           requireDeliveryApproval: document.getElementById(
             'briefing-delivery-approval',

@@ -11,7 +11,9 @@ const router = Router();
 function sendError(res: Response, err: unknown) {
   const message =
     err instanceof Error ? err.message : 'Briefing request failed';
-  const status = /required|approval|cadence|localTime/i.test(message)
+  const status = /required|approval|cadence|localTime|providerProfileId/i.test(
+    message,
+  )
     ? 400
     : 500;
   res.status(status).json({ error: message });
