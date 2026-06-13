@@ -5917,9 +5917,11 @@ function renderSessionTranscript(messages, stats) {
 
 // Backup
 async function renderBackup(el) {
-  const [data, guide] = await Promise.all([
+  const [data, guide, autoConfig, migration] = await Promise.all([
     api('/backup'),
     api('/backup/restore-guide'),
+    api('/backup/auto-config'),
+    api('/backup/migration-status'),
   ]);
 
   el.innerHTML = `
@@ -5956,6 +5958,51 @@ async function renderBackup(el) {
         <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
           <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Notes</div>
           ${guide.notes.map((n) => `<div style="font-size:12px;color:var(--text-muted);padding:4px 0">\u2022 ${esc(n)}</div>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card">
+        <div class="card-title">Automatic Backups</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;align-items:end">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)">
+            <input type="checkbox" id="backup-auto-enabled" ${autoConfig.enabled ? 'checked' : ''}>
+            Enabled
+          </label>
+          <div class="form-group" style="margin:0">
+            <label>Schedule</label>
+            <select id="backup-auto-schedule">
+              <option value="daily" ${autoConfig.schedule === 'daily' ? 'selected' : ''}>Daily</option>
+              <option value="weekly" ${autoConfig.schedule !== 'daily' ? 'selected' : ''}>Weekly</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Keep</label>
+            <input id="backup-auto-keep" type="number" min="1" max="20" value="${Number(autoConfig.keepCount || 4)}">
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="saveAutoBackupConfig(this)">Save</button>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:10px">Automatic backups create essential-only archives and prune old automatic archives after the configured count.</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Migration Readiness</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+          <span class="badge ${migration.summary.legacyFound === 0 ? 'badge-success' : migration.summary.targetConflicts > 0 ? 'badge-warning' : 'badge-info'}">${migration.summary.legacyFound === 0 ? 'No legacy state' : `${migration.summary.legacyFound} legacy item(s)`}</span>
+          <code style="font-size:12px;color:var(--text-secondary)">${esc(migration.command)}</code>
+        </div>
+        <div style="display:grid;gap:8px">
+          ${migration.checks
+            .map(
+              (check) => `
+              <div style="padding:9px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface)">
+                <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+                  <strong style="font-size:12px;color:var(--text)">${esc(check.label)}</strong>
+                  <span class="badge ${check.status === 'not-needed' ? 'badge-success' : check.status === 'ready' ? 'badge-info' : 'badge-warning'}">${check.status === 'not-needed' ? 'OK' : check.status === 'ready' ? 'Ready' : 'Review'}</span>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:5px;line-height:1.35">${esc(check.detail)}</div>
+              </div>`,
+            )
+            .join('')}
         </div>
       </div>
     </div>
@@ -6013,8 +6060,8 @@ window.createBackup = async (includeAll, btnEl) => {
 window.downloadEncryptedBackup = async (filename) => {
   const passphrase = prompt('Enter a passphrase for encryption:');
   if (!passphrase) return;
-  if (passphrase.length < 4) {
-    toast('Passphrase too short (min 4 characters)', 'warning');
+  if (passphrase.length < 8) {
+    toast('Passphrase too short (min 8 characters)', 'warning');
     return;
   }
   try {
@@ -6043,6 +6090,34 @@ window.downloadEncryptedBackup = async (filename) => {
     toast('Encrypted backup downloaded', 'success');
   } catch (e) {
     toast('Download failed: ' + e.message, 'error');
+  }
+};
+
+window.saveAutoBackupConfig = async (btnEl) => {
+  const origText = btnEl.textContent;
+  btnEl.disabled = true;
+  btnEl.textContent = 'Saving...';
+  try {
+    const r = await api('/backup/auto-config', {
+      method: 'PUT',
+      body: JSON.stringify({
+        enabled: document.getElementById('backup-auto-enabled')?.checked,
+        schedule: document.getElementById('backup-auto-schedule')?.value,
+        keepCount: document.getElementById('backup-auto-keep')?.value,
+      }),
+    });
+    if (r.ok) {
+      toast('Auto-backup settings saved', 'success');
+      navigate('backup');
+    } else {
+      toast(r.error || 'Failed to save auto-backup settings', 'error');
+      btnEl.disabled = false;
+      btnEl.textContent = origText;
+    }
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+    btnEl.disabled = false;
+    btnEl.textContent = origText;
   }
 };
 
