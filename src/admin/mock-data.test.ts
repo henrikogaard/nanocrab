@@ -153,6 +153,48 @@ describe('mock admin data', () => {
     });
   });
 
+  it('serves default connector skills in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/skills`);
+      const data = (await response.json()) as {
+        installed: Array<{
+          path: string;
+          category: string;
+          riskLevel: string;
+          triggers: string[];
+          requiredTools: string[];
+        }>;
+      };
+
+      const connectorSkills = data.installed.filter((skill) =>
+        [
+          'connector-catalog',
+          'github-connector',
+          'drive-files-connector',
+          'browser-connector',
+        ].includes(skill.path),
+      );
+
+      expect(connectorSkills).toHaveLength(4);
+      expect(
+        connectorSkills.every((skill) => skill.category === 'plugin'),
+      ).toBe(true);
+      expect(connectorSkills).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: 'github-connector',
+            riskLevel: 'medium',
+            requiredTools: expect.arrayContaining(['mcp__github__*']),
+          }),
+          expect.objectContaining({
+            path: 'drive-files-connector',
+            triggers: expect.arrayContaining(['drive', 'files']),
+          }),
+        ]),
+      );
+    });
+  });
+
   it('serves terminal history and searchable transcripts in mock mode', async () => {
     await withServer(async (baseUrl) => {
       const historyResponse = await fetch(

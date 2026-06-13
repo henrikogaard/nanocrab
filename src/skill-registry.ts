@@ -44,6 +44,7 @@ export type SkillInjectionDecision =
   | 'excluded-disabled'
   | 'excluded-scope'
   | 'excluded-visibility'
+  | 'excluded-connector-scope'
   | 'excluded-low-score'
   | 'excluded-count-limit'
   | 'excluded-byte-limit';
@@ -140,6 +141,10 @@ export const CORE_SKILLS = [
 
 export const PLUGIN_SKILLS = [
   'agent-messaging',
+  'browser-connector',
+  'connector-catalog',
+  'drive-files-connector',
+  'github-connector',
   'google-workspace',
   'infomaniak-ksuite',
 ] as const;
@@ -378,6 +383,35 @@ function exclusionReason(
   return null;
 }
 
+function connectorIdFromToolPattern(pattern: string): string | null {
+  const match = pattern.match(/^mcp__([^_]+(?:[-_][^_]+)*)__\*?$/);
+  if (!match) return null;
+  return match[1].replace(/[_-]?\*$/, '').replace(/_/g, '-');
+}
+
+function requiredConnectorIds(requiredTools: string[]): string[] {
+  return Array.from(
+    new Set(
+      requiredTools
+        .map(connectorIdFromToolPattern)
+        .filter((connectorId): connectorId is string => Boolean(connectorId)),
+    ),
+  );
+}
+
+function connectorExclusionReason(
+  skill: Pick<SkillRegistryEntry, 'requiredTools'>,
+  agentBoundary?: AgentBoundary,
+): SkillInjectionDecision | null {
+  if (!agentBoundary) return null;
+  const required = requiredConnectorIds(skill.requiredTools);
+  if (required.length === 0) return null;
+  const allowed = new Set(agentBoundary.connectorIds);
+  return required.every((connectorId) => allowed.has(connectorId))
+    ? null
+    : 'excluded-connector-scope';
+}
+
 function clampScore(score: number, maxScore: number): number {
   if (!Number.isFinite(score)) return 0;
   return Math.min(Math.max(score, 0), maxScore);
@@ -488,6 +522,18 @@ export function selectSkillsForRequest(
         injectionReasons: [
           `excluded:${authExclusion.replace('excluded-', '')}`,
         ],
+      });
+      continue;
+    }
+    const connectorExclusion = connectorExclusionReason(
+      skill,
+      options.agentBoundary,
+    );
+    if (connectorExclusion) {
+      excluded.push({
+        ...match,
+        decision: connectorExclusion,
+        injectionReasons: ['excluded:connector-scope'],
       });
       continue;
     }

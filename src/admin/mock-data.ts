@@ -1279,6 +1279,54 @@ const skills = [
     enabled: true,
   },
   {
+    name: 'connector-catalog',
+    description:
+      'Discover configured MCP connectors and plan safe setup or permission changes.',
+    path: 'connector-catalog',
+    category: 'plugin',
+    enabled: true,
+    riskLevel: 'medium',
+    triggers: ['connector', 'mcp', 'catalog', 'permission', 'setup'],
+    requiredTools: ['mcp__nanocrab__*'],
+  },
+  {
+    name: 'github-connector',
+    description:
+      'Work with GitHub issues, pull requests, repository metadata, CI, and coding handoffs.',
+    path: 'github-connector',
+    category: 'plugin',
+    enabled: true,
+    riskLevel: 'medium',
+    triggers: ['github', 'issue', 'pull request', 'ci', 'repository'],
+    requiredTools: ['mcp__github__*', 'mcp__nanocrab__*', 'Bash(gh:*)'],
+  },
+  {
+    name: 'drive-files-connector',
+    description:
+      'Search, summarize, and prepare actions for connected drive/file systems.',
+    path: 'drive-files-connector',
+    category: 'plugin',
+    enabled: true,
+    riskLevel: 'medium',
+    triggers: ['drive', 'files', 'kdrive', 'upload', 'share'],
+    requiredTools: [
+      'mcp__google-workspace__*',
+      'mcp__infomaniak__*',
+      'mcp__nanocrab__*',
+    ],
+  },
+  {
+    name: 'browser-connector',
+    description:
+      'Use browser/research connectors for current web context, source checking, and screenshots.',
+    path: 'browser-connector',
+    category: 'plugin',
+    enabled: true,
+    riskLevel: 'low',
+    triggers: ['browser', 'web', 'research', 'screenshot', 'source'],
+    requiredTools: ['mcp__browser__*', 'mcp__nanocrab__*'],
+  },
+  {
     name: 'docx-generation',
     description: 'Generate Word documents and reports.',
     path: 'docx-generation',
