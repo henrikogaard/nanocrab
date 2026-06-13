@@ -8,7 +8,7 @@ import {
   getTaskById,
   setRegisteredGroup,
 } from './db.js';
-import { processTaskIpc, IpcDeps } from './ipc.js';
+import { isSkillVisibleForIpc, processTaskIpc, IpcDeps } from './ipc.js';
 import { RegisteredGroup } from './types.js';
 
 // Set up registered groups used across tests
@@ -433,6 +433,31 @@ describe('IPC message authorization', () => {
     expect(
       isMessageAuthorized('whatsapp_main', true, 'unknown@g.us', groups),
     ).toBe(true);
+  });
+});
+
+// --- IPC skill visibility ---
+
+describe('IPC skill visibility', () => {
+  it('excludes private and system skills from non-main list_skills results', () => {
+    expect(
+      isSkillVisibleForIpc(
+        { enabled: true, scope: 'all', visibility: 'shared' },
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      isSkillVisibleForIpc(
+        { enabled: true, scope: 'all', visibility: 'private' },
+        false,
+      ),
+    ).toBe(false);
+    expect(
+      isSkillVisibleForIpc(
+        { enabled: true, scope: 'all', visibility: 'system' },
+        false,
+      ),
+    ).toBe(false);
   });
 });
 

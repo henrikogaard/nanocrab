@@ -18,6 +18,7 @@ import {
   listMemoryProvenanceTimeline,
   listMemoryReviewQueue,
   listMemoryRecords,
+  markMemoryStale,
   proposeMemory,
   refreshMemoryReviewStatuses,
   rejectMemory,
@@ -87,6 +88,75 @@ describe('memory store', () => {
         },
       ]),
     );
+  });
+
+  it('keeps prior approval events when a memory is later marked stale', () => {
+    const memory = proposeMemory({
+      scope: 'global',
+      type: 'fact',
+      content: 'Multi-step memory reviews keep their full trail.',
+      confidence: 0.83,
+      visibility: 'global',
+      createdBy: 'timeline-test',
+    });
+
+    approveMemory(memory.id);
+    markMemoryStale(memory.id);
+
+    expect(
+      listMemoryProvenanceTimeline()
+        .filter((event) => event.subjectId === memory.id)
+        .map((event) => event.type),
+    ).toEqual(
+      expect.arrayContaining([
+        'memory.proposed',
+        'memory.approved',
+        'memory.stale',
+      ]),
+    );
+  });
+
+  it('includes recent review events for memories outside the newest record window', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2000-01-01T00:00:00.000Z'));
+      const oldMemory = proposeMemory({
+        scope: 'global',
+        type: 'fact',
+        content: 'Old memories can still receive recent reviews.',
+        confidence: 0.8,
+        visibility: 'global',
+        createdBy: 'timeline-test',
+      });
+
+      for (let index = 0; index < 205; index += 1) {
+        vi.setSystemTime(
+          new Date(Date.UTC(2001, 0, 1, 0, 0, 0) + index * 1000),
+        );
+        proposeMemory({
+          scope: 'group',
+          type: 'fact',
+          content: `Newer memory ${index}`,
+          confidence: 0.5,
+          visibility: 'group',
+        });
+      }
+
+      vi.setSystemTime(new Date('2100-01-01T00:00:00.000Z'));
+      approveMemory(oldMemory.id);
+
+      expect(
+        listMemoryProvenanceTimeline(10).map((event) => ({
+          type: event.type,
+          subjectId: event.subjectId,
+        })),
+      ).toContainEqual({
+        type: 'memory.approved',
+        subjectId: oldMemory.id,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('approves global memories into generated MEMORY.md', () => {

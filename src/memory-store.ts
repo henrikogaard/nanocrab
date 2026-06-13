@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-import { GROUPS_DIR } from './config.js';
+import { GROUPS_DIR, STORE_DIR } from './config.js';
 import {
   createMemory,
   listMemories,
@@ -93,6 +93,11 @@ export interface MemoryProvenanceTimelineEvent {
     sensitivity: MemoryRecord['sensitivity'];
   };
 }
+
+const MEMORY_REVIEW_TIMELINE_PATH = path.join(
+  STORE_DIR,
+  'memory-review-timeline.jsonl',
+);
 
 function assertChoice<T extends string>(
   name: string,
@@ -218,8 +223,7 @@ export function listMemoryRecords(filters: {
 
 export function approveMemory(id: string): MemoryRecord {
   const reviewedAt = new Date().toISOString();
-  const memory = reviewMemory(id, 'approved', reviewedAt);
-  if (!memory) throw new Error(`Memory not found: ${id}`);
+  const memory = reviewMemoryWithTimeline(id, 'approved', reviewedAt);
   refreshMemoryReviewStatuses({ now: reviewedAt });
   renderGlobalMemoryMarkdown();
   return memory;
@@ -227,25 +231,79 @@ export function approveMemory(id: string): MemoryRecord {
 
 export function rejectMemory(id: string): MemoryRecord {
   const reviewedAt = new Date().toISOString();
-  const memory = reviewMemory(id, 'rejected', reviewedAt);
-  if (!memory) throw new Error(`Memory not found: ${id}`);
+  const memory = reviewMemoryWithTimeline(id, 'rejected', reviewedAt);
   renderGlobalMemoryMarkdown();
   return memory;
 }
 
 export function markMemoryStale(id: string): MemoryRecord {
   const reviewedAt = new Date().toISOString();
-  const memory = reviewMemory(id, 'stale', reviewedAt);
-  if (!memory) throw new Error(`Memory not found: ${id}`);
+  const memory = reviewMemoryWithTimeline(id, 'stale', reviewedAt);
   renderGlobalMemoryMarkdown();
   return memory;
 }
 
 export function markMemoryContradicted(id: string): MemoryRecord {
   const reviewedAt = new Date().toISOString();
-  const memory = reviewMemory(id, 'contradicted', reviewedAt);
-  if (!memory) throw new Error(`Memory not found: ${id}`);
+  const memory = reviewMemoryWithTimeline(id, 'contradicted', reviewedAt);
   renderGlobalMemoryMarkdown();
+  return memory;
+}
+
+function memoryTimelineBase(memory: MemoryRecord) {
+  return {
+    subjectId: memory.id,
+    subjectName: memory.type,
+    summary: memory.content,
+    metadata: {
+      scope: memory.scope,
+      visibility: memory.visibility,
+      source: memory.source,
+      confidence: memory.confidence,
+      sensitivity: memory.sensitivity,
+    },
+  };
+}
+
+function memoryReviewedEvent(
+  memory: MemoryRecord,
+  status: Exclude<MemoryStatus, 'pending'>,
+  reviewedAt: string,
+): MemoryProvenanceTimelineEvent {
+  return {
+    id: `${memory.id}:${status}:${reviewedAt}`,
+    type: `memory.${status}` as MemoryProvenanceTimelineEvent['type'],
+    timestamp: reviewedAt,
+    actor: 'admin',
+    ...memoryTimelineBase(memory),
+  };
+}
+
+function appendMemoryReviewEvent(event: MemoryProvenanceTimelineEvent): void {
+  fs.mkdirSync(path.dirname(MEMORY_REVIEW_TIMELINE_PATH), { recursive: true });
+  fs.appendFileSync(MEMORY_REVIEW_TIMELINE_PATH, `${JSON.stringify(event)}\n`);
+}
+
+function readMemoryReviewEvents(): MemoryProvenanceTimelineEvent[] {
+  try {
+    return fs
+      .readFileSync(MEMORY_REVIEW_TIMELINE_PATH, 'utf-8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as MemoryProvenanceTimelineEvent);
+  } catch {
+    return [];
+  }
+}
+
+function reviewMemoryWithTimeline(
+  id: string,
+  status: Exclude<MemoryStatus, 'pending'>,
+  reviewedAt: string,
+): MemoryRecord {
+  const memory = reviewMemory(id, status, reviewedAt);
+  if (!memory) throw new Error(`Memory not found: ${id}`);
+  appendMemoryReviewEvent(memoryReviewedEvent(memory, status, reviewedAt));
   return memory;
 }
 
@@ -324,20 +382,24 @@ export function refreshMemoryReviewStatuses(
       Date.parse(memory.created_at) <
         Date.parse(now) - options.staleAfterDays * 24 * 60 * 60 * 1000;
     if (isStaleByDate || isStaleByAge) {
-      const stale = reviewMemory(memory.id, 'stale', now);
-      if (stale) changed.push(stale);
+      try {
+        changed.push(reviewMemoryWithTimeline(memory.id, 'stale', now));
+      } catch {}
     }
   }
 
   const stillApproved = listMemories({ status: 'approved', limit: 200 });
   for (const memory of stillApproved) {
     if (memory.contradicts_memory_id) {
-      const contradicted = reviewMemory(
-        memory.contradicts_memory_id,
-        'contradicted',
-        now,
-      );
-      if (contradicted) changed.push(contradicted);
+      try {
+        changed.push(
+          reviewMemoryWithTimeline(
+            memory.contradicts_memory_id,
+            'contradicted',
+            now,
+          ),
+        );
+      } catch {}
     }
   }
 
@@ -347,8 +409,9 @@ export function refreshMemoryReviewStatuses(
       if (newer.id === older.id) continue;
       if (newer.created_at <= older.created_at) continue;
       if (!memoriesConflict(newer, older)) continue;
-      const contradicted = reviewMemory(older.id, 'contradicted', now);
-      if (contradicted) changed.push(contradicted);
+      try {
+        changed.push(reviewMemoryWithTimeline(older.id, 'contradicted', now));
+      } catch {}
     }
   }
   return changed;
@@ -389,39 +452,35 @@ export function getMemory(id: string): MemoryRecord | undefined {
 export function listMemoryProvenanceTimeline(
   limit = 100,
 ): MemoryProvenanceTimelineEvent[] {
-  const events = listMemories({ limit: 200 }).flatMap((memory) => {
-    const base = {
-      subjectId: memory.id,
-      subjectName: memory.type,
-      summary: memory.content,
-      metadata: {
-        scope: memory.scope,
-        visibility: memory.visibility,
-        source: memory.source,
-        confidence: memory.confidence,
-        sensitivity: memory.sensitivity,
-      },
-    };
+  const reviewEvents = readMemoryReviewEvents();
+  const reviewKeys = new Set(
+    reviewEvents.map(
+      (event) => `${event.subjectId}:${event.type}:${event.timestamp}`,
+    ),
+  );
+  const currentRowEvents = listMemories({ limit: 200 }).flatMap((memory) => {
     const proposed: MemoryProvenanceTimelineEvent = {
       id: `${memory.id}:proposed`,
       type: 'memory.proposed',
       timestamp: memory.created_at,
       actor: memory.created_by || 'system',
-      ...base,
+      ...memoryTimelineBase(memory),
     };
     if (memory.status === 'pending' || !memory.reviewed_at) {
       return [proposed];
     }
-    const reviewed: MemoryProvenanceTimelineEvent = {
-      id: `${memory.id}:${memory.status}`,
-      type: `memory.${memory.status}` as MemoryProvenanceTimelineEvent['type'],
-      timestamp: memory.reviewed_at,
-      actor: 'admin',
-      ...base,
-    };
-    return [proposed, reviewed];
+    const reviewed = memoryReviewedEvent(
+      memory,
+      memory.status as Exclude<MemoryStatus, 'pending'>,
+      memory.reviewed_at,
+    );
+    return reviewKeys.has(
+      `${reviewed.subjectId}:${reviewed.type}:${reviewed.timestamp}`,
+    )
+      ? [proposed]
+      : [proposed, reviewed];
   });
-  return events
+  return [...currentRowEvents, ...reviewEvents]
     .sort(
       (a, b) =>
         b.timestamp.localeCompare(a.timestamp) || a.id.localeCompare(b.id),
