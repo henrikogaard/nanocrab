@@ -3184,6 +3184,8 @@ function reportApprovalText(job) {
 
 async function renderReports(el) {
   const jobs = await api('/reports/jobs').catch(() => []);
+  const briefings = await api('/briefings').catch(() => []);
+  const groups = await api('/groups').catch(() => []);
   el.innerHTML = `
     <div class="page-header"><h2>Report Studio</h2></div>
     <div class="grid grid-2">
@@ -3213,6 +3215,54 @@ async function renderReports(el) {
           <div><span class="badge badge-warning">Delivery</span> Generated artifacts wait for delivery approval before being marked delivered.</div>
           <div><span class="badge badge-info">Exports</span> Artifact downloads are served only from the job deliverables directory.</div>
         </div>
+      </div>
+    </div>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">Scheduled Briefings</div>
+        <form id="briefing-create-form">
+          <div class="form-group"><label>Title</label><input id="briefing-title" placeholder="Daily operations brief" required></div>
+          <div class="grid grid-2">
+            <div class="form-group"><label>Cadence</label><select id="briefing-cadence"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
+            <div class="form-group"><label>Local Time</label><input id="briefing-time" type="time" value="08:30" required></div>
+          </div>
+          <div class="grid grid-2">
+            <div class="form-group"><label>Target Group</label><select id="briefing-group">${groups.map((group) => `<option value="${esc(group.folder)}" data-jid="${esc(group.jid)}">${esc(group.name)}</option>`).join('')}</select></div>
+            <div class="form-group"><label>Source Scopes</label><input id="briefing-sources" value="journal, memory"></div>
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 12px">
+            ${['markdown', 'html', 'docx', 'pdf'].map((format) => `<label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text)"><input type="checkbox" class="briefing-format" value="${format}" ${format === 'markdown' ? 'checked' : ''}> ${format.toUpperCase()}</label>`).join('')}
+          </div>
+          <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text);margin-bottom:14px"><input id="briefing-delivery-approval" type="checkbox" checked> Require delivery approval</label>
+          <button type="submit" class="btn btn-primary btn-sm" ${groups.length ? '' : 'disabled'}>Create Briefing Schedule</button>
+        </form>
+      </div>
+      <div class="card">
+        <div class="card-title">Briefing Jobs <span class="badge badge-muted">${briefings.length}</span></div>
+        ${
+          briefings.length
+            ? briefings
+                .map(
+                  (briefing) => `
+          <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+              <div>
+                <strong style="color:var(--text)">${esc(briefing.title)}</strong>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(briefing.cadence)} at ${esc(briefing.localTime)} ${esc(briefing.timezone || '')}</div>
+              </div>
+              <span class="badge ${briefing.status === 'active' ? 'badge-success' : 'badge-muted'}">${esc(briefing.status)}</span>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+              <span class="badge badge-info">${esc(briefing.scheduleValue)}</span>
+              ${(briefing.sourceScopes || []).map((scope) => `<span class="badge badge-muted">${esc(scope)}</span>`).join('')}
+              ${briefing.requireDeliveryApproval ? '<span class="badge badge-warning">delivery approval</span>' : ''}
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Task: ${esc(briefing.scheduledTaskId || '')}</div>
+          </div>`,
+                )
+                .join('')
+            : '<div style="font-size:12px;color:var(--text-muted)">No briefing schedules yet.</div>'
+        }
       </div>
     </div>
     <div class="card">
@@ -3300,6 +3350,42 @@ async function renderReports(el) {
       navigate('reports');
     } else toast(r.error || 'Failed to create report', 'error');
   };
+
+  const briefingForm = document.getElementById('briefing-create-form');
+  if (briefingForm)
+    briefingForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const groupSelect = document.getElementById('briefing-group');
+      const selected = groupSelect?.selectedOptions?.[0];
+      const formats = Array.from(document.querySelectorAll('.briefing-format'))
+        .filter((input) => input.checked)
+        .map((input) => input.value);
+      const sourceScopes = document
+        .getElementById('briefing-sources')
+        .value.split(',')
+        .map((scope) => scope.trim())
+        .filter(Boolean);
+      const r = await api('/briefings', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: document.getElementById('briefing-title').value,
+          cadence: document.getElementById('briefing-cadence').value,
+          groupFolder: groupSelect?.value,
+          chatJid: selected?.dataset?.jid,
+          localTime: document.getElementById('briefing-time').value,
+          sourceScopes,
+          outputFormats: formats.length ? formats : ['markdown'],
+          deliveryMode: 'approval',
+          requireDeliveryApproval: document.getElementById(
+            'briefing-delivery-approval',
+          ).checked,
+        }),
+      }).catch(() => null);
+      if (r?.ok) {
+        toast('Briefing schedule created', 'success');
+        navigate('reports');
+      } else toast(r?.error || 'Failed to create briefing', 'error');
+    };
 }
 
 window.approveReportOutline = async (id) => {

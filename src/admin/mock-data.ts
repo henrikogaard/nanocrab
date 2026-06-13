@@ -2739,6 +2739,48 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       },
     ];
   }
+  if (pathname === '/briefings') {
+    return [
+      {
+        id: 'briefing-daily-ops',
+        title: 'Daily Operations Brief',
+        cadence: 'daily',
+        groupFolder: 'main',
+        chatJid: 'wa:alliance-command',
+        timezone: 'Europe/Oslo',
+        localTime: '08:30',
+        scheduleType: 'cron',
+        scheduleValue: '30 8 * * *',
+        sourceScopes: ['journal', 'memory'],
+        outputFormats: ['markdown'],
+        deliveryMode: 'approval',
+        requireDeliveryApproval: true,
+        scheduledTaskId: 'briefing-daily-ops-task',
+        status: 'active',
+        createdAt: iso(240),
+        updatedAt: iso(60),
+      },
+      {
+        id: 'briefing-weekly-digest',
+        title: 'Weekly Alliance Digest',
+        cadence: 'weekly',
+        groupFolder: 'operations',
+        chatJid: 'tg:operations-room',
+        timezone: 'Europe/Oslo',
+        localTime: '09:00',
+        scheduleType: 'cron',
+        scheduleValue: '0 9 * * 1',
+        sourceScopes: ['journal', 'memory', 'reports'],
+        outputFormats: ['markdown', 'docx'],
+        deliveryMode: 'approval',
+        requireDeliveryApproval: true,
+        scheduledTaskId: 'briefing-weekly-digest-task',
+        status: 'active',
+        createdAt: iso(1440),
+        updatedAt: iso(180),
+      },
+    ];
+  }
   if (pathname === '/artifacts/vault/summary') {
     return {
       total: 2,
