@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Signal Shrimp avatar</title>
+  <desc id="desc">A slim coral shrimp profile with antennae and signal stripes.</desc>
+  <rect width="128" height="128" rx="64" fill="#eef7ff"/>
+  <circle cx="64" cy="64" r="55" fill="none" stroke="#152238" stroke-width="4"/>
+  <path d="M25 79c20-34 60-44 84-20-5 27-41 40-72 22z" fill="#ff6b6b" stroke="#152238" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M50 55l-9 29M68 50l-6 38M85 51l-2 34" stroke="#fff5f5" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="93" cy="57" r="6" fill="#152238"/>
+  <path d="M96 49c8-12 16-20 25-24M91 47c4-15 9-26 16-35" fill="none" stroke="#152238" stroke-width="4" stroke-linecap="round"/>
+  <path d="M29 80c-8 1-15 5-20 12M36 86c-6 5-9 12-10 21M74 86c7 5 13 11 17 19" fill="none" stroke="#152238" stroke-width="5" stroke-linecap="round"/>
+  <path d="M24 78c-8-2-14-7-18-15" fill="none" stroke="#152238" stroke-width="5" stroke-linecap="round"/>
+</svg>

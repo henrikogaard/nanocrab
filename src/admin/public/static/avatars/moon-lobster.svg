@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Moon Lobster avatar</title>
+  <desc id="desc">A dark blue lobster-like assistant avatar with crescent shell.</desc>
+  <rect width="128" height="128" rx="30" fill="#f5f7ff"/>
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="none" stroke="#101828" stroke-width="4"/>
+  <path d="M40 36c22-18 53-5 57 23 4 25-17 43-41 37 21-9 28-34 13-51-7-8-17-11-29-9z" fill="#3b5bdb" stroke="#101828" stroke-width="5" stroke-linejoin="round"/>
+  <ellipse cx="58" cy="69" rx="18" ry="27" fill="#748ffc" stroke="#101828" stroke-width="5"/>
+  <circle cx="53" cy="49" r="5" fill="#101828"/>
+  <circle cx="69" cy="49" r="5" fill="#101828"/>
+  <path d="M47 36C35 26 23 22 12 24M73 36c12-10 24-14 35-12" fill="none" stroke="#101828" stroke-width="5" stroke-linecap="round"/>
+  <path d="M40 82c-14 3-25-1-30-11M82 82c14 3 25-1 30-11" fill="none" stroke="#101828" stroke-width="5" stroke-linecap="round"/>
+  <path d="M26 66c-8-4-12-12-9-20 9 0 16 5 18 14zM96 66c8-4 12-12 9-20-9 0-16 5-18 14z" fill="#91a7ff" stroke="#101828" stroke-width="5" stroke-linejoin="round"/>
+</svg>

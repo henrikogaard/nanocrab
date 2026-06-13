@@ -283,6 +283,76 @@ const terminalTranscripts: Record<string, string> = {
     'npm test\nPASS src/admin/routes/sessions.test.ts\nPASS src/admin/routes/reports.test.ts\n',
 };
 
+const assistantAvatarOptions = [
+  {
+    id: 'default',
+    kind: 'default',
+    name: 'NanoCrab Mark',
+    description: 'Default NanoCrab logo mark.',
+    url: '/static/nanocrab-mark.png',
+    available: true,
+  },
+  {
+    id: 'uploaded',
+    kind: 'uploaded',
+    name: 'Uploaded Avatar',
+    description: 'Use the custom image uploaded to the dashboard.',
+    url: '/static/avatar.jpg',
+    available: false,
+  },
+  {
+    id: 'tidal-crab',
+    kind: 'builtin',
+    name: 'Tidal Crab',
+    description: 'Bright shell with clean claws for a friendly assistant mark.',
+    url: '/static/avatars/tidal-crab.svg',
+    available: true,
+  },
+  {
+    id: 'moon-lobster',
+    kind: 'builtin',
+    name: 'Moon Lobster',
+    description: 'Calm crescent body and long antennae for night operations.',
+    url: '/static/avatars/moon-lobster.svg',
+    available: true,
+  },
+  {
+    id: 'reef-hermit',
+    kind: 'builtin',
+    name: 'Reef Hermit',
+    description: 'Compact shell silhouette that reads clearly at small sizes.',
+    url: '/static/avatars/reef-hermit.svg',
+    available: true,
+  },
+  {
+    id: 'signal-shrimp',
+    kind: 'builtin',
+    name: 'Signal Shrimp',
+    description: 'Slim, high-contrast profile for fast channel recognition.',
+    url: '/static/avatars/signal-shrimp.svg',
+    available: true,
+  },
+  {
+    id: 'ember-crab',
+    kind: 'builtin',
+    name: 'Ember Crab',
+    description: 'Warm shell and bold eyes for alert or operations profiles.',
+    url: '/static/avatars/ember-crab.svg',
+    available: true,
+  },
+];
+
+function mockAssistantProfile(selectedAvatarId = 'tidal-crab'): JsonValue {
+  const selectedAvatar =
+    assistantAvatarOptions.find((avatar) => avatar.id === selectedAvatarId) ||
+    assistantAvatarOptions[0];
+  return {
+    selectedAvatarId: selectedAvatar.id,
+    selectedAvatar,
+    avatars: assistantAvatarOptions,
+  };
+}
+
 const approvals = [
   {
     id: 'approval-message-risk',
@@ -2000,6 +2070,13 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
     }
     return { results };
   }
+  if (method === 'PUT' && pathname === '/assistant-profile/avatar') {
+    return ok({
+      profile: mockAssistantProfile(
+        String(req.body?.selectedAvatarId || 'default'),
+      ),
+    });
+  }
   if (method !== 'GET') return writeResponse(pathname);
 
   if (pathname === '/me') {
@@ -2020,6 +2097,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
     };
   }
   if (pathname === '/system/provider') return providerInfo;
+  if (pathname === '/assistant-profile') return mockAssistantProfile();
   if (pathname === '/system/provider/profiles') {
     return {
       profiles: providerInfo.profiles,

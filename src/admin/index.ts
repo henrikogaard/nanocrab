@@ -76,6 +76,7 @@ import chatRoutes from './routes/chat.js';
 import developerRoutes, {
   recordMonitoringSnapshot,
 } from './routes/developer.js';
+import assistantProfileRoutes from './routes/assistant-profile.js';
 
 // Plugin system
 import {
@@ -241,6 +242,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/questions', requireAuth, questionsRoutes);
   app.use('/api/approvals', requireAuth, approvalsRoutes);
   app.use('/api/chat', requireAuth, chatRoutes);
+  app.use('/api/assistant-profile', requireAuth, assistantProfileRoutes);
 
   // Admin role required
   app.use('/api/mcp', requireAuth, requireRole('admin'), mcpRoutes);

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Ember Crab avatar</title>
+  <desc id="desc">A warm red crab avatar with angular claws and a bold shell.</desc>
+  <circle cx="64" cy="64" r="58" fill="#fff0f0"/>
+  <circle cx="64" cy="64" r="55" fill="none" stroke="#24110f" stroke-width="4"/>
+  <path d="M33 74c4-23 17-35 31-35s27 12 31 35c-8 18-54 18-62 0z" fill="#e03131" stroke="#24110f" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M44 70c11 9 29 9 40 0" fill="none" stroke="#ffc9c9" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="52" cy="56" r="6" fill="#24110f"/>
+  <circle cx="76" cy="56" r="6" fill="#24110f"/>
+  <path d="M36 70c-14-2-23-10-27-24" fill="none" stroke="#24110f" stroke-width="6" stroke-linecap="round"/>
+  <path d="M92 70c14-2 23-10 27-24" fill="none" stroke="#24110f" stroke-width="6" stroke-linecap="round"/>
+  <path d="M16 42c3-10 11-17 22-18 3 10-1 19-11 25zM112 42c-3-10-11-17-22-18-3 10 1 19 11 25z" fill="#ff922b" stroke="#24110f" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M41 92l-14 14M55 96l-5 17M73 96l5 17M87 92l14 14" stroke="#24110f" stroke-width="6" stroke-linecap="round"/>
+</svg>

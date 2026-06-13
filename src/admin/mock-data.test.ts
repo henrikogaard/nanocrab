@@ -192,4 +192,48 @@ describe('mock admin data', () => {
       ]);
     });
   });
+
+  it('serves assistant avatar gallery metadata in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/assistant-profile`);
+      const profile = (await response.json()) as {
+        selectedAvatarId: string;
+        avatars: Array<{ id: string; kind: string; available: boolean }>;
+      };
+
+      expect(profile.selectedAvatarId).toBe('tidal-crab');
+      expect(profile.avatars).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'default', kind: 'default' }),
+          expect.objectContaining({
+            id: 'uploaded',
+            kind: 'uploaded',
+            available: false,
+          }),
+          expect.objectContaining({ id: 'ember-crab', kind: 'builtin' }),
+        ]),
+      );
+      expect(
+        profile.avatars.filter((avatar) => avatar.kind === 'builtin'),
+      ).toHaveLength(5);
+
+      const saveResponse = await fetch(
+        `${baseUrl}/api/assistant-profile/avatar`,
+        {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ selectedAvatarId: 'ember-crab' }),
+        },
+      );
+      const saved = (await saveResponse.json()) as {
+        ok: boolean;
+        profile: { selectedAvatarId: string };
+      };
+
+      expect(saved).toMatchObject({
+        ok: true,
+        profile: { selectedAvatarId: 'ember-crab' },
+      });
+    });
+  });
 });
