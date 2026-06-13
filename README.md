@@ -71,6 +71,7 @@ Additional plugins can be installed from git URLs via the Marketplace page, or c
 - **Isolated Coding Jobs** — WhatsApp/Signal/Telegram agents can request repo coding jobs through MCP; an ephemeral coding container clones and edits inside `data/coding-workspaces`
 - **Scheduled Tasks** — recurring coding jobs (hourly, daily, weekly)
 - **GitHub Autofix Pipeline** — webhook-driven: issue created/labeled → approval-gated coding job → reviewed PR publish → bot notifies you
+- **GitHub Connector Health** — Webhooks shows the receiver URL, secret/target/event setup, recent deliveries, and read-only connector health checks without revealing credentials
 - **PR Review** — an agent reviews every new PR and posts comments
 
 Coding jobs are available only from the main group. Add

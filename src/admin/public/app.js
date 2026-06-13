@@ -4057,10 +4057,11 @@ window.validatePath = async () => {
 
 // Webhooks
 async function renderWebhooks(el) {
-  const [config, events, groups] = await Promise.all([
+  const [config, events, groups, health] = await Promise.all([
     api('/webhooks/config'),
     api('/webhooks/events'),
     api('/groups'),
+    api('/webhooks/github-health'),
   ]);
   const webhookUrl = `${window.location.origin}/api/webhooks/github`;
 
@@ -4095,6 +4096,25 @@ async function renderWebhooks(el) {
       </div>
       <div class="card">
         <div class="card-title">Setup Instructions</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+          <span class="badge ${health.status === 'ready' ? 'badge-success' : health.status === 'blocked' ? 'badge-error' : 'badge-warning'}">${esc(health.status)}</span>
+          <span style="font-size:12px;color:var(--text-muted)">${health.summary.passed}/${health.summary.total} checks passing</span>
+        </div>
+        <div style="display:grid;gap:6px;margin-bottom:12px">
+          ${health.checks
+            .map(
+              (check) => `
+            <div style="padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface)">
+              <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+                <strong style="font-size:12px;color:var(--text)">${esc(check.label)}</strong>
+                <span class="badge ${check.ok ? 'badge-success' : check.severity === 'required' ? 'badge-error' : 'badge-warning'}">${check.ok ? 'OK' : check.severity === 'required' ? 'Block' : 'Warn'}</span>
+              </div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(check.detail)}</div>
+              ${check.hint && !check.ok ? `<div style="font-size:11px;color:var(--warning);margin-top:4px">${esc(check.hint)}</div>` : ''}
+            </div>`,
+            )
+            .join('')}
+        </div>
         <ol style="font-size:13px;color:var(--text-secondary);line-height:1.8;padding-left:20px">
           <li>Go to your GitHub repo → Settings → Webhooks → Add webhook</li>
           <li>Paste the Webhook URL above</li>
