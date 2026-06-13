@@ -474,6 +474,7 @@ function showShell(page) {
     { id: 'tasks', icon: 'tasks', label: 'Tasks' },
     { id: 'memory', icon: 'memory', label: 'Memory' },
     { id: 'skills', icon: 'skills', label: 'Skills' },
+    { id: 'reports', icon: 'audit', label: 'Reports' },
     { id: 'timeline', icon: 'timeline', label: 'Timeline' },
   ];
 
@@ -703,6 +704,7 @@ const _pageMap = {
   sessions: 'renderSessions',
   groups: 'renderGroups',
   tasks: 'renderTasks',
+  reports: 'renderReports',
   workflows: 'renderWorkflows',
   credentials: 'renderCredentials',
   integrations: 'renderIntegrationsConsolidated',
@@ -3130,6 +3132,168 @@ window.setGroupProvider = async (groupFolder, category, providerId) => {
   });
   if (r.ok) toast('Updated', 'success');
   else toast(r.error || 'Failed', 'error');
+};
+
+function reportStatusBadge(status) {
+  const cls =
+    status === 'delivered' || status === 'draft_ready'
+      ? 'badge-success'
+      : status === 'failed'
+        ? 'badge-error'
+        : 'badge-warning';
+  return `<span class="badge ${cls}">${esc(status || 'unknown')}</span>`;
+}
+
+function reportApprovalText(job) {
+  if (job.status === 'awaiting_outline_approval')
+    return 'Outline approval is required before draft generation or artifact export.';
+  if (job.status === 'awaiting_delivery_approval')
+    return 'Delivery approval is required before this report is marked delivered.';
+  if (job.status === 'draft_ready')
+    return 'Draft artifacts are ready; delivery approval is disabled for this job.';
+  if (job.status === 'delivered') return 'Report delivery has been approved.';
+  return 'Report job is waiting for the next pipeline step.';
+}
+
+async function renderReports(el) {
+  const jobs = await api('/reports/jobs').catch(() => []);
+  el.innerHTML = `
+    <div class="page-header"><h2>Report Studio</h2></div>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">New Report Job</div>
+        <form id="report-create-form">
+          <div class="form-group"><label>Title</label><input id="report-title" placeholder="Weekly alliance digest"></div>
+          <div class="form-group"><label>Request</label><textarea id="report-request" rows="4" placeholder="Summarize recent events, decisions, risks, and next actions" required></textarea></div>
+          <div class="grid grid-2">
+            <div class="form-group"><label>Source Scopes</label><input id="report-sources" value="journal, memory"></div>
+            <div class="form-group"><label>Deliverables Directory</label><input id="report-dir" placeholder="store/deliverables"></div>
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 12px">
+            ${['markdown', 'html', 'docx', 'pdf'].map((format) => `<label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text)"><input type="checkbox" class="report-format" value="${format}" ${format === 'markdown' ? 'checked' : ''}> ${format.toUpperCase()}</label>`).join('')}
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+            <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text)"><input id="report-outline-approval" type="checkbox" checked> Outline approval</label>
+            <label style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--text)"><input id="report-delivery-approval" type="checkbox" checked> Delivery approval</label>
+          </div>
+          <button type="submit" class="btn btn-primary">Create Report</button>
+        </form>
+      </div>
+      <div class="card">
+        <div class="card-title">Pipeline Rules</div>
+        <div style="display:grid;gap:8px;font-size:12px;color:var(--text-muted)">
+          <div><span class="badge badge-warning">Outline</span> Report drafts and exports wait for an approved outline.</div>
+          <div><span class="badge badge-warning">Delivery</span> Generated artifacts wait for delivery approval before being marked delivered.</div>
+          <div><span class="badge badge-info">Exports</span> Artifact downloads are served only from the job deliverables directory.</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Report Jobs</div>
+      ${
+        jobs.length
+          ? jobs
+              .map(
+                (job) => `
+        <div class="channel-card" style="align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <strong style="color:var(--text)">${esc(job.title)}</strong>
+              ${reportStatusBadge(job.status)}
+              ${job.requireOutlineApproval ? '<span class="badge badge-muted">outline approval</span>' : ''}
+              ${job.requireDeliveryApproval ? '<span class="badge badge-muted">delivery approval</span>' : ''}
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${esc(job.request)}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:6px">${esc(reportApprovalText(job))}</div>
+            ${
+              job.outline
+                ? `<pre style="white-space:pre-wrap;margin-top:8px;max-height:140px;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;font-size:11px;color:var(--text)">${esc(job.outline)}</pre>`
+                : ''
+            }
+            ${
+              job.artifacts?.length
+                ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${job.artifacts
+                    .map(
+                      (artifact, index) =>
+                        `<a class="btn btn-sm btn-ghost" href="/api/reports/jobs/${encodeURIComponent(job.id)}/artifacts/${index}/download" download>${esc(artifact.format).toUpperCase()}</a>`,
+                    )
+                    .join('')}</div>`
+                : '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">No exported artifacts yet.</div>'
+            }
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+            ${
+              job.status === 'awaiting_outline_approval'
+                ? `<button class="btn btn-sm btn-primary" onclick="approveReportOutline('${esc(job.id)}')">Generate after approval</button>`
+                : ''
+            }
+            ${
+              job.status === 'awaiting_delivery_approval'
+                ? `<button class="btn btn-sm btn-primary" onclick="approveReportDelivery('${esc(job.id)}')">Mark delivered</button>`
+                : ''
+            }
+            <button class="btn btn-sm btn-ghost" onclick="navigate('approvals')">Approvals</button>
+          </div>
+        </div>`,
+              )
+              .join('')
+          : '<div style="font-size:12px;color:var(--text-muted)">No report jobs yet.</div>'
+      }
+    </div>`;
+
+  document.getElementById('report-create-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const formats = Array.from(document.querySelectorAll('.report-format'))
+      .filter((input) => input.checked)
+      .map((input) => input.value);
+    const sourceScopes = document
+      .getElementById('report-sources')
+      .value.split(',')
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+    const r = await api('/reports/jobs', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: document.getElementById('report-title').value,
+        request: document.getElementById('report-request').value,
+        sourceScopes,
+        outputFormats: formats.length ? formats : ['markdown'],
+        deliverablesDir:
+          document.getElementById('report-dir').value || undefined,
+        requireOutlineApproval: document.getElementById(
+          'report-outline-approval',
+        ).checked,
+        requireDeliveryApproval: document.getElementById(
+          'report-delivery-approval',
+        ).checked,
+      }),
+    });
+    if (r.ok) {
+      toast('Report job created', 'success');
+      navigate('reports');
+    } else toast(r.error || 'Failed to create report', 'error');
+  };
+}
+
+window.approveReportOutline = async (id) => {
+  const r = await api(`/reports/jobs/${encodeURIComponent(id)}/approve-outline`, {
+    method: 'POST',
+  });
+  if (r.ok) {
+    toast('Report outline approved', 'success');
+    navigate('reports');
+  } else toast(r.error || 'Approval is still pending', 'warning');
+};
+
+window.approveReportDelivery = async (id) => {
+  const r = await api(
+    `/reports/jobs/${encodeURIComponent(id)}/approve-delivery`,
+    { method: 'POST' },
+  );
+  if (r.ok) {
+    toast('Report delivered', 'success');
+    navigate('reports');
+  } else toast(r.error || 'Delivery approval is still pending', 'warning');
 };
 
 // Skills

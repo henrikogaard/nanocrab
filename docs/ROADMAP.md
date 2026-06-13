@@ -199,12 +199,10 @@ Goal: work with GitHub repos and produce PRs while the owner is on the go.
 Goal: ask NanoCrab for reports, documents, design notes, and generated assets from chat or dashboard.
 
 - Document/report pipeline:
-  - PARTIAL: report pipeline configuration exists for schedule, target, provider profile, source scopes, output formats, deliverables directory, and outline approval.
-  - NEXT: request intake
+  - PARTIAL: Report Studio now supports dashboard request intake, outline approval gating, draft/export generation, delivery approval gating, safe artifact downloads, provider profile, source scopes, output formats, and deliverables directory.
   - NEXT: source collection through MCP servers and mounted data sources
-  - NEXT: outline approval workflow
-  - draft generation
-  - export to Markdown, DOCX, PDF, or dashboard artifact
+  - NEXT: richer dashboard artifact vault and source-link browsing
+  - export to Markdown, HTML, DOCX, PDF, or dashboard artifact
 - MCP sources:
   - kDrive
   - mail archives
