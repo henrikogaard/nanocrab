@@ -8,6 +8,7 @@ import {
   resolveAgentBoundary,
   type AgentBoundary,
 } from './agent-boundaries.js';
+import { PROVIDER_PURPOSES } from './provider-router.js';
 
 const channelBoundary: AgentBoundary = {
   agentId: 'operations',
@@ -70,6 +71,46 @@ describe('agent boundaries', () => {
     expect(canUseProviderProfile(channelBoundary, 'default_coding')).toBe(
       false,
     );
+  });
+
+  it('uses only canonical provider purpose names in default boundaries', () => {
+    const providerPurposeSet = new Set<string>(PROVIDER_PURPOSES);
+    const mainBoundary = resolveAgentBoundary({
+      group: {
+        name: 'Main',
+        folder: 'main',
+        trigger: '@NanoCrab',
+        added_at: '2026-06-13T10:00:00.000Z',
+        isMain: true,
+      },
+      isMain: true,
+    });
+    const resolvedChannelBoundary = resolveAgentBoundary({
+      group: {
+        name: 'Operations',
+        folder: 'operations',
+        trigger: '@NanoCrab',
+        added_at: '2026-06-13T10:00:00.000Z',
+      },
+      isMain: false,
+    });
+
+    expect(mainBoundary.providerProfiles).toEqual(
+      expect.arrayContaining(['default_docs']),
+    );
+    expect(resolvedChannelBoundary.providerProfiles).toEqual(
+      expect.arrayContaining(['default_docs']),
+    );
+    expect(canUseProviderProfile(mainBoundary, 'default_docs')).toBe(true);
+    expect(canUseProviderProfile(resolvedChannelBoundary, 'default_docs')).toBe(
+      true,
+    );
+    expect(
+      [
+        ...mainBoundary.providerProfiles,
+        ...resolvedChannelBoundary.providerProfiles,
+      ].filter((profile) => !providerPurposeSet.has(profile)),
+    ).toEqual([]);
   });
 
   it('derives runtime capabilities without out-of-scope connectors or write tools', () => {

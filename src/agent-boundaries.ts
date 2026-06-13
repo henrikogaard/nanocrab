@@ -10,7 +10,7 @@ export type AgentProviderProfilePermission =
   | 'default_journal'
   | 'default_skill_factory'
   | 'default_reports'
-  | 'default_documents'
+  | 'default_docs'
   | 'default_vision'
   | string;
 
@@ -64,7 +64,7 @@ const MAIN_PROVIDER_PROFILES: AgentProviderProfilePermission[] = [
   'default_journal',
   'default_skill_factory',
   'default_reports',
-  'default_documents',
+  'default_docs',
   'default_vision',
 ];
 
@@ -73,7 +73,7 @@ const CHANNEL_PROVIDER_PROFILES: AgentProviderProfilePermission[] = [
   'default_automation',
   'default_memory',
   'default_reports',
-  'default_documents',
+  'default_docs',
   'default_vision',
 ];
 
