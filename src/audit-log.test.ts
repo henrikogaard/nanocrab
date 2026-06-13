@@ -90,4 +90,41 @@ describe('audit log', () => {
       eventCount: 2,
     });
   });
+
+  it('replays complete long correlations without dropping earliest events', () => {
+    for (let index = 0; index < 1005; index++) {
+      logAuditEvent({
+        actor: 'coding-agent',
+        actionType:
+          index === 0
+            ? 'coding.first'
+            : index === 1004
+              ? 'coding.last'
+              : 'coding.middle',
+        resource: 'job-long',
+        decision: index === 1004 ? 'simulated' : 'allowed',
+        correlationId: 'job-long',
+        context: { index },
+        timestamp: new Date(Date.UTC(2026, 5, 10, 10, 0, index)).toISOString(),
+      });
+    }
+
+    const replay = replayAuditCorrelation('job-long');
+
+    expect(replay.events).toHaveLength(1005);
+    expect(replay.events[0]).toMatchObject({
+      actionType: 'coding.first',
+      context: { index: 0 },
+    });
+    expect(replay.events[1004]).toMatchObject({
+      actionType: 'coding.last',
+      context: { index: 1004 },
+    });
+    expect(replay.summary).toMatchObject({
+      eventCount: 1005,
+      firstActionType: 'coding.first',
+      lastActionType: 'coding.last',
+      lastDecision: 'simulated',
+    });
+  });
 });

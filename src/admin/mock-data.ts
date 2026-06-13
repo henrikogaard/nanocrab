@@ -2273,6 +2273,66 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
     return { enabled: true, ips: ['92.221.30.107', '10.0.0.0/24'] };
   }
   if (pathname === '/audit') {
+    return [
+      {
+        timestamp: iso(18),
+        action: 'skill_draft_created',
+        ip: '92.221.30.107',
+        details: 'operation-briefing',
+        userAgent: 'Mock browser',
+      },
+      {
+        timestamp: iso(24),
+        action: 'memory_approved',
+        ip: '92.221.30.107',
+        details: 'mem-mock-2',
+        userAgent: 'Mock browser',
+      },
+      {
+        timestamp: iso(38),
+        action: 'skill_draft_approved',
+        ip: '92.221.30.107',
+        details: 'daily-summary',
+        userAgent: 'Mock browser',
+      },
+      {
+        timestamp: iso(66),
+        action: 'memory_edit',
+        ip: '92.221.30.107',
+        details: 'Updated shared MEMORY.md',
+        userAgent: 'Mock browser',
+      },
+      {
+        timestamp: iso(11),
+        action: 'login_success',
+        ip: '92.221.30.107',
+        details: 'mock owner session',
+        userAgent: 'Mock browser',
+      },
+      {
+        timestamp: iso(95),
+        action: 'provider_changed',
+        ip: '92.221.30.107',
+        details: 'codex/gpt-5.4',
+        userAgent: 'Mock browser',
+      },
+      {
+        timestamp: iso(180),
+        action: 'login_failed',
+        ip: '203.0.113.22',
+        details: 'bad password',
+        userAgent: 'Unknown',
+      },
+      {
+        timestamp: iso(210),
+        action: 'ip_blocked',
+        ip: '203.0.113.22',
+        details: 'too many login attempts',
+        userAgent: 'Unknown',
+      },
+    ];
+  }
+  if (pathname === '/runtime-audit') {
     const q = req.query;
     return auditEvents
       .filter((event) => !q.actor || event.actor === q.actor)
@@ -2283,10 +2343,10 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       )
       .slice(0, Math.min(parseInt(String(q.limit || '100'), 10), 1000));
   }
-  if (pathname === '/audit/export') {
+  if (pathname === '/runtime-audit/export') {
     return { exportedAt: iso(0), events: auditEvents };
   }
-  if (pathname.startsWith('/audit/replay/')) {
+  if (pathname.startsWith('/runtime-audit/replay/')) {
     const correlationId = decodeURIComponent(pathname.split('/').pop() || '');
     const events = auditEvents
       .filter((event) => event.correlationId === correlationId)
@@ -2999,7 +3059,7 @@ function writeResponse(pathname: string): JsonValue {
   if (pathname.includes('/preflight'))
     return ok({ message: 'Mock preflight passed' });
   if (pathname === '/providers/probe-all') return { version: 2, entries: [] };
-  if (pathname === '/audit/simulate') {
+  if (pathname === '/runtime-audit/simulate') {
     return ok({
       decision: {
         id: 'policy-mock-simulation',

@@ -11,6 +11,8 @@ function queryString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
+router.use(requireRole('admin'));
+
 router.get('/', (req: Request, res: Response) => {
   res.json(
     listAuditEvents({
@@ -51,49 +53,45 @@ router.get('/replay/:correlationId', (req: Request, res: Response) => {
   res.json(replayAuditCorrelation(req.params.correlationId as string));
 });
 
-router.post(
-  '/simulate',
-  requireRole('admin'),
-  (req: Request, res: Response) => {
-    try {
-      const decision = evaluatePolicy({
-        actor:
-          typeof req.body.actor === 'string' && req.body.actor.trim()
-            ? req.body.actor.trim()
-            : req.user?.username || 'dashboard',
-        actorId: typeof req.body.actorId === 'string' ? req.body.actorId : null,
-        actionType:
-          typeof req.body.actionType === 'string' && req.body.actionType.trim()
-            ? req.body.actionType.trim()
-            : 'tool.action',
-        resource:
-          typeof req.body.resource === 'string' && req.body.resource.trim()
-            ? req.body.resource.trim()
-            : 'simulated-resource',
-        dryRun: req.body.dryRun === true,
-        context:
-          req.body.context && typeof req.body.context === 'object'
-            ? req.body.context
-            : {},
-      });
-      logAuditEvent({
-        actor: req.user?.username || 'dashboard',
-        actionType: 'policy.simulate',
-        resource: decision.resource,
-        decision: decision.decision,
-        correlationId:
-          typeof req.body.correlationId === 'string'
-            ? req.body.correlationId
-            : null,
-        context: decision,
-      });
-      res.json({ ok: true, decision });
-    } catch (err) {
-      res.status(400).json({
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  },
-);
+router.post('/simulate', (req: Request, res: Response) => {
+  try {
+    const decision = evaluatePolicy({
+      actor:
+        typeof req.body.actor === 'string' && req.body.actor.trim()
+          ? req.body.actor.trim()
+          : req.user?.username || 'dashboard',
+      actorId: typeof req.body.actorId === 'string' ? req.body.actorId : null,
+      actionType:
+        typeof req.body.actionType === 'string' && req.body.actionType.trim()
+          ? req.body.actionType.trim()
+          : 'tool.action',
+      resource:
+        typeof req.body.resource === 'string' && req.body.resource.trim()
+          ? req.body.resource.trim()
+          : 'simulated-resource',
+      dryRun: req.body.dryRun === true,
+      context:
+        req.body.context && typeof req.body.context === 'object'
+          ? req.body.context
+          : {},
+    });
+    logAuditEvent({
+      actor: req.user?.username || 'dashboard',
+      actionType: 'policy.simulate',
+      resource: decision.resource,
+      decision: decision.decision,
+      correlationId:
+        typeof req.body.correlationId === 'string'
+          ? req.body.correlationId
+          : null,
+      context: decision,
+    });
+    res.json({ ok: true, decision });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
 
 export default router;

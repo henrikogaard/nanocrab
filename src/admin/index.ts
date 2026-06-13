@@ -207,8 +207,10 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/copilot/oauth/callback', copilotRoutes);
 
   // Auth routes (login has its own rate limiting)
-  app.use('/api/audit', requireAuth, auditRoutes);
   app.use('/api', authRoutes);
+
+  // Runtime audit is separate from the auth/security audit log exposed by authRoutes.
+  app.use('/api/runtime-audit', requireAuth, auditRoutes);
 
   // Core API routes — role-based access control
   // Any authenticated user (viewer+)

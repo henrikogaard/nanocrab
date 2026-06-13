@@ -519,6 +519,7 @@ function showShell(page) {
     'gitcode',
     'pipelines',
     'containers',
+    'audit',
     'security',
     'integrations',
     'marketplace',
@@ -4660,13 +4661,13 @@ async function renderAudit(el) {
     limit: '150',
   };
   window._auditFilters = filters;
-  const events = await api(`/audit?${auditQueryFromFilters()}`);
+  const events = await api(`/runtime-audit?${auditQueryFromFilters()}`);
   const selected =
     events.find((event) => event.id === window._selectedAuditId) || events[0];
   if (selected?.id) window._selectedAuditId = selected.id;
   const replay =
     selected?.correlationId && selected.correlationId !== '-'
-      ? await api(`/audit/replay/${encodeURIComponent(selected.correlationId)}`).catch(() => null)
+      ? await api(`/runtime-audit/replay/${encodeURIComponent(selected.correlationId)}`).catch(() => null)
       : null;
 
   el.innerHTML = `
@@ -4731,7 +4732,7 @@ async function renderAudit(el) {
       toast('Simulator context must be valid JSON', 'error');
       return;
     }
-    const result = await api('/audit/simulate', {
+    const result = await api('/runtime-audit/simulate', {
       method: 'POST',
       body: JSON.stringify({
         actor: data.actor,
@@ -4751,7 +4752,7 @@ window.resetAuditFilters = function () {
 };
 
 window.exportAuditJson = async function () {
-  const payload = await api(`/audit/export?${auditQueryFromFilters()}`);
+  const payload = await api(`/runtime-audit/export?${auditQueryFromFilters()}`);
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: 'application/json',
   });

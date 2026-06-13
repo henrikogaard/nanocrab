@@ -4,6 +4,7 @@ import {
   insertAuditEvent,
   isDatabaseInitialized,
   queryAuditEvents,
+  queryAuditEventsByCorrelation,
   type AuditEventQuery,
   type AuditEventRow,
 } from './db.js';
@@ -174,9 +175,13 @@ export function replayAuditCorrelation(correlationId: string): {
     durationMs: number | null;
   };
 } {
-  const events = listAuditEvents({ correlationId, limit: 1000 }).sort((a, b) =>
-    a.timestamp.localeCompare(b.timestamp),
-  );
+  let events: AuditEvent[];
+  try {
+    events = queryAuditEventsByCorrelation(correlationId).map(rowToEvent);
+  } catch (err) {
+    logger.warn({ err, correlationId }, 'Failed to replay audit correlation');
+    events = [];
+  }
   const first = events[0];
   const last = events[events.length - 1];
   const startMs = first ? Date.parse(first.timestamp) : NaN;

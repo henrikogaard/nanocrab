@@ -852,6 +852,22 @@ export function queryAuditEvents(query: AuditEventQuery = {}): AuditEventRow[] {
     .all(...values, limit) as AuditEventRow[];
 }
 
+export function queryAuditEventsByCorrelation(
+  correlationId: string,
+): AuditEventRow[] {
+  return db
+    .prepare(
+      `
+      SELECT id, timestamp, actor, actor_id, action_type, resource, decision,
+             context_json, correlation_id, duration_ms, error
+      FROM audit_events
+      WHERE correlation_id = ?
+      ORDER BY timestamp ASC, id ASC
+    `,
+    )
+    .all(correlationId) as AuditEventRow[];
+}
+
 // --- Memory accessors ---
 
 export function createMemory(record: NewMemoryRecord): MemoryRecord {
