@@ -318,6 +318,7 @@ These rules are non-negotiable:
    - DONE: Enhanced fallback policy enforcement for write-capable tasks
    - DONE: Provider/model selectors in Scheduled Tasks UI (creation + edit forms)
    - DONE: Model selector in GitHub coding issue picker
+   - DONE: Provider-profile selector in Report Studio scheduled briefing creation
    - DONE: Persistent probe history with dashboard API endpoint
    - DONE: Periodic probe scheduler (5-min interval) with local/remote inference readiness, stale probes, average latency, capability tags, and health dashboard display in Monitoring page
    - DONE: `POST /providers/probe-all` for manual re-probe from dashboard
