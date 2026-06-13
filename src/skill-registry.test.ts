@@ -17,11 +17,17 @@ describe('skill registry', () => {
     const skills = listSkillRegistry();
     expect(skills.map((skill) => skill.path)).toContain('memory-curator');
     expect(skills.map((skill) => skill.path)).toContain('ops-commander');
+    expect(skills.map((skill) => skill.path)).toContain('connector-catalog');
+    expect(skills.map((skill) => skill.path)).toContain('github-connector');
     const ops = skills.find((skill) => skill.path === 'ops-commander');
     expect(ops?.enabled).toBe(true);
     expect(ops?.scope).toBe('all');
     expect(ops?.visibility).toBe('shared');
     expect(ops?.triggers).toContain('operation');
+    const github = skills.find((skill) => skill.path === 'github-connector');
+    expect(github?.category).toBe('plugin');
+    expect(github?.riskLevel).toBe('medium');
+    expect(github?.requiredTools).toContain('mcp__github__*');
   });
 
   it('scores skills for related requests', () => {
@@ -204,5 +210,86 @@ describe('skill registry', () => {
 
     expect(selection.injected).toHaveLength(0);
     expect(selection.excluded[0].decision).toBe('excluded-visibility');
+  });
+
+  it('uses agent boundaries to deny connector skills without required connectors', () => {
+    const boundary: AgentBoundary = {
+      agentId: 'limited-main',
+      groupFolder: 'main',
+      isMain: true,
+      channelScopes: ['own'],
+      filesystemScopes: [],
+      skillScopes: {
+        allowedScopes: ['all'],
+        allowedVisibility: ['shared'],
+      },
+      providerProfiles: ['default_chat'],
+      connectorIds: ['nanocrab'],
+      externalWrites: { allowed: false, requiresApproval: true },
+    };
+
+    const selection = selectSkillsForRequest('github issue triage', {
+      isMain: true,
+      agentBoundary: boundary,
+      skills: [
+        {
+          name: 'GitHub Connector',
+          description: 'GitHub issue triage helper',
+          path: 'github-connector',
+          category: 'plugin',
+          enabled: true,
+          scope: 'all',
+          visibility: 'shared',
+          triggers: ['github', 'issue'],
+          examples: [],
+          riskLevel: 'medium',
+          requiredTools: ['mcp__github__*', 'mcp__nanocrab__*'],
+        },
+      ],
+    });
+
+    expect(selection.injected).toHaveLength(0);
+    expect(selection.excluded[0].decision).toBe('excluded-connector-scope');
+  });
+
+  it('injects connector skills when the agent boundary allows the connector', () => {
+    const boundary: AgentBoundary = {
+      agentId: 'main',
+      groupFolder: 'main',
+      isMain: true,
+      channelScopes: ['all'],
+      filesystemScopes: [],
+      skillScopes: {
+        allowedScopes: ['all'],
+        allowedVisibility: ['shared'],
+      },
+      providerProfiles: ['default_chat'],
+      connectorIds: ['nanocrab', 'github'],
+      externalWrites: { allowed: true, requiresApproval: true },
+    };
+
+    const selection = selectSkillsForRequest('github issue triage', {
+      isMain: true,
+      agentBoundary: boundary,
+      skills: [
+        {
+          name: 'GitHub Connector',
+          description: 'GitHub issue triage helper',
+          path: 'github-connector',
+          category: 'plugin',
+          enabled: true,
+          scope: 'all',
+          visibility: 'shared',
+          triggers: ['github', 'issue'],
+          examples: [],
+          riskLevel: 'medium',
+          requiredTools: ['mcp__github__*', 'mcp__nanocrab__*'],
+        },
+      ],
+      skillBytes: { 'github-connector': 50 },
+    });
+
+    expect(selection.injected[0].path).toBe('github-connector');
+    expect(selection.injected[0].decision).toBe('injected');
   });
 });
