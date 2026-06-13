@@ -255,6 +255,34 @@ const cockpitSessions = [
   },
 ];
 
+const terminalHistory = [
+  {
+    id: 'mock-terminal-main',
+    name: 'main shell',
+    owner: 'mock-owner',
+    createdAt: iso(96),
+    endedAt: null,
+    bytes: 1834,
+    active: true,
+  },
+  {
+    id: 'mock-terminal-audit',
+    name: 'release audit',
+    owner: 'release-lead',
+    createdAt: iso(360),
+    endedAt: iso(300),
+    bytes: 2940,
+    active: false,
+  },
+];
+
+const terminalTranscripts: Record<string, string> = {
+  'mock-terminal-main':
+    'npm run dev\n[watch] compiling admin dashboard\n[watch] cockpit deliverables panel rendered\n',
+  'mock-terminal-audit':
+    'npm test\nPASS src/admin/routes/sessions.test.ts\nPASS src/admin/routes/reports.test.ts\n',
+};
+
 const approvals = [
   {
     id: 'approval-message-risk',
@@ -1860,6 +1888,28 @@ function mockSessionDetail(group: string, sessionId: string): JsonValue {
 
 function routeJson(pathname: string, req: Request): JsonValue | undefined {
   const method = req.method.toUpperCase();
+  if (method === 'POST' && pathname === '/sessions/terminal/search') {
+    const query = String(req.body?.query || '')
+      .trim()
+      .toLowerCase();
+    if (!query) return { results: [] };
+    const results: JsonValue[] = [];
+    for (const session of terminalHistory) {
+      const transcript = terminalTranscripts[session.id] || '';
+      const lines = transcript.split('\n');
+      lines.forEach((line, index) => {
+        if (line.toLowerCase().includes(query)) {
+          results.push({
+            sessionId: session.id,
+            line: index + 1,
+            text: line,
+            context: lines.slice(Math.max(0, index - 2), index + 3).join('\n'),
+          });
+        }
+      });
+    }
+    return { results };
+  }
   if (method !== 'GET') return writeResponse(pathname);
 
   if (pathname === '/me') {
@@ -3376,14 +3426,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
     };
   }
   if (pathname === '/sessions/terminal/active') {
-    return [
-      {
-        id: 'mock-terminal-main',
-        name: 'main shell',
-        owner: 'mock-owner',
-        transcriptBytes: 1834,
-      },
-    ];
+    return terminalHistory;
   }
   if (pathname === '/skills') return { installed: skills, available: [] };
   if (pathname === '/skills/search') {
@@ -3819,6 +3862,13 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname === '/sessions/cockpit') return sessions();
   if (pathname.startsWith('/sessions/cockpit/')) {
     return cockpitDetail(decodeURIComponent(pathname.split('/').pop() || ''));
+  }
+  if (pathname === '/sessions/terminal/history') return terminalHistory;
+  if (pathname === '/sessions/terminal/active') return terminalHistory;
+  if (pathname.match(/^\/sessions\/terminal\/[^/]+\/transcript$/)) {
+    const sessionId = decodeURIComponent(pathname.split('/')[3] || '');
+    const content = terminalTranscripts[sessionId];
+    return content ? { id: sessionId, content } : undefined;
   }
   if (pathname.match(/^\/sessions\/[^/]+\/[^/]+\/detail$/)) {
     const [, , group, sessionId] = pathname.split('/');

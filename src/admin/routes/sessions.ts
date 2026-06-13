@@ -4,7 +4,12 @@ import path from 'path';
 import readline from 'readline';
 
 import { DATA_DIR, SESSIONS_DIR } from '../../config.js';
-import { listTerminalSessions } from '../websocket.js';
+import { requireRole } from '../middleware.js';
+import {
+  isSafeTerminalSessionId,
+  listTerminalSessions,
+  readSessionLog,
+} from '../websocket.js';
 import { getAgentProviderConfig } from '../../agent-provider.js';
 import { listApprovals } from '../../approvals.js';
 import { loadCodingJobs } from '../../coding-jobs.js';
@@ -688,111 +693,139 @@ router.get('/cockpit/:id', (req: Request, res: Response) => {
   }
 });
 
-router.get('/terminal/active', (_req: Request, res: Response) => {
-  res.json(listTerminalSessions());
-});
+router.get(
+  '/terminal/active',
+  requireRole('owner'),
+  (_req: Request, res: Response) => {
+    res.json(listTerminalSessions());
+  },
+);
 
 // GET /api/sessions/terminal/history — list all terminal sessions
-router.get('/terminal/history', async (_req: Request, res: Response) => {
-  try {
-    const indexPath = path.join(SESSIONS_DIR, 'index.json');
-    if (!fs.existsSync(indexPath)) {
-      res.json([]);
-      return;
+router.get(
+  '/terminal/history',
+  requireRole('owner'),
+  async (_req: Request, res: Response) => {
+    try {
+      const indexPath = path.join(SESSIONS_DIR, 'index.json');
+      if (!fs.existsSync(indexPath)) {
+        res.json([]);
+        return;
+      }
+      const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+      const activeSessions = listTerminalSessions();
+      const activeIds = new Set(
+        activeSessions.filter((s) => s.active).map((s) => s.id),
+      );
+      const history = index.map((entry: any) => ({
+        ...entry,
+        active: activeIds.has(entry.id),
+      }));
+      history.sort((a: any, b: any) =>
+        (b.createdAt || '').localeCompare(a.createdAt || ''),
+      );
+      res.json(history);
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to read session history' });
     }
-    const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-    const activeSessions = listTerminalSessions();
-    const activeIds = new Set(
-      activeSessions.filter((s) => s.active).map((s) => s.id),
-    );
-    const history = index.map((entry: any) => ({
-      ...entry,
-      active: activeIds.has(entry.id),
-    }));
-    history.sort((a: any, b: any) =>
-      (b.createdAt || '').localeCompare(a.createdAt || ''),
-    );
-    res.json(history);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to read session history' });
-  }
-});
+  },
+);
 
 // GET /api/sessions/terminal/:id/transcript — full transcript
-router.get('/terminal/:id/transcript', async (req: Request, res: Response) => {
-  try {
-    const sessionId = req.params.id as string;
-    const logPath = path.join(SESSIONS_DIR, `${sessionId}.log`);
-    if (!fs.existsSync(logPath)) {
-      res.status(404).json({ error: 'Session not found' });
-      return;
+router.get(
+  '/terminal/:id/transcript',
+  requireRole('owner'),
+  async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id as string;
+      if (!isSafeTerminalSessionId(sessionId)) {
+        res.status(400).json({ error: 'Invalid session id' });
+        return;
+      }
+      const content = readSessionLog(sessionId);
+      if (!content) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      res.json({ id: sessionId, content });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to read session transcript' });
     }
-    const content = fs.readFileSync(logPath, 'utf-8');
-    res.json({ id: sessionId, content });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to read session transcript' });
-  }
-});
+  },
+);
 
 // POST /api/sessions/terminal/search — search across session logs
-router.post('/terminal/search', async (req: Request, res: Response) => {
-  try {
-    const { query, sessionId, dateFrom, dateTo } = req.body as {
-      query?: string;
-      sessionId?: string;
-      dateFrom?: string;
-      dateTo?: string;
-    };
-    if (!query || !query.trim()) {
-      res.status(400).json({ error: 'query is required' });
-      return;
-    }
+router.post(
+  '/terminal/search',
+  requireRole('owner'),
+  async (req: Request, res: Response) => {
+    try {
+      const { query, sessionId, dateFrom, dateTo } = req.body as {
+        query?: string;
+        sessionId?: string;
+        dateFrom?: string;
+        dateTo?: string;
+      };
+      if (!query || !query.trim()) {
+        res.status(400).json({ error: 'query is required' });
+        return;
+      }
+      if (sessionId && !isSafeTerminalSessionId(sessionId)) {
+        res.status(400).json({ error: 'Invalid session id' });
+        return;
+      }
 
-    const indexPath = path.join(SESSIONS_DIR, 'index.json');
-    if (!fs.existsSync(indexPath)) {
-      res.json({ results: [] });
-      return;
-    }
-    const index: any[] = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-    const lowerQuery = query.toLowerCase();
-    const results: Array<{
-      sessionId: string;
-      line: number;
-      text: string;
-      context: string;
-    }> = [];
+      const indexPath = path.join(SESSIONS_DIR, 'index.json');
+      if (!fs.existsSync(indexPath)) {
+        res.json({ results: [] });
+        return;
+      }
+      const index: any[] = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+      const lowerQuery = query.toLowerCase();
+      const results: Array<{
+        sessionId: string;
+        line: number;
+        text: string;
+        context: string;
+      }> = [];
 
-    const sessionsToSearch = sessionId
-      ? index.filter((e) => e.id === sessionId)
-      : index;
+      const sessionsToSearch = sessionId
+        ? index.filter((e) => e.id === sessionId)
+        : index;
 
-    for (const entry of sessionsToSearch) {
-      if (dateFrom && entry.createdAt && entry.createdAt < dateFrom) continue;
-      if (dateTo && entry.createdAt && entry.createdAt > dateTo + 'T23:59:59Z')
-        continue;
+      for (const entry of sessionsToSearch) {
+        if (dateFrom && entry.createdAt && entry.createdAt < dateFrom) continue;
+        if (
+          dateTo &&
+          entry.createdAt &&
+          entry.createdAt > dateTo + 'T23:59:59Z'
+        )
+          continue;
 
-      const logPath = path.join(SESSIONS_DIR, `${entry.id}.log`);
-      if (!fs.existsSync(logPath)) continue;
+        if (!isSafeTerminalSessionId(String(entry.id || ''))) continue;
+        const logPath = path.join(SESSIONS_DIR, `${entry.id}.log`);
+        if (!fs.existsSync(logPath)) continue;
 
-      const content = fs.readFileSync(logPath, 'utf-8');
-      const lines = content.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].toLowerCase().includes(lowerQuery)) {
-          results.push({
-            sessionId: entry.id,
-            line: i + 1,
-            text: lines[i],
-            context: lines.slice(Math.max(0, i - 2), i + 3).join('\n'),
-          });
+        const content = fs.readFileSync(logPath, 'utf-8');
+        const lines = content.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].toLowerCase().includes(lowerQuery)) {
+            results.push({
+              sessionId: entry.id,
+              line: i + 1,
+              text: lines[i],
+              context: lines.slice(Math.max(0, i - 2), i + 3).join('\n'),
+            });
+          }
         }
       }
-    }
 
-    res.json({ results });
-  } catch (err) {
-    res.status(500).json({ error: 'Search failed' });
-  }
-});
+      res.json({ results });
+    } catch (err) {
+      res.status(500).json({ error: 'Search failed' });
+    }
+  },
+);
 
 // GET /api/sessions/:group/:sessionId/detail — full session detail with stats + structured tool calls
 router.get('/:group/:sessionId/detail', async (req: Request, res: Response) => {

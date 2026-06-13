@@ -37,6 +37,7 @@ const MAX_TERMINALS = 3;
 const historicalSessions = new Map<string, string>();
 
 const INDEX_PATH = path.join(SESSIONS_DIR, 'index.json');
+const SAFE_SESSION_ID = /^[A-Za-z0-9_.-]+$/;
 
 interface SessionMetadata {
   id: string;
@@ -60,18 +61,29 @@ function saveSessionIndex(index: SessionMetadata[]): void {
   fs.writeFileSync(INDEX_PATH, JSON.stringify(index, null, 2));
 }
 
-export function createSessionFile(sessionId: string): void {
+export function isSafeTerminalSessionId(sessionId: string): boolean {
+  return SAFE_SESSION_ID.test(sessionId);
+}
+
+function sessionLogPath(sessionId: string): string | null {
+  if (!isSafeTerminalSessionId(sessionId)) return null;
+  return path.join(SESSIONS_DIR, `${sessionId}.log`);
+}
+
+export function createSessionFile(sessionId: string, owner = 'owner'): boolean {
+  if (!isSafeTerminalSessionId(sessionId)) return false;
   let index = loadSessionIndex();
   index = index.filter((e) => e.id !== sessionId);
   index.push({
     id: sessionId,
     name: sessionId,
-    owner: 'owner',
+    owner,
     createdAt: new Date().toISOString(),
     endedAt: null,
     bytes: 0,
   });
   saveSessionIndex(index);
+  return true;
 }
 
 export function finalizeSessionFile(sessionId: string): void {
@@ -79,9 +91,9 @@ export function finalizeSessionFile(sessionId: string): void {
   const entry = index.find((e) => e.id === sessionId);
   if (entry) {
     entry.endedAt = new Date().toISOString();
-    const logPath = path.join(SESSIONS_DIR, `${sessionId}.log`);
+    const logPath = sessionLogPath(sessionId);
     try {
-      entry.bytes = fs.statSync(logPath).size;
+      entry.bytes = logPath ? fs.statSync(logPath).size : 0;
     } catch {}
     saveSessionIndex(index);
   }
@@ -89,7 +101,8 @@ export function finalizeSessionFile(sessionId: string): void {
 
 export function appendToSessionLog(sessionId: string, data: string): void {
   if (!data) return;
-  const logPath = path.join(SESSIONS_DIR, `${sessionId}.log`);
+  const logPath = sessionLogPath(sessionId);
+  if (!logPath) return;
   try {
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     fs.appendFileSync(logPath, data, 'utf-8');
@@ -99,7 +112,8 @@ export function appendToSessionLog(sessionId: string, data: string): void {
 }
 
 export function readSessionLog(sessionId: string): string {
-  const logPath = path.join(SESSIONS_DIR, `${sessionId}.log`);
+  const logPath = sessionLogPath(sessionId);
+  if (!logPath) return '';
   try {
     return fs.readFileSync(logPath, 'utf-8');
   } catch {
@@ -306,6 +320,15 @@ function stopLogStream(ws: WebSocket): void {
 }
 
 function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
+  if (!isSafeTerminalSessionId(sessionId)) {
+    send(ws, {
+      type: 'terminal_output',
+      data: 'Invalid terminal session id.\r\n',
+      sessionId,
+    });
+    return;
+  }
+
   const existing = terminals.get(sessionId);
   if (existing) {
     existing.clients.add(ws);
@@ -332,7 +355,7 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
     cwd: process.cwd(),
   });
 
-  createSessionFile(sessionId);
+  createSessionFile(sessionId, owner);
   appendToSessionLog(
     sessionId,
     `[Session started at ${new Date().toISOString()}]\r\n`,
@@ -396,11 +419,14 @@ export function listTerminalSessions(): Array<{
     transcriptBytes: Buffer.byteLength(term.transcript),
     active: true,
   }));
+  const indexById = new Map(
+    loadSessionIndex().map((entry) => [entry.id, entry]),
+  );
   const historical = [...historicalSessions.entries()].map(
     ([id, transcript]) => ({
       id,
       name: id,
-      owner: 'unknown',
+      owner: indexById.get(id)?.owner || 'unknown',
       transcriptBytes: Buffer.byteLength(transcript),
       active: false,
     }),
