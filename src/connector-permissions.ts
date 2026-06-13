@@ -44,6 +44,18 @@ const CONNECTOR_PERMISSIONS_PATH = path.join(
 );
 
 const DEFAULT_CONNECTOR_ACTIONS = ['*'];
+const READ_TOOL_PREFIXES = ['get', 'list', 'read', 'search', 'fetch'];
+const WRITE_TOOL_PREFIXES = [
+  'create',
+  'update',
+  'delete',
+  'send',
+  'upload',
+  'push',
+  'commit',
+  'merge',
+  'write',
+];
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -187,7 +199,11 @@ function matchesAction(patterns: string[], action: string): boolean {
 
 function inScope(
   permission: ConnectorPermission,
-  input: ConnectorAuthorizationInput,
+  input: {
+    groupFolder: string;
+    agentId?: string;
+    isMain?: boolean;
+  },
 ): boolean {
   if (permission.scope === 'all') return true;
   if (permission.scope === 'main') return input.isMain === true;
@@ -215,6 +231,70 @@ function isExposureAction(action: string): boolean {
 function isWriteAction(action: string): boolean {
   return /(^|\.)(write|send|create|update|delete|upload|push|commit|open_pr|execute)$/i.test(
     action,
+  );
+}
+
+function toolPattern(connectorId: string, toolNamePattern: string): string {
+  return `mcp__${connectorId}__${toolNamePattern}`;
+}
+
+function actionNameVariants(action: string): string[] {
+  const normalized = action.trim();
+  return Array.from(
+    new Set([
+      normalized,
+      normalized.replace(/[.:\s/]+/g, '_'),
+      normalized.replace(/[.:\s/]+/g, '-'),
+    ]),
+  ).filter(Boolean);
+}
+
+function semanticToolPatterns(
+  connectorId: string,
+  resource: string,
+  mode: 'read' | 'write',
+): string[] {
+  const prefixes = mode === 'read' ? READ_TOOL_PREFIXES : WRITE_TOOL_PREFIXES;
+  if (resource === '*') {
+    return prefixes.map((prefix) => toolPattern(connectorId, `${prefix}_*`));
+  }
+  const normalizedResource = resource.replace(/[^a-z0-9]+/gi, '_');
+  return prefixes.flatMap((prefix) => [
+    toolPattern(connectorId, `${prefix}_${normalizedResource}*`),
+    toolPattern(
+      connectorId,
+      `${prefix}- ${normalizedResource}*`.replace(' ', ''),
+    ),
+  ]);
+}
+
+export function connectorActionToToolPatterns(
+  connectorId: string,
+  action: string,
+): string[] {
+  const normalizedConnectorId = normalizeConnectorId(connectorId);
+  const normalizedAction = String(action || '').trim();
+  if (!normalizedConnectorId || !normalizedAction) return [];
+  if (
+    normalizedAction === 'tools.expose' ||
+    normalizedAction === 'connector.expose'
+  ) {
+    return [];
+  }
+  if (normalizedAction === '*')
+    return [toolPattern(normalizedConnectorId, '*')];
+
+  const semantic = normalizedAction.match(/^(.+)\.(read|write)$/i);
+  if (semantic) {
+    return semanticToolPatterns(
+      normalizedConnectorId,
+      semantic[1].toLowerCase(),
+      semantic[2].toLowerCase() as 'read' | 'write',
+    );
+  }
+
+  return actionNameVariants(normalizedAction).map((variant) =>
+    toolPattern(normalizedConnectorId, variant),
   );
 }
 
@@ -341,4 +421,40 @@ export function filterAllowedConnectorIds(input: {
       });
       return decision.allowed;
     });
+}
+
+export function getAllowedConnectorToolPatterns(input: {
+  connectorIds: string[];
+  permissions?: ConnectorPermission[];
+  groupFolder: string;
+  agentId?: string;
+  isMain?: boolean;
+  dryRun?: boolean;
+}): string[] {
+  const permissions = input.permissions || loadConnectorPermissions();
+  const patterns: string[] = [];
+  for (const connectorId of input.connectorIds) {
+    const permission = findPermission(permissions, connectorId);
+    if (!permission || !inScope(permission, input)) continue;
+    if (permission.requiresApproval && permission.connectorId !== 'nanocrab') {
+      continue;
+    }
+    for (const action of permission.allowedActions) {
+      if (action === 'tools.expose' || action === 'connector.expose') continue;
+      const decision = authorizeConnectorAction({
+        permissions,
+        connectorId: permission.connectorId,
+        action,
+        groupFolder: input.groupFolder,
+        agentId: input.agentId,
+        isMain: input.isMain,
+        dryRun: input.dryRun,
+      });
+      if (!decision.allowed) continue;
+      patterns.push(
+        ...connectorActionToToolPatterns(permission.connectorId, action),
+      );
+    }
+  }
+  return Array.from(new Set(patterns));
 }

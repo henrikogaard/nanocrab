@@ -56,7 +56,10 @@ import {
   resolveAgentBoundary,
   type AgentBoundary,
 } from './agent-boundaries.js';
-import { filterAllowedConnectorIds } from './connector-permissions.js';
+import {
+  filterAllowedConnectorIds,
+  getAllowedConnectorToolPatterns,
+} from './connector-permissions.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCRAB_OUTPUT_START---';
@@ -72,6 +75,7 @@ export interface ContainerInput {
   assistantName?: string;
   script?: string;
   allowedMcpServers?: string[];
+  allowedMcpToolPatterns?: string[];
   model?: string;
   provider?: AgentProvider;
   providerFallbackPurpose?: ProviderPurpose;
@@ -166,6 +170,16 @@ function loadConfiguredConnectorIds(): string[] {
     }
   } catch {}
   return Array.from(ids);
+}
+
+function connectorIdsFromMcpToolPatterns(patterns: string[]): string[] {
+  return Array.from(
+    new Set(
+      patterns
+        .map((pattern) => pattern.match(/^mcp__([^_]+)__/)?.[1])
+        .filter((connectorId): connectorId is string => Boolean(connectorId)),
+    ),
+  );
 }
 
 function buildVolumeMounts(
@@ -652,6 +666,19 @@ export async function runContainerAgent(
     isMain: input.isMain,
     action: 'tools.expose',
   });
+  const allowedMcpToolPatterns = getAllowedConnectorToolPatterns({
+    connectorIds: allowedConnectorIds,
+    groupFolder: input.groupFolder,
+    agentId: agentBoundary.agentId,
+    isMain: input.isMain,
+    dryRun: input.dryRun,
+  });
+  const executableConnectorIds = connectorIdsFromMcpToolPatterns(
+    allowedMcpToolPatterns,
+  );
+  const runtimeConnectorIds = Array.from(
+    new Set(['nanocrab', ...executableConnectorIds]),
+  );
 
   const mounts = buildVolumeMounts(
     group,
@@ -678,6 +705,7 @@ export async function runContainerAgent(
         agentId: agentBoundary.agentId,
         channelScopes: agentBoundary.channelScopes,
         connectorIds: allowedConnectorIds,
+        connectorToolPatterns: allowedMcpToolPatterns,
         providerProfiles: agentBoundary.providerProfiles,
         externalWrites: agentBoundary.externalWrites,
       },
@@ -771,7 +799,7 @@ export async function runContainerAgent(
   const builtContainerArgs = buildContainerArgs(
     mounts,
     containerName,
-    allowedConnectorIds,
+    runtimeConnectorIds,
     effectiveProvider,
     effectiveModel,
   );
@@ -821,12 +849,16 @@ export async function runContainerAgent(
       JSON.stringify({
         ...input,
         allowedMcpServers: allowedConnectorIds.filter(
-          (connectorId) => connectorId !== 'nanocrab',
+          (connectorId) =>
+            connectorId !== 'nanocrab' &&
+            executableConnectorIds.includes(connectorId),
         ),
+        allowedMcpToolPatterns,
         agentBoundary,
         runtimeCapabilities: {
           ...runtimeCapabilities,
           allowedConnectorIds,
+          allowedMcpToolPatterns,
         },
       }),
     );

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   authorizeConnectorAction,
   filterAllowedConnectorIds,
+  getAllowedConnectorToolPatterns,
   normalizeConnectorPermission,
   type ConnectorPermission,
 } from './connector-permissions.js';
@@ -68,6 +69,46 @@ describe('connector permissions', () => {
     expect(decision.allowed).toBe(false);
     expect(decision.decision).toBe('requires_approval');
     expect(decision.requiresApproval).toBe(true);
+  });
+
+  it('narrows read-only connector permissions to read-like MCP tool patterns', () => {
+    const patterns = getAllowedConnectorToolPatterns({
+      permissions: [
+        {
+          ...basePermission,
+          allowedActions: ['*.read'],
+          requiresApproval: false,
+        },
+      ],
+      connectorIds: ['github'],
+      groupFolder: 'main',
+      agentId: 'main',
+      isMain: true,
+    });
+
+    expect(patterns).toContain('mcp__github__get_*');
+    expect(patterns).toContain('mcp__github__list_*');
+    expect(patterns).not.toContain('mcp__github__*');
+    expect(patterns).not.toContain('mcp__github__create_*');
+    expect(patterns).not.toContain('mcp__github__delete_*');
+  });
+
+  it('does not expose executable MCP tools for approval-required connectors', () => {
+    const patterns = getAllowedConnectorToolPatterns({
+      permissions: [
+        {
+          ...basePermission,
+          allowedActions: ['issues.read'],
+          requiresApproval: true,
+        },
+      ],
+      connectorIds: ['github'],
+      groupFolder: 'main',
+      agentId: 'main',
+      isMain: true,
+    });
+
+    expect(patterns).toEqual([]);
   });
 
   it('filters connector ids using group and agent scope', () => {

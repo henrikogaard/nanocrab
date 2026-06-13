@@ -515,4 +515,56 @@ describe('container-runner MCP env forwarding', () => {
       { mode: 0o600 },
     );
   });
+
+  it('does not pass MCP env vars for approval-required connectors without executable tools', async () => {
+    vi.mocked(fs.readFileSync).mockImplementation((file) => {
+      if (String(file).endsWith('mcp-servers.json')) {
+        return JSON.stringify([
+          {
+            name: 'infomaniak',
+            command: 'npx',
+            args: ['-y', '@example/infomaniak-mcp'],
+            envVars: ['MAIL_USER', 'MAIL_PASSWORD'],
+          },
+        ]);
+      }
+      if (String(file).endsWith('connector-permissions.json')) {
+        return JSON.stringify([
+          {
+            connectorId: 'infomaniak',
+            scope: 'all',
+            allowedActions: ['*.read'],
+            requiresApproval: true,
+            groups: [],
+            agents: [],
+            createdAt: '2026-06-13T10:00:00.000Z',
+            updatedAt: '2026-06-13T10:00:00.000Z',
+          },
+        ]);
+      }
+      return '';
+    });
+    vi.mocked(fs.writeFileSync).mockClear();
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        allowedMcpServers: ['infomaniak'],
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalledWith(
+      '/tmp/nanocrab-env-test/env',
+      expect.stringContaining('MAIL_PASSWORD=secret'),
+      { mode: 0o600 },
+    );
+  });
 });
