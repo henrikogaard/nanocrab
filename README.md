@@ -362,6 +362,13 @@ state is persisted in `.setup-state.json` with `pending`, `running`,
 `completed`, and `failed` statuses so reruns resume at the failed or next
 incomplete step.
 
+Owners can also use **Settings -> Production Release Diagnostics** before a
+deployment. The checklist combines first-run preflight results with release
+gates for a clean Git worktree, compiled server/admin output, operator docs,
+runtime state, backups, and service supervision. Required failures block the
+release status; advisory failures flag operational work to finish before going
+live.
+
 Setup logs are written to `logs/setup.log`; credential-looking material is
 redacted before it is logged. For a disposable VPS rehearsal, see
 [docs/FIRST_RUN_VPS_TEST.md](docs/FIRST_RUN_VPS_TEST.md).

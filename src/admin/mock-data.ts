@@ -1649,6 +1649,91 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       ],
     };
   }
+  if (pathname === '/system/release-diagnostics') {
+    return {
+      status: 'attention',
+      generatedAt: iso(0),
+      summary: { total: 8, passed: 7, failedRequired: 0, failedAdvisory: 1 },
+      sections: [
+        {
+          id: 'setup',
+          title: 'Install Readiness',
+          checks: [
+            {
+              id: 'setup-node',
+              label: 'Node.js',
+              ok: true,
+              severity: 'required',
+              detail: 'Node 22.x detected',
+            },
+            {
+              id: 'setup-container-runtime',
+              label: 'Container runtime',
+              ok: true,
+              severity: 'required',
+              detail: 'Docker is available',
+            },
+          ],
+        },
+        {
+          id: 'release',
+          title: 'Release Gate',
+          checks: [
+            {
+              id: 'git-clean',
+              label: 'Git worktree',
+              ok: true,
+              severity: 'required',
+              detail: 'No uncommitted or untracked files',
+            },
+            {
+              id: 'compiled-output',
+              label: 'Compiled server output',
+              ok: true,
+              severity: 'required',
+              detail: 'dist/index.js exists',
+            },
+            {
+              id: 'admin-assets',
+              label: 'Compiled admin assets',
+              ok: true,
+              severity: 'required',
+              detail: 'Admin assets are present in dist/admin/public',
+            },
+          ],
+        },
+        {
+          id: 'operations',
+          title: 'Operations Safety',
+          checks: [
+            {
+              id: 'runtime-state',
+              label: 'Runtime state detected',
+              ok: true,
+              severity: 'advisory',
+              detail: 'Sample channels and groups have runtime state',
+            },
+            {
+              id: 'backup-plan',
+              label: 'Backup plan',
+              ok: false,
+              severity: 'advisory',
+              detail:
+                'No mock backup archive or auto-backup configuration found',
+              hint: 'Create a backup or configure automatic backups before production release',
+            },
+            {
+              id: 'service-manager',
+              label: 'Service manager',
+              ok: true,
+              severity: 'advisory',
+              detail: 'systemctl is available in the release target',
+            },
+          ],
+        },
+      ],
+    };
+  }
   if (pathname === '/system') return system();
   if (pathname === '/system/stats') {
     return {

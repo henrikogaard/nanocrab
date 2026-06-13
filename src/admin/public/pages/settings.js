@@ -38,9 +38,13 @@ async function renderSettings(el) {
   } catch {}
   const isOwner = (window._userRole || 'owner') === 'owner';
   let setupPreflight = null;
+  let releaseDiagnostics = null;
   if (isOwner) {
     try {
       setupPreflight = await api('/system/setup/preflight');
+    } catch {}
+    try {
+      releaseDiagnostics = await api('/system/release-diagnostics');
     } catch {}
   }
   const providerModels = providerInfo.models || {
@@ -326,6 +330,23 @@ async function renderSettings(el) {
       </div>
     </div>`
       : '';
+  const releaseDiagnosticsCard =
+    isOwner && releaseDiagnostics
+      ? `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px">
+        <div>
+          <div class="card-title" style="margin:0">Production Release Diagnostics</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Required gates must pass before production release; advisory gates flag operational risk.</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="badge ${releaseDiagnostics.status === 'ready' ? 'badge-success' : releaseDiagnostics.status === 'blocked' ? 'badge-error' : 'badge-warning'}">${esc(releaseDiagnostics.status)}</span>
+          <button class="btn btn-sm btn-ghost" onclick="refreshReleaseDiagnostics()">Refresh</button>
+        </div>
+      </div>
+      <div id="release-diagnostics-list">${renderReleaseDiagnostics(releaseDiagnostics)}</div>
+    </div>`
+      : '';
 
   el.innerHTML = `
     <div class="page-header"><h2>Settings</h2></div>
@@ -384,6 +405,7 @@ async function renderSettings(el) {
     ${providerProfilesCard}`
         : ''
     }
+    ${releaseDiagnosticsCard}
     ${setupPreflightCard}
     ${isOwner ? '<div id="users-section"></div>' : ''}
     ${isOwner ? agentBoundaryCard : ''}
@@ -622,6 +644,32 @@ async function renderSettings(el) {
     };
 }
 
+function renderReleaseDiagnostics(result) {
+  return (result.sections || [])
+    .map(
+      (section) => `
+      <div style="margin-top:12px">
+        <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px">${esc(section.title)}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px">
+          ${(section.checks || [])
+            .map(
+              (check) => `
+              <div style="padding:9px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface)">
+                <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+                  <strong style="font-size:12px;color:var(--text)">${esc(check.label)}</strong>
+                  <span class="badge ${check.ok ? 'badge-success' : check.severity === 'required' ? 'badge-error' : 'badge-warning'}">${check.ok ? 'OK' : check.severity === 'required' ? 'Block' : 'Warn'}</span>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:5px;line-height:1.35">${esc(check.detail || '')}</div>
+                ${check.hint && !check.ok ? `<div style="font-size:11px;color:var(--warning);margin-top:5px;line-height:1.35">${esc(check.hint)}</div>` : ''}
+              </div>`,
+            )
+            .join('')}
+        </div>
+      </div>`,
+    )
+    .join('');
+}
+
 // --- User Management ---
 async function loadUsersSection() {
   const section = document.getElementById('users-section');
@@ -767,7 +815,8 @@ window.preflightProvider = async function (provider) {
 window.refreshSetupPreflight = async function () {
   const target = document.getElementById('setup-preflight-list');
   if (!target) return;
-  target.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Checking...</div>';
+  target.innerHTML =
+    '<div style="font-size:12px;color:var(--text-muted)">Checking...</div>';
   try {
     const result = await api('/system/setup/preflight');
     target.innerHTML = result.checks
@@ -782,6 +831,19 @@ window.refreshSetupPreflight = async function () {
         </div>`,
       )
       .join('');
+  } catch (e) {
+    target.innerHTML = `<span class="badge badge-error">Fail</span> ${esc(e.message)}`;
+  }
+};
+
+window.refreshReleaseDiagnostics = async function () {
+  const target = document.getElementById('release-diagnostics-list');
+  if (!target) return;
+  target.innerHTML =
+    '<div style="font-size:12px;color:var(--text-muted)">Checking...</div>';
+  try {
+    const result = await api('/system/release-diagnostics');
+    target.innerHTML = renderReleaseDiagnostics(result);
   } catch (e) {
     target.innerHTML = `<span class="badge badge-error">Fail</span> ${esc(e.message)}`;
   }
