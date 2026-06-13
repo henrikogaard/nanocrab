@@ -26,6 +26,7 @@ import {
   EDITION_VERSION,
 } from '../../edition.js';
 import { ensureCodexOAuth, getCodexAuthStatus } from '../../codex-auth.js';
+import { runSetupPreflight } from '../../setup-preflight.js';
 import { CONTAINER_RUNTIME_BIN } from '../../container-runtime.js';
 import {
   AGENT_PROVIDER_DEFINITIONS,
@@ -370,6 +371,19 @@ router.get('/health', (_req: Request, res: Response) => {
     channels: health,
     timestamp: new Date().toISOString(),
   });
+});
+
+router.get('/setup/preflight', requireRole('owner'), async (_req, res) => {
+  try {
+    const result = await runSetupPreflight({ dryRun: true });
+    res.json(result);
+  } catch (err) {
+    logger.error({ err }, 'Setup preflight failed');
+    res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 // Usage stats

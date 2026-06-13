@@ -62,6 +62,26 @@ grep -E 'Connected|Connection closed|connection.*close|channel.*ready' logs/nano
 grep 'groupCount' logs/nanocrab.log | tail -3
 ```
 
+## First-Run Setup Preflight
+
+```bash
+# Report prerequisite status without writing secrets
+npm run setup -- --dry-run
+
+# Resume after a failed setup step
+npm run setup:resume
+
+# Inspect explicit step state
+cat .setup-state.json
+
+# Confirm setup logs do not contain common secret shapes
+grep -Ei 'authorization: bearer|api[_-]?key=|password=|cookie=|credential[_-]?proxy' logs/setup.log
+```
+
+Expected dry-run coverage: Node.js, npm, container runtime, admin and
+credential-proxy ports, project/log/store/data write access, `.env`
+writability, admin auth, provider credentials, and channel credentials.
+
 ## Session Transcript Branching
 
 ```bash

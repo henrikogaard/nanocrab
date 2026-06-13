@@ -36,6 +36,13 @@ async function renderSettings(el) {
   try {
     agentBoundaries = await api('/agents/boundaries');
   } catch {}
+  const isOwner = (window._userRole || 'owner') === 'owner';
+  let setupPreflight = null;
+  if (isOwner) {
+    try {
+      setupPreflight = await api('/system/setup/preflight');
+    } catch {}
+  }
   const providerModels = providerInfo.models || {
     claude: [
       'claude-sonnet-4-6',
@@ -295,8 +302,30 @@ async function renderSettings(el) {
         </table>
       </div>
     </div>`;
-
-  const isOwner = (window._userRole || 'owner') === 'owner';
+  const setupPreflightCard =
+    isOwner && setupPreflight
+      ? `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px">
+        <div class="card-title" style="margin:0">First-Run Preflight</div>
+        <button class="btn btn-sm btn-ghost" onclick="refreshSetupPreflight()">Refresh</button>
+      </div>
+      <div id="setup-preflight-list" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px">
+        ${setupPreflight.checks
+          .map(
+            (check) => `
+          <div style="padding:9px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface)">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+              <strong style="font-size:12px;color:var(--text)">${esc(check.label)}</strong>
+              <span class="badge ${check.ok ? 'badge-success' : 'badge-error'}">${check.ok ? 'OK' : 'Fail'}</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:5px;line-height:1.35">${esc(check.detail || '')}</div>
+          </div>`,
+          )
+          .join('')}
+      </div>
+    </div>`
+      : '';
 
   el.innerHTML = `
     <div class="page-header"><h2>Settings</h2></div>
@@ -355,6 +384,7 @@ async function renderSettings(el) {
     ${providerProfilesCard}`
         : ''
     }
+    ${setupPreflightCard}
     ${isOwner ? '<div id="users-section"></div>' : ''}
     ${isOwner ? agentBoundaryCard : ''}
     <div class="grid grid-2">
@@ -731,6 +761,29 @@ window.preflightProvider = async function (provider) {
   } catch (e) {
     if (target)
       target.innerHTML = `<span class="badge badge-error">Fail</span> ${esc(e.message)}`;
+  }
+};
+
+window.refreshSetupPreflight = async function () {
+  const target = document.getElementById('setup-preflight-list');
+  if (!target) return;
+  target.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Checking...</div>';
+  try {
+    const result = await api('/system/setup/preflight');
+    target.innerHTML = result.checks
+      .map(
+        (check) => `
+        <div style="padding:9px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface)">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+            <strong style="font-size:12px;color:var(--text)">${esc(check.label)}</strong>
+            <span class="badge ${check.ok ? 'badge-success' : 'badge-error'}">${check.ok ? 'OK' : 'Fail'}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:5px;line-height:1.35">${esc(check.detail || '')}</div>
+        </div>`,
+      )
+      .join('');
+  } catch (e) {
+    target.innerHTML = `<span class="badge badge-error">Fail</span> ${esc(e.message)}`;
   }
 };
 

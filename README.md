@@ -340,6 +340,9 @@ chat commands, host/operator commands, setup steps, and agent MCP tools.
 ### Dashboard Setup
 
 ```bash
+# Report first-run readiness without writing secrets
+npm run setup -- --dry-run
+
 # Configure admin credentials
 npx tsx setup/index.ts --step admin -- \
   --username youruser \
@@ -351,6 +354,17 @@ npx tsx setup/index.ts --step admin -- \
 sudo cp Caddyfile /etc/caddy/Caddyfile
 sudo systemctl restart caddy
 ```
+
+The setup preflight checks Node.js, npm, Docker or Apple Container, required
+ports, writable runtime directories, `.env` writability, admin auth, provider
+credentials, and channel credentials before the container build step. Setup
+state is persisted in `.setup-state.json` with `pending`, `running`,
+`completed`, and `failed` statuses so reruns resume at the failed or next
+incomplete step.
+
+Setup logs are written to `logs/setup.log`; credential-looking material is
+redacted before it is logged. For a disposable VPS rehearsal, see
+[docs/FIRST_RUN_VPS_TEST.md](docs/FIRST_RUN_VPS_TEST.md).
 
 ### Configuration
 
@@ -461,8 +475,8 @@ Before releasing or deploying a roadmap-sized change, refresh the README, roadma
 ## Requirements
 
 - Linux or macOS (Windows via WSL2)
-- Node.js 20+
-- Docker
+- Node.js 20+ and npm
+- Docker or Apple Container
 - [Claude Code](https://claude.ai/download) or [OpenAI Codex CLI](https://developers.openai.com/codex)
 
 ## License

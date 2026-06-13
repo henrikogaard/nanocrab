@@ -13,6 +13,7 @@ cd "$SCRIPT_DIR"
 
 STATE_FILE=".setup-state.json"
 LOG_FILE="logs/setup.log"
+APP_VERSION="$(node -p "require('./package.json').version" 2>/dev/null || echo unknown)"
 mkdir -p logs
 
 # ── Colors ──
@@ -26,16 +27,20 @@ NC='\033[0m'
 # ── ASCII Banner ──
 print_banner() {
   echo ""
-  echo -e "${CYAN}                 ╱|、${NC}"
-  echo -e "${CYAN}               (˚ˎ 。7${NC}"
-  echo -e "${CYAN}                |、˜〵${NC}"
-  echo -e "${CYAN}                じしˍ,)ノ${NC}"
+  echo -e "${CYAN}       _     _     _     _     _     _${NC}"
+  echo -e "${CYAN}      / \\___/ \\___/ \\___/ \\___/ \\___/ \\\\${NC}"
+  echo -e "${CYAN}     (  o   o   N A N O C R A B   o   o )${NC}"
+  echo -e "${CYAN}      \\_/---\\_/---\\_/---\\_/---\\_/---\\_/${NC}"
+  echo -e "${CYAN}          \\_V_/                 \\_V_/${NC}"
   echo ""
-  echo -e "${BOLD}╔══════════════════════════════════════╗${NC}"
-  echo -e "${BOLD}║        🦀  N A N O C R A B          ║${NC}"
-  echo -e "${BOLD}║   Standalone Personal AI Assistant   ║${NC}"
-  echo -e "${BOLD}╚══════════════════════════════════════╝${NC}"
+  echo -e "${BOLD}NanoCrab - NanoCrab Edition${NC}"
+  echo -e "${BOLD}Edition 2.0-Beta1 | App $APP_VERSION${NC}"
+  echo -e "${BOLD}Standalone Personal AI Assistant${NC}"
   echo ""
+}
+
+redact() {
+  perl -pe 's/(Bearer\s+)[A-Za-z0-9._~+\/=-]+/${1}[REDACTED]/g; s/(sk-)[A-Za-z0-9._-]+/${1}[REDACTED]/g; s/((?:authorization|cookie|password|secret|token|api[_-]?key|credential[_-]?proxy)[^=:\n]{0,20}[=:]\s*)[^ \t\r\n"&]+/${1}[REDACTED]/ig; s#(/__nanocrab/providers/)[^ \t\r\n"&]+#${1}[REDACTED]#g'
 }
 
 # ── Step definitions ──
@@ -53,39 +58,33 @@ STEPS=(
 
 # ── State tracking ──
 load_state() {
-  if [ -f "$STATE_FILE" ]; then
-    COMPLETED=$(python3 -c "import json; d=json.load(open('$STATE_FILE')); print(','.join(d.get('completed', [])))" 2>/dev/null || echo "")
-  else
-    COMPLETED=""
-  fi
+  COMPLETED=$(node -e "const fs=require('fs'); const [statePath,...entries]=process.argv.slice(1); const names=entries.map((entry)=>entry.split(':')[0]); let state={version:2,updatedAt:new Date().toISOString(),steps:Object.fromEntries(names.map((name)=>[name,{status:'pending'}]))}; try{const raw=JSON.parse(fs.readFileSync(statePath,'utf8')); if(Array.isArray(raw.completed)){for(const name of raw.completed) if(state.steps[name]) state.steps[name]={status:'completed'};} if(raw.steps){for(const name of names) if(raw.steps[name]) state.steps[name]=raw.steps[name];}}catch{} let changed=false; for(const name of names){if(state.steps[name]?.status==='running'){state.steps[name]={...state.steps[name],status:'failed',failedAt:new Date().toISOString(),error:'Setup was interrupted while this step was running'}; changed=true;}} if(changed) fs.writeFileSync(statePath, JSON.stringify(state,null,2)+'\n', {mode:0o600}); console.log(names.filter((name)=>state.steps[name]?.status==='completed').join(','));" "$STATE_FILE" "${STEPS[@]}" 2>/dev/null || echo "")
 }
 
 save_state() {
   local step="$1"
   local status="$2"
-  local completed_list=""
-  if [ -f "$STATE_FILE" ]; then
-    completed_list=$(python3 -c "
-import json
-with open('$STATE_FILE') as f:
-    d = json.load(f)
-if '$status' == 'completed' and '$step' not in d.get('completed', []):
-    d.setdefault('completed', []).append('$step')
-with open('$STATE_FILE', 'w') as f:
-    json.dump(d, f, indent=2)
-" 2>/dev/null || true)
-  else
-    if [ "$status" = "completed" ]; then
-      echo "{\"completed\": [\"$step\"], \"version\": 1}" > "$STATE_FILE"
-    fi
-  fi
+  local error="${3:-}"
+  node -e "const fs=require('fs'); const [statePath,step,status,error,...entries]=process.argv.slice(1); const names=entries.map((entry)=>entry.split(':')[0]); let state={version:2,updatedAt:new Date().toISOString(),steps:Object.fromEntries(names.map((name)=>[name,{status:'pending'}]))}; try{const raw=JSON.parse(fs.readFileSync(statePath,'utf8')); if(Array.isArray(raw.completed)){for(const name of raw.completed) if(state.steps[name]) state.steps[name]={status:'completed'};} if(raw.steps){for(const name of names) if(raw.steps[name]) state.steps[name]=raw.steps[name];}}catch{} const now=new Date().toISOString(); const next={...(state.steps[step]||{status:'pending'}),status}; if(status==='running'){next.startedAt=now; delete next.completedAt; delete next.failedAt; delete next.error;} if(status==='completed'){next.completedAt=now; delete next.failedAt; delete next.error;} if(status==='failed'){next.failedAt=now; next.error=error||'Step failed';} state.steps[step]=next; state.updatedAt=now; fs.writeFileSync(statePath, JSON.stringify(state,null,2)+'\n', {mode:0o600});" "$STATE_FILE" "$step" "$status" "$error" "${STEPS[@]}" 2>/dev/null || true
 }
 
 init_state() {
   if [ ! -f "$STATE_FILE" ]; then
-    echo "{\"completed\": [], \"version\": 1}" > "$STATE_FILE"
+    node -e "const fs=require('fs'); const [statePath,...entries]=process.argv.slice(1); const names=entries.map((entry)=>entry.split(':')[0]); const state={version:2,updatedAt:new Date().toISOString(),steps:Object.fromEntries(names.map((name)=>[name,{status:'pending'}]))}; fs.writeFileSync(statePath, JSON.stringify(state,null,2)+'\n', {mode:0o600});" "$STATE_FILE" "${STEPS[@]}" 2>/dev/null || echo "{\"completed\": [], \"version\": 1}" > "$STATE_FILE"
   fi
   load_state
+}
+
+run_preflight_gate() {
+  echo ""
+  echo -e "  ${CYAN}›${NC} ${BOLD}preflight${NC} — prerequisite readiness before container build"
+  if npx tsx setup/index.ts --preflight 2>&1 | redact | tee -a "$LOG_FILE"; then
+    echo -e "  ${GREEN}✓${NC} preflight completed"
+    return 0
+  fi
+  echo -e "  ${RED}✖${NC} preflight failed"
+  echo -e "  ${YELLOW}Run:${NC} npm run setup -- --dry-run"
+  return 1
 }
 
 # ── Run a single step ──
@@ -105,8 +104,9 @@ run_step() {
 
   local start_time
   start_time=$(date +%s)
+  save_state "$step_name" "running"
 
-  if npx tsx setup/index.ts --step "$step_name" 2>&1 | tee -a "$LOG_FILE"; then
+  if npx tsx setup/index.ts --step "$step_name" 2>&1 | redact | tee -a "$LOG_FILE"; then
     local end_time
     end_time=$(date +%s)
     local elapsed=$((end_time - start_time))
@@ -118,6 +118,7 @@ run_step() {
     end_time=$(date +%s)
     local elapsed=$((end_time - start_time))
     echo -e "  ${RED}✖${NC} $step_name failed after ${elapsed}s"
+    save_state "$step_name" "failed" "command exited non-zero"
     echo ""
     echo -e "  ${YELLOW}Recovery:${NC}"
     echo -e "    • Fix the issue above"
@@ -140,6 +141,10 @@ run_all() {
   for step_entry in "${STEPS[@]}"; do
     local step_name="${step_entry%%:*}"
     local step_desc="${step_entry#*:}"
+    if [ "$step_name" = "container" ]; then
+      run_preflight_gate || exit 1
+      load_state
+    fi
     if ! run_step "$step_name" "$step_desc"; then
       echo -e "  ${RED}Setup aborted at: $step_name${NC}"
       exit 1
