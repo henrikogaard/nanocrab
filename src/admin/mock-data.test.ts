@@ -135,4 +135,44 @@ describe('mock admin data', () => {
       });
     });
   });
+
+  it('serves terminal history and searchable transcripts in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const historyResponse = await fetch(
+        `${baseUrl}/api/sessions/terminal/history`,
+      );
+      const history = (await historyResponse.json()) as Array<{
+        id: string;
+        owner: string;
+      }>;
+
+      expect(history).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'mock-terminal-main',
+            owner: 'mock-owner',
+          }),
+        ]),
+      );
+
+      const searchResponse = await fetch(
+        `${baseUrl}/api/sessions/terminal/search`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ query: 'deliverables' }),
+        },
+      );
+      const search = (await searchResponse.json()) as {
+        results: Array<{ sessionId: string; text: string }>;
+      };
+
+      expect(search.results).toEqual([
+        expect.objectContaining({
+          sessionId: 'mock-terminal-main',
+          text: expect.stringContaining('deliverables'),
+        }),
+      ]);
+    });
+  });
 });

@@ -57,6 +57,31 @@ function writeTranscript(
   );
 }
 
+async function withSessionsServer<T>(
+  role: 'viewer' | 'admin' | 'owner',
+  handler: (baseUrl: string) => Promise<T>,
+): Promise<T> {
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.user = { id: role, username: role, role };
+    next();
+  });
+  app.use('/api/sessions', sessionsRouter);
+  const server = app.listen(0);
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('test server did not bind to a port');
+    }
+    return await handler(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
+}
+
 describe('terminal session API', () => {
   beforeEach(() => {
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
@@ -166,6 +191,73 @@ describe('terminal session API', () => {
     });
     expect(matching).toHaveLength(1);
     expect(matching[0].id).toBe('term-2');
+  });
+
+  it('GET /terminal/history returns owned terminal metadata through the route', async () => {
+    await withSessionsServer('owner', async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/sessions/terminal/history`);
+      const history = (await response.json()) as Array<{
+        id: string;
+        owner: string;
+        active: boolean;
+      }>;
+
+      expect(response.status).toBe(200);
+      expect(history).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'term-1',
+            owner: 'owner',
+            active: false,
+          }),
+        ]),
+      );
+    });
+  });
+
+  it('POST /terminal/search returns context and enforces owner role', async () => {
+    await withSessionsServer('owner', async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/sessions/terminal/search`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: 'error' }),
+      });
+      const data = (await response.json()) as {
+        results: Array<{ sessionId: string; line: number; context: string }>;
+      };
+
+      expect(response.status).toBe(200);
+      expect(data.results).toEqual([
+        expect.objectContaining({
+          sessionId: 'term-1',
+          line: 3,
+          context: expect.stringContaining('line2'),
+        }),
+      ]);
+    });
+
+    await withSessionsServer('viewer', async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/sessions/terminal/search`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: 'error' }),
+      });
+
+      expect(response.status).toBe(403);
+    });
+  });
+
+  it('GET /terminal/:id/transcript blocks unsafe session ids', async () => {
+    await withSessionsServer('owner', async (baseUrl) => {
+      const encodedUnsafeId = encodeURIComponent('../term-1');
+      const response = await fetch(
+        `${baseUrl}/api/sessions/terminal/${encodedUnsafeId}/transcript`,
+      );
+      const body = (await response.json()) as { error: string };
+
+      expect(response.status).toBe(400);
+      expect(body.error).toBe('Invalid session id');
+    });
   });
 
   it('lists cockpit session summaries with stable fields from transcripts', () => {

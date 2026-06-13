@@ -30,6 +30,7 @@ import {
   readSessionLog,
   finalizeSessionFile,
   loadHistoricalSessions,
+  listTerminalSessions,
   broadcastCockpitSessionUpdate,
 } from './websocket.js';
 
@@ -43,13 +44,21 @@ describe('file-backed terminal sessions', () => {
   });
 
   it('createSessionFile creates index entry', () => {
-    createSessionFile('term-test-1');
-    const index: Array<{ id: string; endedAt: string | null }> = JSON.parse(
-      fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8'),
-    );
+    createSessionFile('term-test-1', 'alice');
+    const index: Array<{ id: string; endedAt: string | null; owner: string }> =
+      JSON.parse(fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8'));
     expect(index).toHaveLength(1);
     expect(index[0].id).toBe('term-test-1');
+    expect(index[0].owner).toBe('alice');
     expect(index[0].endedAt).toBeNull();
+  });
+
+  it('rejects unsafe terminal session ids before writing files', () => {
+    expect(createSessionFile('../outside', 'alice')).toBe(false);
+    appendToSessionLog('../outside', 'nope');
+
+    expect(fs.existsSync(path.join(TEST_DIR, 'index.json'))).toBe(false);
+    expect(fs.existsSync(path.join(TEST_DIR, '..', 'outside.log'))).toBe(false);
   });
 
   it('appendToSessionLog writes data to file', () => {
@@ -70,10 +79,18 @@ describe('file-backed terminal sessions', () => {
   });
 
   it('loadHistoricalSessions loads from .log files', () => {
+    createSessionFile('term-hist-1', 'alice');
+    createSessionFile('term-hist-2', 'bob');
     fs.writeFileSync(path.join(TEST_DIR, 'term-hist-1.log'), 'output1\n');
     fs.writeFileSync(path.join(TEST_DIR, 'term-hist-2.log'), 'output2\n');
     const count = loadHistoricalSessions();
     expect(count).toBe(2);
+    expect(listTerminalSessions()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'term-hist-1', owner: 'alice' }),
+        expect.objectContaining({ id: 'term-hist-2', owner: 'bob' }),
+      ]),
+    );
   });
 
   it('readSessionLog returns empty string for missing session', () => {
