@@ -2589,14 +2589,21 @@ window.deleteCredential = async (key, btnEl) => {
 
 // MCP Servers
 async function renderMcp(el) {
-  const [health, presets, infomaniakWorkflows, calendarWorkflows, emailWorkflows] =
-    await Promise.all([
-      api('/mcp/health'),
-      api('/mcp/presets').catch(() => []),
-      api('/mcp/infomaniak-workflows').catch(() => null),
-      api('/mcp/calendar-workflows').catch(() => null),
-      api('/mcp/email-workflows').catch(() => null),
-    ]);
+  const [
+    health,
+    presets,
+    catalog,
+    infomaniakWorkflows,
+    calendarWorkflows,
+    emailWorkflows,
+  ] = await Promise.all([
+    api('/mcp/health'),
+    api('/mcp/presets').catch(() => []),
+    api('/mcp/catalog').catch(() => null),
+    api('/mcp/infomaniak-workflows').catch(() => null),
+    api('/mcp/calendar-workflows').catch(() => null),
+    api('/mcp/email-workflows').catch(() => null),
+  ]);
   const servers = health.servers || [];
   el.innerHTML = `
     <div class="page-header"><h2>MCP Servers</h2>
@@ -2611,6 +2618,77 @@ async function renderMcp(el) {
       </div>
       <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Agents load custom MCP servers from <code>${esc(health.summary?.configPath || 'store/mcp-servers.json')}</code>. Rebuild the agent container after changing server code or dependencies.</p>
     </div>
+    ${
+      catalog
+        ? `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px">
+        <div>
+          <div class="card-title" style="margin:0">Connector Catalog</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Setup readiness across built-in, preset, and manual MCP connectors.</div>
+        </div>
+        <span class="badge ${catalog.status === 'ready' ? 'badge-success' : catalog.status === 'blocked' ? 'badge-error' : 'badge-warning'}">${esc(catalog.status)}</span>
+      </div>
+      <div class="grid grid-4" style="margin-bottom:12px">
+        <div><div style="font-size:11px;color:var(--text-muted)">Catalog</div><div style="font-size:20px;font-weight:600">${catalog.summary?.total ?? 0}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Installed</div><div style="font-size:20px;font-weight:600;color:var(--info)">${catalog.summary?.installed ?? 0}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Ready</div><div style="font-size:20px;font-weight:600;color:var(--success)">${catalog.summary?.ready ?? 0}</div></div>
+        <div><div style="font-size:11px;color:var(--text-muted)">Blocked</div><div style="font-size:20px;font-weight:600;color:var(--danger)">${catalog.summary?.blocked ?? 0}</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px">
+        ${(catalog.items || [])
+          .map(
+            (item) => `
+          <div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;background:var(--surface)">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+              <div style="min-width:0">
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                  <strong style="font-size:13px;color:var(--text)">${esc(item.label)}</strong>
+                  <span class="badge badge-muted">${esc(item.category)}</span>
+                </div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px;line-height:1.35">${esc(item.summary)}</div>
+              </div>
+              <span class="badge ${item.status === 'ready' ? 'badge-success' : item.status === 'blocked' ? 'badge-error' : 'badge-warning'}">${esc(item.status)}</span>
+            </div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:8px">
+              ${(item.capabilities || []).map((capability) => `<span class="badge badge-info">${esc(capability)}</span>`).join('')}
+            </div>
+            <div style="display:grid;gap:5px;margin-top:10px">
+              ${(item.steps || [])
+                .map(
+                  (step) => `
+                <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;font-size:11px;padding:6px 7px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+                  <div>
+                    <strong style="color:var(--text)">${esc(step.label)}</strong>
+                    <div style="color:var(--text-muted);margin-top:2px">${esc(step.detail)}</div>
+                  </div>
+                  <span class="badge ${step.status === 'ready' ? 'badge-success' : step.status === 'blocked' ? 'badge-error' : 'badge-warning'}">${step.status === 'ready' ? 'OK' : step.status === 'blocked' ? 'Block' : 'Review'}</span>
+                </div>`,
+                )
+                .join('')}
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+              ${
+                !item.installed && item.setupPath === 'preset' && item.presetName
+                  ? `<button class="btn btn-sm btn-primary" onclick="installMcpPreset('${esc(item.presetName)}')">Install preset</button>`
+                  : !item.installed && item.setupPath === 'manual'
+                    ? `<button class="btn btn-sm btn-primary" onclick="document.getElementById('new-mcp-form').style.display='block';document.getElementById('new-mcp-form').scrollIntoView({behavior:'smooth',block:'start'})">Add server</button>`
+                    : ''
+              }
+              ${
+                item.missingEnvVars?.length
+                  ? `<button class="btn btn-sm btn-ghost" onclick="navigate('credentials')">Credentials</button>`
+                  : ''
+              }
+              <button class="btn btn-sm btn-ghost" onclick="document.getElementById('mcp-permissions-note')?.scrollIntoView({behavior:'smooth',block:'center'})">Permissions</button>
+            </div>
+          </div>`,
+          )
+          .join('')}
+      </div>
+      <div id="mcp-permissions-note" style="margin-top:12px;padding:10px;background:var(--info-bg);border-radius:var(--radius-sm);font-size:12px;color:var(--info)">Connector setup keeps external writes approval-gated. Adjust connector permissions from the server cards or config only when the operator has approved the scope.</div>
+    </div>`
+        : ''
+    }
     ${
       presets.length
         ? `<div class="card">
