@@ -2702,6 +2702,76 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       },
     ];
   }
+  if (pathname === '/artifacts/vault/summary') {
+    return {
+      total: 2,
+      totalSizeBytes: 48_128,
+      kinds: ['report'],
+      formats: ['html', 'markdown'],
+    };
+  }
+  if (pathname === '/artifacts/vault') {
+    const query = String(req.query.query || '').toLowerCase();
+    const source = String(req.query.source || '').toLowerCase();
+    const records = [
+      {
+        id: 'report-mock-2:operations-briefing-export.md',
+        title: 'Operations Briefing Export',
+        kind: 'report',
+        format: 'markdown',
+        path: '/mock/store/deliverables/operations-briefing-export.md',
+        sizeBytes: 18_432,
+        sourceType: 'report-job',
+        sourceId: 'report-mock-2',
+        sourceArtifactIndex: 0,
+        sourceLinks: [
+          {
+            label: 'Fleet crash near Kepler-442b',
+            source: 'journal:evt-mock-1',
+          },
+        ],
+        createdAt: iso(35),
+        updatedAt: iso(28),
+        retentionDays: 90,
+        expiresAt: day(89),
+        tags: ['report', 'journal', 'memory'],
+      },
+      {
+        id: 'report-mock-2:operations-briefing-export.html',
+        title: 'Operations Briefing Export',
+        kind: 'report',
+        format: 'html',
+        path: '/mock/store/deliverables/operations-briefing-export.html',
+        sizeBytes: 29_696,
+        sourceType: 'report-job',
+        sourceId: 'report-mock-2',
+        sourceArtifactIndex: 1,
+        sourceLinks: [
+          {
+            label: 'Fleet crash near Kepler-442b',
+            source: 'journal:evt-mock-1',
+          },
+        ],
+        createdAt: iso(35),
+        updatedAt: iso(28),
+        retentionDays: 90,
+        expiresAt: day(89),
+        tags: ['report', 'journal', 'memory'],
+      },
+    ];
+    return records.filter((record) => {
+      const sourceHaystack = record.sourceLinks
+        .map((link) => `${link.label} ${link.source}`)
+        .join(' ')
+        .toLowerCase();
+      const haystack =
+        `${record.title} ${record.kind} ${record.format} ${record.path} ${record.tags.join(' ')} ${sourceHaystack}`.toLowerCase();
+      return (
+        (!query || haystack.includes(query)) &&
+        (!source || sourceHaystack.includes(source))
+      );
+    });
+  }
   if (pathname === '/research/jobs') {
     return [
       {
