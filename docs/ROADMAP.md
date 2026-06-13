@@ -156,7 +156,7 @@ Let the agent create skills, but never install them silently.
 Build the "when did that happen?" layer before adding heavy vector systems.
 
 - DONE: Dashboard can generate daily/weekly summaries per registered group from stored message history.
-- DONE: Notable-event extraction/search APIs store cited event records with entities, tags, confidence, source message ids, and provenance.
+- DONE: Notable-event extraction/search APIs store cited event records with entities, tags, confidence, source message ids, and provenance. Journal search now produces natural-language answers with event and summary citations.
 - Tables:
   - `journal_entries`: date, scope, summary, notable_events_json, source_message_ids, provider_profile_id.
   - `journal_events`: timestamp, title, entities, location/context, confidence, source ids, tags.
