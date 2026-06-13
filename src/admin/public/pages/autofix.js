@@ -319,6 +319,9 @@ window.viewAutofixJob = async function (id) {
       job.status === 'await_pr_approval'
         ? `<button class="btn btn-sm btn-primary" onclick="autofixJobAction('${esc(id)}','approve-pr')">Approve PR</button>`
         : '',
+      job.commitSha && ['ci_running', 'completed'].includes(job.status)
+        ? `<button class="btn btn-sm btn-ghost" onclick="autofixJobAction('${esc(id)}','refresh-ci')">Refresh CI</button>`
+        : '',
       ['failed', 'cancelled'].includes(job.status)
         ? `<button class="btn btn-sm btn-ghost" onclick="autofixJobAction('${esc(id)}','retry')">Retry</button>`
         : '',

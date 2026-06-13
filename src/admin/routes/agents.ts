@@ -27,6 +27,7 @@ import {
   loadCodingRepos,
   openCodingJobPr,
   pickGitHubIssue,
+  refreshCodingJobCi,
   registerCodingRepo,
   retryCodingJob,
   revertCodingJob,
@@ -188,6 +189,21 @@ router.post('/coding/jobs/:id/open-pr', async (req: Request, res: Response) => {
       .json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
+
+router.post(
+  '/coding/jobs/:id/refresh-ci',
+  async (req: Request, res: Response) => {
+    try {
+      const job = await refreshCodingJobCi(req.params.id as string);
+      auditLog(req, 'coding_job_ci_refreshed', job.id);
+      res.json({ ok: true, job });
+    } catch (err) {
+      res
+        .status(400)
+        .json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+);
 
 router.post('/coding/jobs/:id/revert', async (req: Request, res: Response) => {
   try {

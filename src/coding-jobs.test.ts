@@ -65,6 +65,7 @@ import {
   getCodingJob,
   openCodingJobPr,
   pickGitHubIssue,
+  refreshCodingJobCi,
   registerCodingRepo,
   startCodingJob,
   transitionCodingJob,
@@ -560,5 +561,139 @@ describe('coding jobs', () => {
       expect.stringContaining('/repos/owner/repo/pulls'),
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+
+  it('records successful CI and completes a PR job', async () => {
+    vi.useRealTimers();
+    mockGitHubFetch((url) => {
+      if (url.includes('/commits/abc123def456/status')) {
+        return { state: 'success', statuses: [] };
+      }
+      if (url.includes('/pulls')) {
+        return { html_url: 'https://github.com/owner/repo/pull/11' };
+      }
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.mkdirSync(`${jobRoot}/owner__repo`, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/changed-files.txt`, 'src/a.ts\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+      createPr: true,
+    });
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_pr_approval');
+    });
+    const approval = createApproval({
+      kind: 'coding-open-pr',
+      title: 'Approve PR',
+      summary: 'Allow this job to publish a PR.',
+      targetType: 'coding-job',
+      targetId: job.id,
+    });
+    reviewApproval(approval.id, 'approved', 'owner');
+    const opened = await openCodingJobPr(job.id, 'owner');
+
+    const refreshed = await refreshCodingJobCi(opened.id);
+
+    expect(refreshed.ciStatus).toBe('success');
+    expect(refreshed.lastCiError).toBeNull();
+    expect(refreshed.status).toBe('completed');
+    expect(refreshed.transitionedAt.completed).toEqual(expect.any(String));
+  });
+
+  it('records failing CI details and completes a PR job', async () => {
+    vi.useRealTimers();
+    mockGitHubFetch((url) => {
+      if (url.includes('/commits/abc123def456/status')) {
+        return {
+          state: 'failure',
+          statuses: [
+            {
+              state: 'success',
+              context: 'lint',
+              description: 'lint passed',
+            },
+            {
+              state: 'failure',
+              context: 'test',
+              description: 'vitest failed on coding-jobs.test.ts',
+            },
+          ],
+        };
+      }
+      if (url.includes('/pulls')) {
+        return { html_url: 'https://github.com/owner/repo/pull/12' };
+      }
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.mkdirSync(`${jobRoot}/owner__repo`, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/changed-files.txt`, 'src/a.ts\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+      createPr: true,
+    });
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_pr_approval');
+    });
+    const approval = createApproval({
+      kind: 'coding-open-pr',
+      title: 'Approve PR',
+      summary: 'Allow this job to publish a PR.',
+      targetType: 'coding-job',
+      targetId: job.id,
+    });
+    reviewApproval(approval.id, 'approved', 'owner');
+    const opened = await openCodingJobPr(job.id, 'owner');
+
+    const refreshed = await refreshCodingJobCi(opened.id);
+
+    expect(refreshed.ciStatus).toBe('failure');
+    expect(refreshed.lastCiError).toContain('test: vitest failed');
+    expect(refreshed.status).toBe('completed');
+    expect(refreshed.failureReason).toBeNull();
   });
 });

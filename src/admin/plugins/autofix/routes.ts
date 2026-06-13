@@ -35,6 +35,7 @@ import {
   listGitHubIssues,
   loadCodingJobs,
   openCodingJobPr,
+  refreshCodingJobCi,
   registerCodingRepo,
   retryCodingJob,
   startCodingJob,
@@ -654,6 +655,19 @@ router.post('/jobs/:id/approve-pr', async (req: Request, res: Response) => {
       req.user?.username || 'autofix-dashboard',
     );
     auditLog(req, 'autofix_pr_approved', job.id);
+    res.json({ ok: true, job });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post('/jobs/:id/refresh-ci', async (req: Request, res: Response) => {
+  try {
+    const jobId = String(req.params.id);
+    const job = await refreshCodingJobCi(jobId);
+    auditLog(req, 'autofix_ci_refreshed', job.id);
     res.json({ ok: true, job });
   } catch (err) {
     res.status(400).json({

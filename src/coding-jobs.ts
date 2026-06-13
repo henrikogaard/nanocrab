@@ -1361,6 +1361,73 @@ export async function openCodingJobPr(
   }
 }
 
+function summarizeCiError(statusPayload: {
+  state?: string;
+  statuses?: Array<{
+    state?: string;
+    context?: string;
+    description?: string | null;
+    target_url?: string | null;
+  }>;
+}): string | null {
+  const failingStatus = (statusPayload.statuses || []).find((status) =>
+    ['failure', 'error'].includes(String(status.state || '').toLowerCase()),
+  );
+  if (!failingStatus) {
+    if (['failure', 'error'].includes(String(statusPayload.state || ''))) {
+      return 'CI reported failure';
+    }
+    return null;
+  }
+  const context = failingStatus.context || 'CI';
+  const description = failingStatus.description || failingStatus.state || '';
+  return `${context}: ${description}`.trim();
+}
+
+export async function refreshCodingJobCi(jobId: string): Promise<CodingJob> {
+  const job = getCodingJob(jobId);
+  if (!job) throw new Error(`Coding job not found: ${jobId}`);
+  if (!job.commitSha) {
+    throw new Error(`Coding job ${jobId} has no commit SHA for CI lookup`);
+  }
+  if (job.status !== 'ci_running' && job.status !== 'completed') {
+    throw new Error(`Cannot refresh CI from ${job.status}`);
+  }
+
+  const statusPayload = (await githubApi(
+    `/repos/${job.repo}/commits/${job.commitSha}/status`,
+  )) as {
+    state?: 'pending' | 'success' | 'failure' | 'error';
+    statuses?: Array<{
+      state?: string;
+      context?: string;
+      description?: string | null;
+      target_url?: string | null;
+    }>;
+  };
+  const state = statusPayload.state || 'pending';
+  if (state === 'success') {
+    job.ciStatus = 'success';
+    job.lastCiError = null;
+  } else if (state === 'failure' || state === 'error') {
+    job.ciStatus = 'failure';
+    job.lastCiError = summarizeCiError(statusPayload);
+  } else {
+    job.ciStatus = 'pending';
+    job.lastCiError = null;
+  }
+
+  if (
+    job.status === 'ci_running' &&
+    (job.ciStatus === 'success' || job.ciStatus === 'failure')
+  ) {
+    applyCodingJobTransition(job, 'completed');
+  } else {
+    upsertCodingJob(job);
+  }
+  return job;
+}
+
 export async function revertCodingJob(
   jobId: string,
   by = 'dashboard',
