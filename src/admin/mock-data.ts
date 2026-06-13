@@ -1174,6 +1174,49 @@ function mockSkillVersions(skillPath: string) {
   };
 }
 
+const modelMetrics = {
+  generatedAt: iso(2),
+  summary: {
+    totalModels: 2,
+    healthyModels: 1,
+    degradedModels: 1,
+    averageSuccessRate: 0.75,
+    averageLatencyMs: 880,
+  },
+  models: [
+    {
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      profileIds: ['default_automation'],
+      sampleCount: 2,
+      successCount: 1,
+      failureCount: 1,
+      successRate: 0.5,
+      averageLatencyMs: 1575,
+      p95LatencyMs: 2400,
+      contextWindow: 200000,
+      costTier: 'high',
+      lastProbeAt: iso(16),
+      lastError: 'API key expired; update Claude credentials.',
+    },
+    {
+      provider: 'openrouter',
+      model: 'openrouter/auto',
+      profileIds: ['default_chat'],
+      sampleCount: 2,
+      successCount: 2,
+      failureCount: 0,
+      successRate: 1,
+      averageLatencyMs: 198,
+      p95LatencyMs: 211,
+      contextWindow: 128000,
+      costTier: 'medium',
+      lastProbeAt: iso(8),
+      lastError: null,
+    },
+  ],
+};
+
 const skills = [
   {
     name: 'capabilities',
@@ -2780,6 +2823,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       ],
     };
   }
+  if (pathname === '/providers/model-metrics') return modelMetrics;
   if (pathname === '/mcp/presets') {
     return [
       {

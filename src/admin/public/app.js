@@ -8327,9 +8327,10 @@ async function renderMonitoring(el) {
     <div class="page-header"><h2>Monitoring</h2>
       <span class="badge badge-muted" id="monitoring-refresh-badge">Auto-refresh: 30s</span>
     </div>
-    <div id="monitoring-stats"><div class="loading">Loading</div></div>
-    <div id="monitoring-health"></div>
-    <div class="card" id="monitoring-chart-card">
+	    <div id="monitoring-stats"><div class="loading">Loading</div></div>
+	    <div id="monitoring-health"></div>
+	    <div id="model-metrics"></div>
+	    <div class="card" id="monitoring-chart-card">
       <div class="card-title">History</div>
       <div id="monitoring-chart"><div class="loading">Loading</div></div>
     </div>
@@ -8441,6 +8442,56 @@ async function renderMonitoring(el) {
         }
       } catch {
         /* provider health not available */
+      }
+      try {
+        const metrics = await api('/providers/model-metrics').catch(() => null);
+        const metricsEl = document.getElementById('model-metrics');
+        if (metricsEl && metrics && Array.isArray(metrics.models)) {
+          const summary = metrics.summary || {};
+          metricsEl.innerHTML = `
+	            <div class="card" style="margin:0;margin-top:16px">
+	              <div class="card-title">Model Operations Metrics <span class="badge badge-muted" style="font-size:10px">${metrics.models.length}</span></div>
+	              <div class="grid grid-4" style="margin-bottom:12px">
+	                <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+	                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Healthy Models</div>
+	                  <div style="font-size:18px;font-weight:700;color:var(--text)">${Number(summary.healthyModels || 0)}/${Number(summary.totalModels || 0)}</div>
+	                </div>
+	                <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+	                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Avg Success</div>
+	                  <div style="font-size:18px;font-weight:700;color:var(--text)">${summary.averageSuccessRate == null ? '-' : `${Math.round(Number(summary.averageSuccessRate) * 100)}%`}</div>
+	                </div>
+	                <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+	                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Avg Latency</div>
+	                  <div style="font-size:18px;font-weight:700;color:var(--text)">${summary.averageLatencyMs == null ? '-' : `${Number(summary.averageLatencyMs)}ms`}</div>
+	                </div>
+	                <div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg)">
+	                  <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px">Degraded</div>
+	                  <div style="font-size:18px;font-weight:700;color:${Number(summary.degradedModels || 0) > 0 ? 'var(--warning)' : 'var(--text)'}">${Number(summary.degradedModels || 0)}</div>
+	                </div>
+	              </div>
+	              <div class="table-wrap"><table>
+	                <thead><tr><th>Provider</th><th>Model</th><th>Profiles</th><th>Cost</th><th>Context</th><th>Latency</th><th>Reliability</th><th>Last Error</th></tr></thead>
+	                <tbody>${metrics.models
+                    .map(
+                      (m) => `
+	                  <tr>
+	                    <td><span class="badge badge-muted">${esc(m.provider)}</span></td>
+	                    <td style="font-family:var(--mono);font-size:11px;color:var(--text)">${esc(m.model)}</td>
+	                    <td>${(m.profileIds || []).map((id) => `<span class="badge badge-info" style="font-size:9px">${esc(id)}</span>`).join(' ') || '<span class="badge badge-muted">none</span>'}</td>
+	                    <td><span class="badge ${m.costTier === 'high' ? 'badge-warning' : m.costTier === 'unknown' ? 'badge-muted' : 'badge-success'}">${esc(m.costTier || 'unknown')}</span></td>
+	                    <td style="font-size:11px;color:var(--text-muted)">${m.contextWindow ? Number(m.contextWindow).toLocaleString() : '-'}</td>
+	                    <td style="font-size:11px;color:var(--text-muted)">avg ${m.averageLatencyMs == null ? '-' : `${Number(m.averageLatencyMs)}ms`} · p95 ${m.p95LatencyMs == null ? '-' : `${Number(m.p95LatencyMs)}ms`}</td>
+	                    <td><span class="badge ${Number(m.successRate || 0) >= 0.8 ? 'badge-success' : 'badge-warning'}">${Math.round(Number(m.successRate || 0) * 100)}%</span> <span style="font-size:11px;color:var(--text-muted)">${Number(m.successCount || 0)}/${Number(m.sampleCount || 0)}</span></td>
+	                    <td style="font-size:11px;color:${m.lastError ? 'var(--error)' : 'var(--text-muted)'}">${m.lastError ? esc(m.lastError) : '-'}</td>
+	                  </tr>`,
+                    )
+                    .join('')}
+	                </tbody>
+	              </table></div>
+	            </div>`;
+        }
+      } catch {
+        /* model metrics not available */
       }
     } catch {}
 

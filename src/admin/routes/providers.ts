@@ -21,6 +21,7 @@ import {
   getProbeHealth,
   refreshProbeHealth,
 } from '../../probe-scheduler.js';
+import { getModelMetricsData } from '../../model-metrics.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -490,6 +491,10 @@ router.get('/health', (_req: Request, res: Response) => {
     refreshProbeHealth();
   }
   res.json(getProbeHealth());
+});
+
+router.get('/model-metrics', (_req: Request, res: Response) => {
+  res.json(getModelMetricsData());
 });
 
 router.post('/probe-all', async (_req: Request, res: Response) => {

@@ -326,6 +326,7 @@ when needed, which is the normal VPS/Linux container path.
 - **Groups -> Provider** overrides the provider per group.
 - **Integrations -> AI Providers** enables/disables API-key providers.
 - **Monitoring -> Inference Health** shows local vs remote provider readiness, stale probes, average latency, capability tags, and manual re-probe controls.
+- **Monitoring -> Model Operations Metrics** rolls probe history into per-model cost tier, context window, latency, success rate, sample count, and latest error.
 
 Settings can close active agent sessions while switching providers. Main-group
 persistent containers restart automatically and new containers pick up the
