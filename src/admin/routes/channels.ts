@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { getState } from '../state.js';
 import { readEnvFile } from '../../env.js';
+import { buildChannelStatus } from '../../channel-status.js';
 
 const router = Router();
 
@@ -79,6 +80,7 @@ router.get('/', (_req: Request, res: Response) => {
   // Build active channels with status and config
   const activeChannels = state.channels.map((ch) => {
     const def = SUPPORTED_CHANNELS.find((s) => s.id === ch.name.toLowerCase());
+    const health = buildChannelStatus(ch);
     const config: Record<string, string> = {};
 
     if (def) {
@@ -116,7 +118,10 @@ router.get('/', (_req: Request, res: Response) => {
     return {
       name: ch.name,
       id: ch.name.toLowerCase(),
-      connected: ch.isConnected(),
+      connected: health.connected,
+      status: health.status,
+      lastActiveAt: health.lastActiveAt,
+      statusReason: health.reason,
       config,
       envVars: def?.envVars || [],
       description: def?.description || '',

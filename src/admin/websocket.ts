@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { logger } from '../logger.js';
+import { buildChannelStatus } from '../channel-status.js';
 import { getState } from './state.js';
 import { validateSession, getSessionUser, AdminUser } from './auth.js';
 import { SESSIONS_DIR, TERMINAL_IDLE_TIMEOUT_MS } from '../config.js';
@@ -239,10 +240,7 @@ function sendStatus(ws: WebSocket): void {
 function getStatusData(): object {
   const state = getState();
   return {
-    channels: state.channels.map((ch) => ({
-      name: ch.name,
-      connected: ch.isConnected(),
-    })),
+    channels: state.channels.map((ch) => buildChannelStatus(ch)),
     containers: state.queue.getActiveContainers(),
     uptime: Date.now() - state.startTime,
   };
