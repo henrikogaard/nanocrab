@@ -20,7 +20,10 @@ import Database from 'better-sqlite3';
 
 import { STORE_DIR, SESSIONS_DIR } from '../config.js';
 import { logger } from '../logger.js';
-import { buildChannelStatus } from '../channel-status.js';
+import {
+  buildChannelStatus,
+  isChannelEnabledForRegisteredGroups,
+} from '../channel-status.js';
 import { NanoCrabState, setState, getState } from './state.js';
 import { initAuth } from './auth.js';
 import { requireAuth, requireRole } from './middleware.js';
@@ -196,7 +199,10 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   // Public health endpoint (no auth required)
   app.get('/health', (_req, res) => {
     const state = getState();
-    const channels = state.channels.map((ch) => buildChannelStatus(ch));
+    const groups = state.registeredGroups();
+    const channels = state.channels
+      .filter((ch) => isChannelEnabledForRegisteredGroups(ch.name, groups))
+      .map((ch) => buildChannelStatus(ch));
     const allUp = channels.every((c) => c.connected);
     res.status(allUp ? 200 : 503).json({
       status: allUp ? 'healthy' : 'degraded',

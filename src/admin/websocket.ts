@@ -9,7 +9,10 @@ import fs from 'fs';
 import path from 'path';
 
 import { logger } from '../logger.js';
-import { buildChannelStatus } from '../channel-status.js';
+import {
+  buildChannelStatus,
+  isChannelEnabledForRegisteredGroups,
+} from '../channel-status.js';
 import { getState } from './state.js';
 import { validateSession, getSessionUser, AdminUser } from './auth.js';
 import { SESSIONS_DIR, TERMINAL_IDLE_TIMEOUT_MS } from '../config.js';
@@ -293,8 +296,11 @@ function sendStatus(ws: WebSocket): void {
 
 function getStatusData(): object {
   const state = getState();
+  const groups = state.registeredGroups();
   return {
-    channels: state.channels.map((ch) => buildChannelStatus(ch)),
+    channels: state.channels
+      .filter((ch) => isChannelEnabledForRegisteredGroups(ch.name, groups))
+      .map((ch) => buildChannelStatus(ch)),
     containers: state.queue.getActiveContainers(),
     uptime: Date.now() - state.startTime,
   };

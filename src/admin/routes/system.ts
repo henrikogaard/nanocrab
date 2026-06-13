@@ -17,7 +17,10 @@ import {
 } from '../../config.js';
 import { readEnvFile, writeEnvValue } from '../../env.js';
 import { getState } from '../state.js';
-import { buildChannelStatus } from '../../channel-status.js';
+import {
+  buildChannelStatus,
+  isChannelEnabledForRegisteredGroups,
+} from '../../channel-status.js';
 import { auditLog } from '../security.js';
 import { requireRole } from '../middleware.js';
 import { logger } from '../../logger.js';
@@ -199,7 +202,10 @@ router.get('/', (_req: Request, res: Response) => {
 router.get('/dashboard', async (_req: Request, res: Response) => {
   const state = getState();
   const uptimeMs = Date.now() - state.startTime;
-  const channels = state.channels.map((ch) => buildChannelStatus(ch));
+  const groupsRecord = state.registeredGroups();
+  const channels = state.channels
+    .filter((ch) => isChannelEnabledForRegisteredGroups(ch.name, groupsRecord))
+    .map((ch) => buildChannelStatus(ch));
   const containers = state.queue.getActiveContainers();
 
   const db = new Database(path.join(STORE_DIR, 'messages.db'), {
@@ -244,7 +250,7 @@ router.get('/dashboard', async (_req: Request, res: Response) => {
     db.close();
   }
 
-  const groups = Object.values(state.registeredGroups()).map((g: any) => ({
+  const groups = Object.values(groupsRecord).map((g: any) => ({
     jid: g.jid,
     name: g.name,
     folder: g.folder,
@@ -396,7 +402,10 @@ router.post(
 // Channel health check
 router.get('/health', (_req: Request, res: Response) => {
   const state = getState();
-  const health = state.channels.map((ch) => buildChannelStatus(ch));
+  const groups = state.registeredGroups();
+  const health = state.channels
+    .filter((ch) => isChannelEnabledForRegisteredGroups(ch.name, groups))
+    .map((ch) => buildChannelStatus(ch));
 
   const allHealthy = health.every((h) => h.connected);
   res.json({
@@ -608,9 +617,11 @@ router.put('/budget', (req: Request, res: Response) => {
 router.get('/alerts', async (_req: Request, res: Response) => {
   const alerts: Array<{ type: string; message: string }> = [];
   const state = getState();
+  const groups = state.registeredGroups();
 
   // Check offline channels
   for (const ch of state.channels) {
+    if (!isChannelEnabledForRegisteredGroups(ch.name, groups)) continue;
     if (!ch.isConnected()) {
       alerts.push({
         type: 'error',

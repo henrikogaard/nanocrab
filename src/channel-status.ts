@@ -1,4 +1,46 @@
-import { Channel, ChannelStatusSnapshot } from './types.js';
+import {
+  Channel,
+  ChannelStatusSnapshot,
+  RegisteredGroup,
+} from './types.js';
+
+export function channelIdForRegisteredGroup(
+  jid: string,
+  group?: RegisteredGroup & { channel?: string | null },
+): string {
+  if (group?.channel) return group.channel.toLowerCase();
+  const hints = [jid, group?.folder, group?.name]
+    .filter((value): value is string => !!value)
+    .map((value) => value.toLowerCase());
+  if (
+    hints.some(
+      (hint) => hint.startsWith('tg:') || hint.includes('telegram'),
+    )
+  )
+    return 'telegram';
+  if (
+    hints.some((hint) => hint.startsWith('sig:') || hint.includes('signal'))
+  )
+    return 'signal';
+  if (
+    hints.some((hint) => hint.startsWith('wa:') || hint.includes('whatsapp'))
+  )
+    return 'whatsapp';
+  return 'whatsapp';
+}
+
+export function isChannelEnabledForRegisteredGroups(
+  channelName: string,
+  groups: Record<string, RegisteredGroup>,
+): boolean {
+  const channelId = channelName.toLowerCase();
+  const matchingGroups = Object.entries(groups).filter(
+    ([jid, group]) => channelIdForRegisteredGroup(jid, group) === channelId,
+  );
+
+  if (matchingGroups.length === 0) return true;
+  return matchingGroups.some(([, group]) => group.enabled !== false);
+}
 
 export function buildChannelStatus(channel: Channel): ChannelStatusSnapshot {
   if (channel.getStatus) {

@@ -5,7 +5,10 @@ import path from 'path';
 import QRCode from 'qrcode';
 import { getState } from '../state.js';
 import { readEnvFile } from '../../env.js';
-import { buildChannelStatus } from '../../channel-status.js';
+import {
+  buildChannelStatus,
+  isChannelEnabledForRegisteredGroups,
+} from '../../channel-status.js';
 import { requireRole } from '../middleware.js';
 import { logger } from '../../logger.js';
 
@@ -222,9 +225,11 @@ router.get('/', (_req: Request, res: Response) => {
   const envValues = readEnvFile(allEnvKeys);
 
   // Build active channels with status and config
+  const groups = state.registeredGroups();
   const activeChannels = state.channels.map((ch) => {
     const def = SUPPORTED_CHANNELS.find((s) => s.id === ch.name.toLowerCase());
     const health = buildChannelStatus(ch);
+    const enabled = isChannelEnabledForRegisteredGroups(ch.name, groups);
     const config: Record<string, string> = {};
 
     if (def) {
@@ -262,10 +267,11 @@ router.get('/', (_req: Request, res: Response) => {
     return {
       name: ch.name,
       id: ch.name.toLowerCase(),
-      connected: health.connected,
-      status: health.status,
+      enabled,
+      connected: enabled && health.connected,
+      status: enabled ? health.status : 'disabled',
       lastActiveAt: health.lastActiveAt,
-      statusReason: health.reason,
+      statusReason: enabled ? health.reason : 'All bot agents for this channel are disabled',
       config,
       envVars: def?.envVars || [],
       description: def?.description || '',
