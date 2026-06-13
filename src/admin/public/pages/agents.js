@@ -55,6 +55,7 @@ async function renderAgents(el) {
       reportJobs,
       researchJobs,
       terminals,
+      boundaries,
     ] = await Promise.all([
       api('/groups').catch(() => []),
       api('/containers').catch(() => []),
@@ -71,8 +72,13 @@ async function renderAgents(el) {
       api('/reports/jobs').catch(() => []),
       api('/research/jobs').catch(() => []),
       api('/sessions/terminal/active').catch(() => []),
+      api('/agents/boundaries').catch(() => []),
     ]);
     const groups = Array.isArray(groupsRaw) ? groupsRaw : [];
+    const boundaryByFolder = (boundaries || []).reduce((acc, item) => {
+      if (item.folder) acc[item.folder] = item;
+      return acc;
+    }, {});
 
     const agentCards = groups
       .map((g) => {
@@ -91,6 +97,14 @@ async function renderAgents(el) {
         const isEnabled = g.enabled !== false;
         const isPrimary = g.isPrimary === true;
         const recentLogs = recent.filter((r) => r.group === g.folder);
+        const boundary = boundaryByFolder[g.folder]?.boundary;
+        const connectorBadges = (boundary?.connectorIds || [])
+          .slice(0, 4)
+          .map(
+            (connector) =>
+              `<span class="badge badge-info" style="font-size:8px">${esc(connector)}</span>`,
+          )
+          .join('');
 
         let statusBadge, statusColor;
         if (!isEnabled) {
@@ -116,6 +130,11 @@ async function renderAgents(el) {
             ${g.isMain ? '<span class="badge badge-success" style="font-size:9px;margin-left:3px">Persistent</span>' : ''}
             ${isPrimary ? '<span class="badge badge-accent" style="font-size:9px;margin-left:3px">Primary</span>' : ''}
             <div style="font-size:11px;color:var(--text-muted)">${g.lastActivity ? 'Active ' + timeAgo(g.lastActivity) : 'No activity'}</div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
+              <span class="badge badge-muted" style="font-size:8px">${esc((boundary?.channelScopes || ['own']).join(','))} channels</span>
+              <span class="badge ${boundary?.externalWrites?.allowed ? 'badge-warning' : 'badge-success'}" style="font-size:8px">${boundary?.externalWrites?.allowed ? 'writes gated' : 'read/write denied'}</span>
+              ${connectorBadges}
+            </div>
           </div>
         </div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">

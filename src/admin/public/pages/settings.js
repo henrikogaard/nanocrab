@@ -32,6 +32,10 @@ async function renderSettings(el) {
   try {
     providerInfo = await api('/system/provider');
   } catch {}
+  let agentBoundaries = [];
+  try {
+    agentBoundaries = await api('/agents/boundaries');
+  } catch {}
   const providerModels = providerInfo.models || {
     claude: [
       'claude-sonnet-4-6',
@@ -258,6 +262,39 @@ async function renderSettings(el) {
         </table>
       </div>
     </div>`;
+  const agentBoundaryCard = `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">Agent Boundaries</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Runtime scopes are derived before containers receive mounts, provider profiles, skills, channels, or connector tools.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Agent</th><th>Channels</th><th>Connectors</th><th>Provider Profiles</th><th>External Writes</th></tr></thead>
+          <tbody>
+            ${
+              (agentBoundaries || [])
+                .map((item) => {
+                  const boundary = item.boundary || {};
+                  return `<tr>
+                  <td style="font-weight:600;color:var(--text)">${esc(item.name || item.folder || boundary.agentId || '')}</td>
+                  <td>${(boundary.channelScopes || []).map((scope) => `<span class="badge badge-muted">${esc(scope)}</span>`).join(' ')}</td>
+                  <td>${(boundary.connectorIds || [])
+                    .slice(0, 5)
+                    .map(
+                      (connector) =>
+                        `<span class="badge badge-info">${esc(connector)}</span>`,
+                    )
+                    .join(' ')}</td>
+                  <td style="font-size:11px;color:var(--text-muted)">${esc((boundary.providerProfiles || []).join(', '))}</td>
+                  <td><span class="badge ${boundary.externalWrites?.allowed ? 'badge-warning' : 'badge-success'}">${boundary.externalWrites?.allowed ? 'approval gated' : 'denied'}</span></td>
+                </tr>`;
+                })
+                .join('') ||
+              '<tr><td colspan="5" style="color:var(--text-muted)">No registered agents.</td></tr>'
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>`;
 
   const isOwner = (window._userRole || 'owner') === 'owner';
 
@@ -319,6 +356,7 @@ async function renderSettings(el) {
         : ''
     }
     ${isOwner ? '<div id="users-section"></div>' : ''}
+    ${isOwner ? agentBoundaryCard : ''}
     <div class="grid grid-2">
       <div class="card">
         <div class="card-title">Appearance</div>

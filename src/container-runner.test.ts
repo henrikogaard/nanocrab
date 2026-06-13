@@ -387,6 +387,27 @@ describe('container-runner provider fallback metadata', () => {
       { mode: 0o600 },
     );
   });
+
+  it('denies provider fallback purposes outside the agent boundary', async () => {
+    vi.mocked(spawn).mockClear();
+
+    const result = await runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        providerFallbackPurpose: 'default_coding',
+        providerFallbackAction: 'coding-implementation',
+      },
+      () => {
+        throw new Error('disallowed provider profile should not spawn');
+      },
+    );
+
+    expect(result.status).toBe('error');
+    expect(result.error).toContain('Agent boundary denied provider profile');
+    expect(resolveProviderFallbackForAction).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
 });
 
 describe('container-runner MCP env forwarding', () => {
@@ -404,6 +425,20 @@ describe('container-runner MCP env forwarding', () => {
             command: 'npx',
             args: ['-y', '@example/infomaniak-mcp'],
             envVars: ['MAIL_USER', 'MAIL_PASSWORD'],
+          },
+        ]);
+      }
+      if (String(file).endsWith('connector-permissions.json')) {
+        return JSON.stringify([
+          {
+            connectorId: 'infomaniak',
+            scope: 'all',
+            allowedActions: ['tools.expose', '*.read'],
+            requiresApproval: false,
+            groups: [],
+            agents: [],
+            createdAt: '2026-06-13T10:00:00.000Z',
+            updatedAt: '2026-06-13T10:00:00.000Z',
           },
         ]);
       }
@@ -445,6 +480,36 @@ describe('container-runner MCP env forwarding', () => {
       { mode: 0o600 },
     );
     expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
+      '/tmp/nanocrab-env-test/env',
+      expect.stringContaining('MAIL_PASSWORD=secret'),
+      { mode: 0o600 },
+    );
+  });
+
+  it('does not pass MCP env vars for connectors outside the agent boundary', async () => {
+    const restrictedGroup: RegisteredGroup = {
+      ...testGroup,
+      containerConfig: { allowedMcpServers: ['github'] },
+    };
+    vi.mocked(spawn).mockClear();
+    vi.mocked(fs.writeFileSync).mockClear();
+
+    const resultPromise = runContainerAgent(
+      restrictedGroup,
+      {
+        ...testInput,
+        groupFolder: restrictedGroup.folder,
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalledWith(
       '/tmp/nanocrab-env-test/env',
       expect.stringContaining('MAIL_PASSWORD=secret'),
       { mode: 0o600 },

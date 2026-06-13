@@ -17,6 +17,11 @@ import {
   DEFAULT_AGENT_MODELS,
   getProviderAvailability,
 } from '../../agent-provider.js';
+import { getAllRegisteredGroups } from '../../db.js';
+import {
+  deriveRuntimeCapabilities,
+  resolveAgentBoundary,
+} from '../../agent-boundaries.js';
 import {
   getCodingJob,
   approveCodingJob,
@@ -38,6 +43,22 @@ import {
 
 const router = Router();
 const TASKS_PATH = path.join(STORE_DIR, 'agent-tasks.json');
+
+function loadConfiguredConnectorIds(): string[] {
+  const ids = new Set(['nanocrab', 'github']);
+  try {
+    const mcpConfigPath = path.join(STORE_DIR, 'mcp-servers.json');
+    if (fs.existsSync(mcpConfigPath)) {
+      const servers = JSON.parse(
+        fs.readFileSync(mcpConfigPath, 'utf-8'),
+      ) as Array<{ name?: string }>;
+      for (const server of servers) {
+        if (server.name) ids.add(server.name);
+      }
+    }
+  } catch {}
+  return Array.from(ids);
+}
 
 interface AgentTask {
   id: string;
@@ -84,6 +105,29 @@ router.get('/providers', (_req: Request, res: Response) => {
       })),
       defaultModel: DEFAULT_AGENT_MODELS[provider.id],
     })),
+  );
+});
+
+router.get('/boundaries', (_req: Request, res: Response) => {
+  const connectorIds = loadConfiguredConnectorIds();
+  const groups = getAllRegisteredGroups();
+  res.json(
+    Object.entries(groups).map(([jid, group]) => {
+      const boundary = resolveAgentBoundary({
+        group,
+        isMain: group.isMain === true,
+        agentId: group.folder,
+        availableConnectorIds: connectorIds,
+      });
+      return {
+        jid,
+        name: group.name,
+        folder: group.folder,
+        isMain: boundary.isMain,
+        boundary,
+        capabilities: deriveRuntimeCapabilities(boundary, { connectorIds }),
+      };
+    }),
   );
 });
 

@@ -4,6 +4,7 @@ import { execFileSync } from 'child_process';
 import crypto from 'crypto';
 
 import { CONTAINER_SKILLS_DIR, DATA_DIR, STORE_DIR } from './config.js';
+import { canUseSkill, type AgentBoundary } from './agent-boundaries.js';
 
 export type SkillScope = 'all' | 'main' | 'channels';
 export type SkillVisibility = 'shared' | 'private' | 'system';
@@ -336,7 +337,9 @@ export function listSkillRegistry(): SkillRegistryEntry[] {
 export function isSkillVisibleForGroup(
   skill: Pick<SkillRegistryEntry, 'enabled' | 'scope' | 'visibility'>,
   isMain: boolean,
+  agentBoundary?: AgentBoundary,
 ): boolean {
+  if (agentBoundary) return canUseSkill(agentBoundary, skill);
   if (!skill.enabled) return false;
   if (skill.scope === 'main' && !isMain) return false;
   if (skill.scope === 'channels' && isMain) return false;
@@ -348,7 +351,15 @@ export function isSkillVisibleForGroup(
 function exclusionReason(
   skill: Pick<SkillRegistryEntry, 'enabled' | 'scope' | 'visibility'>,
   isMain: boolean,
+  agentBoundary?: AgentBoundary,
 ): SkillInjectionDecision | null {
+  if (agentBoundary && !canUseSkill(agentBoundary, skill)) {
+    if (!skill.enabled) return 'excluded-disabled';
+    if (!agentBoundary.skillScopes.allowedScopes.includes(skill.scope)) {
+      return 'excluded-scope';
+    }
+    return 'excluded-visibility';
+  }
   if (!skill.enabled) return 'excluded-disabled';
   if (skill.scope === 'main' && !isMain) return 'excluded-scope';
   if (skill.scope === 'channels' && isMain) return 'excluded-scope';
@@ -424,6 +435,7 @@ export function selectSkillsForRequest(
     maxScore?: number;
     skills?: SkillRegistryEntry[];
     skillBytes?: Record<string, number>;
+    agentBoundary?: AgentBoundary;
   } = {},
 ): SkillSelectionResult {
   const isMain = options.isMain ?? true;
@@ -462,7 +474,7 @@ export function selectSkillsForRequest(
   const candidates: SkillInjectionMatch[] = [];
   for (const skill of skills) {
     const match = scoreAndBytes(skill);
-    const authExclusion = exclusionReason(skill, isMain);
+    const authExclusion = exclusionReason(skill, isMain, options.agentBoundary);
     if (authExclusion) {
       excluded.push({
         ...match,
@@ -545,6 +557,7 @@ export function prepareActiveSkillsDirectory(options: {
   limit?: number;
   maxBytes?: number;
   skills?: SkillRegistryEntry[];
+  agentBoundary?: AgentBoundary;
 }): string {
   const destination = path.join(
     DATA_DIR,
@@ -560,9 +573,12 @@ export function prepareActiveSkillsDirectory(options: {
         limit: options.limit,
         maxBytes: options.maxBytes,
         skills: registry,
+        agentBoundary: options.agentBoundary,
       }).injected
     : registry
-        .filter((skill) => isSkillVisibleForGroup(skill, options.isMain))
+        .filter((skill) =>
+          isSkillVisibleForGroup(skill, options.isMain, options.agentBoundary),
+        )
         .slice(0, options.limit ?? DEFAULT_SKILL_INJECTION_LIMIT);
   for (const skill of activeSkills) {
     const source = path.join(CONTAINER_SKILLS_DIR, skill.path);

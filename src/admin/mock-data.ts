@@ -73,6 +73,76 @@ const channels = [
   { name: 'signal', connected: true, status: 'healthy', lastSeen: iso(1) },
 ];
 
+const agentBoundaries = [
+  {
+    jid: 'wa:alliance-command',
+    name: 'Alliance Command',
+    folder: 'main',
+    isMain: true,
+    boundary: {
+      agentId: 'main',
+      groupFolder: 'main',
+      isMain: true,
+      channelScopes: ['own', 'all'],
+      filesystemScopes: [
+        { containerPath: '/workspace/project', access: 'read-only' },
+        { containerPath: '/workspace/project/store', access: 'read-write' },
+        { containerPath: '/workspace/group', access: 'read-write' },
+      ],
+      skillScopes: {
+        allowedScopes: ['all', 'main', 'channels'],
+        allowedVisibility: ['shared', 'private', 'system'],
+      },
+      providerProfiles: ['default_chat', 'default_coding', 'default_reports'],
+      connectorIds: ['nanocrab', 'github', 'kdrive'],
+      externalWrites: { allowed: true, requiresApproval: true },
+    },
+    capabilities: {
+      allowedConnectorIds: ['nanocrab', 'github', 'kdrive'],
+      allowedChannelScopes: ['own', 'all'],
+      allowedProviderProfiles: [
+        'default_chat',
+        'default_coding',
+        'default_reports',
+      ],
+      allowExternalWrites: true,
+      externalWritesRequireApproval: true,
+      allowedToolActions: ['read', 'mcp.call', 'external.write'],
+    },
+  },
+  {
+    jid: 'tg:operations-room',
+    name: 'Operations Room',
+    folder: 'operations',
+    isMain: false,
+    boundary: {
+      agentId: 'operations',
+      groupFolder: 'operations',
+      isMain: false,
+      channelScopes: ['own'],
+      filesystemScopes: [
+        { containerPath: '/workspace/group', access: 'read-write' },
+        { containerPath: '/workspace/global', access: 'read-only' },
+      ],
+      skillScopes: {
+        allowedScopes: ['all', 'channels'],
+        allowedVisibility: ['shared'],
+      },
+      providerProfiles: ['default_chat', 'default_automation'],
+      connectorIds: ['nanocrab', 'github'],
+      externalWrites: { allowed: false, requiresApproval: true },
+    },
+    capabilities: {
+      allowedConnectorIds: ['nanocrab', 'github'],
+      allowedChannelScopes: ['own'],
+      allowedProviderProfiles: ['default_chat', 'default_automation'],
+      allowExternalWrites: false,
+      externalWritesRequireApproval: true,
+      allowedToolActions: ['read', 'mcp.call'],
+    },
+  },
+];
+
 const containers = [
   {
     id: 'mock-main-agent',
@@ -1699,6 +1769,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname === '/messages/pinned') return [messages[1]];
   if (pathname.startsWith('/messages/')) return messages;
   if (pathname === '/tasks') return tasks;
+  if (pathname === '/agents/boundaries') return agentBoundaries;
   if (pathname.startsWith('/tasks/')) {
     const id = decodeURIComponent(pathname.split('/')[2] || '');
     return tasks.find((t) => t.id === id) || tasks[0];
@@ -1731,6 +1802,16 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           envVars: [],
           envStatus: [],
           toolPattern: 'mcp__nanocrab__*',
+          permission: {
+            connectorId: 'nanocrab',
+            scope: 'all',
+            allowedActions: ['*'],
+            requiresApproval: false,
+            groups: [],
+            agents: [],
+            createdAt: iso(120),
+            updatedAt: iso(20),
+          },
           status: 'healthy',
           notes: 'Core mock server exposed to every sample agent container.',
         },
@@ -1744,6 +1825,16 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           envVars: ['GITHUB_TOKEN'],
           envStatus: [{ key: 'GITHUB_TOKEN', isSet: true }],
           toolPattern: 'mcp__github__*',
+          permission: {
+            connectorId: 'github',
+            scope: 'groups',
+            allowedActions: ['issues.read', 'pulls.read', 'pulls.write'],
+            requiresApproval: true,
+            groups: ['main', 'operations'],
+            agents: [],
+            createdAt: iso(120),
+            updatedAt: iso(20),
+          },
           status: 'healthy',
           notes: 'Sample GitHub issue and pull request tooling.',
         },
@@ -1757,6 +1848,16 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           envVars: ['KDRIVE_TOKEN'],
           envStatus: [{ key: 'KDRIVE_TOKEN', isSet: false }],
           toolPattern: 'mcp__kdrive__*',
+          permission: {
+            connectorId: 'kdrive',
+            scope: 'main',
+            allowedActions: ['files.read', 'files.write'],
+            requiresApproval: true,
+            groups: [],
+            agents: [],
+            createdAt: iso(120),
+            updatedAt: iso(20),
+          },
           status: 'not_configured',
           notes: 'Placeholder document source for report generation.',
         },

@@ -10,6 +10,7 @@ import {
   selectSkillsForRequest,
   scoreSkillsForRequest,
 } from './skill-registry.js';
+import type { AgentBoundary } from './agent-boundaries.js';
 
 describe('skill registry', () => {
   it('lists bundled skills with registry metadata', () => {
@@ -163,5 +164,45 @@ describe('skill registry', () => {
     ) as unknown[];
     expect(registry).toHaveLength(0);
     expect(fs.existsSync(path.join(runtimeDir, 'private-memory'))).toBe(false);
+  });
+
+  it('uses agent boundaries to deny private skills even when legacy isMain is true', () => {
+    const boundary: AgentBoundary = {
+      agentId: 'limited-main',
+      groupFolder: 'main',
+      isMain: true,
+      channelScopes: ['own'],
+      filesystemScopes: [],
+      skillScopes: {
+        allowedScopes: ['all'],
+        allowedVisibility: ['shared'],
+      },
+      providerProfiles: ['default_chat'],
+      connectorIds: ['nanocrab'],
+      externalWrites: { allowed: false, requiresApproval: true },
+    };
+
+    const selection = selectSkillsForRequest('remember', {
+      isMain: true,
+      agentBoundary: boundary,
+      skills: [
+        {
+          name: 'Private Memory',
+          description: 'Private memory helper',
+          path: 'private-memory',
+          category: 'custom',
+          enabled: true,
+          scope: 'all',
+          visibility: 'private',
+          triggers: ['remember'],
+          examples: [],
+          riskLevel: 'low',
+          requiredTools: [],
+        },
+      ],
+    });
+
+    expect(selection.injected).toHaveLength(0);
+    expect(selection.excluded[0].decision).toBe('excluded-visibility');
   });
 });

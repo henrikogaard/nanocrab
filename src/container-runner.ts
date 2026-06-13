@@ -50,6 +50,13 @@ import {
 import type { FallbackAction } from './providers/fallback-policy.js';
 import { logAuditEvent } from './audit-log.js';
 import { evaluatePolicy } from './policy-engine.js';
+import {
+  canUseProviderProfile,
+  deriveRuntimeCapabilities,
+  resolveAgentBoundary,
+  type AgentBoundary,
+} from './agent-boundaries.js';
+import { filterAllowedConnectorIds } from './connector-permissions.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCRAB_OUTPUT_START---';
@@ -145,22 +152,40 @@ function latestMtimeMs(dir: string): number {
   return latest;
 }
 
+function loadConfiguredConnectorIds(): string[] {
+  const ids = new Set(['nanocrab', 'github']);
+  try {
+    const mcpConfigPath = path.join(STORE_DIR, 'mcp-servers.json');
+    if (fs.existsSync(mcpConfigPath)) {
+      const servers = JSON.parse(
+        fs.readFileSync(mcpConfigPath, 'utf-8'),
+      ) as Array<{ name?: string }>;
+      for (const server of servers) {
+        if (server.name) ids.add(server.name);
+      }
+    }
+  } catch {}
+  return Array.from(ids);
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
   request?: string,
   sessionId?: string,
+  agentBoundary?: AgentBoundary,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
   const skillSelection = request
-    ? selectSkillsForRequest(request, { isMain })
+    ? selectSkillsForRequest(request, { isMain, agentBoundary })
     : undefined;
   const skillsSrc = prepareActiveSkillsDirectory({
     groupFolder: group.folder,
     isMain,
     request,
+    agentBoundary,
   });
   if (request) {
     recordSkillRoutingDecision({
@@ -405,6 +430,12 @@ function buildContainerArgs(
     defaults.modelsByProvider[effectiveProvider] ||
     DEFAULT_AGENT_MODELS[effectiveProvider];
   const providerDefinition = getAgentProviderDefinition(effectiveProvider);
+  const allowedMcpServerSet = new Set(
+    (allowedMcpServers || []).map((server) => server.toLowerCase()),
+  );
+  const isMcpAllowed = (serverName: string): boolean =>
+    allowedMcpServers === undefined ||
+    allowedMcpServerSet.has(serverName.toLowerCase());
   const providerEnvKeys = [
     providerDefinition.envKey,
     providerDefinition.baseUrlEnvKey,
@@ -471,8 +502,13 @@ function buildContainerArgs(
     setEnv(key, envValue(key));
   }
 
-  // Pass GitHub token to container
-  setEnv('GITHUB_TOKEN', envValue('GITHUB_TOKEN') || process.env.GITHUB_TOKEN);
+  // Pass GitHub token only when the GitHub connector is inside the boundary.
+  if (isMcpAllowed('github')) {
+    setEnv(
+      'GITHUB_TOKEN',
+      envValue('GITHUB_TOKEN') || process.env.GITHUB_TOKEN,
+    );
+  }
 
   // Pass admin API token for container skills
   setEnv(
@@ -486,11 +522,12 @@ function buildContainerArgs(
     if (fs.existsSync(mcpConfigPath)) {
       const servers = JSON.parse(
         fs.readFileSync(mcpConfigPath, 'utf-8'),
-      ) as Array<{ envVars?: string[] }>;
+      ) as Array<{ name?: string; envVars?: string[] }>;
       const envKeys = [...new Set(servers.flatMap((srv) => srv.envVars || []))];
       const envFileValues = readEnvFile(envKeys);
       const passedKeys = new Set<string>();
       for (const srv of servers) {
+        if (!srv.name || !isMcpAllowed(srv.name)) continue;
         for (const key of srv.envVars || []) {
           const value = process.env[key] || envFileValues[key];
           if (
@@ -595,11 +632,33 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
+  const connectorIds = loadConfiguredConnectorIds();
+  const agentBoundary = resolveAgentBoundary({
+    group,
+    isMain: input.isMain,
+    agentId: input.groupFolder,
+    availableConnectorIds: connectorIds,
+  });
+  const runtimeCapabilities = deriveRuntimeCapabilities(agentBoundary, {
+    connectorIds,
+    requestedConnectorIds: input.allowedMcpServers
+      ? ['nanocrab', ...input.allowedMcpServers]
+      : undefined,
+  });
+  const allowedConnectorIds = filterAllowedConnectorIds({
+    connectorIds: runtimeCapabilities.allowedConnectorIds,
+    groupFolder: input.groupFolder,
+    agentId: agentBoundary.agentId,
+    isMain: input.isMain,
+    action: 'tools.expose',
+  });
+
   const mounts = buildVolumeMounts(
     group,
     input.isMain,
     input.prompt,
     input.sessionId,
+    agentBoundary,
   );
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanocrab-${safeName}-${Date.now()}`;
@@ -615,6 +674,13 @@ export async function runContainerAgent(
       isMain: input.isMain,
       isScheduledTask: input.isScheduledTask,
       mountCount: mounts.length,
+      boundary: {
+        agentId: agentBoundary.agentId,
+        channelScopes: agentBoundary.channelScopes,
+        connectorIds: allowedConnectorIds,
+        providerProfiles: agentBoundary.providerProfiles,
+        externalWrites: agentBoundary.externalWrites,
+      },
       mounts: mounts.map((mount) => ({
         containerPath: mount.containerPath,
         readonly: input.dryRun ? true : mount.readonly,
@@ -651,6 +717,25 @@ export async function runContainerAgent(
     : undefined;
   let effectiveModel = input.model;
   if (input.providerFallbackPurpose && input.providerFallbackAction) {
+    if (!canUseProviderProfile(agentBoundary, input.providerFallbackPurpose)) {
+      logAuditEvent({
+        actor: input.groupFolder,
+        actorId: input.sessionId || null,
+        actionType: 'agent_boundary.provider_profile',
+        resource: input.providerFallbackPurpose,
+        decision: 'denied',
+        correlationId: input.sessionId || null,
+        context: {
+          agentId: agentBoundary.agentId,
+          allowedProviderProfiles: agentBoundary.providerProfiles,
+        },
+      });
+      return {
+        status: 'error',
+        result: null,
+        error: `Agent boundary denied provider profile: ${input.providerFallbackPurpose}`,
+      };
+    }
     const fallback = resolveProviderFallbackForAction({
       purpose: input.providerFallbackPurpose,
       action: input.providerFallbackAction,
@@ -686,7 +771,7 @@ export async function runContainerAgent(
   const builtContainerArgs = buildContainerArgs(
     mounts,
     containerName,
-    input.isMain ? undefined : input.allowedMcpServers,
+    allowedConnectorIds,
     effectiveProvider,
     effectiveModel,
   );
@@ -732,7 +817,19 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    container.stdin.write(JSON.stringify(input));
+    container.stdin.write(
+      JSON.stringify({
+        ...input,
+        allowedMcpServers: allowedConnectorIds.filter(
+          (connectorId) => connectorId !== 'nanocrab',
+        ),
+        agentBoundary,
+        runtimeCapabilities: {
+          ...runtimeCapabilities,
+          allowedConnectorIds,
+        },
+      }),
+    );
     container.stdin.end();
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive

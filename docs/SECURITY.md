@@ -80,6 +80,12 @@ Audit events are stored in SQLite (`audit_events`) with actor, action, resource,
 
 Dry-run mode records `decision: simulated` audit events and avoids external writes. Coding-job dry-runs skip container execution, Git commits, pushes, and pull request creation while still recording the workflow timeline. Scheduled automations can run with `tool_policy: dry-run`; the container runner returns a simulated result without spawning a container and treats mounts as read-only in the recorded decision.
 
+### 3c. Connector Permissions And Agent Boundaries
+
+MCP connectors have explicit permission records in `store/connector-permissions.json`: `connectorId`, `scope`, `allowedActions`, `requiresApproval`, `groups`, `agents`, `createdAt`, and `updatedAt`. Before connector tools are exposed to a container or connector actions are authorized, NanoCrab checks the active group/agent scope and then evaluates host policy for the connector action. Write-capable connector actions should either require approval on the connector permission or be allowed by an explicit policy rule.
+
+Every container invocation also resolves an agent boundary from the group identity before runtime assembly. The boundary declares channel scopes, filesystem scopes, skill scopes, provider profile permissions, allowed connector ids, and external write permissions. Container mounts, runtime skill snapshots, provider fallback profile selection, channel capability metadata, connector tool exposure, and MCP credential forwarding are derived from that boundary. Unauthorized channel agents therefore cannot receive private skills, out-of-scope connector credentials, coding-only provider profiles, broad channel scopes, or write-capable external tools.
+
 ### 4. IPC Authorization
 
 Messages and task operations are verified against group identity:
@@ -125,7 +131,7 @@ Claude, OpenRouter, and Google Gemini API traffic can be proxied this way. Ollam
 | Global memory       | Implicit via project            | `/workspace/global` (ro) |
 | Additional mounts   | Configurable                    | Read-only unless allowed |
 | Network access      | Unrestricted                    | Unrestricted             |
-| MCP tools           | All                             | All                      |
+| MCP tools           | Boundary-filtered               | Boundary-filtered        |
 
 ## Security Architecture Diagram
 
