@@ -56,6 +56,7 @@ describe('mock admin data', () => {
       const detail = (await detailResponse.json()) as {
         timeline: unknown[];
         artifacts: Array<{ kind: string; path: string }>;
+        deliverables: Array<{ status: string; sourceType: string }>;
         approvals: Array<{ status: string; risk: string; targetType: string }>;
       };
 
@@ -74,6 +75,14 @@ describe('mock admin data', () => {
             status: 'pending',
             risk: 'high',
             targetType: 'message',
+          }),
+        ]),
+      );
+      expect(detail.deliverables).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            status: 'pending',
+            sourceType: 'approval',
           }),
         ]),
       );

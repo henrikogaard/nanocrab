@@ -1668,6 +1668,85 @@ function cockpitApprovals(
   return fixtures[id] || [];
 }
 
+function cockpitDeliverables(
+  id: string,
+  session: (typeof cockpitSessions)[number],
+): JsonValue[] {
+  const fixtures: Record<string, JsonValue[]> = {
+    'cockpit-running-001': [
+      {
+        id: 'cockpit-running-001-deliverable-summary',
+        title: 'Live cockpit summary',
+        format: 'markdown',
+        path: 'data/runtime/cockpit/cockpit-running-001/summary.md',
+        sourceType: 'transcript',
+        sourceId: id,
+        status: 'drafting',
+        createdAt: iso(5),
+        sizeBytes: 1840,
+        summary: 'Operational summary artifact still being updated by the run.',
+      },
+    ],
+    'cockpit-approval-002': [
+      {
+        id: 'cockpit-approval-002-deliverable-preview',
+        title: 'Nightfall orders preview',
+        format: 'markdown',
+        path: 'data/approvals/cockpit-approval-002/preview.md',
+        sourceType: 'approval',
+        sourceId: id,
+        status: 'pending',
+        createdAt: iso(9),
+        sizeBytes: 4200,
+        summary: 'Reviewable deliverable waiting for operator approval.',
+      },
+    ],
+    'cockpit-failed-003': [
+      {
+        id: 'cockpit-failed-003-deliverable-error-log',
+        title: 'Provider failure log',
+        format: 'log',
+        path: 'data/runtime/cockpit/cockpit-failed-003/provider-error.log',
+        sourceType: 'transcript',
+        sourceId: id,
+        status: 'failed',
+        createdAt: iso(132),
+        sizeBytes: 930,
+        summary: 'Failure artifact retained for debugging the provider retry.',
+      },
+    ],
+    'cockpit-complete-004': [
+      {
+        id: 'cockpit-complete-004-deliverable-pr',
+        title: 'Implementation pull request',
+        format: 'github-pr',
+        path: 'https://github.com/henrikogaard/nanocrab/pull/42',
+        sourceType: 'coding-job',
+        sourceId: id,
+        status: 'ready',
+        createdAt: iso(296),
+        sizeBytes: null,
+        summary: 'Reviewable pull request created by the completed coding run.',
+        externalUrl: 'https://github.com/henrikogaard/nanocrab/pull/42',
+      },
+      {
+        id: 'cockpit-complete-004-deliverable-tests',
+        title: 'Test summary',
+        format: 'text',
+        path: 'data/runtime/cockpit/cockpit-complete-004/test-summary.txt',
+        sourceType: 'coding-job',
+        sourceId: id,
+        status: 'ready',
+        createdAt: iso(300),
+        sizeBytes: 760,
+        summary: 'Focused route and websocket verification output.',
+      },
+    ],
+  };
+
+  return fixtures[id] || [];
+}
+
 function cockpitDetail(id: string): JsonValue | undefined {
   const session = cockpitSessions.find((item) => item.id === id);
   if (!session) return undefined;
@@ -1675,6 +1754,7 @@ function cockpitDetail(id: string): JsonValue | undefined {
     ...session,
     timeline: cockpitTimeline(id, session),
     artifacts: cockpitArtifacts(id, session),
+    deliverables: cockpitDeliverables(id, session),
     approvals: cockpitApprovals(id, session),
   };
 }

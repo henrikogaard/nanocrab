@@ -1771,6 +1771,7 @@ tr {
 }
 .cockpit-timeline,
 .cockpit-artifacts,
+.cockpit-deliverables,
 .cockpit-approvals {
   display: grid;
   gap: 1px;
@@ -1781,6 +1782,7 @@ tr {
 }
 .cockpit-timeline-item,
 .cockpit-artifact,
+.cockpit-deliverable,
 .cockpit-approval {
   padding: 10px 11px;
   background: var(--surface);
@@ -1793,17 +1795,32 @@ tr {
 }
 .cockpit-timeline-item strong,
 .cockpit-artifact strong,
+.cockpit-deliverable strong,
 .cockpit-approval strong {
   display: block;
   color: var(--text);
   font-size: 12px;
 }
 .cockpit-timeline-item p,
-.cockpit-artifact small {
+.cockpit-artifact small,
+.cockpit-deliverable small {
   margin: 4px 0 0;
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.4;
+}
+.cockpit-deliverable {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+.cockpit-deliverable-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
 }
 .cockpit-approval {
   display: flex;

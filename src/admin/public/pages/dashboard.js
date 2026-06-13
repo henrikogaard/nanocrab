@@ -457,9 +457,22 @@ async function renderDashboard(el) {
 
 function cockpitStatusClass(status) {
   if (status === 'running' || status === 'completed') return 'is-good';
-  if (status === 'waiting_approval' || status === 'queued') return 'is-warn';
-  if (status === 'failed' || status === 'cancelled') return 'is-bad';
+  if (
+    status === 'waiting_approval' ||
+    status === 'queued' ||
+    status === 'pending'
+  )
+    return 'is-warn';
+  if (status === 'failed' || status === 'cancelled' || status === 'denied')
+    return 'is-bad';
   return 'is-idle';
+}
+
+function formatCockpitBytes(bytes) {
+  if (!bytes && bytes !== 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function renderCockpitSessionRow(session, index, selectedId) {
@@ -543,9 +556,29 @@ async function loadCockpitDetail(id) {
         (artifact) => `
           <div class="cockpit-artifact">
             <strong>${esc(artifact.name || artifact.path || 'artifact')}</strong>
-            <small>${esc(artifact.kind || 'file')}</small>
+            <small>${esc([artifact.kind || 'file', artifact.status, formatCockpitBytes(artifact.sizeBytes)].filter(Boolean).join(' · '))}</small>
           </div>`,
       )
+      .join('');
+    const deliverables = (data.deliverables || [])
+      .slice(0, 6)
+      .map((item) => {
+        const href = item.downloadUrl || item.externalUrl || '';
+        const action = href
+          ? `<a class="btn btn-sm btn-ghost" href="${esc(href)}" ${item.downloadUrl ? 'download' : 'target="_blank" rel="noopener"'}>${item.downloadUrl ? 'Download' : 'Open'}</a>`
+          : '';
+        return `
+          <div class="cockpit-deliverable">
+            <div>
+              <strong>${esc(item.title || item.path || 'Deliverable')}</strong>
+              <small>${esc([item.format || 'file', formatCockpitBytes(item.sizeBytes), item.summary].filter(Boolean).join(' · '))}</small>
+            </div>
+            <div class="cockpit-deliverable-actions">
+              <span class="dash-pill ${cockpitStatusClass(item.status || 'completed')}">${esc(item.status || 'ready')}</span>
+              ${action}
+            </div>
+          </div>`;
+      })
       .join('');
     const approvals = (data.approvals || [])
       .slice(0, 5)
@@ -567,6 +600,10 @@ async function loadCockpitDetail(id) {
         <section>
           <div class="dash-section-label">Artifacts</div>
           <div class="cockpit-artifacts">${artifacts || '<div class="dash-empty">No artifacts recorded.</div>'}</div>
+        </section>
+        <section>
+          <div class="dash-section-label">Deliverables</div>
+          <div class="cockpit-deliverables">${deliverables || '<div class="dash-empty">No deliverables published.</div>'}</div>
         </section>
         <section>
           <div class="dash-section-label">Approvals</div>
