@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import {
   getAllRegisteredGroups,
+  getNonWebRegisteredGroups,
   setRegisteredGroup,
   getAllChats,
 } from '../../db.js';
@@ -16,7 +17,7 @@ import { getState } from '../state.js';
 const router = Router();
 
 router.get('/', (_req: Request, res: Response) => {
-  const groups = getAllRegisteredGroups();
+  const groups = getNonWebRegisteredGroups();
   const chats = getAllChats();
   const chatMap = new Map(chats.map((c) => [c.jid, c]));
 

@@ -96,7 +96,10 @@ router.get('/github-health', (req: Request, res: Response) => {
   const env = readEnvFile(['GITHUB_TOKEN', 'GITHUB_WEBHOOK_SECRET']);
   const config = loadConfig();
   const state = getState();
-  const groups = state.registeredGroups();
+  const allGroups = state.registeredGroups();
+  const groups = Object.fromEntries(
+    Object.entries(allGroups).filter(([, g]) => g.kind !== 'web'),
+  );
   const webhookSecret =
     config.secret ||
     process.env.GITHUB_WEBHOOK_SECRET ||

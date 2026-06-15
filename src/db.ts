@@ -1402,6 +1402,24 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   return result;
 }
 
+export function getNonWebRegisteredGroups(): Record<string, RegisteredGroup> {
+  const all = getAllRegisteredGroups();
+  const out: Record<string, RegisteredGroup> = {};
+  for (const [jid, g] of Object.entries(all)) {
+    if (g.kind !== 'web') out[jid] = g;
+  }
+  return out;
+}
+
+export function getWebThreads(): Record<string, RegisteredGroup> {
+  const all = getAllRegisteredGroups();
+  const out: Record<string, RegisteredGroup> = {};
+  for (const [jid, g] of Object.entries(all)) {
+    if (g.kind === 'web') out[jid] = g;
+  }
+  return out;
+}
+
 // --- JSON migration ---
 
 function migrateJsonState(): void {

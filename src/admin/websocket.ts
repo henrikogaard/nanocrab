@@ -296,7 +296,10 @@ function sendStatus(ws: WebSocket): void {
 
 function getStatusData(): object {
   const state = getState();
-  const groups = state.registeredGroups();
+  const allGroups = state.registeredGroups();
+  const groups = Object.fromEntries(
+    Object.entries(allGroups).filter(([, g]) => g.kind !== 'web'),
+  );
   return {
     channels: state.channels
       .filter((ch) => isChannelEnabledForRegisteredGroups(ch.name, groups))

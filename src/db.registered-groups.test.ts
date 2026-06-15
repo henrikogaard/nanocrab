@@ -36,3 +36,24 @@ describe('registered group kind/title round-trip', () => {
     expect(db.getAllRegisteredGroups()[jid].kind).toBeUndefined();
   });
 });
+
+describe('web vs non-web partition', () => {
+  it('getNonWebRegisteredGroups excludes web threads; getWebThreads returns only web', () => {
+    const webJid = 'web:partition-1';
+    const realJid = 'real:partition-2';
+    db.setRegisteredGroup(webJid, {
+      name: 'Web', title: 'T', kind: 'web', folder: 'web-partition-1',
+      trigger: '^', added_at: '2026-06-15T00:00:00Z', requiresTrigger: false,
+    });
+    db.setRegisteredGroup(realJid, {
+      name: 'Real', folder: 'real-partition-2', trigger: '^',
+      added_at: '2026-06-15T00:00:00Z',
+    });
+    const nonWeb = db.getNonWebRegisteredGroups();
+    expect(nonWeb[webJid]).toBeUndefined();
+    expect(nonWeb[realJid]).toBeDefined();
+    const web = db.getWebThreads();
+    expect(web[webJid]).toBeDefined();
+    expect(web[realJid]).toBeUndefined();
+  });
+});

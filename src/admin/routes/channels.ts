@@ -225,7 +225,10 @@ router.get('/', (_req: Request, res: Response) => {
   const envValues = readEnvFile(allEnvKeys);
 
   // Build active channels with status and config
-  const groups = state.registeredGroups();
+  const allGroups = state.registeredGroups();
+  const groups = Object.fromEntries(
+    Object.entries(allGroups).filter(([, g]) => g.kind !== 'web'),
+  );
   const activeChannels = state.channels.map((ch) => {
     const def = SUPPORTED_CHANNELS.find((s) => s.id === ch.name.toLowerCase());
     const health = buildChannelStatus(ch);
