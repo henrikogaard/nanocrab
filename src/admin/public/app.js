@@ -583,6 +583,18 @@ function showShell(page) {
 
   app.innerHTML = `
     <div class="app">
+      <div class="more-overlay" onclick="toggleMoreDrawer()"></div>
+      <div class="more-drawer" id="more-drawer">
+        <div class="more-drawer-header"><span>Admin & operations</span><button class="more-close" onclick="toggleMoreDrawer()" aria-label="Close">✕</button></div>
+        <div class="more-drawer-body">
+          ${window.NanoModes.MORE_IDS.filter((id) => pages[id] && filteredNavItems.every((n) => n.id !== id))
+            .map((id) => {
+              const labels = { dashboard: 'Dashboard', pipelines: 'Deploy', monitoring: 'Monitoring', containers: 'Containers', integrations: 'Integrations', webhooks: 'Webhooks', credentials: 'Credentials', security: 'Security', audit: 'Audit', uptime: 'Uptime', copilot: 'Copilot', backup: 'Backup', usage: 'Usage', settings: 'Settings', help: 'Help' };
+              return `<a class="nav-link" onclick="toggleMoreDrawer(); navigate('${id}')">${navIcon(id) || navIcon('settings')}<span class="nav-label">${labels[id] || id}</span></a>`;
+            })
+            .join('')}
+        </div>
+      </div>
       <div class="mobile-nav">
         <div class="mobile-nav-header">
           <div class="mobile-brand"><span class="brand-mark">${brandLogo()}</span><div><h1>${esc(botName)}</h1><span>${window._editionShort || 'NanoCrab'}</span></div></div>
@@ -661,6 +673,13 @@ window.setMode = function (mode) {
   // Open the first page of the chosen mode.
   const first = NM.navPagesForMode(mode)[0];
   if (first) navigate(first);
+};
+
+window.toggleMoreDrawer = function () {
+  const drawer = document.getElementById('more-drawer');
+  const overlay = document.querySelector('.more-overlay');
+  if (drawer) drawer.classList.toggle('open');
+  if (overlay) overlay.classList.toggle('visible');
 };
 
 window.logout = async function () {
