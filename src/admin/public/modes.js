@@ -51,7 +51,6 @@
     'copilot',
     'backup',
     'usage',
-    'settings',
     'help',
   ];
 

@@ -2,7 +2,12 @@
 
 const app = document.getElementById('app');
 let currentPage = '';
-let activeMode = 'chat';
+// Seed from the persisted last-used mode so deep-links to admin/More pages
+// (which don't resolve to a mode) still show the correct mode in the switcher.
+let activeMode =
+  (window.NanoModes &&
+    window.NanoModes.loadActiveMode(window.localStorage)) ||
+  'chat';
 // Page display metadata (label + icon) for every navigable page id — used by
 // the mode-scoped sidebar and the More drawer.
 const PAGE_META = {
@@ -641,7 +646,7 @@ function showShell(page) {
         </div>
         <div class="sidebar-nav">${navHtml}</div>
         <div class="sidebar-pinned">
-          <a class="nav-link" onclick="toggleMoreDrawer()">${navIcon('settings')}<span class="nav-label">More</span></a>
+          <a class="nav-link" onclick="toggleMoreDrawer()">${navIcon('menu')}<span class="nav-label">More</span></a>
           <a class="nav-link ${page === 'settings' ? 'active' : ''}" onclick="navigate('settings')">${navIcon('settings')}<span class="nav-label">Customize</span></a>
         </div>
         <div class="sidebar-footer">
