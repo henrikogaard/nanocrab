@@ -507,57 +507,42 @@ function showShell(page) {
     activeMode = ownerMode;
     NM.saveActiveMode(activeMode, window.localStorage);
   }
-  // Core navigation
-  const navItems = [
-    { id: 'dashboard', icon: 'dashboard', label: 'Dashboard', section: 'Home' },
-    { id: 'agents', icon: 'agents', label: 'Agents' },
-    { id: 'messages', icon: 'messages', label: 'Messages' },
-    { id: 'approvals', icon: 'approvals', label: 'Approvals' },
-    { id: 'audit', icon: 'audit', label: 'Audit' },
-    { id: 'chat', icon: 'chat', label: 'Chat' },
-    { id: 'groups', icon: 'groups', label: 'Groups', section: 'Workspace' },
-    { id: 'tasks', icon: 'tasks', label: 'Tasks' },
-    { id: 'memory', icon: 'memory', label: 'Memory' },
-    { id: 'skills', icon: 'skills', label: 'Skills' },
-    { id: 'reports', icon: 'audit', label: 'Reports' },
-    { id: 'artifacts', icon: 'files', label: 'Artifacts' },
-    { id: 'timeline', icon: 'timeline', label: 'Timeline' },
-  ];
+  // Mode-scoped nav: only the pages for the active mode (in config order).
+  const NMcfg = window.NanoModes;
+  const labelFor = {
+    chat: 'Chat', messages: 'Messages',
+    agents: 'Agents', groups: 'Groups', tasks: 'Tasks', approvals: 'Approvals',
+    sessions: 'Sessions', workflows: 'Workflows', reports: 'Reports',
+    artifacts: 'Artifacts', memory: 'Memory', timeline: 'Timeline',
+    gitcode: 'Git & Code', devhub: 'Terminal', autofix: 'AutoFix',
+    skills: 'Skills', marketplace: 'Marketplace',
+  };
+  const iconFor = {
+    chat: 'chat', messages: 'messages',
+    agents: 'agents', groups: 'groups', tasks: 'tasks', approvals: 'approvals',
+    sessions: 'sessions', workflows: 'workflows', reports: 'audit',
+    artifacts: 'files', memory: 'memory', timeline: 'timeline',
+    gitcode: 'gitcode', devhub: 'devhub', autofix: 'autofix',
+    skills: 'skills', marketplace: 'marketplace',
+  };
+  const navItems = NMcfg.navPagesForMode(activeMode).map((id) => ({
+    id,
+    icon: iconFor[id] || 'integrations',
+    label: labelFor[id] || id,
+  }));
 
-  // Inject enabled plugins
+  // Inject enabled plugins whose page belongs to the active mode.
   const cachedPlugins = window._pluginsList || [];
-  if (cachedPlugins.length > 0) {
-    let first = true;
-    for (const p of cachedPlugins) {
-      if (!p.enabled || !p.sidebar) continue;
-      if (p.sidebar.id === 'chat') continue; // chat already in Home
-      navItems.push({
-        id: p.sidebar.id,
-        icon: navIconPaths[p.sidebar.id] ? p.sidebar.id : 'integrations',
-        label: p.sidebar.label,
-        section: first ? 'Tools' : undefined,
-      });
-      first = false;
-    }
+  for (const p of cachedPlugins) {
+    if (!p.enabled || !p.sidebar) continue;
+    if (NMcfg.resolveMode(p.sidebar.id) !== activeMode) continue;
+    if (navItems.some((n) => n.id === p.sidebar.id)) continue;
+    navItems.push({
+      id: p.sidebar.id,
+      icon: navIconPaths[p.sidebar.id] ? p.sidebar.id : 'integrations',
+      label: p.sidebar.label,
+    });
   }
-
-  // Developer & System
-  navItems.push(
-    { id: 'devhub', icon: 'devhub', label: 'Terminal', section: 'Developer' },
-    { id: 'gitcode', icon: 'gitcode', label: 'Git & Code' },
-    { id: 'pipelines', icon: 'pipelines', label: 'Deploy' },
-    {
-      id: 'monitoring',
-      icon: 'monitoring',
-      label: 'Monitoring',
-      section: 'System',
-    },
-    { id: 'containers', icon: 'containers', label: 'Containers' },
-    { id: 'integrations', icon: 'integrations', label: 'Integrations' },
-    { id: 'security', icon: 'security', label: 'Security' },
-    { id: 'marketplace', icon: 'marketplace', label: 'Marketplace' },
-    { id: 'settings', icon: 'settings', label: 'Settings' },
-  );
 
   // Role-based sidebar filtering
   const role = window._userRole || 'owner';
@@ -578,33 +563,12 @@ function showShell(page) {
     return true; // admin sees all nav items
   });
 
-  // Build nav with collapsible sections
-  const savedCollapsed = JSON.parse(
-    localStorage.getItem('nav_collapsed') || '{}',
-  );
-  let navHtml = '';
-  let lastSection = '';
-  let sectionIdx = 0;
-  for (const item of filteredNavItems) {
-    if (item.section && item.section !== lastSection) {
-      if (lastSection) navHtml += '</div>'; // close previous group
-      const secId = item.section.toLowerCase().replace(/\s/g, '-');
-      const isCollapsed =
-        savedCollapsed[secId] &&
-        !filteredNavItems
-          .filter(
-            (n) =>
-              n.section === item.section ||
-              (!n.section && lastSection === item.section),
-          )
-          .some((n) => n.id === page);
-      navHtml += `<button class="nav-section nav-section-toggle" onclick="toggleNavSection('${secId}')" type="button"><span>${item.section}</span><span class="toggle-arrow ${isCollapsed ? 'collapsed' : ''}" id="arrow-${secId}">${navIcon('chevron', 'nav-icon-sm')}</span></button><div class="nav-group ${isCollapsed ? 'collapsed' : ''}" id="navgroup-${secId}">`;
-      lastSection = item.section;
-      sectionIdx++;
-    }
-    navHtml += `<a class="nav-link ${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`;
-  }
-  if (lastSection) navHtml += '</div>'; // close last group
+  let navHtml = filteredNavItems
+    .map(
+      (item) =>
+        `<a class="nav-link ${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`,
+    )
+    .join('');
 
   // Build mobile menu HTML
   let mobileMenuHtml = '';
@@ -641,6 +605,10 @@ function showShell(page) {
           }).join('')}
         </div>
         <div class="sidebar-nav">${navHtml}</div>
+        <div class="sidebar-pinned">
+          <a class="nav-link" onclick="toggleMoreDrawer()">${navIcon('settings')}<span class="nav-label">More</span></a>
+          <a class="nav-link ${page === 'settings' ? 'active' : ''}" onclick="navigate('settings')">${navIcon('settings')}<span class="nav-label">Customize</span></a>
+        </div>
         <div class="sidebar-footer">
           <div class="sidebar-footer-actions">
             <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme"></button>
