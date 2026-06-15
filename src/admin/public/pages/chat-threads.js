@@ -20,13 +20,15 @@
 
   async function loadThreads() {
     try {
-      return await api('/threads');
+      var t = await api('/threads');
+      return Array.isArray(t) ? t : [];
     } catch (_) {
       return [];
     }
   }
 
   function renderThreadList(threads, currentId) {
+    if (!Array.isArray(threads)) threads = [];
     var newBtn =
       '<a class="nav-link" onclick="WebChat.openNewConversationModal()">' +
       navIcon('chat') +
@@ -442,7 +444,8 @@
 
     var templates = [];
     try {
-      templates = await api('/threads/agent-templates');
+      var tmpl = await api('/threads/agent-templates');
+      templates = Array.isArray(tmpl) ? tmpl : [];
     } catch (_) {
       templates = [];
     }
