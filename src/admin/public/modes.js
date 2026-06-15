@@ -55,34 +55,29 @@
     'help',
   ];
 
-  function resolveMode(pageId, modes, order) {
-    modes = modes || MODES;
-    order = order || MODE_ORDER;
-    for (const m of order) {
-      if (modes[m] && modes[m].pages.indexOf(pageId) !== -1) return m;
+  function resolveMode(pageId) {
+    for (const m of MODE_ORDER) {
+      if (MODES[m] && MODES[m].pages.indexOf(pageId) !== -1) return m;
     }
     return null;
   }
 
-  function navPagesForMode(modeId, modes) {
-    modes = modes || MODES;
-    return modes[modeId] ? modes[modeId].pages.slice() : [];
+  function navPagesForMode(modeId) {
+    return MODES[modeId] ? MODES[modeId].pages.slice() : [];
   }
 
-  function loadActiveMode(storage, order) {
-    order = order || MODE_ORDER;
+  function loadActiveMode(storage) {
     let saved = null;
     try {
       saved = storage && storage.getItem('active_mode');
     } catch {
       saved = null;
     }
-    return order.indexOf(saved) !== -1 ? saved : order[0];
+    return MODE_ORDER.indexOf(saved) !== -1 ? saved : MODE_ORDER[0];
   }
 
-  function saveActiveMode(modeId, storage, order) {
-    order = order || MODE_ORDER;
-    if (order.indexOf(modeId) === -1) return false;
+  function saveActiveMode(modeId, storage) {
+    if (MODE_ORDER.indexOf(modeId) === -1) return false;
     try {
       if (storage) storage.setItem('active_mode', modeId);
       return true;
