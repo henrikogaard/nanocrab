@@ -6,7 +6,7 @@
 
 > Standalone personal AI assistant platform with multi-channel messaging, an admin dashboard, provider-neutral agent skills, autonomous coding agents, memory, journal, and plugin support.
 
-**NanoCrab 2.0-RC2**
+**NanoCrab 2.0-RC3**
 
 ---
 
@@ -14,11 +14,13 @@
 
 NanoCrab is a standalone personal assistant platform for running AI agents in isolated containers. It combines messaging channels, a web dashboard, provider routing, autonomous coding, long-term memory, journal/event tracking, and provider-neutral skills in one understandable Node.js process.
 
-NanoCrab is its own product now. It is not an upstream-compatible fork of any upstream project. NanoCrab 2.0-RC2 uses NanoCrab-native container images, MCP names, config paths, cookies, logs, and service identifiers.
+NanoCrab is its own product now. It is not an upstream-compatible fork of any upstream project. NanoCrab 2.0-RC3 uses NanoCrab-native container images, MCP names, config paths, cookies, logs, and service identifiers.
 
 ## Learning, Memory, And Skills
 
-NanoCrab 2.0-RC2 is a major step toward a long-running personal agent. It can learn over time, keep memories, reuse those memories across channels, and grow its own provider-neutral skills, but it does this with review and provenance instead of silently absorbing everything it sees.
+NanoCrab 2.0-RC3 is a major step toward a long-running personal agent. It can learn over time, keep memories, reuse those memories across channels, and grow its own provider-neutral skills, but it does this with review and provenance instead of silently absorbing everything it sees.
+
+RC3 focuses on making the new autonomy surfaces easier to operate: the dashboard now exposes guided coding assignment, GitHub issue pickup, Autofix auto-pickup, routine blueprints, scheduled task delivery controls, webhook approvals, and clearer operator documentation.
 
 - **Structured memory** is stored as reviewed records with scope, type, content, source, confidence, sensitivity, visibility, stale-review state, and contradiction metadata.
 - **Shared context** is generated from approved memories into runtime `MEMORY.md` files, so chat, automations, coding jobs, journal extraction, and reports can all benefit from the same remembered facts and preferences.
@@ -44,6 +46,7 @@ Full web dashboard at your domain with 7-layer security (firewall, TLS, IP allow
 
 - **Overview** — live stats, weather, channel status, message feed
 - **Agents** — Assign Work wizard for one-off coding tasks, GitHub issue pickup, Autofix auto-pickup setup, coding-job output, and bot agents
+- **Tasks** — routine blueprints, schedule builder, delivery modes, run history, heartbeat checks, and run-now controls
 - **Messages** — search, filter, export conversations across all channels
 - **Approvals** — unified inbox for pending and reviewed risky actions with provenance, filters, and approve/deny controls
 - **Memory** — shared cross-channel memory + wiki knowledge base
@@ -59,7 +62,7 @@ Optional features that can be enabled/disabled from the dashboard:
 | **GitHub Copilot** | Multi-account OAuth, assign Copilot to issues, track PRs                                |
 | **Uptime Monitor** | HTTP + file-freshness health checks with bot alerts                                     |
 | **Chat**           | Send messages to the bot from the dashboard                                             |
-| **Workflows**      | Automation workflows plus missions/runbooks with tracked operator steps                 |
+| **Workflows**      | Automation workflows, routines, missions, runbooks, and tracked operator steps          |
 | **Wiki**           | Markdown knowledge base                                                                 |
 
 Additional plugins can be installed from git URLs via the Marketplace page, or created as personal plugins that stay local (gitignored).
@@ -378,6 +381,10 @@ changes before updating.
 See [docs/COMMANDS.md](docs/COMMANDS.md) for the full NanoCrab command surface:
 chat commands, host/operator commands, setup steps, and agent MCP tools.
 
+For a task-oriented walkthrough of the dashboard, messaging channels, coding
+jobs, routines, approvals, memory, backups, and daily operations, see
+[docs/USER_GUIDE.md](docs/USER_GUIDE.md).
+
 ### Dashboard Setup
 
 ```bash
@@ -469,7 +476,11 @@ Single Node.js process. Channels self-register at startup. Agents execute in iso
 
 ## Release And Upgrade Notes
 
-NanoCrab 2.0-RC2 is tested with Node.js 24. Node.js 20-24 are the supported range; avoid Node.js 26 for now because native dependencies such as SQLite bindings may not install cleanly there yet.
+NanoCrab 2.0-RC3 is tested with Node.js 24. Node.js 20-24 are the supported range; avoid Node.js 26 for now because native dependencies such as SQLite bindings may not install cleanly there yet.
+
+RC3 documentation adds a user guide, refreshes the release handover, and
+clarifies the dashboard path for scheduled routines, coding jobs, approvals,
+Autofix pickup, and operational checks.
 
 Useful release checks:
 
@@ -508,7 +519,7 @@ Each plugin exports: `id`, `name`, `router` (Express), `sidebar` config, and opt
 
 ## Standalone Product
 
-NanoCrab 2.0-RC2 is a standalone product, not an upstream-compatible fork.
+NanoCrab 2.0-RC3 is a standalone product, not an upstream-compatible fork.
 
 New capabilities should land as normal NanoCrab code, optional private plugins, or approved provider-neutral skills through the Skill Factory.
 

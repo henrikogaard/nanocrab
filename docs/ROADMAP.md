@@ -13,10 +13,12 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 - Provider basics exist: Claude, Codex, OpenCode, Ollama, OpenRouter, and Google are selectable with preflight checks and credential-proxy support where needed. Provider profiles now route chat, coding, automations, memory, journal, skill factory, reports, docs, and vision defaults.
 - Report jobs support source scopes, outline approval, Markdown/HTML/DOCX/PDF deliverables, artifacts, and delivery approval.
 - Personal operations now include reusable runbooks, missions with step-level status tracking, and daily/weekly briefing schedules backed by approval-gated report tasks.
+- Routines and scheduled tasks now include dashboard blueprints, freeform draft creation, exact cron/interval/one-time schedules, dashboard/chat/file/webhook delivery modes, approval-gated webhook delivery, named routine sessions, chained task context, heartbeat checks, quiet hours, stale policies, active-run limits, run history, and run-now controls.
+- Autofix now supports issue-webhook startup, scheduled auto-pickup, max-active-job limits, project cadence controls, connector health checks, and approval-gated implementation/PR publishing.
 - Better terminal controls exist in the dashboard: named shell session id, reconnect, clear, copy transcript, and xterm output.
 - Standalone cleanup is implemented: NanoCrab is treated as its own product with NanoCrab-first code, plugins, skills, MCP names, container names, docs, and migration tooling.
 - P0 closure sweep complete: non-epic P0 issues for cockpit/approvals, provider hardening, memory/skill review surfaces, timeline/router safety, GitHub coding jobs, policy/audit/dry-run controls, connector boundaries, and first-run setup are closed. Remaining P0-labeled GitHub issues are roadmap epics with lower-priority follow-up children still open.
-- Still future work: richer CI-status visualization, mobile coding-agent chat commands, more MCP source connectors, and continued dashboard UX polish.
+- Still future work: richer CI-status visualization, more MCP source connectors, deeper production diagnostics, and continued dashboard UX polish.
 
 ---
 
@@ -267,6 +269,13 @@ Goal: give agents a durable research/reporting workflow without making the core 
   - skills proposed
   - journal events extracted
   - approvals pending
+- Add a polished scheduled-task setup flow:
+  - DONE: routine blueprints and quick-start prompts
+  - DONE: freeform routine drafting from natural-language automation goals
+  - DONE: provider/profile/model/tool-policy selectors
+  - DONE: delivery-mode controls for dashboard, chat, file, and webhook output
+  - DONE: heartbeat and active-run safety controls
+  - NEXT: richer calendar-style schedule preview and grouped routine analytics
 
 ---
 
@@ -307,7 +316,8 @@ These rules are non-negotiable:
 8. **Personal Operations v1** - PARTIAL
    - DONE: reusable runbooks, missions started from runbooks, dashboard step tracking, and approval references for sensitive steps.
    - DONE: daily and weekly briefing schedules create approval-gated report tasks from journal/memory sources.
-   - NEXT: richer briefing history and per-channel delivery preferences.
+   - DONE: routine blueprints, exact scheduled tasks, delivery modes, webhook approvals, heartbeat checks, run history, and run-now controls.
+   - NEXT: richer briefing history, grouped routine analytics, and per-channel delivery preferences.
 9. **Provider Expansion**
    - DONE: OpenAI Responses API adapter with 11 tests
    - DONE: Anthropic Messages API adapter with 13 tests

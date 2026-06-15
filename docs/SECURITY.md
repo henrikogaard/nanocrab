@@ -86,6 +86,22 @@ MCP connectors have explicit permission records in `store/connector-permissions.
 
 Every container invocation also resolves an agent boundary from the group identity before runtime assembly. The boundary declares channel scopes, filesystem scopes, skill scopes, provider profile permissions, allowed connector ids, and external write permissions. Container mounts, runtime skill snapshots, provider fallback profile selection, channel capability metadata, connector tool exposure, and MCP credential forwarding are derived from that boundary. Unauthorized channel agents therefore cannot receive private skills, out-of-scope connector credentials, coding-only provider profiles, broad channel scopes, or write-capable external tools.
 
+### 3d. Scheduled Task And Webhook Delivery Controls
+
+Scheduled tasks inherit the boundary of the group that owns the task. Main-group
+tasks can target other registered groups only through host authorization; normal
+channel groups can manage only their own tasks. Task delivery mode is explicit:
+dashboard-only runs stay in task history, chat delivery targets a registered
+group, file delivery writes reviewable output under `store/task-deliveries/`,
+and webhook delivery creates an approval record before an external request is
+sent.
+
+Routine safety controls are evaluated before execution: max runtime, max active
+runs, heartbeat stale policy, quiet hours, dry-run/tool policy, provider
+fallback policy, and delivery approval policy. Webhook targets and payload
+previews are shown in the approval inbox so operators can deny stale, vague, or
+incorrect deliveries before any external side effect occurs.
+
 ### 4. IPC Authorization
 
 Messages and task operations are verified against group identity:

@@ -1,20 +1,20 @@
 # NanoCrab Handover
 
-Last updated: 2026-06-13
+Last updated: 2026-06-15
 
 ## Repository State
 
 - Canonical repository: `https://github.com/henrikogaard/nanocrab.git`
 - Main branch: `main`
-- Functional baseline before this note: `5673d48` (`Format skill registry changes`)
-- NanoCrab version: `2.0.0-beta.1`
+- Functional baseline before this note: `51ee219` (`chore: apply formatting cleanup`)
+- NanoCrab version: `2.0.0-rc.3`
 - The repo is standalone. Do not use the old `nanoclaw` upstream as a source of truth.
 
 ## What Is Ready
 
 - Local workstation changes are committed and pushed through `origin/main`.
 - The GitHub issue tracker has a roadmap index plus milestones, epics, and child issues for the Hermes/OpenClaw expansion.
-- README, command docs, roadmap, changelog, and repository agent instructions describe the 2.0-Beta1 direction and the completed non-epic P0 closure sweep.
+- README, command docs, user guide, roadmap, and repository agent instructions describe the 2.0-RC3 direction and the completed non-epic P0 closure sweep.
 - Skills are provider-neutral and managed through the skill registry.
 - Runtime memories and generated `MEMORY.md` files are private state and gitignored.
 
@@ -25,7 +25,9 @@ Last updated: 2026-06-13
 - Provider profiles for Claude, Codex, OpenCode, Ollama, OpenRouter, Google, and related OpenAI-compatible flows.
 - Structured memory proposals, journal events/summaries, skill drafts, skill suggestions, and skill timeline surfaces.
 - Skill registry with enabled/scope/visibility controls and relevance-based skill injection.
-- Dedicated coding job containers for GitHub work.
+- Dedicated coding job containers for GitHub work, including dashboard assignment, mobile `/code` commands, GitHub issue pickup, and approval-gated PR creation.
+- Routine blueprints and scheduled tasks with delivery modes, webhook approvals, heartbeat checks, active-run limits, run history, and run-now controls.
+- Autofix auto-pickup with cadence, max-active-job limits, webhook receiver guidance, and connector health checks.
 - Reports, research jobs, deliverables, artifacts, approvals, and Playwright support.
 - Optional Infomaniak kSuite MCP preset.
 - P0 release foundations are in place: cockpit/approval inbox, provider probes/fallback approval, memory/skill review timelines, coding workflow approvals/PR/CI tracking, policy/audit/dry-run controls, connector boundaries, and first-run setup preflight.
@@ -62,6 +64,6 @@ Last updated: 2026-06-13
 ## Next High-Value Work
 
 - Keep the P0 roadmap epics open only for their remaining follow-up children; all non-epic P0 implementation issues are closed.
-- Add mobile chat commands and persisted repo preference/rules for coding jobs.
-- Build backup/restore/migration UI and production release diagnostics.
+- Improve CI-status visualization for coding jobs and PRs.
+- Continue backup/restore/migration UI and production release diagnostics hardening.
 - Grow the connector catalog with permissioned email, calendar, kDrive, GitHub, and document workflows.

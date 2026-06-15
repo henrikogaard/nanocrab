@@ -6,6 +6,9 @@ NanoCrab has three command surfaces:
 - **Host/operator commands** run from a shell in the NanoCrab repo.
 - **Agent MCP tools** called by the agent when you ask for tasks like scheduling, reports, coding jobs, memories, or artifacts.
 
+For a guided operator walkthrough, including which dashboard page to use for
+common work, see [USER_GUIDE.md](USER_GUIDE.md).
+
 ## Chat Commands
 
 These are exact text commands intercepted by the NanoCrab host before they are stored as normal messages.

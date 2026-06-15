@@ -111,11 +111,12 @@ A personal AI assistant accessible via messaging, with minimal custom code.
 - Users can ask the configured agent provider to schedule recurring or one-time tasks from any group
 - Tasks run as full agents in the context of the group that created them
 - Tasks have access to all tools including Bash (safe in container)
-- Tasks can optionally send messages to their group via `send_message` tool, or complete silently
+- Tasks can stay dashboard-only, send messages to their group, write review files, or create approval-gated webhook deliveries
 - Task runs are logged to the database with duration and result
 - Schedule types: cron expressions, intervals (ms), or one-time (ISO timestamp)
 - From main: can schedule tasks for any group, view/manage all tasks
 - From other groups: can only manage that group's tasks
+- Dashboard routines provide guided blueprints, provider/model overrides, delivery modes, heartbeat policies, active-run limits, run history, and run-now checks
 
 ### Group Management
 
