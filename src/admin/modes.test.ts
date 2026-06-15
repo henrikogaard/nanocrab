@@ -36,3 +36,15 @@ describe('resolveMode', () => {
     expect(M().resolveMode('does-not-exist')).toBeNull();
   });
 });
+
+describe('navPagesForMode', () => {
+  it('returns the page list for a mode (a copy, not the original)', () => {
+    const pages = M().navPagesForMode('chat');
+    expect(pages).toEqual(['chat', 'messages']);
+    pages.push('tampered');
+    expect(M().MODES.chat.pages).toEqual(['chat', 'messages']);
+  });
+  it('returns an empty array for an unknown mode', () => {
+    expect(M().navPagesForMode('nope')).toEqual([]);
+  });
+});
