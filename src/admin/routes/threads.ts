@@ -13,6 +13,8 @@ import {
   setRegisteredGroup,
   deleteRegisteredGroup,
   deleteMessagesForJid,
+  storeMessageDirect,
+  storeChatMetadata,
 } from '../../db.js';
 import { isWebJid, newWebJid, buildThreadGroup } from '../../web-threads.js';
 import { resolveGroupFolderPath } from '../../group-folder.js';
@@ -130,7 +132,7 @@ router.post('/', (req: Request, res: Response) => {
     const jid = newWebJid();
     const group = buildThreadGroup({
       jid,
-      title: title ?? undefined,
+      title: typeof title === 'string' ? title : undefined,
       addedAt: new Date().toISOString(),
       config,
     });
@@ -147,6 +149,10 @@ router.post('/', (req: Request, res: Response) => {
 router.get('/:id/messages', (req: Request, res: Response) => {
   const id = req.params.id as string;
   if (!isWebJid(id)) {
+    res.status(404).json({ error: 'Thread not found' });
+    return;
+  }
+  if (!getRegisteredGroup(id)) {
     res.status(404).json({ error: 'Thread not found' });
     return;
   }
@@ -173,7 +179,7 @@ router.post('/:id/messages', (req: Request, res: Response) => {
   }
 
   const { message } = req.body as { message?: string };
-  if (!message) {
+  if (!message || !message.trim()) {
     res.status(400).json({ error: 'message is required' });
     return;
   }
@@ -187,24 +193,19 @@ router.post('/:id/messages', (req: Request, res: Response) => {
     const msgId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const timestamp = new Date().toISOString();
 
-    // Store the message — mirror approach from chat plugin (direct sqlite write)
-    const writableDb = new Database(path.join(STORE_DIR, 'messages.db'));
-    try {
-      writableDb
-        .prepare(
-          'INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        )
-        .run(msgId, id, 'user', senderName, message, timestamp, 0, 0);
-      // Ensure the chat row exists so the agent can look it up
-      writableDb
-        .prepare(
-          `INSERT INTO chats (jid, name, last_message_time, channel) VALUES (?, ?, ?, ?)
-           ON CONFLICT(jid) DO UPDATE SET last_message_time = MAX(last_message_time, excluded.last_message_time)`,
-        )
-        .run(id, group.title ?? 'Web conversation', timestamp, 'web');
-    } finally {
-      writableDb.close();
-    }
+    // Store the message using shared db helpers
+    storeMessageDirect({
+      id: msgId,
+      chat_jid: id,
+      sender: 'user',
+      sender_name: senderName,
+      content: message,
+      timestamp,
+      is_from_me: false,
+      is_bot_message: false,
+    });
+    // Ensure the chat row exists so the agent can look it up
+    storeChatMetadata(id, timestamp, group.title ?? 'Web conversation', 'web');
 
     // Trigger the agent via the queue (same mechanism as chat plugin)
     try {
@@ -231,7 +232,9 @@ router.patch('/:id', (req: Request, res: Response) => {
     return;
   }
   try {
-    const newTitle = String((req.body as { title?: unknown })?.title ?? group.title ?? '');
+    const incoming = (req.body as { title?: unknown })?.title;
+    const newTitle =
+      typeof incoming === 'string' && incoming.trim() ? incoming.trim() : (group.title ?? '');
     setRegisteredGroup(id, { ...group, title: newTitle });
     res.json({ ok: true });
   } catch (err) {
