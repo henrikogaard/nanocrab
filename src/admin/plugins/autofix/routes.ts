@@ -234,9 +234,7 @@ function autoPickDue(project: Project, now: Date): boolean {
   if (!project.lastAutoPickAt) return true;
   const lastPoll = new Date(project.lastAutoPickAt).getTime();
   if (!Number.isFinite(lastPoll)) return true;
-  return (
-    now.getTime() - lastPoll >= project.pollIntervalMinutes * 60_000
-  );
+  return now.getTime() - lastPoll >= project.pollIntervalMinutes * 60_000;
 }
 
 export async function runAutofixAutoPickOnce(

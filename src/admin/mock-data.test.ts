@@ -359,10 +359,9 @@ describe('mock admin data', () => {
         ]),
       );
 
-      const scanResponse = await fetch(
-        `${baseUrl}/api/autofix/auto-pick/run`,
-        { method: 'POST' },
-      );
+      const scanResponse = await fetch(`${baseUrl}/api/autofix/auto-pick/run`, {
+        method: 'POST',
+      });
       const scan = (await scanResponse.json()) as {
         ok: boolean;
         result: { scanned: number; started: number };

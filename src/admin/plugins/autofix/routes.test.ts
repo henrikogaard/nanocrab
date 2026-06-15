@@ -150,7 +150,7 @@ describe('autofix project automation settings', () => {
       createdAt: new Date(0).toISOString(),
     } as any);
     const started: Array<{ issueNumber?: number; requestedBy?: string }> = [];
-    const savedProjects: typeof project[][] = [];
+    const savedProjects: (typeof project)[][] = [];
 
     const result = await runAutofixAutoPickOnce({
       now: new Date('2026-06-15T09:00:00.000Z'),
@@ -203,8 +203,6 @@ describe('autofix project automation settings', () => {
       skippedDuplicate: 1,
       skippedLabel: 1,
     });
-    expect(savedProjects[0][0].lastAutoPickAt).toBe(
-      '2026-06-15T09:00:00.000Z',
-    );
+    expect(savedProjects[0][0].lastAutoPickAt).toBe('2026-06-15T09:00:00.000Z');
   });
 });

@@ -1,8 +1,4 @@
-import {
-  Channel,
-  ChannelStatusSnapshot,
-  RegisteredGroup,
-} from './types.js';
+import { Channel, ChannelStatusSnapshot, RegisteredGroup } from './types.js';
 
 export function channelIdForRegisteredGroup(
   jid: string,
@@ -12,19 +8,11 @@ export function channelIdForRegisteredGroup(
   const hints = [jid, group?.folder, group?.name]
     .filter((value): value is string => !!value)
     .map((value) => value.toLowerCase());
-  if (
-    hints.some(
-      (hint) => hint.startsWith('tg:') || hint.includes('telegram'),
-    )
-  )
+  if (hints.some((hint) => hint.startsWith('tg:') || hint.includes('telegram')))
     return 'telegram';
-  if (
-    hints.some((hint) => hint.startsWith('sig:') || hint.includes('signal'))
-  )
+  if (hints.some((hint) => hint.startsWith('sig:') || hint.includes('signal')))
     return 'signal';
-  if (
-    hints.some((hint) => hint.startsWith('wa:') || hint.includes('whatsapp'))
-  )
+  if (hints.some((hint) => hint.startsWith('wa:') || hint.includes('whatsapp')))
     return 'whatsapp';
   return 'whatsapp';
 }

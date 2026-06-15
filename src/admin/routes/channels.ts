@@ -271,7 +271,9 @@ router.get('/', (_req: Request, res: Response) => {
       connected: enabled && health.connected,
       status: enabled ? health.status : 'disabled',
       lastActiveAt: health.lastActiveAt,
-      statusReason: enabled ? health.reason : 'All bot agents for this channel are disabled',
+      statusReason: enabled
+        ? health.reason
+        : 'All bot agents for this channel are disabled',
       config,
       envVars: def?.envVars || [],
       description: def?.description || '',
