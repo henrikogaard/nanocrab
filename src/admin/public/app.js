@@ -3,6 +3,64 @@
 const app = document.getElementById('app');
 let currentPage = '';
 let activeMode = 'chat';
+// Page display metadata (label + icon) for every navigable page id — used by
+// the mode-scoped sidebar and the More drawer.
+const PAGE_META = {
+  chat: { label: 'Chat', icon: 'chat' },
+  messages: { label: 'Messages', icon: 'messages' },
+  agents: { label: 'Agents', icon: 'agents' },
+  groups: { label: 'Groups', icon: 'groups' },
+  tasks: { label: 'Tasks', icon: 'tasks' },
+  approvals: { label: 'Approvals', icon: 'approvals' },
+  sessions: { label: 'Sessions', icon: 'sessions' },
+  workflows: { label: 'Workflows', icon: 'workflows' },
+  reports: { label: 'Reports', icon: 'audit' },
+  artifacts: { label: 'Artifacts', icon: 'files' },
+  memory: { label: 'Memory', icon: 'memory' },
+  timeline: { label: 'Timeline', icon: 'timeline' },
+  gitcode: { label: 'Git & Code', icon: 'gitcode' },
+  devhub: { label: 'Terminal', icon: 'devhub' },
+  autofix: { label: 'AutoFix', icon: 'autofix' },
+  skills: { label: 'Skills', icon: 'skills' },
+  marketplace: { label: 'Marketplace', icon: 'marketplace' },
+  dashboard: { label: 'Dashboard', icon: 'dashboard' },
+  pipelines: { label: 'Deploy', icon: 'pipelines' },
+  monitoring: { label: 'Monitoring', icon: 'monitoring' },
+  containers: { label: 'Containers', icon: 'containers' },
+  integrations: { label: 'Integrations', icon: 'integrations' },
+  webhooks: { label: 'Webhooks', icon: 'webhooks' },
+  credentials: { label: 'Credentials', icon: 'credentials' },
+  security: { label: 'Security', icon: 'security' },
+  audit: { label: 'Audit', icon: 'audit' },
+  uptime: { label: 'Uptime', icon: 'uptime' },
+  copilot: { label: 'Copilot', icon: 'copilot' },
+  backup: { label: 'Backup', icon: 'backup' },
+  usage: { label: 'Usage', icon: 'usage' },
+  settings: { label: 'Settings', icon: 'settings' },
+  help: { label: 'Help', icon: 'help' },
+};
+function metaLabel(id) {
+  return (PAGE_META[id] && PAGE_META[id].label) || id;
+}
+function metaIcon(id) {
+  return (PAGE_META[id] && PAGE_META[id].icon) || 'integrations';
+}
+// Pages hidden from the 'viewer' role. Owners and admins see everything.
+const VIEWER_HIDDEN = [
+  'devhub',
+  'gitcode',
+  'pipelines',
+  'containers',
+  'audit',
+  'security',
+  'integrations',
+  'marketplace',
+];
+function isVisibleForRole(id) {
+  const role = window._userRole || 'owner';
+  if (role === 'viewer') return !VIEWER_HIDDEN.includes(id);
+  return true;
+}
 let pollTimers = [];
 let ws = null;
 let sessionToken = null;
@@ -508,34 +566,18 @@ function showShell(page) {
     NM.saveActiveMode(activeMode, window.localStorage);
   }
   // Mode-scoped nav: only the pages for the active mode (in config order).
-  const NMcfg = window.NanoModes;
-  const labelFor = {
-    chat: 'Chat', messages: 'Messages',
-    agents: 'Agents', groups: 'Groups', tasks: 'Tasks', approvals: 'Approvals',
-    sessions: 'Sessions', workflows: 'Workflows', reports: 'Reports',
-    artifacts: 'Artifacts', memory: 'Memory', timeline: 'Timeline',
-    gitcode: 'Git & Code', devhub: 'Terminal', autofix: 'AutoFix',
-    skills: 'Skills', marketplace: 'Marketplace',
-  };
-  const iconFor = {
-    chat: 'chat', messages: 'messages',
-    agents: 'agents', groups: 'groups', tasks: 'tasks', approvals: 'approvals',
-    sessions: 'sessions', workflows: 'workflows', reports: 'audit',
-    artifacts: 'files', memory: 'memory', timeline: 'timeline',
-    gitcode: 'gitcode', devhub: 'devhub', autofix: 'autofix',
-    skills: 'skills', marketplace: 'marketplace',
-  };
-  const navItems = NMcfg.navPagesForMode(activeMode).map((id) => ({
+  const NM2 = window.NanoModes;
+  const navItems = NM2.navPagesForMode(activeMode).map((id) => ({
     id,
-    icon: iconFor[id] || 'integrations',
-    label: labelFor[id] || id,
+    icon: metaIcon(id),
+    label: metaLabel(id),
   }));
 
   // Inject enabled plugins whose page belongs to the active mode.
   const cachedPlugins = window._pluginsList || [];
   for (const p of cachedPlugins) {
     if (!p.enabled || !p.sidebar) continue;
-    if (NMcfg.resolveMode(p.sidebar.id) !== activeMode) continue;
+    if (NM2.resolveMode(p.sidebar.id) !== activeMode) continue;
     if (navItems.some((n) => n.id === p.sidebar.id)) continue;
     navItems.push({
       id: p.sidebar.id,
@@ -544,24 +586,8 @@ function showShell(page) {
     });
   }
 
-  // Role-based sidebar filtering
-  const role = window._userRole || 'owner';
-  const viewerHidden = [
-    'devhub',
-    'gitcode',
-    'pipelines',
-    'containers',
-    'audit',
-    'security',
-    'integrations',
-    'marketplace',
-  ];
-  const adminHidden = []; // admins see everything except terminal (checked at runtime)
-  const filteredNavItems = navItems.filter((item) => {
-    if (role === 'owner') return true;
-    if (role === 'viewer') return !viewerHidden.includes(item.id);
-    return true; // admin sees all nav items
-  });
+  // Role-based sidebar filtering (see isVisibleForRole at module scope).
+  const filteredNavItems = navItems.filter((item) => isVisibleForRole(item.id));
 
   let navHtml = filteredNavItems
     .map(
@@ -570,16 +596,13 @@ function showShell(page) {
     )
     .join('');
 
-  // Build mobile menu HTML
-  let mobileMenuHtml = '';
-  let mobileLastSection = '';
-  for (const item of filteredNavItems) {
-    if (item.section && item.section !== mobileLastSection) {
-      mobileMenuHtml += `<div class="mobile-section">${item.section}</div>`;
-      mobileLastSection = item.section;
-    }
-    mobileMenuHtml += `<a class="${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span>${item.label}</span></a>`;
-  }
+  // Build mobile menu HTML (mode-scoped, flat list)
+  const mobileMenuHtml = filteredNavItems
+    .map(
+      (item) =>
+        `<a class="${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span>${item.label}</span></a>`,
+    )
+    .join('');
 
   app.innerHTML = `
     <div class="app">
@@ -587,11 +610,11 @@ function showShell(page) {
       <div class="more-drawer" id="more-drawer">
         <div class="more-drawer-header"><span>Admin & operations</span><button class="more-close" onclick="toggleMoreDrawer()" aria-label="Close">✕</button></div>
         <div class="more-drawer-body">
-          ${window.NanoModes.MORE_IDS.filter((id) => pages[id] && filteredNavItems.every((n) => n.id !== id))
-            .map((id) => {
-              const labels = { dashboard: 'Dashboard', pipelines: 'Deploy', monitoring: 'Monitoring', containers: 'Containers', integrations: 'Integrations', webhooks: 'Webhooks', credentials: 'Credentials', security: 'Security', audit: 'Audit', uptime: 'Uptime', copilot: 'Copilot', backup: 'Backup', usage: 'Usage', settings: 'Settings', help: 'Help' };
-              return `<a class="nav-link" onclick="toggleMoreDrawer(); navigate('${id}')">${navIcon(id) || navIcon('settings')}<span class="nav-label">${labels[id] || id}</span></a>`;
-            })
+          ${window.NanoModes.MORE_IDS.filter((id) => pages[id] && isVisibleForRole(id) && filteredNavItems.every((n) => n.id !== id))
+            .map(
+              (id) =>
+                `<a class="nav-link" onclick="toggleMoreDrawer(); navigate('${id}')">${navIcon(metaIcon(id))}<span class="nav-label">${metaLabel(id)}</span></a>`,
+            )
             .join('')}
         </div>
       </div>
@@ -670,8 +693,9 @@ window.setMode = function (mode) {
   if (NM.MODE_ORDER.indexOf(mode) === -1) return;
   activeMode = mode;
   NM.saveActiveMode(mode, window.localStorage);
-  // Open the first page of the chosen mode.
-  const first = NM.navPagesForMode(mode)[0];
+  // Open the first page of the chosen mode that this role can see.
+  const visible = NM.navPagesForMode(mode).filter(isVisibleForRole);
+  const first = visible[0] || NM.navPagesForMode(mode)[0];
   if (first) navigate(first);
 };
 
@@ -9618,17 +9642,6 @@ window.forkSession = async (group, sessionId, messageIndex) => {
 };
 
 // --- Router ---
-window.toggleNavSection = (secId) => {
-  const group = document.getElementById('navgroup-' + secId);
-  const arrow = document.getElementById('arrow-' + secId);
-  if (!group) return;
-  group.classList.toggle('collapsed');
-  if (arrow) arrow.classList.toggle('collapsed');
-  const saved = JSON.parse(localStorage.getItem('nav_collapsed') || '{}');
-  saved[secId] = group.classList.contains('collapsed');
-  localStorage.setItem('nav_collapsed', JSON.stringify(saved));
-};
-
 window.toggleMobileMenu = () => {
   const menu = document.getElementById('mobile-menu');
   const overlay = document.querySelector('.sidebar-overlay');
