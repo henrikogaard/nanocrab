@@ -15,3 +15,6 @@ import './signal.js';
 
 // whatsapp
 import './whatsapp.js';
+
+// web
+import './web.js';
