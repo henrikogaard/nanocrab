@@ -9930,8 +9930,16 @@ window.addEventListener('hashchange', () => {
     await loadBotName();
     window._pluginsList = await api('/plugins').catch(() => []);
     connectWs();
-    const p = canonicalPage(window.location.hash.replace('#/', ''));
-    showShell(pages[p] ? p : 'dashboard');
+    const hashPage = canonicalPage(window.location.hash.replace('#/', ''));
+    if (window.location.hash && pages[hashPage]) {
+      // Explicit deep link wins; showShell derives the mode from the page.
+      showShell(hashPage);
+    } else {
+      // No deep link: open the last-used mode's first page.
+      const mode = window.NanoModes.loadActiveMode(window.localStorage);
+      const landing = window.NanoModes.navPagesForMode(mode)[0] || 'chat';
+      navigate(landing);
+    }
   } else showLogin();
 })();
 
