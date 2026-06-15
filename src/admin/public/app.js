@@ -20,7 +20,7 @@ const PAGE_META = {
   sessions: { label: 'Sessions', icon: 'sessions' },
   workflows: { label: 'Workflows', icon: 'workflows' },
   reports: { label: 'Reports', icon: 'audit' },
-  artifacts: { label: 'Artifacts', icon: 'files' },
+  artifacts: { label: 'Artifacts', icon: 'artifacts' },
   memory: { label: 'Memory', icon: 'memory' },
   timeline: { label: 'Timeline', icon: 'timeline' },
   gitcode: { label: 'Git & Code', icon: 'gitcode' },
@@ -541,6 +541,18 @@ const navIconPaths = {
     '<path d="M9.5 5.5h-3A1.5 1.5 0 0 0 5 7v10a1.5 1.5 0 0 0 1.5 1.5h3"/><path d="M13.5 8.5 17 12l-3.5 3.5"/><path d="M17 12H9"/>',
   menu: '<path d="M5 7h14"/><path d="M5 12h14"/><path d="M5 17h14"/>',
   chevron: '<path d="m8 10 4 4 4-4"/>',
+  sessions:
+    '<rect x="4.5" y="6" width="15" height="10" rx="1.5"/><path d="M4.5 9h15"/><path d="M6.5 7.6h.01"/><path d="M8.5 7.6h.01"/><path d="M9.5 19h5"/><path d="M12 16v3"/>',
+  webhooks:
+    '<circle cx="8" cy="8" r="2"/><circle cx="16.5" cy="10.5" r="2"/><circle cx="9.5" cy="17" r="2"/><path d="m9.5 9.3 5.3 2.7"/><path d="M15.5 12.3 11 16"/><path d="M7.6 15.2 8 9.9"/>',
+  credentials:
+    '<circle cx="8" cy="12" r="3.5"/><path d="M11.5 12h8"/><path d="M16.5 12v3"/><path d="M19.5 12v2.5"/>',
+  backup:
+    '<path d="M4.5 6h15v3.5h-15z"/><path d="M6 9.5v8.5a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.5"/><path d="M10 13h4"/>',
+  usage:
+    '<path d="M4.5 16a7.5 7.5 0 1 1 15 0"/><path d="M12 16l3.5-4.5"/><circle cx="12" cy="16" r=".7"/>',
+  artifacts:
+    '<path d="M9 4.5h5l3.5 3.5v8a1.5 1.5 0 0 1-1.5 1.5H9A1.5 1.5 0 0 1 7.5 16V6A1.5 1.5 0 0 1 9 4.5Z"/><path d="M14 4.5V8h3.5"/><path d="M4.5 8.5V18.5A1 1 0 0 0 5.5 19.5h7.5"/>',
 };
 
 function navIcon(name, extraClass = '') {
