@@ -16,7 +16,7 @@ import {
   CREDENTIAL_PROXY_PORT,
 } from '../../config.js';
 import { readEnvFile, writeEnvValue } from '../../env.js';
-import { getState } from '../state.js';
+import { getState, nonWebGroups } from '../state.js';
 import {
   buildChannelStatus,
   isChannelEnabledForRegisteredGroups,
@@ -202,10 +202,7 @@ router.get('/', (_req: Request, res: Response) => {
 router.get('/dashboard', async (_req: Request, res: Response) => {
   const state = getState();
   const uptimeMs = Date.now() - state.startTime;
-  const allGroupsRecord = state.registeredGroups();
-  const groupsRecord = Object.fromEntries(
-    Object.entries(allGroupsRecord).filter(([, g]) => g.kind !== 'web'),
-  );
+  const groupsRecord = nonWebGroups(state.registeredGroups());
   const channels = state.channels
     .filter((ch) => isChannelEnabledForRegisteredGroups(ch.name, groupsRecord))
     .map((ch) => buildChannelStatus(ch));
@@ -405,10 +402,7 @@ router.post(
 // Channel health check
 router.get('/health', (_req: Request, res: Response) => {
   const state = getState();
-  const allGroups = state.registeredGroups();
-  const groups = Object.fromEntries(
-    Object.entries(allGroups).filter(([, g]) => g.kind !== 'web'),
-  );
+  const groups = nonWebGroups(state.registeredGroups());
   const health = state.channels
     .filter((ch) => isChannelEnabledForRegisteredGroups(ch.name, groups))
     .map((ch) => buildChannelStatus(ch));
@@ -623,10 +617,7 @@ router.put('/budget', (req: Request, res: Response) => {
 router.get('/alerts', async (_req: Request, res: Response) => {
   const alerts: Array<{ type: string; message: string }> = [];
   const state = getState();
-  const allGroups = state.registeredGroups();
-  const groups = Object.fromEntries(
-    Object.entries(allGroups).filter(([, g]) => g.kind !== 'web'),
-  );
+  const groups = nonWebGroups(state.registeredGroups());
 
   // Check offline channels
   for (const ch of state.channels) {

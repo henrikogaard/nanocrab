@@ -24,7 +24,7 @@ import {
   buildChannelStatus,
   isChannelEnabledForRegisteredGroups,
 } from '../channel-status.js';
-import { NanoCrabState, setState, getState } from './state.js';
+import { NanoCrabState, setState, getState, nonWebGroups } from './state.js';
 import { initAuth } from './auth.js';
 import { requireAuth, requireRole } from './middleware.js';
 import { initWebSocket } from './websocket.js';
@@ -199,7 +199,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   // Public health endpoint (no auth required)
   app.get('/health', (_req, res) => {
     const state = getState();
-    const groups = state.registeredGroups();
+    const groups = nonWebGroups(state.registeredGroups());
     const channels = state.channels
       .filter((ch) => isChannelEnabledForRegisteredGroups(ch.name, groups))
       .map((ch) => buildChannelStatus(ch));

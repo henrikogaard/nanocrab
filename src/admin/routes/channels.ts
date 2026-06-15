@@ -3,7 +3,7 @@ import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import QRCode from 'qrcode';
-import { getState } from '../state.js';
+import { getState, nonWebGroups } from '../state.js';
 import { readEnvFile } from '../../env.js';
 import {
   buildChannelStatus,
@@ -225,10 +225,7 @@ router.get('/', (_req: Request, res: Response) => {
   const envValues = readEnvFile(allEnvKeys);
 
   // Build active channels with status and config
-  const allGroups = state.registeredGroups();
-  const groups = Object.fromEntries(
-    Object.entries(allGroups).filter(([, g]) => g.kind !== 'web'),
-  );
+  const groups = nonWebGroups(state.registeredGroups());
   const activeChannels = state.channels.map((ch) => {
     const def = SUPPORTED_CHANNELS.find((s) => s.id === ch.name.toLowerCase());
     const health = buildChannelStatus(ch);

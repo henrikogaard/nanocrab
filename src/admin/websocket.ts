@@ -13,7 +13,7 @@ import {
   buildChannelStatus,
   isChannelEnabledForRegisteredGroups,
 } from '../channel-status.js';
-import { getState } from './state.js';
+import { getState, nonWebGroups } from './state.js';
 import { validateSession, getSessionUser, AdminUser } from './auth.js';
 import { SESSIONS_DIR, TERMINAL_IDLE_TIMEOUT_MS } from '../config.js';
 
@@ -296,10 +296,7 @@ function sendStatus(ws: WebSocket): void {
 
 function getStatusData(): object {
   const state = getState();
-  const allGroups = state.registeredGroups();
-  const groups = Object.fromEntries(
-    Object.entries(allGroups).filter(([, g]) => g.kind !== 'web'),
-  );
+  const groups = nonWebGroups(state.registeredGroups());
   return {
     channels: state.channels
       .filter((ch) => isChannelEnabledForRegisteredGroups(ch.name, groups))

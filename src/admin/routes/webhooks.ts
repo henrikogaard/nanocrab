@@ -5,7 +5,7 @@ import path from 'path';
 
 import { STORE_DIR } from '../../config.js';
 import { readEnvFile } from '../../env.js';
-import { getState } from '../state.js';
+import { getState, nonWebGroups } from '../state.js';
 import { auditLog } from '../security.js';
 import { logger } from '../../logger.js';
 import { handleAutofixWebhook } from '../plugins/autofix/routes.js';
@@ -96,10 +96,7 @@ router.get('/github-health', (req: Request, res: Response) => {
   const env = readEnvFile(['GITHUB_TOKEN', 'GITHUB_WEBHOOK_SECRET']);
   const config = loadConfig();
   const state = getState();
-  const allGroups = state.registeredGroups();
-  const groups = Object.fromEntries(
-    Object.entries(allGroups).filter(([, g]) => g.kind !== 'web'),
-  );
+  const groups = nonWebGroups(state.registeredGroups());
   const webhookSecret =
     config.secret ||
     process.env.GITHUB_WEBHOOK_SECRET ||
