@@ -48,3 +48,40 @@ describe('navPagesForMode', () => {
     expect(M().navPagesForMode('nope')).toEqual([]);
   });
 });
+
+function mkStore() {
+  const m = new Map<string, string>();
+  return {
+    getItem: (k: string) => (m.has(k) ? m.get(k)! : null),
+    setItem: (k: string, v: string) => void m.set(k, v),
+  };
+}
+
+describe('loadActiveMode', () => {
+  it('defaults to the first mode when storage is empty', () => {
+    expect(M().loadActiveMode(mkStore())).toBe('chat');
+  });
+  it('returns the saved mode when valid', () => {
+    const s = mkStore();
+    s.setItem('active_mode', 'code');
+    expect(M().loadActiveMode(s)).toBe('code');
+  });
+  it('falls back to the first mode when saved value is invalid', () => {
+    const s = mkStore();
+    s.setItem('active_mode', 'garbage');
+    expect(M().loadActiveMode(s)).toBe('chat');
+  });
+});
+
+describe('saveActiveMode', () => {
+  it('persists a valid mode and reports success', () => {
+    const s = mkStore();
+    expect(M().saveActiveMode('work', s)).toBe(true);
+    expect(s.getItem('active_mode')).toBe('work');
+  });
+  it('rejects an invalid mode without writing', () => {
+    const s = mkStore();
+    expect(M().saveActiveMode('garbage', s)).toBe(false);
+    expect(s.getItem('active_mode')).toBeNull();
+  });
+});
