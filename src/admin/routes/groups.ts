@@ -44,6 +44,10 @@ router.put('/:jid', (req: Request, res: Response) => {
     res.status(404).json({ error: 'Group not found' });
     return;
   }
+  if (existing.kind === 'web') {
+    res.status(404).json({ error: 'Group not found' });
+    return;
+  }
   if (updates.containerConfig?.provider === 'codex') {
     const codexAuth = ensureCodexOAuth();
     if (!codexAuth.configured) {

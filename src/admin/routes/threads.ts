@@ -237,7 +237,11 @@ router.patch('/:id', (req: Request, res: Response) => {
     const newTitle =
       typeof incoming === 'string' && incoming.trim() ? incoming.trim() : (group.title ?? '');
     setRegisteredGroup(id, { ...group, title: newTitle });
-    getState().updateRegisteredGroup?.(id, { ...group, title: newTitle });
+    try {
+      getState().updateRegisteredGroup?.(id, { ...group, title: newTitle });
+    } catch {
+      /* state not ready */
+    }
     res.json({ ok: true });
   } catch (err) {
     logger.error({ err, id }, 'Failed to rename thread');
