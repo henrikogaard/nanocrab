@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { isWebJid, newWebJid, buildThreadGroup } from './web-threads.js';
+import type { ContainerConfig } from './types.js';
 
 describe('isWebJid', () => {
   it('matches only web: jids', () => {
@@ -41,5 +42,23 @@ describe('buildThreadGroup', () => {
     expect(g.title).toBe('New conversation');
     expect(g.containerConfig).toBeUndefined();
     expect(g.folder).toBe('web-x');
+  });
+
+  it('does not mutate the source config (deep clone)', () => {
+    const config: ContainerConfig = { provider: 'codex', model: 'gpt-5.4', allowedMcpServers: ['nanocrab'] };
+    const g = buildThreadGroup({ jid: 'web:iso', addedAt: '2026-06-15T00:00:00Z', config });
+    (g.containerConfig!.allowedMcpServers as string[]).push('tampered');
+    g.containerConfig!.provider = 'openai-compatible';
+    expect(config.allowedMcpServers).toEqual(['nanocrab']);
+    expect(config.provider).toBe('codex');
+  });
+
+  it('defaults a whitespace-only title to "New conversation"', () => {
+    const g = buildThreadGroup({ jid: 'web:ws', title: '   ', addedAt: '2026-06-15T00:00:00Z' });
+    expect(g.title).toBe('New conversation');
+  });
+
+  it('throws on a non-web jid', () => {
+    expect(() => buildThreadGroup({ jid: '123@g.us', addedAt: '2026-06-15T00:00:00Z' })).toThrow();
   });
 });

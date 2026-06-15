@@ -22,15 +22,16 @@ export interface BuildThreadInput {
 // never from a source agent — isolation is strict. The config is a deep clone so
 // the source template is never mutated.
 export function buildThreadGroup(input: BuildThreadInput): RegisteredGroup {
-  const id = input.jid.startsWith(WEB_PREFIX)
-    ? input.jid.slice(WEB_PREFIX.length)
-    : input.jid;
+  if (!input.jid.startsWith(WEB_PREFIX)) {
+    throw new Error(`buildThreadGroup requires a web: jid, got "${input.jid}"`);
+  }
+  const id = input.jid.slice(WEB_PREFIX.length);
   return {
     name: 'Web Conversation',
     title: input.title && input.title.trim() ? input.title.trim() : 'New conversation',
     kind: 'web',
     folder: `web-${id}`,
-    trigger: '^',
+    trigger: '^', // unused: requiresTrigger is false, so every message is processed
     added_at: input.addedAt,
     requiresTrigger: false,
     enabled: true,
