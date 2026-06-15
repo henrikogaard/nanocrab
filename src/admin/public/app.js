@@ -606,12 +606,18 @@ function showShell(page) {
   // Role-based sidebar filtering (see isVisibleForRole at module scope).
   const filteredNavItems = navItems.filter((item) => isVisibleForRole(item.id));
 
-  let navHtml = filteredNavItems
-    .map(
-      (item) =>
-        `<a class="nav-link ${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`,
-    )
-    .join('');
+  // Chat mode gets a dynamic thread list instead of static page links
+  let navHtml;
+  if (activeMode === 'chat' && window.WebChat) {
+    navHtml = '<div id="chat-thread-nav"><div class="loading">Loading</div></div>';
+  } else {
+    navHtml = filteredNavItems
+      .map(
+        (item) =>
+          `<a class="nav-link ${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`,
+      )
+      .join('');
+  }
 
   // Build mobile menu HTML (mode-scoped, flat list)
   const mobileMenuHtml = filteredNavItems
@@ -687,6 +693,16 @@ function showShell(page) {
     </div>`;
   loadMetricsBar();
   loadAlerts();
+  // Hydrate chat-mode thread sidebar
+  if (activeMode === 'chat' && window.WebChat) {
+    const navEl = document.getElementById('chat-thread-nav');
+    if (navEl) {
+      WebChat.loadThreads().then((threads) => {
+        const el2 = document.getElementById('chat-thread-nav');
+        if (el2) el2.innerHTML = WebChat.renderThreadList(threads, WebChat.activeThreadId);
+      });
+    }
+  }
   // Load plugin frontend if needed, then render
   const el = document.getElementById('page-content');
   const renderFn = pages[page];
@@ -793,10 +809,18 @@ async function loadAlerts() {
 // --- Pages ---
 // Page render functions are split into /pages/*.js files loaded via <script defer>.
 // Use a proxy so function references are resolved at call time (after all scripts load).
+// Delegate the 'chat' page to WebChat when available; fall back to renderChat.
+window.renderChatPage = function (el) {
+  if (window.WebChat) {
+    return WebChat.renderConversation(el, WebChat.activeThreadId);
+  }
+  return renderChat(el);
+};
+
 const _pageMap = {
   dashboard: 'renderDashboard',
   agents: 'renderAgents',
-  chat: 'renderChat',
+  chat: 'renderChatPage',
   messages: 'renderMessages',
   approvals: 'renderApprovals',
   audit: 'renderAudit',
@@ -9949,8 +9973,37 @@ window.navigate = (page) => {
     window.location.hash = newHash;
   }
 };
+// Parse a #/chat or #/chat/<id> hash into { isChatRoute, threadId }.
+// Returns null when the hash is not a chat thread route.
+function parseChatHash(hash) {
+  if (!hash) return null;
+  // Remove leading '#'
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  if (raw === '/chat') return { isChatRoute: true, threadId: null };
+  if (raw.startsWith('/chat/')) {
+    const encoded = raw.slice('/chat/'.length);
+    // Only treat as a thread route when there is a non-empty id segment
+    if (encoded) {
+      return { isChatRoute: true, threadId: 'web:' + decodeURIComponent(encoded) };
+    }
+    return { isChatRoute: true, threadId: null };
+  }
+  return null;
+}
+
 window.addEventListener('hashchange', () => {
-  const p = canonicalPage(window.location.hash.replace('#/', ''));
+  const hash = window.location.hash;
+  const chatRoute = parseChatHash(hash);
+  if (chatRoute) {
+    showShell('chat');
+    const el = document.getElementById('page-content');
+    if (el && window.WebChat) {
+      if (chatRoute.threadId) window._webchatActiveThreadId = chatRoute.threadId;
+      WebChat.renderConversation(el, chatRoute.threadId);
+    }
+    return;
+  }
+  const p = canonicalPage(hash.replace('#/', ''));
   if (pages[p]) showShell(p);
 });
 
@@ -9960,15 +10013,31 @@ window.addEventListener('hashchange', () => {
     await loadBotName();
     window._pluginsList = await api('/plugins').catch(() => []);
     connectWs();
-    const hashPage = canonicalPage(window.location.hash.replace('#/', ''));
-    if (window.location.hash && pages[hashPage]) {
-      // Explicit deep link wins; showShell derives the mode from the page.
-      showShell(hashPage);
+    const hash = window.location.hash;
+    const chatRoute = parseChatHash(hash);
+    if (chatRoute) {
+      // Deep link into a chat thread — render after shell is up
+      showShell('chat');
+      // WebChat may not be defined yet (script loads deferred); defer to next tick
+      setTimeout(() => {
+        const el = document.getElementById('page-content');
+        if (el && window.WebChat) {
+          WebChat.renderConversation(el, chatRoute.threadId);
+        } else if (el) {
+          el.innerHTML = '<div class="loading">Loading conversation…</div>';
+        }
+      }, 0);
     } else {
-      // No deep link: open the last-used mode's first page.
-      const mode = window.NanoModes.loadActiveMode(window.localStorage);
-      const landing = window.NanoModes.navPagesForMode(mode)[0] || 'chat';
-      navigate(landing);
+      const hashPage = canonicalPage(hash.replace('#/', ''));
+      if (hash && pages[hashPage]) {
+        // Explicit deep link wins; showShell derives the mode from the page.
+        showShell(hashPage);
+      } else {
+        // No deep link: open the last-used mode's first page.
+        const mode = window.NanoModes.loadActiveMode(window.localStorage);
+        const landing = window.NanoModes.navPagesForMode(mode)[0] || 'chat';
+        navigate(landing);
+      }
     }
   } else showLogin();
 })();
