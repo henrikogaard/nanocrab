@@ -23,6 +23,10 @@ import crypto from 'crypto';
 
 import { STORE_DIR } from '../../../config.js';
 import { readEnvFile } from '../../../env.js';
+import {
+  DEFAULT_AGENT_MODELS,
+  type AgentProvider,
+} from '../../../agent-provider.js';
 import { auditLog } from '../../security.js';
 import { getState } from '../../state.js';
 import { logger } from '../../../logger.js';
@@ -39,21 +43,29 @@ import {
   registerCodingRepo,
   retryCodingJob,
   startCodingJob,
+  type CodingJob,
+  type StartCodingJobInput,
 } from '../../../coding-jobs.js';
 
 const router = Router();
 const PROJECTS_PATH = path.join(STORE_DIR, 'autofix-projects.json');
 const JOBS_PATH = path.join(STORE_DIR, 'autofix-jobs.json');
 
-interface Project {
+export interface Project {
   id: string;
   owner: string;
   repo: string;
   workDir: string;
   triggerLabel: string;
+  provider: string;
   model: string;
   notifyJid: string; // bot channel to notify
   autoReview: boolean; // auto-review new PRs
+  createPr: boolean;
+  maxActiveJobs: number;
+  autoPickEnabled: boolean;
+  pollIntervalMinutes: number;
+  lastAutoPickAt: string | null;
   createdAt: string;
 }
 
@@ -74,9 +86,269 @@ interface AutofixJob {
   completedAt: string | null;
 }
 
+const AUTOFIX_ACTIVE_JOB_STATUSES = new Set([
+  'queued',
+  'investigate',
+  'plan',
+  'await_approval',
+  'implement',
+  'test',
+  'await_pr_approval',
+  'open_pr',
+  'ci_running',
+]);
+
+function defaultAutofixModel(provider: string): string {
+  if (provider in DEFAULT_AGENT_MODELS) {
+    return DEFAULT_AGENT_MODELS[provider as AgentProvider];
+  }
+  return DEFAULT_AGENT_MODELS.claude;
+}
+
+function normalizePollIntervalMinutes(input: unknown): number {
+  const minutes = Number(input);
+  if (!Number.isFinite(minutes) || minutes <= 0) return 15;
+  return Math.max(5, Math.floor(minutes));
+}
+
+export function normalizeAutofixProject(input: Partial<Project>): Project {
+  const owner = String(input.owner || '').trim();
+  const repo = String(input.repo || '').trim();
+  const maxActiveJobs = Number(input.maxActiveJobs);
+
+  return {
+    id: input.id || crypto.randomUUID(),
+    owner,
+    repo,
+    workDir:
+      input.workDir ||
+      path.join(process.env.HOME || '/tmp', 'repos', `${owner}-${repo}`),
+    triggerLabel: input.triggerLabel?.trim() || 'autofix',
+    provider: input.provider?.trim() || 'claude',
+    model:
+      input.model?.trim() ||
+      defaultAutofixModel(input.provider?.trim() || 'claude'),
+    notifyJid: input.notifyJid || '',
+    autoReview: input.autoReview === true,
+    createPr: input.createPr !== false,
+    maxActiveJobs:
+      Number.isFinite(maxActiveJobs) && maxActiveJobs > 0
+        ? Math.floor(maxActiveJobs)
+        : 1,
+    autoPickEnabled: input.autoPickEnabled === true,
+    pollIntervalMinutes: normalizePollIntervalMinutes(
+      input.pollIntervalMinutes,
+    ),
+    lastAutoPickAt:
+      typeof input.lastAutoPickAt === 'string' && input.lastAutoPickAt.trim()
+        ? input.lastAutoPickAt
+        : null,
+    createdAt: input.createdAt || new Date().toISOString(),
+  };
+}
+
+export function buildAutofixStartInput(
+  project: Project,
+  issueNumber: number,
+  requestedBy: string,
+): StartCodingJobInput {
+  return {
+    repo: `${project.owner}/${project.repo}`,
+    issueNumber,
+    provider: project.provider,
+    model: project.model || undefined,
+    createPr: project.createPr,
+    requestedBy,
+  };
+}
+
+export function hasAutofixCapacity(
+  project: Project,
+  codingJobs: CodingJob[],
+): boolean {
+  const repo = `${project.owner}/${project.repo}`;
+  const activeCount = codingJobs.filter(
+    (job) =>
+      job.repo === repo &&
+      AUTOFIX_ACTIVE_JOB_STATUSES.has(String(job.status)) &&
+      job.type === 'issue',
+  ).length;
+  return activeCount < project.maxActiveJobs;
+}
+
+type AutoPickIssueLabel = string | { name?: string };
+
+export interface AutofixAutoPickIssue {
+  number: number;
+  title?: string;
+  labels?: AutoPickIssueLabel[];
+  pull_request?: unknown;
+}
+
+export interface AutofixAutoPickResult {
+  scanned: number;
+  started: number;
+  skippedCapacity: number;
+  skippedDuplicate: number;
+  skippedLabel: number;
+  skippedNotDue: number;
+  errors: number;
+}
+
+export interface RunAutofixAutoPickOptions {
+  now?: Date;
+  projects?: Project[];
+  loadProjects?: () => Project[];
+  saveProjects?: (projects: Project[]) => void;
+  loadCodingJobs?: () => CodingJob[];
+  listIssues?: (project: Project) => Promise<AutofixAutoPickIssue[]>;
+  startJob?: (input: StartCodingJobInput) => Promise<CodingJob>;
+}
+
+function issueLabelNames(issue: AutofixAutoPickIssue): string[] {
+  return (issue.labels || [])
+    .map((label) => (typeof label === 'string' ? label : label.name || ''))
+    .filter(Boolean);
+}
+
+function issueHasLabel(issue: AutofixAutoPickIssue, label: string): boolean {
+  return issueLabelNames(issue).includes(label);
+}
+
+function hasActiveIssueJob(
+  project: Project,
+  issueNumber: number,
+  codingJobs: CodingJob[],
+): boolean {
+  const repo = `${project.owner}/${project.repo}`;
+  return codingJobs.some(
+    (job) =>
+      job.repo === repo &&
+      job.type === 'issue' &&
+      job.issueNumber === issueNumber &&
+      AUTOFIX_ACTIVE_JOB_STATUSES.has(String(job.status)),
+  );
+}
+
+function autoPickDue(project: Project, now: Date): boolean {
+  if (!project.lastAutoPickAt) return true;
+  const lastPoll = new Date(project.lastAutoPickAt).getTime();
+  if (!Number.isFinite(lastPoll)) return true;
+  return (
+    now.getTime() - lastPoll >= project.pollIntervalMinutes * 60_000
+  );
+}
+
+export async function runAutofixAutoPickOnce(
+  options: RunAutofixAutoPickOptions = {},
+): Promise<AutofixAutoPickResult> {
+  const now = options.now || new Date();
+  const load = options.loadProjects || loadProjects;
+  const save = options.saveProjects || saveProjects;
+  const projects = (options.projects || load()).map((project) =>
+    normalizeAutofixProject(project),
+  );
+  const codingJobs = (options.loadCodingJobs || loadCodingJobs)();
+  const listIssues =
+    options.listIssues ||
+    ((project: Project) =>
+      listGitHubIssues({
+        repo: `${project.owner}/${project.repo}`,
+        labels: [project.triggerLabel],
+        limit: 20,
+      }));
+  const startJob = options.startJob || startCodingJob;
+  const result: AutofixAutoPickResult = {
+    scanned: 0,
+    started: 0,
+    skippedCapacity: 0,
+    skippedDuplicate: 0,
+    skippedLabel: 0,
+    skippedNotDue: 0,
+    errors: 0,
+  };
+  let shouldSave = false;
+
+  for (const project of projects) {
+    if (!project.autoPickEnabled) continue;
+    if (!autoPickDue(project, now)) {
+      result.skippedNotDue += 1;
+      continue;
+    }
+
+    result.scanned += 1;
+    try {
+      const issues = await listIssues(project);
+      for (const issue of issues) {
+        if ('pull_request' in issue && issue.pull_request) continue;
+        if (!issueHasLabel(issue, project.triggerLabel)) {
+          result.skippedLabel += 1;
+          continue;
+        }
+        if (hasActiveIssueJob(project, issue.number, codingJobs)) {
+          result.skippedDuplicate += 1;
+          continue;
+        }
+        if (!hasAutofixCapacity(project, codingJobs)) {
+          result.skippedCapacity += 1;
+          break;
+        }
+
+        const job = await startJob(
+          buildAutofixStartInput(project, issue.number, 'github-auto-pick'),
+        );
+        codingJobs.push(job);
+        result.started += 1;
+      }
+    } catch (err) {
+      result.errors += 1;
+      logger.warn(
+        { err, repo: `${project.owner}/${project.repo}` },
+        'Autofix auto-pick scan failed',
+      );
+    } finally {
+      project.lastAutoPickAt = now.toISOString();
+      shouldSave = true;
+    }
+  }
+
+  if (shouldSave) save(projects);
+  return result;
+}
+
+let autoPickTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startAutofixAutoPickLoop(intervalMs = 60_000): void {
+  if (autoPickTimer) return;
+  const run = async () => {
+    try {
+      const result = await runAutofixAutoPickOnce();
+      if (result.scanned > 0 || result.started > 0 || result.errors > 0) {
+        logger.info({ ...result }, 'Autofix auto-pick scan completed');
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Autofix auto-pick loop failed');
+    }
+  };
+  autoPickTimer = setInterval(() => {
+    void run();
+  }, intervalMs);
+  autoPickTimer.unref?.();
+  void run();
+}
+
+export function stopAutofixAutoPickLoop(): void {
+  if (!autoPickTimer) return;
+  clearInterval(autoPickTimer);
+  autoPickTimer = null;
+}
+
 function loadProjects(): Project[] {
   try {
-    return JSON.parse(fs.readFileSync(PROJECTS_PATH, 'utf-8'));
+    const projects = JSON.parse(fs.readFileSync(PROJECTS_PATH, 'utf-8'));
+    return Array.isArray(projects)
+      ? projects.map((project) => normalizeAutofixProject(project))
+      : [];
   } catch {
     return [];
   }
@@ -131,26 +403,40 @@ router.get('/projects', (_req: Request, res: Response) => {
 });
 
 router.post('/projects', async (req: Request, res: Response) => {
-  const { owner, repo, workDir, triggerLabel, model, notifyJid, autoReview } =
-    req.body;
+  const {
+    owner,
+    repo,
+    workDir,
+    triggerLabel,
+    provider,
+    model,
+    notifyJid,
+    autoReview,
+    createPr,
+    maxActiveJobs,
+    autoPickEnabled,
+    pollIntervalMinutes,
+  } = req.body;
   if (!owner || !repo) {
     res.status(400).json({ error: 'owner and repo required' });
     return;
   }
 
-  const project: Project = {
+  const project = normalizeAutofixProject({
     id: crypto.randomUUID(),
     owner,
     repo,
-    workDir:
-      workDir ||
-      path.join(process.env.HOME || '/tmp', 'repos', `${owner}-${repo}`),
-    triggerLabel: triggerLabel || 'autofix',
-    model: model || 'sonnet',
-    notifyJid: notifyJid || '',
-    autoReview: autoReview || false,
-    createdAt: new Date().toISOString(),
-  };
+    workDir,
+    triggerLabel,
+    provider,
+    model,
+    notifyJid,
+    autoReview,
+    createPr,
+    maxActiveJobs,
+    autoPickEnabled,
+    pollIntervalMinutes,
+  });
 
   const projects = loadProjects();
   projects.push(project);
@@ -181,13 +467,19 @@ router.put('/projects/:id', (req: Request, res: Response) => {
   const fields = [
     'workDir',
     'triggerLabel',
+    'provider',
     'model',
     'notifyJid',
     'autoReview',
+    'createPr',
+    'maxActiveJobs',
+    'autoPickEnabled',
+    'pollIntervalMinutes',
   ];
   for (const f of fields) {
     if (req.body[f] !== undefined) (project as any)[f] = req.body[f];
   }
+  Object.assign(project, normalizeAutofixProject(project));
   saveProjects(projects);
   res.json({ ok: true });
 });
@@ -294,9 +586,21 @@ router.get('/issues', async (req: Request, res: Response) => {
   }
 });
 
+router.post('/auto-pick/run', async (req: Request, res: Response) => {
+  try {
+    const result = await runAutofixAutoPickOnce();
+    auditLog(req, 'autofix_auto_pick_run', JSON.stringify(result));
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 // --- Run an autofix ---
 
-async function runAutofix(
+async function _runAutofix(
   project: Project,
   issueNumber: number,
   issueTitle: string,
@@ -373,7 +677,9 @@ async function runAutofix(
           cwd: workDir,
           stdio: 'pipe',
         });
-      } catch {}
+      } catch {
+        // Fall through; the checked-out default branch may not be named master.
+      }
     }
   }
 
@@ -383,7 +689,9 @@ async function runAutofix(
       cwd: workDir,
       stdio: 'pipe',
     });
-  } catch {}
+  } catch {
+    // Branch creation failures are captured later by the git/PR step.
+  }
 
   // Build the prompt
   const prompt = `You are working on the repository ${project.owner}/${project.repo}.
@@ -517,7 +825,9 @@ Instructions:
             }),
           },
         );
-      } catch {}
+      } catch {
+        // Issue comments are best-effort and should not fail the completed job.
+      }
 
       // Notify via bot if configured
       if (project.notifyJid) {
@@ -531,7 +841,9 @@ Instructions:
               `PR: ${pr.html_url}\n` +
               `Model: ${usedModel}`,
           );
-        } catch {}
+        } catch {
+          // Bot notification is best-effort after the PR has already been created.
+        }
       }
 
       logger.info(
@@ -575,14 +887,16 @@ router.post('/run', async (req: Request, res: Response) => {
 
   // Fetch issue details
   try {
-    const job = await startCodingJob({
-      repo: `${project.owner}/${project.repo}`,
-      issueNumber: Number(issueNumber),
-      provider: 'claude',
-      model: typeof model === 'string' && model.trim() ? model : undefined,
-      createPr: true,
-      requestedBy: req.user?.username || 'autofix-dashboard',
-    });
+    const jobInput = buildAutofixStartInput(
+      {
+        ...project,
+        model:
+          typeof model === 'string' && model.trim() ? model : project.model,
+      },
+      Number(issueNumber),
+      req.user?.username || 'autofix-dashboard',
+    );
+    const job = await startCodingJob(jobInput);
     auditLog(
       req,
       'autofix_triggered',
@@ -828,13 +1142,20 @@ export async function handleAutofixWebhook(payload: any): Promise<void> {
         'Autofix triggered by label',
       );
       try {
-        await startCodingJob({
-          repo: fullName,
-          issueNumber: issue.number,
-          provider: 'claude',
-          createPr: true,
-          requestedBy: 'github-webhook',
-        });
+        if (!hasAutofixCapacity(project, loadCodingJobs())) {
+          logger.info(
+            {
+              repo: fullName,
+              issue: issue.number,
+              maxActiveJobs: project.maxActiveJobs,
+            },
+            'Autofix webhook skipped because project active-job limit is reached',
+          );
+          return;
+        }
+        await startCodingJob(
+          buildAutofixStartInput(project, issue.number, 'github-webhook'),
+        );
       } catch (err) {
         logger.warn(
           { err, repo: fullName, issue: issue.number },
@@ -855,13 +1176,20 @@ export async function handleAutofixWebhook(payload: any): Promise<void> {
         'Autofix triggered by new issue with label',
       );
       try {
-        await startCodingJob({
-          repo: fullName,
-          issueNumber: issue.number,
-          provider: 'claude',
-          createPr: true,
-          requestedBy: 'github-webhook',
-        });
+        if (!hasAutofixCapacity(project, loadCodingJobs())) {
+          logger.info(
+            {
+              repo: fullName,
+              issue: issue.number,
+              maxActiveJobs: project.maxActiveJobs,
+            },
+            'Autofix webhook skipped because project active-job limit is reached',
+          );
+          return;
+        }
+        await startCodingJob(
+          buildAutofixStartInput(project, issue.number, 'github-webhook'),
+        );
       } catch (err) {
         logger.warn(
           { err, repo: fullName, issue: issue.number },
@@ -919,7 +1247,9 @@ export async function handleAutofixWebhook(payload: any): Promise<void> {
             }),
           },
         );
-      } catch {}
+      } catch {
+        // PR review comments are best-effort; webhook processing should not retry forever.
+      }
     });
   }
 }

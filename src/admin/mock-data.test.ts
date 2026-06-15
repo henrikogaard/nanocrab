@@ -202,6 +202,9 @@ describe('mock admin data', () => {
         id: string;
         prompt: string;
         tool_policy?: string;
+        routine_type?: string;
+        delivery_mode?: string;
+        session_key?: string;
       }>;
 
       expect(tasks).toEqual(
@@ -209,6 +212,8 @@ describe('mock admin data', () => {
           expect.objectContaining({
             id: 'task-operation-reminder',
             prompt: expect.stringContaining('[operation-schedule]'),
+            routine_type: 'operation',
+            delivery_mode: 'chat',
             tool_policy: 'approval-required',
           }),
         ]),
@@ -244,6 +249,130 @@ describe('mock admin data', () => {
         task: {
           prompt: expect.stringContaining('[operation-schedule]'),
           tool_policy: 'dry-run',
+        },
+      });
+    });
+  });
+
+  it('serves routine blueprints and task logs in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const blueprintsResponse = await fetch(`${baseUrl}/api/tasks/blueprints`);
+      const blueprints = (await blueprintsResponse.json()) as Array<{
+        id: string;
+        routineType: string;
+        deliveryMode?: string;
+        skills?: string[];
+      }>;
+      expect(blueprints).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'daily-briefing',
+            routineType: 'briefing',
+            deliveryMode: 'dashboard',
+            skills: expect.arrayContaining(['calendar-assistant']),
+          }),
+          expect.objectContaining({
+            id: 'heartbeat-health-check',
+            routineType: 'heartbeat',
+            deliveryMode: 'dashboard',
+          }),
+          expect.objectContaining({
+            id: 'skill-automation-safety-review',
+          }),
+        ]),
+      );
+
+      const logsResponse = await fetch(
+        `${baseUrl}/api/tasks/task-health-heartbeat/logs`,
+      );
+      const logs = (await logsResponse.json()) as Array<{
+        task_id: string;
+        status: string;
+      }>;
+      expect(logs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            task_id: 'task-health-heartbeat',
+            status: 'success',
+          }),
+        ]),
+      );
+    });
+  });
+
+  it('serves task run telemetry and task-scoped webhook approvals in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const tasksResponse = await fetch(`${baseUrl}/api/tasks`);
+      const tasks = (await tasksResponse.json()) as Array<{
+        id: string;
+        active_run_count?: number;
+        last_started_at?: string;
+      }>;
+
+      expect(tasks).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'task-health-heartbeat',
+            active_run_count: 1,
+            last_started_at: expect.any(String),
+          }),
+        ]),
+      );
+
+      const approvalResponse = await fetch(
+        `${baseUrl}/api/approvals?kind=webhook-delivery&targetType=scheduled-task&targetId=task-release-webhook`,
+      );
+      const approvals = (await approvalResponse.json()) as Array<{
+        kind: string;
+        targetType: string;
+        targetId: string;
+        status: string;
+      }>;
+
+      expect(approvals).toEqual([
+        expect.objectContaining({
+          kind: 'webhook-delivery',
+          targetType: 'scheduled-task',
+          targetId: 'task-release-webhook',
+          status: 'pending',
+        }),
+      ]);
+    });
+  });
+
+  it('serves autofix auto-pick settings and mock scan results', async () => {
+    await withServer(async (baseUrl) => {
+      const projectsResponse = await fetch(`${baseUrl}/api/autofix/projects`);
+      const projects = (await projectsResponse.json()) as Array<{
+        autoPickEnabled: boolean;
+        pollIntervalMinutes: number;
+        lastAutoPickAt: string | null;
+      }>;
+
+      expect(projects).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            autoPickEnabled: true,
+            pollIntervalMinutes: 15,
+            lastAutoPickAt: expect.any(String),
+          }),
+        ]),
+      );
+
+      const scanResponse = await fetch(
+        `${baseUrl}/api/autofix/auto-pick/run`,
+        { method: 'POST' },
+      );
+      const scan = (await scanResponse.json()) as {
+        ok: boolean;
+        result: { scanned: number; started: number };
+      };
+
+      expect(scan).toMatchObject({
+        ok: true,
+        result: {
+          scanned: 1,
+          started: 1,
         },
       });
     });

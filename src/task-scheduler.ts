@@ -1,17 +1,25 @@
 import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
+import path from 'path';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import {
+  ASSISTANT_NAME,
+  SCHEDULER_POLL_INTERVAL,
+  STORE_DIR,
+  TIMEZONE,
+} from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { createApproval, findPendingApprovalForTarget } from './approvals.js';
 import {
   getAllTasks,
   getDueTasks,
   getTaskById,
+  getTaskRunLogs,
   logTaskRun,
   updateTask,
   updateTaskAfterRun,
@@ -26,6 +34,18 @@ import {
   PROVIDER_PURPOSES,
 } from './provider-router.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+
+interface HeartbeatPolicy {
+  quietHours?: {
+    start?: string;
+    end?: string;
+  };
+  activeHours?: {
+    start?: string;
+    end?: string;
+  };
+  staleAfterMinutes?: number;
+}
 
 /**
  * Compute the next run time for a recurring task, anchored to the
@@ -79,6 +99,254 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  saveSession?: (key: string, sessionId: string) => void;
+}
+
+function parseStringArrayJson(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseHeartbeatPolicy(
+  value: string | null | undefined,
+): HeartbeatPolicy {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseClockMinutes(value: string | undefined): number | null {
+  if (!value) return null;
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function minutesSinceMidnight(date: Date): number {
+  return date.getHours() * 60 + date.getMinutes();
+}
+
+function isWithinClockWindow(
+  nowMinutes: number,
+  startValue: string | undefined,
+  endValue: string | undefined,
+): boolean {
+  const start = parseClockMinutes(startValue);
+  const end = parseClockMinutes(endValue);
+  if (start === null || end === null) return false;
+  if (start === end) return true;
+  if (start < end) return nowMinutes >= start && nowMinutes < end;
+  return nowMinutes >= start || nowMinutes < end;
+}
+
+function isHeartbeatStale(
+  task: ScheduledTask,
+  policy: HeartbeatPolicy,
+  now: Date,
+): boolean {
+  const staleAfterMinutes = Number(policy.staleAfterMinutes);
+  if (!Number.isFinite(staleAfterMinutes) || staleAfterMinutes <= 0) {
+    return false;
+  }
+  if (!task.last_run) return true;
+  const lastRunMs = new Date(task.last_run).getTime();
+  if (!Number.isFinite(lastRunMs)) return true;
+  return now.getTime() - lastRunMs >= staleAfterMinutes * 60_000;
+}
+
+function heartbeatSkipReason(
+  task: ScheduledTask,
+  now = new Date(),
+): string | null {
+  const policy = parseHeartbeatPolicy(task.heartbeat_policy_json);
+  if (task.routine_type !== 'heartbeat' && !task.heartbeat_policy_json) {
+    return null;
+  }
+  if (isHeartbeatStale(task, policy, now)) return null;
+
+  const nowMinutes = minutesSinceMidnight(now);
+  if (
+    policy.quietHours &&
+    isWithinClockWindow(
+      nowMinutes,
+      policy.quietHours.start,
+      policy.quietHours.end,
+    )
+  ) {
+    return 'Skipped: quiet hours';
+  }
+
+  if (
+    policy.activeHours &&
+    !isWithinClockWindow(
+      nowMinutes,
+      policy.activeHours.start,
+      policy.activeHours.end,
+    )
+  ) {
+    return 'Skipped: outside active hours';
+  }
+
+  return null;
+}
+
+function getTaskSessionStorageKey(task: ScheduledTask): string | undefined {
+  if (task.context_mode === 'group') return task.group_folder;
+  if (task.context_mode === 'session') {
+    const key = task.session_key?.trim() || task.id;
+    return `task:${key}`;
+  }
+  return undefined;
+}
+
+function buildPromptWithChainedContext(task: ScheduledTask): string {
+  const sourceTaskIds = parseStringArrayJson(task.context_task_ids_json);
+  if (sourceTaskIds.length === 0) return task.prompt;
+
+  const sections: string[] = [];
+  for (const taskId of sourceTaskIds) {
+    const logs = getTaskRunLogs(taskId, 3);
+    if (!logs.length) continue;
+    const rows = logs.map((log) => {
+      const body = log.status === 'error' ? log.error : log.result;
+      return `- ${log.run_at} ${log.status}: ${body || '(no output)'}`;
+    });
+    sections.push(`Source task ${taskId} recent results:\n${rows.join('\n')}`);
+  }
+
+  if (!sections.length) return task.prompt;
+  return [
+    'Recent scheduled-task context for this routine:',
+    sections.join('\n\n'),
+    'Current routine request:',
+    task.prompt,
+  ].join('\n\n');
+}
+
+function resolveDeliveryFilePath(task: ScheduledTask): string {
+  const root = path.resolve(STORE_DIR, 'task-deliveries');
+  const rawTarget = task.delivery_target?.trim() || `${task.id}.md`;
+  const relativeTarget = path.isAbsolute(rawTarget)
+    ? path.basename(rawTarget)
+    : rawTarget;
+  const normalized = path
+    .normalize(relativeTarget)
+    .replace(/^(\.\.(\/|\\|$))+/, '');
+  const safeTarget =
+    normalized && normalized !== '.' && !normalized.startsWith('..')
+      ? normalized
+      : `${task.id}.md`;
+  const resolved = path.resolve(root, safeTarget);
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+    return path.join(root, `${task.id}.md`);
+  }
+  return resolved;
+}
+
+async function deliverTaskResult(
+  task: ScheduledTask,
+  result: string | null,
+  dryRun: boolean,
+  deps: SchedulerDependencies,
+): Promise<void> {
+  if (!result || dryRun) return;
+
+  const silentMarker = task.silent_marker?.trim();
+  if (silentMarker && result.includes(silentMarker)) {
+    logger.info(
+      { taskId: task.id, marker: silentMarker },
+      'Scheduled task result suppressed by silent marker',
+    );
+    return;
+  }
+
+  const deliveryMode = task.delivery_mode || 'chat';
+  if (deliveryMode === 'dashboard') return;
+
+  if (deliveryMode === 'file') {
+    const outputPath = resolveDeliveryFilePath(task);
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, result, 'utf-8');
+    logger.info(
+      { taskId: task.id, outputPath },
+      'Scheduled task result written to file',
+    );
+    return;
+  }
+
+  if (deliveryMode === 'webhook') {
+    const url = task.delivery_target?.trim();
+    if (!url) {
+      logger.warn(
+        { taskId: task.id },
+        'Scheduled task webhook delivery skipped because no URL is configured',
+      );
+      return;
+    }
+
+    const existingApproval = findPendingApprovalForTarget(
+      'webhook-delivery',
+      'scheduled-task',
+      task.id,
+    );
+    if (!existingApproval) {
+      createApproval({
+        kind: 'webhook-delivery',
+        title: `Send webhook for ${task.title || task.id}`,
+        summary: `Approve delivery of scheduled task output to ${url}.`,
+        risk: 'medium',
+        requester: 'task-scheduler',
+        targetType: 'scheduled-task',
+        targetId: task.id,
+        source: 'scheduled-task',
+        correlationId: `scheduled-task:${task.id}`,
+        actionPreview: result.slice(0, 1000),
+        resourceSummary: url,
+        payload: {
+          taskId: task.id,
+          url,
+          result,
+        },
+      });
+    }
+    logger.info(
+      { taskId: task.id, target: url, approvalId: existingApproval?.id },
+      'Scheduled task webhook delivery is awaiting approval',
+    );
+    return;
+  }
+
+  await deps.sendMessage(task.delivery_target || task.chat_jid, result);
+}
+
+function skipTaskRun(
+  task: ScheduledTask,
+  startTime: number,
+  resultSummary: string,
+): void {
+  logTaskRun({
+    task_id: task.id,
+    run_at: new Date().toISOString(),
+    duration_ms: Date.now() - startTime,
+    status: 'success',
+    result: resultSummary,
+    error: null,
+  });
+  updateTaskAfterRun(task.id, computeNextRun(task), resultSummary);
 }
 
 async function runTask(
@@ -135,6 +403,32 @@ async function runTask(
     return;
   }
 
+  const activeRunCount = task.active_run_count || 0;
+  const maxActiveRuns = task.max_active_runs || 0;
+  if (maxActiveRuns > 0 && activeRunCount >= maxActiveRuns) {
+    skipTaskRun(task, startTime, 'Skipped: active run limit');
+    logger.info(
+      { taskId: task.id, activeRunCount, maxActiveRuns },
+      'Scheduled task skipped because active-run limit is reached',
+    );
+    return;
+  }
+
+  const heartbeatReason = heartbeatSkipReason(task);
+  if (heartbeatReason) {
+    skipTaskRun(task, startTime, heartbeatReason);
+    logger.info(
+      { taskId: task.id, reason: heartbeatReason },
+      'Scheduled heartbeat skipped by local policy',
+    );
+    return;
+  }
+
+  updateTask(task.id, {
+    active_run_count: activeRunCount + 1,
+    last_started_at: new Date().toISOString(),
+  });
+
   // Update tasks snapshot for container to read (filtered by group)
   const isMain = group.isMain === true;
   const tasks = getAllTasks();
@@ -146,9 +440,14 @@ async function runTask(
       groupFolder: t.group_folder,
       prompt: t.prompt,
       script: t.script,
+      title: t.title,
+      routine_type: t.routine_type,
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
+      delivery_mode: t.delivery_mode,
       status: t.status,
+      active_run_count: t.active_run_count,
+      last_started_at: t.last_started_at,
       next_run: t.next_run,
     })),
   );
@@ -156,10 +455,10 @@ async function runTask(
   let result: string | null = null;
   let error: string | null = null;
 
-  // For group context mode, use the group's current session
   const sessions = deps.getSessions();
-  const sessionId =
-    task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+  const sessionStorageKey = getTaskSessionStorageKey(task);
+  const sessionId = sessionStorageKey ? sessions[sessionStorageKey] : undefined;
+  const prompt = buildPromptWithChainedContext(task);
   const defaultProvider = getAgentProviderConfig().provider;
   const taskProfile =
     task.provider_profile_id &&
@@ -181,12 +480,23 @@ async function runTask(
   const fallbackPurpose = (taskProfile?.id ||
     'default_automation') as ProviderPurpose;
   const dryRun = task.tool_policy === 'dry-run';
+  const runnerGroup =
+    task.max_runtime_ms && task.max_runtime_ms > 0
+      ? {
+          ...group,
+          containerConfig: {
+            ...(group.containerConfig || {}),
+            timeout: task.max_runtime_ms,
+          },
+        }
+      : group;
 
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
   // query loop to time out. A short delay handles any final MCP calls.
   const TASK_CLOSE_DELAY_MS = 10000;
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
+  let deliveredResult = false;
 
   const scheduleClose = () => {
     if (closeTimer) return; // already scheduled
@@ -198,9 +508,9 @@ async function runTask(
 
   try {
     const output = await runContainerAgent(
-      group,
+      runnerGroup,
       {
-        prompt: task.prompt,
+        prompt,
         sessionId,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
@@ -208,7 +518,7 @@ async function runTask(
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
         script: task.script || undefined,
-        allowedMcpServers: group.containerConfig?.allowedMcpServers,
+        allowedMcpServers: runnerGroup.containerConfig?.allowedMcpServers,
         provider: effectiveProvider,
         model: effectiveModel,
         providerFallbackPurpose: fallbackPurpose,
@@ -218,12 +528,13 @@ async function runTask(
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
+        if (streamedOutput.newSessionId && sessionStorageKey) {
+          deps.saveSession?.(sessionStorageKey, streamedOutput.newSessionId);
+        }
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          if (!dryRun) {
-            await deps.sendMessage(task.chat_jid, streamedOutput.result);
-          }
+          await deliverTaskResult(task, streamedOutput.result, dryRun, deps);
+          deliveredResult = true;
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
@@ -238,11 +549,17 @@ async function runTask(
 
     if (closeTimer) clearTimeout(closeTimer);
 
+    if (output.newSessionId && sessionStorageKey) {
+      deps.saveSession?.(sessionStorageKey, output.newSessionId);
+    }
+
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else if (output.result) {
-      // Result was already forwarded to the user via the streaming callback above
       result = output.result;
+      if (!deliveredResult) {
+        await deliverTaskResult(task, output.result, dryRun, deps);
+      }
     }
 
     logger.info(
@@ -273,6 +590,7 @@ async function runTask(
       ? result.slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+  updateTask(task.id, { active_run_count: activeRunCount });
 }
 
 let schedulerRunning = false;

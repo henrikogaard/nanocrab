@@ -43,7 +43,7 @@ In short: yes, NanoCrab now has governed long-term learning. It remembers what y
 Full web dashboard at your domain with 7-layer security (firewall, TLS, IP allowlist, rate limiting, CSP headers, session auth, audit logging).
 
 - **Overview** — live stats, weather, channel status, message feed
-- **Agents** — bot agents, coding agents, GitHub issue pickup, coding-job output, and task launcher
+- **Agents** — Assign Work wizard for one-off coding tasks, GitHub issue pickup, Autofix auto-pickup setup, coding-job output, and bot agents
 - **Messages** — search, filter, export conversations across all channels
 - **Approvals** — unified inbox for pending and reviewed risky actions with provenance, filters, and approve/deny controls
 - **Memory** — shared cross-channel memory + wiki knowledge base
@@ -55,7 +55,7 @@ Optional features that can be enabled/disabled from the dashboard:
 
 | Plugin             | Description                                                                             |
 | ------------------ | --------------------------------------------------------------------------------------- |
-| **GitHub Autofix** | Label an issue `autofix` → an agent clones repo, writes fix, opens PR. Auto-review PRs. |
+| **GitHub Autofix** | Label an issue `autofix` → an agent clones repo, writes fix, opens PR. Auto-pick labeled issues and auto-review PRs. |
 | **GitHub Copilot** | Multi-account OAuth, assign Copilot to issues, track PRs                                |
 | **Uptime Monitor** | HTTP + file-freshness health checks with bot alerts                                     |
 | **Chat**           | Send messages to the bot from the dashboard                                             |
@@ -66,13 +66,13 @@ Additional plugins can be installed from git URLs via the Marketplace page, or c
 
 ### Autonomous Coding
 
-- **Coding Task Launcher** — pick tool (Claude Code / Codex / Copilot), model, working directory, and describe the task
+- **Assign Work Wizard** — start a freeform coding task from templates, pick the next matching GitHub issue, or enable Autofix auto-pickup from the Agents dashboard
 - **GitHub Coding Jobs** — register enabled repos, pick issues by repo/label/assignee/milestone/number, inspect diffs/output/tests/CI, approve implementation, approve PRs, retry, cancel, and revert
 - **Repo Coding Rules** — save reviewed repo preferences such as required runtimes, test commands, and safety conventions; approved rules are injected into coding-job prompts without exposing secrets.
 - **Isolated Coding Jobs** — WhatsApp/Signal/Telegram agents can request repo coding jobs through MCP; an ephemeral coding container clones and edits inside `data/coding-workspaces`
 - **Mobile Coding Commands** — the main control group can use `/code repos`, `/code start`, `/code pick`, `/code status`, and `/code approve|cancel|retry|open-pr` to drive coding jobs from chat.
-- **Scheduled Tasks** — recurring coding jobs (hourly, daily, weekly)
-- **GitHub Autofix Pipeline** — webhook-driven: issue created/labeled → approval-gated coding job → reviewed PR publish → bot notifies you
+- **Routines & Scheduled Tasks** — blueprint-driven routines, exact cron/interval jobs, dashboard/chat/file/webhook delivery modes, approval-gated webhooks, named routine sessions, chained task context, script-gated heartbeat checks, heartbeat quiet hours/stale policies, active-run limits, run history, and run-now controls
+- **GitHub Autofix Pipeline** — webhook-driven or poller-driven: issue created/labeled or auto-picked → configured provider/model starts an approval-gated coding job → reviewed PR publish → bot notifies you; dashboard settings include auto-pick cadence, PR behavior, and max active jobs
 - **GitHub Connector Health** — Webhooks shows the receiver URL, secret/target/event setup, recent deliveries, and read-only connector health checks without revealing credentials
 - **PR Review** — an agent reviews every new PR and posts comments
 
@@ -91,12 +91,19 @@ Create a scheduled task that periodically asks the main agent to pick an autofix
 The agent calls MCP tools such as `register_coding_repo`,
 `list_github_issues`, `start_coding_job`, `pick_github_issue`, and
 the scheduled-task tools. The dashboard exposes the same flow under
-**Agents -> GitHub Coding Jobs** and **Autofix**. Issue pickup only runs for
+**Agents -> Assign Work**, **Agents -> GitHub Coding Jobs**, and **Autofix**.
+Issue pickup only runs for
 enabled repo configs and supports repo, label, assignee, milestone, and direct
 issue-number filters. Jobs move through `queued -> investigate -> plan ->
 await_approval -> implement -> test -> await_pr_approval -> open_pr ->
 ci_running -> completed`, with transition timestamps and failure reasons stored
 on the job record.
+
+Autofix projects can also enable scheduled GitHub auto-pickup from the Autofix
+dashboard. Each project stores `autoPickEnabled`, `pollIntervalMinutes`, and
+`lastAutoPickAt`; the background scanner starts only matching labeled issues,
+skips duplicates that already have active jobs, and honors each project's
+`maxActiveJobs` capacity.
 
 The host creates job metadata and launches a short-lived agent container with
 only that job directory mounted at `/workspace/coding-job`. The container clones
@@ -173,7 +180,7 @@ success responses and do not mutate live files or services.
 - **Assistant Profile** — Settings groups assistant name, trigger preview, avatar choice, personality instructions, and skill preference summaries so owners can make NanoCrab feel like their own assistant.
 - **Assistant Avatar Gallery** — Settings includes the NanoCrab default mark, an uploaded-avatar slot, and five built-in SVG assistant avatars with metadata for small dashboard identity use.
 - **Scheduled Briefings** — Report Studio can create daily or weekly briefing schedules backed by scheduled tasks. Briefings include an explicit provider-profile selector, journal/memory sources, selected output formats, and keep external delivery behind approval.
-- **Operation Schedules** — Tasks can create recurring operation orders or reminders for a selected group. New operation schedules default to preview-only dry runs unless the admin explicitly approves scheduled chat delivery.
+- **Routines & Operation Schedules** — Tasks now starts from routine blueprints such as daily briefings, issue triage, PR digests, dependency/security watches, flaky-test tracking, inbox SLA monitoring, release notes, approval-gated webhooks, skill-declared templates, and script-gated heartbeat checks. Routines can stay dashboard-only, send to chat, write review files under `store/task-deliveries`, create webhook-delivery approvals, keep named sessions, enforce heartbeat quiet hours/stale checks, cap active runs, and chain recent results from other tasks. Operation reminders still default to preview-only dry runs unless the admin explicitly approves scheduled chat delivery.
 - **Missions And Runbooks** — the Workflows page can define reusable runbooks, start missions from those runbooks, and track step state (`pending`, `running`, `completed`, `blocked`, or `skipped`). Steps marked as approval-required cannot be completed without an approval reference.
 - **Unified Approvals** — risky actions such as provider fallback, repo changes, PR creation, report delivery, publishing, uploads, external messages, and tool actions flow through `/api/approvals` and the dashboard Approvals inbox. Approval records include provenance (`source`, `correlationId`, `policyDecisionId`), action/resource previews, expiry metadata, and server-side filters for status, risk, kind, requester, target type, correlation ID, and created date range. Expired pending approvals are marked `expired` and cannot be approved or denied later.
 - **Backup, Restore, And Migration** — owners can create essential or full backups, download encrypted archives, configure automatic backup cadence/retention, review manual restore steps, and check legacy NanoClaw migration readiness from the dashboard Backup page.
@@ -336,8 +343,12 @@ group can keep a Claude model and a Codex model without reselecting them each
 time.
 
 Scheduled tasks can also store a provider profile, explicit provider, model,
-and tool policy. This lets an automation use a cheap local summary model or a
-strong coding runtime without changing the global bot default.
+tool policy, delivery mode, routine title/type, silent marker, named session
+key, skill hints, heartbeat policy, max runtime, active-run limits, and chained
+source task IDs. This lets an automation use a cheap local summary model or a
+strong coding runtime without changing the global bot default, while keeping
+noisy or sensitive outputs dashboard-only, file-backed, or approval-gated
+before chat or webhook delivery.
 
 ### Updating NanoCrab
 

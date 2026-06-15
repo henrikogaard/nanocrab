@@ -12,6 +12,7 @@ export type ApprovalKind =
   | 'coding-revert'
   | 'report-outline'
   | 'report-delivery'
+  | 'webhook-delivery'
   | 'publish'
   | 'external-message'
   | 'upload'

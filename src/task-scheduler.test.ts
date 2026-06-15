@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./container-runner.js', () => ({
@@ -5,23 +8,48 @@ vi.mock('./container-runner.js', () => ({
   writeTasksSnapshot: vi.fn(),
 }));
 
-import { _initTestDatabase, createTask, getTaskById } from './db.js';
+vi.mock('./approvals.js', () => ({
+  createApproval: vi.fn(() => ({
+    id: 'approval-webhook',
+    status: 'pending',
+  })),
+  findPendingApprovalForTarget: vi.fn(() => undefined),
+}));
+
+import {
+  _initTestDatabase,
+  createTask,
+  getTaskById,
+  logTaskRun,
+} from './db.js';
 import {
   _resetSchedulerLoopForTests,
   computeNextRun,
   startSchedulerLoop,
 } from './task-scheduler.js';
 import { runContainerAgent } from './container-runner.js';
+import { STORE_DIR } from './config.js';
+import { createApproval, findPendingApprovalForTarget } from './approvals.js';
 
 describe('task scheduler', () => {
   beforeEach(() => {
     _initTestDatabase();
     _resetSchedulerLoopForTests();
+    vi.clearAllMocks();
+    vi.mocked(findPendingApprovalForTarget).mockReturnValue(undefined as any);
     vi.useFakeTimers();
+    fs.rmSync(path.join(STORE_DIR, 'task-deliveries'), {
+      recursive: true,
+      force: true,
+    });
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    fs.rmSync(path.join(STORE_DIR, 'task-deliveries'), {
+      recursive: true,
+      force: true,
+    });
   });
 
   it('pauses due tasks with invalid group folders to prevent retry churn', async () => {
@@ -172,6 +200,593 @@ describe('task scheduler', () => {
     expect(sendMessage).not.toHaveBeenCalled();
     expect(getTaskById('task-dry-run')?.last_result).toContain(
       'Dry-run simulated',
+    );
+  });
+
+  it('keeps dashboard-only task output in run history without sending a chat message', async () => {
+    vi.mocked(runContainerAgent).mockImplementationOnce(
+      async (_group, _input, _onProcess, onOutput) => {
+        await onOutput?.({
+          status: 'success',
+          result: 'Dashboard-only briefing draft.',
+        });
+        return { status: 'success', result: 'Dashboard-only briefing draft.' };
+      },
+    );
+    createTask({
+      id: 'task-dashboard-delivery',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      prompt: 'Prepare a briefing draft',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      delivery_mode: 'dashboard',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    } as any);
+    const sendMessage = vi.fn(async () => {});
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage,
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(getTaskById('task-dashboard-delivery')?.last_result).toContain(
+      'Dashboard-only briefing',
+    );
+  });
+
+  it('uses and persists named routine sessions separately from group chat sessions', async () => {
+    vi.mocked(runContainerAgent).mockImplementationOnce(
+      async () =>
+        ({
+          status: 'success',
+          result: 'Session-aware briefing complete.',
+          newSessionId: 'session-next',
+        }) as any,
+    );
+    createTask({
+      id: 'task-named-session',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      prompt: 'Continue the routine memory',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'session',
+      session_key: 'daily-briefing',
+      delivery_mode: 'dashboard',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    } as any);
+    const saveSession = vi.fn();
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({ 'task:daily-briefing': 'session-previous' }),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+      saveSession,
+    } as any);
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(runContainerAgent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ sessionId: 'session-previous' }),
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(saveSession).toHaveBeenCalledWith(
+      'task:daily-briefing',
+      'session-next',
+    );
+  });
+
+  it('adds recent source task results to chained routine prompts', async () => {
+    vi.mocked(runContainerAgent).mockImplementationOnce(async () => ({
+      status: 'success',
+      result: 'Chained digest complete.',
+    }));
+    createTask({
+      id: 'task-source',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      prompt: 'Source task',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: null,
+      status: 'completed',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+    logTaskRun({
+      task_id: 'task-source',
+      run_at: '2026-02-22T08:00:00.000Z',
+      duration_ms: 1200,
+      status: 'success',
+      result: 'Source task found two open P0 issues.',
+      error: null,
+    });
+    createTask({
+      id: 'task-chained',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      prompt: 'Draft the next action plan.',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      delivery_mode: 'dashboard',
+      context_task_ids_json: JSON.stringify(['task-source']),
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    } as any);
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(runContainerAgent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'Source task found two open P0 issues.',
+        ),
+      }),
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(vi.mocked(runContainerAgent).mock.calls[0]?.[1].prompt).toContain(
+      'Draft the next action plan.',
+    );
+  });
+
+  it('writes file-delivered task output into the task-deliveries folder', async () => {
+    vi.mocked(runContainerAgent).mockImplementationOnce(
+      async (_group, _input, _onProcess, onOutput) => {
+        await onOutput?.({
+          status: 'success',
+          result: 'File delivery payload.',
+        });
+        return { status: 'success', result: 'File delivery payload.' };
+      },
+    );
+    createTask({
+      id: 'task-file-delivery',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      prompt: 'Write an artifact',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      delivery_mode: 'file',
+      delivery_target: 'briefings/latest.md',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    } as any);
+    const sendMessage = vi.fn(async () => {});
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage,
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(
+      fs.readFileSync(
+        path.join(STORE_DIR, 'task-deliveries', 'briefings', 'latest.md'),
+        'utf-8',
+      ),
+    ).toBe('File delivery payload.');
+  });
+
+  it('suppresses chat delivery when a successful heartbeat includes its silent marker', async () => {
+    vi.mocked(runContainerAgent).mockImplementationOnce(
+      async (_group, _input, _onProcess, onOutput) => {
+        await onOutput?.({
+          status: 'success',
+          result: 'HEARTBEAT_OK',
+        });
+        return { status: 'success', result: 'HEARTBEAT_OK' };
+      },
+    );
+    createTask({
+      id: 'task-silent-heartbeat',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      prompt: 'Check heartbeat',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      delivery_mode: 'chat',
+      silent_marker: 'HEARTBEAT_OK',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    } as any);
+    const sendMessage = vi.fn(async () => {});
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage,
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(getTaskById('task-silent-heartbeat')?.last_result).toContain(
+      'HEARTBEAT_OK',
+    );
+  });
+
+  it('creates an approval instead of emitting webhook deliveries directly', async () => {
+    vi.mocked(runContainerAgent).mockImplementationOnce(
+      async (_group, _input, _onProcess, onOutput) => {
+        await onOutput?.({
+          status: 'success',
+          result: 'Webhook payload.',
+        });
+        return { status: 'success', result: 'Webhook payload.' };
+      },
+    );
+    createTask({
+      id: 'task-webhook-delivery',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      title: 'Webhook routine',
+      prompt: 'Prepare webhook payload',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      delivery_mode: 'webhook',
+      delivery_target: 'https://example.com/hooks/nanocrab',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    } as any);
+    const sendMessage = vi.fn(async () => {});
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage,
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(createApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'webhook-delivery',
+        requester: 'task-scheduler',
+        targetType: 'scheduled-task',
+        targetId: 'task-webhook-delivery',
+        resourceSummary: 'https://example.com/hooks/nanocrab',
+        payload: expect.objectContaining({
+          taskId: 'task-webhook-delivery',
+          url: 'https://example.com/hooks/nanocrab',
+          result: 'Webhook payload.',
+        }),
+      }),
+    );
+  });
+
+  it('skips heartbeat tasks during quiet hours without waking the container', async () => {
+    createTask({
+      id: 'task-quiet-heartbeat',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      prompt: 'Check heartbeat',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      routine_type: 'heartbeat',
+      heartbeat_policy_json: JSON.stringify({
+        quietHours: { start: '00:00', end: '23:59' },
+      }),
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    } as any);
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(runContainerAgent).not.toHaveBeenCalled();
+    expect(getTaskById('task-quiet-heartbeat')?.last_result).toContain(
+      'Skipped: quiet hours',
+    );
+  });
+
+  it('runs stale heartbeat tasks even during quiet hours', async () => {
+    createTask({
+      id: 'task-stale-heartbeat',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      prompt: 'Check stale heartbeat',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      routine_type: 'heartbeat',
+      heartbeat_policy_json: JSON.stringify({
+        quietHours: { start: '00:00', end: '23:59' },
+        staleAfterMinutes: 1,
+      }),
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    } as any);
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(runContainerAgent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        prompt: 'Check stale heartbeat',
+      }),
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
+  it('skips tasks that have reached their active-run limit', async () => {
+    createTask({
+      id: 'task-active-limit',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      prompt: 'Should not run',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      max_active_runs: 1,
+      active_run_count: 1,
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    } as any);
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(runContainerAgent).not.toHaveBeenCalled();
+    expect(getTaskById('task-active-limit')?.last_result).toContain(
+      'Skipped: active run limit',
+    );
+  });
+
+  it('passes max_runtime_ms through as a task container timeout override', async () => {
+    createTask({
+      id: 'task-runtime-limit',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      prompt: 'Run with timeout',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      max_runtime_ms: 123000,
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    } as any);
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(runContainerAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        containerConfig: expect.objectContaining({
+          timeout: 123000,
+        }),
+      }),
+      expect.any(Object),
+      expect.any(Function),
+      expect.any(Function),
     );
   });
 

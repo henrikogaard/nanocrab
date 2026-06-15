@@ -6,22 +6,141 @@ import {
   createTask,
   updateTask,
   deleteTask,
+  getTaskRunLogs,
 } from '../../db.js';
-import Database from 'better-sqlite3';
-import path from 'path';
-import { STORE_DIR } from '../../config.js';
 import { isAgentProvider } from '../../agent-provider.js';
 import { ProviderPurpose, PROVIDER_PURPOSES } from '../../provider-router.js';
 import { createOperationSchedule } from '../../operation-schedules.js';
+import { listRoutineBlueprints } from '../../routine-blueprints.js';
 
 const router = Router();
+const DELIVERY_MODES = new Set(['chat', 'dashboard', 'file', 'webhook']);
 
-function getDb(): Database.Database {
-  return new Database(path.join(STORE_DIR, 'messages.db'), { readonly: true });
+function cleanString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function cleanPositiveInt(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed =
+    typeof value === 'number' ? value : Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizeContextMode(
+  value: unknown,
+): 'group' | 'isolated' | 'session' {
+  return value === 'group' || value === 'session' ? value : 'isolated';
+}
+
+function normalizeDeliveryMode(
+  value: unknown,
+): 'chat' | 'dashboard' | 'file' | 'webhook' | null {
+  const normalized = cleanString(value);
+  return normalized && DELIVERY_MODES.has(normalized)
+    ? (normalized as 'chat' | 'dashboard' | 'file' | 'webhook')
+    : null;
+}
+
+function normalizeStringArrayJson(value: unknown): string | null {
+  let source = value;
+  if (typeof value === 'string' && value.trim().startsWith('[')) {
+    try {
+      source = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  } else if (typeof value === 'string' && value.trim()) {
+    source = value.split(',');
+  }
+
+  if (!Array.isArray(source)) return null;
+  const items = source
+    .map((item) => cleanString(item))
+    .filter((item): item is string => Boolean(item));
+  return items.length ? JSON.stringify([...new Set(items)]) : null;
+}
+
+function normalizeObjectJson(value: unknown): string | null {
+  let source = value;
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      source = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    return null;
+  }
+  return JSON.stringify(source);
+}
+
+function routineMetadataFromBody(body: Record<string, unknown>) {
+  return {
+    ...(body.title !== undefined && { title: cleanString(body.title) }),
+    ...(body.description !== undefined && {
+      description: cleanString(body.description),
+    }),
+    ...((body.routineType !== undefined || body.routine_type !== undefined) && {
+      routine_type: cleanString(body.routineType ?? body.routine_type),
+    }),
+    ...((body.contextMode !== undefined || body.context_mode !== undefined) && {
+      context_mode: normalizeContextMode(body.contextMode ?? body.context_mode),
+    }),
+    ...((body.deliveryMode !== undefined ||
+      body.delivery_mode !== undefined) && {
+      delivery_mode: normalizeDeliveryMode(
+        body.deliveryMode ?? body.delivery_mode,
+      ),
+    }),
+    ...((body.deliveryTarget !== undefined ||
+      body.delivery_target !== undefined) && {
+      delivery_target: cleanString(body.deliveryTarget ?? body.delivery_target),
+    }),
+    ...((body.skills !== undefined || body.skills_json !== undefined) && {
+      skills_json: normalizeStringArrayJson(body.skills ?? body.skills_json),
+    }),
+    ...((body.maxRuntimeMs !== undefined ||
+      body.max_runtime_ms !== undefined) && {
+      max_runtime_ms: cleanPositiveInt(
+        body.maxRuntimeMs ?? body.max_runtime_ms,
+      ),
+    }),
+    ...((body.maxActiveRuns !== undefined ||
+      body.max_active_runs !== undefined) && {
+      max_active_runs: cleanPositiveInt(
+        body.maxActiveRuns ?? body.max_active_runs,
+      ),
+    }),
+    ...((body.heartbeatPolicy !== undefined ||
+      body.heartbeat_policy_json !== undefined) && {
+      heartbeat_policy_json: normalizeObjectJson(
+        body.heartbeatPolicy ?? body.heartbeat_policy_json,
+      ),
+    }),
+    ...((body.silentMarker !== undefined ||
+      body.silent_marker !== undefined) && {
+      silent_marker: cleanString(body.silentMarker ?? body.silent_marker),
+    }),
+    ...((body.sessionKey !== undefined || body.session_key !== undefined) && {
+      session_key: cleanString(body.sessionKey ?? body.session_key),
+    }),
+    ...((body.contextTaskIds !== undefined ||
+      body.context_task_ids_json !== undefined) && {
+      context_task_ids_json: normalizeStringArrayJson(
+        body.contextTaskIds ?? body.context_task_ids_json,
+      ),
+    }),
+  };
 }
 
 router.get('/', (_req: Request, res: Response) => {
   res.json(getAllTasks());
+});
+
+router.get('/blueprints', (_req: Request, res: Response) => {
+  res.json(listRoutineBlueprints());
 });
 
 // Create a new task
@@ -79,7 +198,8 @@ router.post('/', (req: Request, res: Response) => {
           : null,
     schedule_type: scheduleType,
     schedule_value: scheduleValue,
-    context_mode: contextMode || 'isolated',
+    context_mode: normalizeContextMode(contextMode),
+    ...routineMetadataFromBody(req.body),
     next_run: now,
     status: 'active',
     created_at: now,
@@ -155,6 +275,26 @@ router.get('/:id', (req: Request, res: Response) => {
   res.json(task);
 });
 
+router.post('/:id/run-now', (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const task = getTaskById(id);
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+
+  const nextRun = new Date().toISOString();
+  updateTask(id, { status: 'active', next_run: nextRun });
+  res.json({
+    ok: true,
+    task: {
+      id,
+      status: 'active',
+      next_run: nextRun,
+    },
+  });
+});
+
 router.put('/:id', (req: Request, res: Response) => {
   const id = req.params.id as string;
   const task = getTaskById(id);
@@ -175,6 +315,8 @@ router.put('/:id', (req: Request, res: Response) => {
     model,
     toolPolicy,
     tool_policy,
+    contextMode,
+    context_mode,
   } = req.body;
   updateTask(id, {
     ...(prompt !== undefined && { prompt }),
@@ -216,6 +358,10 @@ router.put('/:id', (req: Request, res: Response) => {
     }),
     ...(schedule_type !== undefined && { schedule_type }),
     ...(schedule_value !== undefined && { schedule_value }),
+    ...((contextMode !== undefined || context_mode !== undefined) && {
+      context_mode: normalizeContextMode(contextMode ?? context_mode),
+    }),
+    ...routineMetadataFromBody(req.body),
     ...(status !== undefined && { status }),
   });
 
@@ -246,17 +392,7 @@ router.put('/:id/resume', (req: Request, res: Response) => {
 router.get('/:id/logs', (req: Request, res: Response) => {
   const id = req.params.id as string;
   const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
-  const db = getDb();
-  try {
-    const rows = db
-      .prepare(
-        'SELECT * FROM task_run_logs WHERE task_id = ? ORDER BY run_at DESC LIMIT ?',
-      )
-      .all(id, limit);
-    res.json(rows);
-  } finally {
-    db.close();
-  }
+  res.json(getTaskRunLogs(id, limit));
 });
 
 export default router;

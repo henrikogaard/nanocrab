@@ -10,6 +10,8 @@ import {
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  getTaskRunLogs,
+  logTaskRun,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
@@ -538,6 +540,111 @@ describe('task CRUD', () => {
 
     updateTask('task-2', { status: 'paused' });
     expect(getTaskById('task-2')!.status).toBe('paused');
+  });
+
+  it('creates and updates extended routine metadata', () => {
+    createTask({
+      id: 'task-routine-meta',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      title: 'Daily briefing',
+      description: 'Dashboard-only morning briefing',
+      routine_type: 'briefing',
+      prompt: 'brief me',
+      schedule_type: 'cron',
+      schedule_value: '0 8 * * 1-5',
+      context_mode: 'session',
+      session_key: 'daily-briefing',
+      delivery_mode: 'dashboard',
+      delivery_target: 'group@g.us',
+      skills_json: JSON.stringify(['calendar-assistant']),
+      max_runtime_ms: 120000,
+      max_active_runs: 1,
+      active_run_count: 0,
+      heartbeat_policy_json: JSON.stringify({
+        quietHours: { start: '22:00', end: '07:00' },
+      }),
+      silent_marker: 'BRIEFING_OK',
+      context_task_ids_json: JSON.stringify(['task-source']),
+      next_run: '2024-06-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    expect(getTaskById('task-routine-meta')).toMatchObject({
+      title: 'Daily briefing',
+      description: 'Dashboard-only morning briefing',
+      routine_type: 'briefing',
+      context_mode: 'session',
+      session_key: 'daily-briefing',
+      delivery_mode: 'dashboard',
+      delivery_target: 'group@g.us',
+      skills_json: '["calendar-assistant"]',
+      max_runtime_ms: 120000,
+      max_active_runs: 1,
+      active_run_count: 0,
+      heartbeat_policy_json: '{"quietHours":{"start":"22:00","end":"07:00"}}',
+      silent_marker: 'BRIEFING_OK',
+      context_task_ids_json: '["task-source"]',
+    });
+
+    updateTask('task-routine-meta', {
+      title: 'Updated briefing',
+      delivery_mode: 'file',
+      delivery_target: 'briefings/latest.md',
+      active_run_count: 2,
+      last_started_at: '2024-06-01T09:00:00.000Z',
+      context_task_ids_json: JSON.stringify(['task-source', 'task-extra']),
+    });
+
+    expect(getTaskById('task-routine-meta')).toMatchObject({
+      title: 'Updated briefing',
+      delivery_mode: 'file',
+      delivery_target: 'briefings/latest.md',
+      active_run_count: 2,
+      last_started_at: '2024-06-01T09:00:00.000Z',
+      context_task_ids_json: '["task-source","task-extra"]',
+    });
+  });
+
+  it('lists recent task run logs newest first', () => {
+    createTask({
+      id: 'task-source',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'source task',
+      schedule_type: 'once',
+      schedule_value: '2024-06-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: null,
+      status: 'completed',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    logTaskRun({
+      task_id: 'task-source',
+      run_at: '2024-06-01T08:00:00.000Z',
+      duration_ms: 100,
+      status: 'success',
+      result: 'Older result',
+      error: null,
+    });
+    logTaskRun({
+      task_id: 'task-source',
+      run_at: '2024-06-01T09:00:00.000Z',
+      duration_ms: 200,
+      status: 'success',
+      result: 'Newer result',
+      error: null,
+    });
+
+    expect(getTaskRunLogs('task-source', 1)).toEqual([
+      expect.objectContaining({
+        task_id: 'task-source',
+        run_at: '2024-06-01T09:00:00.000Z',
+        result: 'Newer result',
+      }),
+    ]);
   });
 
   it('deletes a task and its run logs', () => {

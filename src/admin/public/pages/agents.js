@@ -312,36 +312,88 @@ async function renderAgents(el) {
     el.innerHTML = `
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <h2>Agents</h2>
-        <button class="btn btn-sm btn-primary" onclick="document.getElementById('task-launcher').style.display=document.getElementById('task-launcher').style.display==='none'?'block':'none'">New Coding Task</button>
+        <button class="btn btn-sm btn-primary" onclick="openAssignWorkWizard()">Assign Work</button>
       </div>
 
-      <div id="task-launcher" class="card" style="display:none;margin-bottom:16px;border-left:3px solid var(--accent)">
-        <div class="card-title">Launch Coding Task</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-          <div class="form-group">
-            <label>Tool</label>
-            <select class="search-input" id="task-tool" onchange="updateTaskModels()" style="width:100%">${toolOptions}</select>
+      <div id="task-launcher" class="card assign-wizard" style="display:none;margin-bottom:16px">
+        <div class="assign-wizard-head">
+          <div>
+            <div class="card-title">Assign Work</div>
+            <div class="assign-wizard-subtitle">Start a one-off task, pick a GitHub issue, or enable automatic issue pickup.</div>
+          </div>
+          <button class="btn btn-sm btn-ghost" onclick="document.getElementById('task-launcher').style.display='none'">Close</button>
+        </div>
+        <div class="assign-mode-tabs" role="tablist" aria-label="Assignment type">
+          <button class="assign-mode is-active" id="assign-mode-freeform" onclick="setAssignMode('freeform')">Freeform Task</button>
+          <button class="assign-mode" id="assign-mode-github" onclick="setAssignMode('github')">GitHub Issue</button>
+          <button class="assign-mode" id="assign-mode-autofix" onclick="setAssignMode('autofix')">Auto-Pickup</button>
+        </div>
+
+        <div class="assign-pane" id="assign-pane-freeform">
+          <div class="assign-template-row">
+            <button class="btn btn-sm btn-ghost" onclick="applyTaskTemplate('bugfix')">Bug Fix</button>
+            <button class="btn btn-sm btn-ghost" onclick="applyTaskTemplate('review')">Code Review</button>
+            <button class="btn btn-sm btn-ghost" onclick="applyTaskTemplate('docs')">Docs Update</button>
+            <button class="btn btn-sm btn-ghost" onclick="applyTaskTemplate('test')">Add Tests</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+            <div class="form-group">
+              <label>Tool</label>
+              <select class="search-input" id="task-tool" onchange="updateTaskModels()" style="width:100%">${toolOptions}</select>
+            </div>
+            <div class="form-group">
+              <label>Model</label>
+              <select class="search-input" id="task-model" style="width:100%"></select>
+            </div>
+            <div class="form-group">
+              <label>Budget (USD, optional)</label>
+              <input class="search-input" id="task-budget" type="number" step="0.1" min="0" placeholder="e.g. 5" style="width:100%">
+            </div>
           </div>
           <div class="form-group">
-            <label>Model</label>
-            <select class="search-input" id="task-model" style="width:100%"></select>
+            <label>Working directory</label>
+            <input class="search-input" id="task-workdir" value="${esc(window._lastWorkDir || window._projectRoot || '.')}" placeholder="/path/to/repo" style="width:100%">
           </div>
           <div class="form-group">
-            <label>Budget (USD, optional)</label>
-            <input class="search-input" id="task-budget" type="number" step="0.1" min="0" placeholder="e.g. 5" style="width:100%">
+            <label>Task description</label>
+            <textarea class="search-input" id="task-prompt" rows="4" placeholder="Describe the outcome you want, the repo area, and any checks to run." style="width:100%;resize:vertical;font-family:var(--font)"></textarea>
+            <div class="field-hint" id="task-prompt-hint">A good task names the target files or workflow, expected behavior, and verification command.</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="launchAgentTask()">Launch Task</button>
+            <button class="btn btn-ghost" onclick="document.getElementById('task-launcher').style.display='none'">Cancel</button>
           </div>
         </div>
-        <div class="form-group">
-          <label>Working directory</label>
-          <input class="search-input" id="task-workdir" value="${esc(window._lastWorkDir || window._projectRoot || '.')}" placeholder="/path/to/repo" style="width:100%">
+
+        <div class="assign-pane" id="assign-pane-github" style="display:none">
+          <div class="assign-grid-compact">
+            <div class="form-group"><label>Repository</label><select class="search-input" id="assign-coding-repo-select">${codingRepoOptions || '<option value="">No repos registered</option>'}</select></div>
+            <div class="form-group"><label>Provider</label><select class="search-input" id="assign-coding-provider-select" onchange="updateAssignCodingModels()">${codingProviderOptions || '<option value="claude">Claude</option>'}</select></div>
+            <div class="form-group"><label>Model</label><select class="search-input" id="assign-coding-model-select"><option value="">Default model</option></select></div>
+            <div class="form-group"><label>Labels</label><input class="search-input" id="assign-coding-labels" placeholder="p0, autofix, bug"></div>
+          </div>
+          <label class="assign-check"><input type="checkbox" id="assign-coding-create-pr" checked> Create a draft PR when changes are ready</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="assignPickCodingIssue()">Pick Next Issue</button>
+            <button class="btn btn-ghost" onclick="document.getElementById('coding-repo-new')?.focus()">Register Repo Below</button>
+          </div>
         </div>
-        <div class="form-group">
-          <label>Task description</label>
-          <textarea class="search-input" id="task-prompt" rows="3" placeholder="Describe what the agent should do..." style="width:100%;resize:vertical;font-family:var(--font)"></textarea>
-        </div>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-primary" onclick="launchAgentTask()">Launch</button>
-          <button class="btn btn-ghost" onclick="document.getElementById('task-launcher').style.display='none'">Cancel</button>
+
+        <div class="assign-pane" id="assign-pane-autofix" style="display:none">
+          <div class="assign-grid-compact">
+            <div class="form-group"><label>Owner</label><input class="search-input" id="assign-af-owner" placeholder="owner"></div>
+            <div class="form-group"><label>Repo</label><input class="search-input" id="assign-af-repo" placeholder="nanocrab"></div>
+            <div class="form-group"><label>Trigger label</label><input class="search-input" id="assign-af-label" value="autofix"></div>
+            <div class="form-group"><label>Provider</label><select class="search-input" id="assign-af-provider" onchange="updateAssignAutofixModels()">${codingProviderOptions || '<option value="claude">Claude</option>'}</select></div>
+            <div class="form-group"><label>Model</label><select class="search-input" id="assign-af-model"><option value="">Default model</option></select></div>
+            <div class="form-group"><label>Max active jobs</label><input class="search-input" id="assign-af-max-active" type="number" min="1" step="1" value="1"></div>
+          </div>
+          <label class="assign-check"><input type="checkbox" id="assign-af-create-pr" checked> Open PR flow after implementation</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="assignCreateAutofixProject()">Enable Auto-Pickup</button>
+            <button class="btn btn-ghost" onclick="navigate('autofix')">Open Autofix Settings</button>
+            <button class="btn btn-ghost" onclick="navigate('webhooks')">Check Webhook</button>
+          </div>
         </div>
       </div>
 
@@ -424,7 +476,7 @@ async function renderAgents(el) {
             </div>
             <div style="display:flex;gap:6px;align-items:center">
               ${running > 0 ? '<span class="badge badge-success" style="font-size:10px">' + running + ' running</span>' : '<span class="badge badge-muted" style="font-size:10px">Ready</span>'}
-              <button class="btn btn-sm btn-ghost" onclick="document.getElementById('task-launcher').style.display='block';document.getElementById('task-tool').value='${t.id}';updateTaskModels()">Launch</button>
+              <button class="btn btn-sm btn-ghost" onclick="openAssignWorkWizard('freeform');document.getElementById('task-tool').value='${t.id}';updateTaskModels()">Launch</button>
             </div>
           </div>`;
           })
@@ -596,10 +648,46 @@ async function renderAgents(el) {
     updateTaskModels();
     window._codingModelsByProvider = codingModelsByProvider;
     updateCodingModels();
+    updateAssignCodingModels();
+    updateAssignAutofixModels();
   } catch (e) {
     el.innerHTML = `<div class="card empty">Failed to load agents: ${esc(e.message)}</div>`;
   }
 }
+
+window.openAssignWorkWizard = function (mode = 'freeform') {
+  const launcher = document.getElementById('task-launcher');
+  if (!launcher) return;
+  launcher.style.display = 'block';
+  setAssignMode(mode);
+  launcher.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+window.setAssignMode = function (mode) {
+  ['freeform', 'github', 'autofix'].forEach((name) => {
+    document
+      .getElementById(`assign-mode-${name}`)
+      ?.classList.toggle('is-active', name === mode);
+    const pane = document.getElementById(`assign-pane-${name}`);
+    if (pane) pane.style.display = name === mode ? 'block' : 'none';
+  });
+};
+
+window.applyTaskTemplate = function (kind) {
+  const prompt = document.getElementById('task-prompt');
+  if (!prompt) return;
+  const templates = {
+    bugfix:
+      'Investigate and fix the bug. Reproduce the issue if possible, make the smallest code change that resolves it, add or update focused tests, and run the relevant checks.',
+    review:
+      'Review the current changes for correctness, regressions, security issues, and missing tests. Summarize findings with file and line references before suggesting fixes.',
+    docs:
+      'Update the documentation for this feature. Keep the README and operator notes consistent with the implementation, and include any setup or verification steps.',
+    test: 'Add focused test coverage for this workflow. Prefer existing test patterns, cover the edge cases that can regress, and run the targeted test command.',
+  };
+  prompt.value = templates[kind] || '';
+  prompt.focus();
+};
 
 window.updateTaskModels = function () {
   const tool = document.getElementById('task-tool')?.value;
@@ -618,6 +706,9 @@ window.launchAgentTask = async function () {
   const workDir = document.getElementById('task-workdir').value.trim();
   const budget = document.getElementById('task-budget').value;
   if (!prompt) {
+    const promptEl = document.getElementById('task-prompt');
+    promptEl?.classList.add('input-error');
+    promptEl?.focus();
     toast('Enter a task description', 'warning');
     return;
   }
@@ -717,6 +808,22 @@ window.updateCodingModels = function () {
   modelEl.innerHTML = `<option value="">Default model</option>${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
 };
 
+window.updateAssignCodingModels = function () {
+  const providerEl = document.getElementById('assign-coding-provider-select');
+  const modelEl = document.getElementById('assign-coding-model-select');
+  if (!providerEl || !modelEl) return;
+  const models = (window._codingModelsByProvider || {})[providerEl.value] || [];
+  modelEl.innerHTML = `<option value="">Default model</option>${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
+};
+
+window.updateAssignAutofixModels = function () {
+  const providerEl = document.getElementById('assign-af-provider');
+  const modelEl = document.getElementById('assign-af-model');
+  if (!providerEl || !modelEl) return;
+  const models = (window._codingModelsByProvider || {})[providerEl.value] || [];
+  modelEl.innerHTML = `<option value="">Default model</option>${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
+};
+
 window.pickCodingIssue = async function () {
   const repo = document.getElementById('coding-repo-select')?.value;
   const provider = document.getElementById('coding-provider-select')?.value;
@@ -759,6 +866,131 @@ window.pickCodingIssue = async function () {
     toast('Failed: ' + e.message, 'error');
   }
 };
+
+window.assignPickCodingIssue = async function () {
+  const repo = document.getElementById('assign-coding-repo-select')?.value;
+  const provider = document.getElementById('assign-coding-provider-select')?.value;
+  const model = document.getElementById('assign-coding-model-select')?.value;
+  const labels = document
+    .getElementById('assign-coding-labels')
+    ?.value?.split(',')
+    .map((label) => label.trim())
+    .filter(Boolean);
+  const createPr =
+    document.getElementById('assign-coding-create-pr')?.checked === true;
+  if (!repo) {
+    toast('Register/select a repo first', 'warning');
+    document.getElementById('assign-coding-repo-select')?.focus();
+    return;
+  }
+  try {
+    const r = await api('/agents/coding/pick-issue', {
+      method: 'POST',
+      body: JSON.stringify({
+        repo,
+        labels,
+        provider,
+        model: model || undefined,
+        createPr,
+      }),
+    });
+    if (!r.ok) {
+      toast(r.error || 'Failed', 'error');
+      return;
+    }
+    if (!r.issue) {
+      toast('No matching open issue found', 'info');
+      return;
+    }
+    toast(`Started coding job for #${r.issue.number}`, 'success');
+    document.getElementById('task-launcher').style.display = 'none';
+    setTimeout(() => {
+      if (currentPage === 'agents') navigate('agents');
+    }, 1000);
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
+window.assignCreateAutofixProject = async function () {
+  const ownerEl = document.getElementById('assign-af-owner');
+  const repoEl = document.getElementById('assign-af-repo');
+  const owner = ownerEl?.value?.trim();
+  const repo = repoEl?.value?.trim();
+  if (!owner || !repo) {
+    toast('Owner and repo required', 'warning');
+    (owner ? repoEl : ownerEl)?.focus();
+    return;
+  }
+  try {
+    const r = await api('/autofix/projects', {
+      method: 'POST',
+      body: JSON.stringify({
+        owner,
+        repo,
+        triggerLabel:
+          document.getElementById('assign-af-label')?.value?.trim() ||
+          'autofix',
+        provider: document.getElementById('assign-af-provider')?.value,
+        model:
+          document.getElementById('assign-af-model')?.value || undefined,
+        createPr: document.getElementById('assign-af-create-pr')?.checked,
+        maxActiveJobs: Number(
+          document.getElementById('assign-af-max-active')?.value || 1,
+        ),
+      }),
+    });
+    if (r.ok) {
+      toast('Autofix auto-pickup enabled', 'success');
+      document.getElementById('task-launcher').style.display = 'none';
+      navigate('autofix');
+    } else {
+      toast(r.error || 'Failed', 'error');
+    }
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
+function renderCodingJobStepper(job) {
+  const steps = [
+    ['queued', 'Queued'],
+    ['investigate', 'Investigate'],
+    ['plan', 'Plan'],
+    ['await_approval', 'Approve'],
+    ['implement', 'Implement'],
+    ['test', 'Test'],
+    ['await_pr_approval', 'PR Approval'],
+    ['open_pr', 'Open PR'],
+    ['ci_running', 'CI'],
+    ['completed', 'Done'],
+  ];
+  const visualStatus = job.status === 'running' ? 'implement' : job.status;
+  const currentIndex = steps.findIndex(([status]) => status === visualStatus);
+  const failed = ['failed', 'cancelled'].includes(job.status);
+  return `<div class="coding-stepper" aria-label="Coding job progress">
+    ${steps
+      .map(([status, label], index) => {
+        const done =
+          job.transitionedAt?.[status] ||
+          job.status === 'completed' ||
+          (currentIndex > -1 && index < currentIndex);
+        const active = status === visualStatus;
+        const cls = failed
+          ? 'is-muted'
+          : active
+            ? 'is-active'
+            : done
+              ? 'is-done'
+              : '';
+        return `<div class="coding-step ${cls}">
+          <span class="coding-step-dot"></span>
+          <span>${esc(label)}</span>
+        </div>`;
+      })
+      .join('')}
+  </div>`;
+}
 
 window.viewCodingJob = async function (id) {
   const panel = document.getElementById('task-output-panel');
@@ -823,6 +1055,7 @@ window.viewCodingJob = async function (id) {
         <strong>Branch:</strong> ${esc(job.branch)}<br>
         <strong>Workspace:</strong> ${esc(job.workspace)}
       </div>
+      ${renderCodingJobStepper(job)}
       <div class="autofix-review-grid">
         <div class="autofix-review-pane"><div class="autofix-pane-title">Diff</div><pre>${esc(diff)}</pre></div>
         <div class="autofix-review-pane"><div class="autofix-pane-title">Log</div><pre>${esc(job.output || '(no output yet)')}</pre></div>

@@ -982,6 +982,7 @@ const APPROVAL_KIND_LABELS = {
   'coding-revert': 'Revert change',
   'report-outline': 'Report outline',
   'report-delivery': 'Report delivery',
+  'webhook-delivery': 'Webhook delivery',
   publish: 'Publish',
   'external-message': 'Outbound message',
   upload: 'Upload',
@@ -1028,6 +1029,7 @@ function approvalQueryFromFilters() {
     'kind',
     'requester',
     'targetType',
+    'targetId',
     'correlationId',
   ].forEach((key) => {
     if (filters[key]) params.set(key, filters[key]);
@@ -1133,6 +1135,7 @@ async function renderApprovals(el) {
     kind: '',
     requester: '',
     targetType: '',
+    targetId: '',
     correlationId: '',
     createdFrom: '',
     createdTo: '',
@@ -1191,6 +1194,7 @@ async function renderApprovals(el) {
       </select>
       <input name="requester" value="${esc(filters.requester || '')}" placeholder="Requester">
       <input name="targetType" value="${esc(filters.targetType || '')}" placeholder="Target type">
+      <input name="targetId" value="${esc(filters.targetId || '')}" placeholder="Target ID">
       <input name="correlationId" value="${esc(filters.correlationId || '')}" placeholder="Correlation ID">
       <input name="createdFrom" type="date" value="${esc(filters.createdFrom || '')}" aria-label="Created from">
       <input name="createdTo" type="date" value="${esc(filters.createdTo || '')}" aria-label="Created to">
@@ -2421,10 +2425,11 @@ async function renderMessages(el) {
 
 // Tasks
 async function renderTasks(el) {
-  const [tasks, groups, providerInfo] = await Promise.all([
+  const [tasks, groups, providerInfo, blueprints] = await Promise.all([
     api('/tasks'),
     api('/groups'),
     api('/system/provider').catch(() => ({ provider: 'claude' })),
+    api('/tasks/blueprints').catch(() => []),
   ]);
   const providerModels = providerInfo.models || {
     claude: [
@@ -2432,14 +2437,7 @@ async function renderTasks(el) {
       'claude-sonnet-4-6',
       'claude-haiku-4-5-20251001',
     ],
-    codex: [
-      'gpt-5.4',
-      'gpt-5.4-mini',
-      'gpt-5.2',
-      'o4-mini',
-      'o3-mini',
-      'gpt-4.1',
-    ],
+    codex: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2', 'o4-mini', 'gpt-4.1'],
     opencode: ['opencode/grok-code-fast-1'],
     ollama: ['llama3', 'llama3.1', 'mistral', 'codestral', 'gemma4:e2b'],
     openrouter: [
@@ -2461,230 +2459,675 @@ async function renderTasks(el) {
     .filter((p) => p && p.selectable !== false)
     .map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`)
     .join('');
-
-  const TASK_TEMPLATES = [
-    {
-      name: 'Morning Briefing',
-      icon: '\u2600',
-      desc: 'Daily summary at 8am',
-      prompt:
-        'Check GitHub notifications, unread emails, calendar events, and recent task results. Send a concise morning briefing.',
-      type: 'cron',
-      value: '0 8 * * 1-5',
-      mode: 'isolated',
-    },
-    {
-      name: 'PR Review',
-      icon: '\u2714',
-      desc: 'Check open PRs twice daily',
-      prompt:
-        'Check for open pull requests. Summarize changes, flag issues, and recommend actions.',
-      type: 'cron',
-      value: '0 10,15 * * 1-5',
-      mode: 'isolated',
-    },
-    {
-      name: 'Test Runner',
-      icon: '\u2699',
-      desc: 'Run tests daily, alert on failures',
-      prompt: 'Tests failed. Analyze the output and suggest fixes.',
-      type: 'cron',
-      value: '0 6 * * *',
-      mode: 'isolated',
-      script:
-        'cd /workspace/extra/* 2>/dev/null && npm test 2>&1 | tail -50\nif [ $? -ne 0 ]; then\n  echo \'{"wakeAgent":true,"data":{"testsFailed":true}}\'\nelse\n  echo \'{"wakeAgent":false}\'\nfi',
-    },
-    {
-      name: 'Dependency Check',
-      icon: '\u26A0',
-      desc: 'Weekly scan for outdated deps',
-      prompt:
-        'Check repositories for outdated dependencies and security vulnerabilities.',
-      type: 'cron',
-      value: '0 7 * * 1',
-      mode: 'isolated',
-    },
-  ];
-  const operationTaskCount = tasks.filter((task) =>
-    (task.prompt || '').includes('[operation-schedule]'),
+  const safeBlueprints = Array.isArray(blueprints) ? blueprints : [];
+  const activeCount = tasks.filter((task) => task.status === 'active').length;
+  const heartbeatCount = tasks.filter(
+    (task) => classifyTask(task) === 'heartbeat',
+  ).length;
+  const operationTaskCount = tasks.filter(
+    (task) => classifyTask(task) === 'operation',
+  ).length;
+  const failedCount = tasks.filter((task) =>
+    String(task.last_result || '').toLowerCase().startsWith('error:'),
   ).length;
 
+  const blueprintCards = safeBlueprints
+    .map((blueprint, index) => {
+      const icon = routineIcon(blueprint.routineType);
+      return `<button type="button" class="routine-blueprint-card" data-routine-filter="${esc(
+        `${blueprint.title} ${blueprint.description} ${blueprint.routineType} ${(blueprint.tags || []).join(' ')}`.toLowerCase(),
+      )}" onclick="applyRoutineBlueprint(${index})">
+        <div class="routine-card-icon">${icon}</div>
+        <div class="routine-card-main">
+          <div class="routine-card-title">${esc(blueprint.title)}</div>
+          <div class="routine-card-desc">${esc(blueprint.description)}</div>
+          <div class="routine-card-meta">
+            <span>${esc(blueprint.schedule?.label || describeTaskSchedule(blueprint))}</span>
+            ${(blueprint.requiredConnectors || []).length ? `<span>Works with ${esc(blueprint.requiredConnectors.join(' · '))}</span>` : '<span>No connector required</span>'}
+          </div>
+        </div>
+      </button>`;
+    })
+    .join('');
+
+  const taskCards = tasks
+    .map((task) => {
+      const kind = classifyTask(task);
+      const deliveryMode = task.delivery_mode || 'chat';
+      const filterText = `${task.title || ''} ${task.description || ''} ${task.prompt || ''} ${task.group_folder || ''} ${task.schedule_type || ''} ${task.schedule_value || ''} ${kind} ${deliveryMode} ${task.session_key || ''}`.toLowerCase();
+      const statusClass =
+        task.status === 'active'
+          ? 'badge-success'
+          : task.status === 'paused'
+            ? 'badge-warning'
+            : 'badge-muted';
+      const toolPolicy = task.tool_policy
+        ? `<span class="badge badge-muted">${esc(task.tool_policy)}</span>`
+        : '<span class="badge badge-muted">default policy</span>';
+      return `<div class="routine-task-card" data-task-kind="${esc(kind)}" data-task-filter="${esc(filterText)}">
+        <div class="routine-task-main">
+          <div class="routine-task-title">
+            <span class="routine-card-icon">${routineIcon(kind)}</span>
+            <span>${esc(taskTitle(task))}</span>
+          </div>
+          <div class="routine-task-prompt">${esc(truncate(taskPromptPreview(task), 180))}</div>
+          <div class="routine-task-meta">
+            <span>${esc(describeTaskSchedule(task))}</span>
+            <span>${task.next_run ? `Next ${formatTime(task.next_run)}` : 'No next run'}</span>
+            <span>${task.last_run ? `Last ${formatTime(task.last_run)}` : 'Never run'}</span>
+            <span>${esc(task.group_folder)}</span>
+            <span>${esc(describeDelivery(task))}</span>
+          </div>
+        </div>
+        <div class="routine-task-side">
+          <div class="routine-task-badges">
+            <span class="badge ${statusClass}">${esc(task.status)}</span>
+            <span class="badge badge-info">${esc(kind)}</span>
+            <span class="badge badge-muted">${esc(deliveryMode)}</span>
+            ${toolPolicy}
+            ${task.provider ? `<span class="badge badge-accent">${esc(task.provider)}</span>` : '<span class="badge badge-muted">inherit provider</span>'}
+            ${taskRuntimeBadges(task)}
+          </div>
+          <div class="routine-task-actions">
+            <button class="btn btn-sm btn-primary" onclick="viewTaskDetail('${esc(task.id)}')">Details</button>
+            <button class="btn btn-sm btn-ghost" onclick="taskRunNow('${esc(task.id)}')">Run now</button>
+            ${task.status === 'active' ? `<button class="btn btn-sm btn-ghost" onclick="taskAction('${esc(task.id)}','pause',this)">Pause</button>` : ''}
+            ${task.status === 'paused' ? `<button class="btn btn-sm btn-success" onclick="taskAction('${esc(task.id)}','resume',this)">Resume</button>` : ''}
+          </div>
+        </div>
+      </div>`;
+    })
+    .join('');
+
   el.innerHTML = `
-    <div class="page-header"><h2>Scheduled Tasks</h2><div style="display:flex;gap:8px"><button class="btn btn-sm btn-ghost" onclick="window.print()">Export</button><button class="btn btn-primary btn-sm" onclick="document.getElementById('new-task-form').style.display=document.getElementById('new-task-form').style.display==='none'?'block':'none'">New Task</button></div></div>
-    <div class="card">
-      <div class="card-title">Templates</div>
-      <div class="grid grid-4">
-        ${TASK_TEMPLATES.map(
-          (t, i) => `
-          <div class="card" style="cursor:pointer;margin-bottom:0;transition:border-color 0.2s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'" onclick="applyTaskTemplate(${i})">
-            <div style="font-size:24px;margin-bottom:8px">${t.icon}</div>
-            <div style="font-weight:600;color:var(--text);margin-bottom:4px">${esc(t.name)}</div>
-            <div style="font-size:12px;color:var(--text-muted)">${esc(t.desc)}</div>
-          </div>`,
-        ).join('')}
+    <div class="page-header routine-page-header">
+      <div>
+        <h2>Routines & Scheduled Tasks</h2>
+        <p class="routine-page-subtitle">Run tasks on a schedule, from templates, or whenever you need them.</p>
+      </div>
+      <div class="routine-header-actions">
+        <button class="btn btn-sm btn-ghost" onclick="window.print()">Export</button>
+        <button class="btn btn-sm btn-primary" onclick="openRoutineWizard()">New routine</button>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title">Operations <span class="badge badge-muted" style="font-size:10px">${operationTaskCount}</span></div>
+
+    <div class="routine-command-card">
+      <div class="routine-command-row">
+        <input id="routine-search" class="search-input routine-search" placeholder="What do you want automated?" oninput="filterRoutineCards()">
+        <button class="btn btn-primary" onclick="openRoutineWizard()">Draft routine</button>
+      </div>
+      <div class="routine-chip-row">
+        ${safeBlueprints
+          .slice(0, 4)
+          .map(
+            (blueprint, index) =>
+              `<button class="routine-chip" onclick="applyRoutineBlueprint(${index})">${esc(blueprint.title)}</button>`,
+          )
+          .join('')}
+      </div>
+    </div>
+
+    <div class="routine-status-strip">
+      <div><span class="badge badge-success">${activeCount}</span> active</div>
+      <div><span class="badge badge-info">${heartbeatCount}</span> heartbeat</div>
+      <div><span class="badge badge-muted">${operationTaskCount}</span> operation</div>
+      <div><span class="badge ${failedCount ? 'badge-error' : 'badge-success'}">${failedCount}</span> recent failures</div>
+      <div class="routine-status-note">Scheduled tasks run while the NanoCrab service is awake.</div>
+    </div>
+
+    <div id="new-task-form" class="card routine-wizard" style="display:none">
+      <div class="routine-wizard-head">
+        <div>
+          <div class="card-title">New routine</div>
+          <div class="routine-page-subtitle">Start from a blueprint or create an exact scheduled task.</div>
+        </div>
+        <button class="btn btn-sm btn-ghost" onclick="document.getElementById('new-task-form').style.display='none'">Close</button>
+      </div>
+      <form id="task-create-form">
+        <input type="hidden" id="task-provider-profile">
+        <div class="grid grid-2">
+          <div class="form-group"><label>Routine name</label><input id="task-title" placeholder="Daily operator briefing"></div>
+          <div class="form-group"><label>Routine type</label><select id="task-routine-type">
+            <option value="briefing">Briefing</option>
+            <option value="github">GitHub triage</option>
+            <option value="heartbeat">Heartbeat</option>
+            <option value="monitor">Monitor</option>
+            <option value="release">Release</option>
+            <option value="operation">Operation</option>
+            <option value="task">Task</option>
+          </select></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Group</label><select id="task-group" onchange="toggleTaskDeliveryFields()">${groups.map((g) => `<option value="${esc(g.folder)}|${esc(g.jid)}">${esc(g.name)}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Schedule Type</label><select id="task-type"><option value="cron">Cron</option><option value="interval">Interval</option><option value="once">Once</option></select></div>
+        </div>
+        <div class="routine-preset-row">
+          <button type="button" class="btn btn-sm btn-ghost" onclick="setTaskSchedulePreset('weekdayMorning')">Weekday morning</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="setTaskSchedulePreset('dailyAfternoon')">Daily afternoon</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="setTaskSchedulePreset('weeklyReview')">Weekly review</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="setTaskSchedulePreset('hourlyHeartbeat')">Hourly heartbeat</button>
+        </div>
+        <div class="form-group"><label>Schedule Value</label><input id="task-schedule" placeholder="0 9 * * * or 30m"></div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Provider</label><select id="task-provider" onchange="updateTaskModelSelect('task-provider','task-model')"><option value="">Inherit</option>${providerOptions}</select></div>
+          <div class="form-group"><label>Model</label><select id="task-model"><option value="">Inherit</option></select></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Delivery</label><select id="task-delivery-mode" onchange="toggleTaskDeliveryFields()">
+            <option value="dashboard">Dashboard only</option>
+            <option value="chat">Send to chat</option>
+            <option value="file">Write file</option>
+            <option value="webhook">Webhook approval</option>
+          </select><div id="task-delivery-help" class="routine-field-hint"></div></div>
+          <div class="form-group"><label>Delivery target</label><input id="task-delivery-target" placeholder="Optional"></div>
+        </div>
+        <div class="form-group"><label>Prompt</label><textarea id="task-prompt" class="routine-textarea" placeholder="What should NanoCrab do when this runs?"></textarea></div>
+        <div class="routine-field-grid">
+          <div class="form-group">
+            <label>Context</label>
+            <div class="routine-radio-row">
+              <label><input type="radio" name="task-context-mode" value="isolated" checked onchange="toggleTaskContextMode()"> Isolated</label>
+              <label><input type="radio" name="task-context-mode" value="group" onchange="toggleTaskContextMode()"> Continue group</label>
+              <label><input type="radio" name="task-context-mode" value="session" onchange="toggleTaskContextMode()"> Named session</label>
+            </div>
+          </div>
+          <div class="form-group"><label>Session key</label><input id="task-session-key" placeholder="daily-briefing"></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Skills</label><input id="task-skills" placeholder="calendar-assistant, email-assistant"></div>
+          <div class="form-group"><label>Context from tasks</label><input id="task-context-task-ids" placeholder="task-id-a, task-id-b"></div>
+        </div>
+        <div class="grid grid-4">
+          <div class="form-group"><label>Tool policy</label><select id="task-tool-policy">
+            <option value="">Default</option>
+            <option value="dry-run">Dry run</option>
+            <option value="approval-required">Approval required</option>
+          </select></div>
+          <div class="form-group"><label>Silent marker</label><input id="task-silent-marker" placeholder="HEARTBEAT_OK"></div>
+          <div class="form-group"><label>Max runtime ms</label><input id="task-max-runtime-ms" type="number" min="10000" step="10000" placeholder="300000"></div>
+          <div class="form-group"><label>Max active runs</label><input id="task-max-active-runs" type="number" min="1" max="10" placeholder="1"></div>
+        </div>
+        <div class="grid grid-3">
+          <div class="form-group"><label>Quiet hours start</label><input id="task-quiet-start" type="time"></div>
+          <div class="form-group"><label>Quiet hours end</label><input id="task-quiet-end" type="time"></div>
+          <div class="form-group"><label>Force stale after min</label><input id="task-stale-after-minutes" type="number" min="1" step="1" placeholder="120"></div>
+        </div>
+        <label class="routine-check"><input type="checkbox" id="task-script-gate" onchange="toggleTaskScriptGate()"> Use script gate to skip waking the agent when quiet</label>
+        <div class="form-group"><label>Script</label><textarea id="task-script" class="routine-script" placeholder="#!/usr/bin/env bash&#10;echo '{&quot;wakeAgent&quot;:false}'"></textarea></div>
+        <div class="routine-form-actions">
+          <button type="submit" class="btn btn-primary">Create routine</button>
+          <button type="button" class="btn btn-ghost" onclick="document.getElementById('new-task-form').style.display='none'">Cancel</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="task-detail-panel" style="display:none"></div>
+    <div id="task-editor"></div>
+
+    <div class="routine-section-head">
+      <div>
+        <div class="card-title">Start from a template</div>
+        <div class="routine-page-subtitle">Blueprints fill the schedule, prompt, context, and safety defaults.</div>
+      </div>
+    </div>
+    <div class="routine-blueprint-grid">
+      ${blueprintCards || '<div class="empty">No routine blueprints available.</div>'}
+    </div>
+
+    <div class="routine-section-head">
+      <div>
+        <div class="card-title">Scheduled work <span class="badge badge-muted" style="font-size:10px">${tasks.length}</span></div>
+        <div class="routine-page-subtitle">Search, run now, pause, resume, or inspect recent history.</div>
+      </div>
+      <select class="search-input" id="routine-kind-filter" onchange="filterRoutineCards()" style="width:180px">
+        <option value="">All types</option>
+        <option value="briefing">Briefing</option>
+        <option value="github">GitHub</option>
+        <option value="heartbeat">Heartbeat</option>
+        <option value="operation">Operation</option>
+        <option value="task">Task</option>
+      </select>
+    </div>
+    <div class="routine-task-list">
+      ${taskCards || '<div class="routine-empty"><div class="routine-empty-icon">◷</div><div>Create your first scheduled task</div><div class="routine-chip-row"><button class="routine-chip" onclick="applyRoutineBlueprint(0)">Daily brief</button><button class="routine-chip" onclick="applyRoutineBlueprint(2)">System health check</button></div></div>'}
+    </div>
+
+    <div class="card routine-operation-card">
+      <div class="card-title">Operation reminder</div>
       <form id="operation-schedule-form">
         <div class="grid grid-2">
-          <div class="form-group"><label>Group</label><select id="operation-group">${groups.map((g) => `<option value="${g.folder}|${g.jid}">${esc(g.name)}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Group</label><select id="operation-group">${groups.map((g) => `<option value="${esc(g.folder)}|${esc(g.jid)}">${esc(g.name)}</option>`).join('')}</select></div>
           <div class="form-group"><label>Kind</label><select id="operation-intent"><option value="orders">Repeat orders</option><option value="reminder">Reminder</option></select></div>
         </div>
         <div class="grid grid-2">
           <div class="form-group"><label>Title</label><input id="operation-title" placeholder="Night rally orders"></div>
           <div class="form-group"><label>Schedule</label><div style="display:flex;gap:8px"><select id="operation-schedule-type" style="width:120px"><option value="interval">Interval</option><option value="cron">Cron</option></select><input id="operation-schedule-value" placeholder="30m or 0 */2 * * *"></div></div>
         </div>
-        <div class="form-group"><label>Orders / Reminder Text</label><textarea id="operation-orders" style="width:100%;min-height:76px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:13px;resize:vertical" placeholder="What should the bot repeat or remind the group about?"></textarea></div>
-        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);margin-bottom:10px"><input type="checkbox" id="operation-delivery-approved"> Send scheduled messages to this group</label>
+        <div class="form-group"><label>Orders / Reminder Text</label><textarea id="operation-orders" class="routine-textarea" placeholder="What should the bot repeat or remind the group about?"></textarea></div>
+        <label class="routine-check"><input type="checkbox" id="operation-delivery-approved"> Send scheduled messages to this group</label>
         <button type="submit" class="btn btn-sm btn-primary">Create Operation Schedule</button>
       </form>
     </div>
-    <div class="card" id="new-task-form" style="display:none">
-      <div class="card-title">Create Task</div>
-      <form id="task-create-form">
-        <div class="grid grid-2">
-          <div class="form-group"><label>Group</label><select id="task-group">${groups.map((g) => `<option value="${g.folder}|${g.jid}">${esc(g.name)}</option>`).join('')}</select></div>
-          <div class="form-group"><label>Schedule Type</label><select id="task-type"><option value="cron">Cron</option><option value="interval">Interval</option><option value="once">Once</option></select></div>
-        </div>
-        <div class="form-group"><label>Schedule Value (cron expression or interval like "30m", "2h")</label><input id="task-schedule" placeholder="0 9 * * *"></div>
-        <div class="grid grid-2">
-          <div class="form-group"><label>Provider (optional — overrides group default)</label><select id="task-provider" onchange="updateTaskModelSelect('task-provider','task-model')"><option value="">Inherit</option>${providerOptions}</select></div>
-          <div class="form-group"><label>Model (optional — overrides group default)</label><select id="task-model"><option value="">Inherit</option></select></div>
-        </div>
-        <div class="form-group"><label>Prompt</label><textarea id="task-prompt" style="width:100%;min-height:80px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:13px;resize:vertical" placeholder="What should the bot do?"></textarea></div>
-        <div class="form-group"><label>Script (optional — runs before the agent, stdout is passed as context)</label><textarea id="task-script" style="width:100%;min-height:60px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical" placeholder="#!/bin/bash\n# Script output is passed to the agent"></textarea></div>
-        <div class="form-group">
-          <label>Context Mode</label>
-          <div style="display:flex;gap:16px;margin-top:4px">
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer"><input type="radio" name="task-context-mode" value="isolated" checked> Isolated (new conversation)</label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer"><input type="radio" name="task-context-mode" value="continue"> Continue (resume last conversation)</label>
-          </div>
-        </div>
-        <button type="submit" class="btn btn-primary">Create Task</button>
-      </form>
-    </div>
-    ${
-      tasks.length === 0
-        ? '<div class="card empty">No scheduled tasks</div>'
-        : `<div class="card table-wrap"><table>
-    <thead><tr><th>Prompt</th><th>Group</th><th>Provider</th><th>Model</th><th>Schedule</th><th>Status</th><th>Last Run</th><th>Next Run</th><th>Actions</th></tr></thead>
-    <tbody>${tasks
-      .map(
-        (t) => `<tr>
-      <td style="max-width:300px;color:var(--text)">${(t.prompt || '').includes('[operation-schedule]') ? '<span class="badge badge-info" style="margin-right:6px">operation</span>' : ''}${esc(truncate(t.prompt, 100))}</td>
-      <td><span class="badge badge-muted">${esc(t.group_folder)}</span></td>
-      <td>${t.provider ? `<span class="badge badge-accent">${esc(t.provider)}</span>` : '<span class="badge badge-muted">inherit</span>'}</td>
-      <td>${t.model ? `<span style="font-family:var(--mono);font-size:11px;color:var(--text)">${esc(t.model)}</span>` : '<span class="badge badge-muted">inherit</span>'}</td>
-      <td><code>${t.schedule_type}: ${esc(t.schedule_value)}</code></td>
-      <td><span class="badge ${t.status === 'active' ? 'badge-success' : t.status === 'paused' ? 'badge-warning' : 'badge-muted'}">${t.status}</span></td>
-      <td>${t.last_run ? formatTime(t.last_run) : '-'}</td>
-      <td>${t.next_run ? formatTime(t.next_run) : '-'}</td>
-      <td style="white-space:nowrap">
-        <button class="btn btn-sm btn-ghost" onclick="editTask('${t.id}')">Edit</button>
-        ${t.status === 'active' ? `<button class="btn btn-sm btn-ghost" onclick="taskAction('${t.id}','pause',this)">Pause</button>` : ''}
-        ${t.status === 'paused' ? `<button class="btn btn-sm btn-success" onclick="taskAction('${t.id}','resume',this)">Resume</button>` : ''}
-        <button class="btn btn-sm btn-danger" onclick="taskAction('${t.id}','delete',this)">Delete</button>
-      </td>
-    </tr>`,
-      )
-      .join('')}</tbody></table></div>`
-    }
-    <div id="task-editor"></div>`;
+  `;
 
-  window._taskTemplates = TASK_TEMPLATES;
+  window._routineBlueprints = safeBlueprints;
+  window._taskTemplates = safeBlueprints;
   window._taskProviderModels = providerModels;
   window._taskProviderDefs = providerDefinitions;
 
-  const form = document.getElementById('task-create-form');
-  if (form)
-    form.onsubmit = async (e) => {
-      e.preventDefault();
-      const [groupFolder, chatJid] = document
-        .getElementById('task-group')
-        .value.split('|');
-      const contextMode =
-        document.querySelector('input[name="task-context-mode"]:checked')
-          ?.value || 'isolated';
-      const script = document.getElementById('task-script').value;
-      const provider = document.getElementById('task-provider')?.value || '';
-      const model = document.getElementById('task-model')?.value || '';
-      const r = await api('/tasks', {
-        method: 'POST',
-        body: JSON.stringify({
-          groupFolder,
-          chatJid,
-          prompt: document.getElementById('task-prompt').value,
-          scheduleType: document.getElementById('task-type').value,
-          scheduleValue: document.getElementById('task-schedule').value,
-          script: script || undefined,
-          contextMode,
-          provider: provider || undefined,
-          model: model || undefined,
-        }),
-      });
-      if (r.ok) navigate('tasks');
-      else toast(r.error || 'Failed', 'error');
-    };
-  const operationForm = document.getElementById('operation-schedule-form');
-  if (operationForm)
-    operationForm.onsubmit = async (e) => {
-      e.preventDefault();
-      const [groupFolder, chatJid] = document
-        .getElementById('operation-group')
-        .value.split('|');
-      const deliveryApproved = document.getElementById(
-        'operation-delivery-approved',
-      ).checked;
-      const r = await api('/tasks/operation-schedules', {
-        method: 'POST',
-        body: JSON.stringify({
-          groupFolder,
-          chatJid,
-          title: document.getElementById('operation-title').value,
-          orders: document.getElementById('operation-orders').value,
-          intent: document.getElementById('operation-intent').value,
-          scheduleType: document.getElementById('operation-schedule-type')
-            .value,
-          scheduleValue: document.getElementById('operation-schedule-value')
-            .value,
-          deliveryMode: deliveryApproved ? 'send' : 'preview',
-          deliveryApproved,
-        }),
-      });
-      if (r.ok) {
-        toast(
-          deliveryApproved
-            ? 'Operation schedule created'
-            : 'Preview operation schedule created',
-          'success',
-        );
-        navigate('tasks');
-      } else {
-        toast(r.error || 'Failed', 'error');
-      }
-    };
+  bindTaskCreateForm();
+  bindOperationScheduleForm();
 }
 
-window.applyTaskTemplate = (idx) => {
-  const t = window._taskTemplates?.[idx];
-  if (!t) return;
+function routineIcon(kind) {
+  const icons = {
+    briefing: '☼',
+    email: '✉',
+    monitor: '▣',
+    github: '⑂',
+    release: '▤',
+    heartbeat: '◷',
+    operation: '⚑',
+    task: '☑',
+  };
+  return icons[kind] || icons.task;
+}
+
+function classifyTask(task) {
+  if (task.routine_type) return task.routine_type;
+  const prompt = String(task.prompt || '').toLowerCase();
+  if (prompt.includes('[operation-schedule]')) return 'operation';
+  if (prompt.includes('heartbeat') || prompt.includes('health')) return 'heartbeat';
+  if (prompt.includes('github') || prompt.includes('pull request') || prompt.includes('issue')) return 'github';
+  if (prompt.includes('briefing') || prompt.includes('summary')) return 'briefing';
+  return 'task';
+}
+
+function taskTitle(task) {
+  if (task.title) return task.title;
+  const match = String(task.prompt || '').match(/^Title:\s*(.+)$/m);
+  if (match) return match[1].trim();
+  if (String(task.prompt || '').includes('[operation-schedule]')) {
+    const title = String(task.prompt || '').match(/^Title:\s*(.+)$/m);
+    return title?.[1] || 'Operation schedule';
+  }
+  return truncate(task.prompt || 'Scheduled task', 58);
+}
+
+function taskPromptPreview(task) {
+  if (task.description) return task.description;
+  return String(task.prompt || '').replace(/\[operation-schedule\]\s*/g, '').trim();
+}
+
+function describeDelivery(task) {
+  const mode = task.delivery_mode || 'chat';
+  if (mode === 'dashboard') return 'Dashboard only';
+  if (mode === 'file') return `File ${task.delivery_target || 'task-deliveries'}`;
+  if (mode === 'webhook') return 'Webhook pending approval flow';
+  return `Chat ${task.delivery_target || task.chat_jid || ''}`.trim();
+}
+
+function describeActiveRuns(task) {
+  const active = Number(task.active_run_count || 0);
+  const max = Number(task.max_active_runs || 0);
+  return max > 0 ? `${active}/${max} active` : `${active} active`;
+}
+
+function taskRuntimeBadges(task) {
+  const badges = [];
+  if (task.active_run_count !== undefined || task.max_active_runs) {
+    badges.push(
+      `<span class="badge ${Number(task.active_run_count || 0) > 0 ? 'badge-warning' : 'badge-muted'}">${esc(describeActiveRuns(task))}</span>`,
+    );
+  }
+  if (task.last_started_at) {
+    badges.push(
+      `<span class="badge badge-muted">started ${esc(timeAgo(task.last_started_at))}</span>`,
+    );
+  }
+  return badges.join('');
+}
+
+window.openTaskWebhookApprovals = function (taskId) {
+  window._approvalFilters = {
+    kind: 'webhook-delivery',
+    targetType: 'scheduled-task',
+    targetId: taskId,
+  };
+  navigate('approvals');
+};
+
+function parseCommaList(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseJsonList(value) {
+  if (!value) return [];
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseJsonObject(value) {
+  if (!value) return {};
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function setHeartbeatPolicyFields(prefix, policy) {
+  const quietStart = document.getElementById(`${prefix}-quiet-start`);
+  const quietEnd = document.getElementById(`${prefix}-quiet-end`);
+  const staleAfter = document.getElementById(`${prefix}-stale-after-minutes`);
+  if (quietStart) quietStart.value = policy?.quietHours?.start || '';
+  if (quietEnd) quietEnd.value = policy?.quietHours?.end || '';
+  if (staleAfter) staleAfter.value = policy?.staleAfterMinutes || '';
+}
+
+function heartbeatPolicyFromFields(prefix) {
+  const quietStart = document.getElementById(`${prefix}-quiet-start`)?.value || '';
+  const quietEnd = document.getElementById(`${prefix}-quiet-end`)?.value || '';
+  const staleAfter = Number(
+    document.getElementById(`${prefix}-stale-after-minutes`)?.value || 0,
+  );
+  const policy = {};
+  if (quietStart && quietEnd) {
+    policy.quietHours = { start: quietStart, end: quietEnd };
+  }
+  if (Number.isFinite(staleAfter) && staleAfter > 0) {
+    policy.staleAfterMinutes = staleAfter;
+  }
+  return Object.keys(policy).length ? policy : null;
+}
+
+function selectedTaskGroupParts() {
+  return (
+    document.getElementById('task-group')?.value || '|'
+  ).split('|');
+}
+
+function describeTaskSchedule(task) {
+  if (task.schedule?.label) return task.schedule.label;
+  const type = task.schedule_type || task.schedule?.type;
+  const value = task.schedule_value || task.schedule?.value;
+  if (type === 'interval') {
+    const ms = Number(value);
+    if (Number.isFinite(ms) && ms > 0) {
+      const minutes = Math.round(ms / 60000);
+      if (minutes < 60) return `Every ${minutes} min`;
+      const hours = Math.round(minutes / 60);
+      if (hours < 24) return `Every ${hours} hour${hours === 1 ? '' : 's'}`;
+    }
+  }
+  if (type === 'cron') return `Cron ${value}`;
+  if (type === 'once') return `Once ${value}`;
+  return `${type || 'schedule'} ${value || ''}`.trim();
+}
+
+window.openRoutineWizard = function () {
   const formEl = document.getElementById('new-task-form');
-  if (formEl) formEl.style.display = 'block';
+  if (!formEl) return;
+  formEl.style.display = 'block';
+  toggleTaskDeliveryFields();
+  toggleTaskContextMode();
+  formEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+window.applyRoutineBlueprint = function (idx) {
+  const blueprint = window._routineBlueprints?.[idx];
+  if (!blueprint) return;
+  openRoutineWizard();
+  const titleEl = document.getElementById('task-title');
+  if (titleEl) titleEl.value = blueprint.title || '';
+  const routineTypeEl = document.getElementById('task-routine-type');
+  if (routineTypeEl) routineTypeEl.value = blueprint.routineType || 'task';
+  const providerProfileEl = document.getElementById('task-provider-profile');
+  if (providerProfileEl) {
+    providerProfileEl.value = blueprint.providerProfileId || '';
+  }
   const typeEl = document.getElementById('task-type');
-  if (typeEl) typeEl.value = t.type;
+  if (typeEl) typeEl.value = blueprint.schedule?.type || 'cron';
   const schedEl = document.getElementById('task-schedule');
-  if (schedEl) schedEl.value = t.value;
+  if (schedEl) schedEl.value = blueprint.schedule?.value || '';
   const promptEl = document.getElementById('task-prompt');
-  if (promptEl) promptEl.value = t.prompt;
+  if (promptEl) promptEl.value = blueprint.prompt || '';
   const scriptEl = document.getElementById('task-script');
-  if (scriptEl) scriptEl.value = t.script || '';
+  if (scriptEl) scriptEl.value = blueprint.script || '';
+  const scriptGate = document.getElementById('task-script-gate');
+  if (scriptGate) scriptGate.checked = blueprint.scriptMode === 'gate';
+  const deliveryModeEl = document.getElementById('task-delivery-mode');
+  if (deliveryModeEl) deliveryModeEl.value = blueprint.deliveryMode || 'dashboard';
+  const deliveryTargetEl = document.getElementById('task-delivery-target');
+  if (deliveryTargetEl) deliveryTargetEl.value = blueprint.deliveryTarget || '';
+  const toolPolicyEl = document.getElementById('task-tool-policy');
+  if (toolPolicyEl) toolPolicyEl.value = blueprint.toolPolicy || '';
+  const silentMarkerEl = document.getElementById('task-silent-marker');
+  if (silentMarkerEl) silentMarkerEl.value = blueprint.silentMarker || '';
+  const sessionKeyEl = document.getElementById('task-session-key');
+  if (sessionKeyEl) sessionKeyEl.value = blueprint.sessionKey || blueprint.id || '';
+  const skillsEl = document.getElementById('task-skills');
+  if (skillsEl) skillsEl.value = (blueprint.skills || []).join(', ');
+  const contextTasksEl = document.getElementById('task-context-task-ids');
+  if (contextTasksEl) {
+    contextTasksEl.value = (blueprint.contextTaskIds || []).join(', ');
+  }
+  const maxActiveRunsEl = document.getElementById('task-max-active-runs');
+  if (maxActiveRunsEl) maxActiveRunsEl.value = blueprint.maxActiveRuns || '';
+  const maxRuntimeEl = document.getElementById('task-max-runtime-ms');
+  if (maxRuntimeEl) maxRuntimeEl.value = blueprint.maxRuntimeMs || '';
+  setHeartbeatPolicyFields('task', blueprint.heartbeatPolicy);
   const modeRadio = document.querySelector(
-    `input[name="task-context-mode"][value="${t.mode || 'isolated'}"]`,
+    `input[name="task-context-mode"][value="${blueprint.contextMode || 'isolated'}"]`,
   );
   if (modeRadio) modeRadio.checked = true;
-  formEl?.scrollIntoView({ behavior: 'smooth' });
+  toggleTaskScriptGate();
+  toggleTaskDeliveryFields();
+  toggleTaskContextMode();
 };
+
+window.applyTaskTemplate = (idx) => window.applyRoutineBlueprint(idx);
+
+window.setTaskSchedulePreset = function (preset) {
+  const typeEl = document.getElementById('task-type');
+  const schedEl = document.getElementById('task-schedule');
+  if (!typeEl || !schedEl) return;
+  const presets = {
+    weekdayMorning: ['cron', '0 8 * * 1-5'],
+    dailyAfternoon: ['cron', '0 15 * * *'],
+    weeklyReview: ['cron', '0 9 * * 1'],
+    hourlyHeartbeat: ['interval', '3600000'],
+  };
+  const selected = presets[preset] || presets.weekdayMorning;
+  typeEl.value = selected[0];
+  schedEl.value = selected[1];
+};
+
+window.toggleTaskScriptGate = function () {
+  const gate = document.getElementById('task-script-gate');
+  const script = document.getElementById('task-script');
+  if (!gate || !script || !gate.checked || script.value.trim()) return;
+  script.value =
+    '#!/usr/bin/env bash\n' +
+    '# Return wakeAgent=false when there is nothing useful to report.\n' +
+    'echo \'{"wakeAgent":false}\'\n';
+};
+
+window.toggleTaskDeliveryFields = function () {
+  const mode = document.getElementById('task-delivery-mode')?.value || 'dashboard';
+  const target = document.getElementById('task-delivery-target');
+  const help = document.getElementById('task-delivery-help');
+  const [, chatJid] = selectedTaskGroupParts();
+  if (!target || !help) return;
+  if (mode === 'chat') {
+    target.placeholder = chatJid || 'chat jid';
+    help.textContent = 'Sends the final result to the selected channel.';
+  } else if (mode === 'file') {
+    target.placeholder = 'briefings/latest.md';
+    help.textContent = 'Writes under store/task-deliveries for review.';
+  } else if (mode === 'webhook') {
+    target.placeholder = 'https://example.com/webhook';
+    help.textContent = 'Creates an approval before the webhook is delivered.';
+  } else {
+    target.placeholder = 'No external delivery';
+    help.textContent = 'Keeps output in task history and dashboard detail.';
+  }
+};
+
+window.toggleTaskContextMode = function () {
+  const mode =
+    document.querySelector('input[name="task-context-mode"]:checked')?.value ||
+    'isolated';
+  const sessionKey = document.getElementById('task-session-key');
+  if (!sessionKey) return;
+  sessionKey.disabled = mode !== 'session';
+  if (mode === 'session' && !sessionKey.value.trim()) {
+    sessionKey.value =
+      document.getElementById('task-title')?.value
+        ?.toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '') || '';
+  }
+};
+
+window.filterRoutineCards = function () {
+  const q = document.getElementById('routine-search')?.value?.toLowerCase() || '';
+  const kind = document.getElementById('routine-kind-filter')?.value || '';
+  document.querySelectorAll('[data-routine-filter]').forEach((card) => {
+    const matches = card.dataset.routineFilter.includes(q);
+    card.style.display = matches ? '' : 'none';
+  });
+  document.querySelectorAll('.routine-task-card').forEach((card) => {
+    const matchesText = card.dataset.taskFilter.includes(q);
+    const matchesKind = !kind || card.dataset.taskKind === kind;
+    card.style.display = matchesText && matchesKind ? '' : 'none';
+  });
+};
+
+function bindTaskCreateForm() {
+  const form = document.getElementById('task-create-form');
+  if (!form) return;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const [groupFolder, chatJid] = document
+      .getElementById('task-group')
+      .value.split('|');
+    const contextMode =
+      document.querySelector('input[name="task-context-mode"]:checked')?.value ||
+      'isolated';
+    const script = document.getElementById('task-script').value;
+    const provider = document.getElementById('task-provider')?.value || '';
+    const model = document.getElementById('task-model')?.value || '';
+    const prompt = document.getElementById('task-prompt').value.trim();
+    const scheduleValue = document.getElementById('task-schedule').value.trim();
+    const toolPolicy =
+      document.getElementById('task-tool-policy')?.value ||
+      (document.getElementById('task-script-gate')?.checked ? 'dry-run' : '');
+    const sessionKey = document.getElementById('task-session-key').value.trim();
+    if (!prompt || !scheduleValue) {
+      toast('Prompt and schedule are required', 'warning');
+      (!prompt
+        ? document.getElementById('task-prompt')
+        : document.getElementById('task-schedule')
+      )?.focus();
+      return;
+    }
+    if (contextMode === 'session' && !sessionKey) {
+      toast('Named session routines need a session key', 'warning');
+      document.getElementById('task-session-key')?.focus();
+      return;
+    }
+    const r = await api('/tasks', {
+      method: 'POST',
+      body: JSON.stringify({
+        groupFolder,
+        chatJid,
+        title: document.getElementById('task-title').value.trim(),
+        routineType: document.getElementById('task-routine-type').value,
+        prompt,
+        providerProfileId:
+          document.getElementById('task-provider-profile')?.value || undefined,
+        scheduleType: document.getElementById('task-type').value,
+        scheduleValue,
+        script: script || undefined,
+        contextMode,
+        sessionKey: sessionKey || undefined,
+        deliveryMode: document.getElementById('task-delivery-mode').value,
+        deliveryTarget:
+          document.getElementById('task-delivery-target').value.trim() ||
+          undefined,
+        skills: parseCommaList(document.getElementById('task-skills').value),
+        contextTaskIds: parseCommaList(
+          document.getElementById('task-context-task-ids').value,
+        ),
+        silentMarker:
+          document.getElementById('task-silent-marker').value.trim() ||
+          undefined,
+        maxActiveRuns:
+          Number(document.getElementById('task-max-active-runs').value) ||
+          undefined,
+        maxRuntimeMs:
+          Number(document.getElementById('task-max-runtime-ms').value) ||
+          undefined,
+        heartbeatPolicy: heartbeatPolicyFromFields('task'),
+        provider: provider || undefined,
+        model: model || undefined,
+        toolPolicy: toolPolicy || undefined,
+      }),
+    });
+    if (r.ok) navigate('tasks');
+    else toast(r.error || 'Failed', 'error');
+  };
+}
+
+function bindOperationScheduleForm() {
+  const operationForm = document.getElementById('operation-schedule-form');
+  if (!operationForm) return;
+  operationForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const [groupFolder, chatJid] = document
+      .getElementById('operation-group')
+      .value.split('|');
+    const deliveryApproved = document.getElementById(
+      'operation-delivery-approved',
+    ).checked;
+    const r = await api('/tasks/operation-schedules', {
+      method: 'POST',
+      body: JSON.stringify({
+        groupFolder,
+        chatJid,
+        title: document.getElementById('operation-title').value,
+        orders: document.getElementById('operation-orders').value,
+        intent: document.getElementById('operation-intent').value,
+        scheduleType: document.getElementById('operation-schedule-type').value,
+        scheduleValue: document.getElementById('operation-schedule-value').value,
+        deliveryMode: deliveryApproved ? 'send' : 'preview',
+        deliveryApproved,
+      }),
+    });
+    if (r.ok) {
+      toast(
+        deliveryApproved
+          ? 'Operation schedule created'
+          : 'Preview operation schedule created',
+        'success',
+      );
+      navigate('tasks');
+    } else {
+      toast(r.error || 'Failed', 'error');
+    }
+  };
+}
 
 // Credentials
 async function renderCredentials(el) {
@@ -7138,12 +7581,137 @@ function inlineInput(btnEl, label, onSubmit) {
 }
 
 // --- Task actions ---
+window.viewTaskDetail = async (id) => {
+  const panel = document.getElementById('task-detail-panel');
+  if (!panel) return;
+  panel.style.display = 'block';
+  panel.innerHTML =
+    '<div class="card"><div class="loading">Loading task details...</div></div>';
+  try {
+    const [task, logs] = await Promise.all([
+      api(`/tasks/${encodeURIComponent(id)}`),
+      api(`/tasks/${encodeURIComponent(id)}/logs?limit=8`).catch(() => []),
+    ]);
+    const runRows = Array.isArray(logs)
+      ? logs
+          .map(
+            (log) => `<div class="routine-log-row">
+              <span class="badge ${log.status === 'success' ? 'badge-success' : 'badge-error'}">${esc(log.status)}</span>
+              <span>${esc(formatTime(log.run_at))}</span>
+              <span>${esc(String(log.duration_ms || 0))}ms</span>
+              <span>${esc(truncate(log.error || log.result || 'Completed', 120))}</span>
+            </div>`,
+          )
+          .join('')
+      : '';
+    const skillChips = parseJsonList(task.skills_json)
+      .map((skill) => `<span class="badge badge-info">${esc(skill)}</span>`)
+      .join('');
+    const contextTaskChips = parseJsonList(task.context_task_ids_json)
+      .map((taskId) => `<span class="badge badge-muted">${esc(taskId)}</span>`)
+      .join('');
+    const webhookApprovals =
+      task.delivery_mode === 'webhook'
+        ? await api(
+            `/approvals?kind=webhook-delivery&targetType=scheduled-task&targetId=${encodeURIComponent(task.id)}&limit=20`,
+          ).catch(() => [])
+        : [];
+    const pendingWebhookApproval = Array.isArray(webhookApprovals)
+      ? webhookApprovals.find((approval) => approval.status === 'pending')
+      : null;
+    const webhookApprovalCallout =
+      task.delivery_mode === 'webhook'
+        ? `<div class="routine-approval-callout">
+            <div>
+              <strong>${pendingWebhookApproval ? 'Webhook approval pending' : 'Webhook approval history'}</strong>
+              <span>${esc(pendingWebhookApproval?.resourceSummary || task.delivery_target || 'Webhook delivery requires approval before sending.')}</span>
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="openTaskWebhookApprovals('${esc(task.id)}')">${pendingWebhookApproval ? 'Review approval' : 'View approvals'}</button>
+          </div>`
+        : '';
+    panel.innerHTML = `<div class="card routine-detail-card">
+      <div class="routine-detail-head">
+        <div>
+          <div class="card-title">${esc(taskTitle(task))}</div>
+          <div class="routine-page-subtitle">${esc(describeTaskSchedule(task))} · ${esc(task.group_folder)}</div>
+        </div>
+        <div class="routine-task-actions">
+          <button class="btn btn-sm btn-primary" onclick="taskRunNow('${esc(id)}')">Run now</button>
+          <button class="btn btn-sm btn-ghost" onclick="editTask('${esc(id)}')">Edit</button>
+          <button class="btn btn-sm btn-ghost" onclick="document.getElementById('task-detail-panel').style.display='none'">Close</button>
+        </div>
+      </div>
+      <div class="routine-detail-grid">
+        <div><span class="routine-detail-label">Status</span><strong>${esc(task.status)}</strong></div>
+        <div><span class="routine-detail-label">Type</span><strong>${esc(classifyTask(task))}</strong></div>
+        <div><span class="routine-detail-label">Context</span><strong>${esc(task.context_mode || 'isolated')}</strong></div>
+        <div><span class="routine-detail-label">Session</span><strong>${esc(task.session_key || '-')}</strong></div>
+        <div><span class="routine-detail-label">Delivery</span><strong>${esc(describeDelivery(task))}</strong></div>
+        <div><span class="routine-detail-label">Provider</span><strong>${esc(task.provider || 'inherit')}</strong></div>
+        <div><span class="routine-detail-label">Model</span><strong>${esc(task.model || 'inherit')}</strong></div>
+        <div><span class="routine-detail-label">Policy</span><strong>${esc(task.tool_policy || 'default')}</strong></div>
+        <div><span class="routine-detail-label">Next</span><strong>${task.next_run ? esc(formatTime(task.next_run)) : '-'}</strong></div>
+        <div><span class="routine-detail-label">Active runs</span><strong>${esc(describeActiveRuns(task))}</strong></div>
+        <div><span class="routine-detail-label">Last started</span><strong>${task.last_started_at ? esc(formatTime(task.last_started_at)) : '-'}</strong></div>
+        <div><span class="routine-detail-label">Max runtime</span><strong>${task.max_runtime_ms ? `${esc(String(task.max_runtime_ms))}ms` : '-'}</strong></div>
+      </div>
+      ${webhookApprovalCallout}
+      ${
+        task.description || skillChips || contextTaskChips || task.silent_marker
+          ? `<div class="routine-detail-section"><div class="autofix-pane-title">Routine metadata</div><div class="routine-metadata-body">
+              ${task.description ? `<p>${esc(task.description)}</p>` : ''}
+              ${skillChips ? `<div><span class="routine-detail-label">Skills</span><div class="routine-inline-chips">${skillChips}</div></div>` : ''}
+              ${contextTaskChips ? `<div><span class="routine-detail-label">Context from tasks</span><div class="routine-inline-chips">${contextTaskChips}</div></div>` : ''}
+              ${task.silent_marker ? `<div><span class="routine-detail-label">Silent marker</span><code>${esc(task.silent_marker)}</code></div>` : ''}
+            </div></div>`
+          : ''
+      }
+      <div class="routine-detail-section">
+        <div class="autofix-pane-title">Prompt</div>
+        <pre>${esc(task.prompt || '')}</pre>
+      </div>
+      ${
+        task.script
+          ? `<div class="routine-detail-section"><div class="autofix-pane-title">Script gate</div><pre>${esc(task.script)}</pre></div>`
+          : ''
+      }
+      <div class="routine-detail-section">
+        <div class="autofix-pane-title">Recent runs</div>
+        ${runRows || '<div class="empty" style="padding:12px">No runs recorded yet.</div>'}
+      </div>
+    </div>`;
+  } catch (e) {
+    panel.innerHTML = `<div class="card empty">Failed to load task: ${esc(e.message)}</div>`;
+  }
+};
+
+window.taskRunNow = async (id) => {
+  try {
+    const r = await api(`/tasks/${encodeURIComponent(id)}/run-now`, {
+      method: 'POST',
+    });
+    if (!r.ok) {
+      toast(r.error || 'Failed to queue task', 'error');
+      return;
+    }
+    toast('Task queued for the next scheduler pass', 'success');
+    if (document.getElementById('task-detail-panel')?.style.display !== 'none') {
+      viewTaskDetail(id);
+    } else if (currentPage === 'tasks') {
+      navigate('tasks');
+    }
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
 window.editTask = async (id) => {
   const task = await api(`/tasks/${id}`);
   const editor = document.getElementById('task-editor');
   if (!editor) return;
   const defs = window._taskProviderDefs || {};
   const models = window._taskProviderModels || {};
+  const heartbeatPolicy = parseJsonObject(task.heartbeat_policy_json);
   const providerOptions = Object.values(defs)
     .filter((p) => p && p.selectable !== false)
     .map(
@@ -7158,6 +7726,14 @@ window.editTask = async (id) => {
       <div class="card-title">Edit Task <span class="badge badge-muted">${esc(task.id.slice(0, 8))}</span></div>
       <form id="task-edit-form">
         <div class="grid grid-2">
+          <div class="form-group"><label>Routine name</label><input id="edit-task-title" value="${esc(task.title || '')}"></div>
+          <div class="form-group"><label>Routine type</label><select id="edit-task-routine-type">
+            ${['briefing', 'github', 'heartbeat', 'monitor', 'release', 'operation', 'task']
+              .map((kind) => `<option value="${kind}" ${classifyTask(task) === kind ? 'selected' : ''}>${kind}</option>`)
+              .join('')}
+          </select></div>
+        </div>
+        <div class="grid grid-2">
           <div class="form-group"><label>Schedule Type</label><select id="edit-task-type">
             <option value="cron" ${task.schedule_type === 'cron' ? 'selected' : ''}>Cron</option>
             <option value="interval" ${task.schedule_type === 'interval' ? 'selected' : ''}>Interval</option>
@@ -7168,6 +7744,37 @@ window.editTask = async (id) => {
         <div class="grid grid-2">
           <div class="form-group"><label>Provider</label><select id="edit-task-provider" onchange="updateTaskModelSelect('edit-task-provider','edit-task-model')"><option value="">Inherit</option>${providerOptions}</select></div>
           <div class="form-group"><label>Model</label><select id="edit-task-model">${modelOptions}</select></div>
+        </div>
+        <div class="grid grid-3">
+          <div class="form-group"><label>Delivery</label><select id="edit-task-delivery-mode">
+            ${['dashboard', 'chat', 'file', 'webhook']
+              .map((mode) => `<option value="${mode}" ${(task.delivery_mode || 'chat') === mode ? 'selected' : ''}>${mode === 'webhook' ? 'webhook approval' : mode}</option>`)
+              .join('')}
+          </select></div>
+          <div class="form-group"><label>Delivery target</label><input id="edit-task-delivery-target" value="${esc(task.delivery_target || '')}"></div>
+          <div class="form-group"><label>Context</label><select id="edit-task-context-mode">
+            ${['isolated', 'group', 'session']
+              .map((mode) => `<option value="${mode}" ${(task.context_mode || 'isolated') === mode ? 'selected' : ''}>${mode}</option>`)
+              .join('')}
+          </select></div>
+        </div>
+        <div class="grid grid-3">
+          <div class="form-group"><label>Session key</label><input id="edit-task-session-key" value="${esc(task.session_key || '')}"></div>
+          <div class="form-group"><label>Tool policy</label><select id="edit-task-tool-policy">
+            ${['', 'dry-run', 'approval-required']
+              .map((policy) => `<option value="${policy}" ${(task.tool_policy || '') === policy ? 'selected' : ''}>${policy || 'default'}</option>`)
+              .join('')}
+          </select></div>
+          <div class="form-group"><label>Silent marker</label><input id="edit-task-silent-marker" value="${esc(task.silent_marker || '')}"></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Skills</label><input id="edit-task-skills" value="${esc(parseJsonList(task.skills_json).join(', '))}"></div>
+          <div class="form-group"><label>Context from tasks</label><input id="edit-task-context-task-ids" value="${esc(parseJsonList(task.context_task_ids_json).join(', '))}"></div>
+        </div>
+        <div class="grid grid-3">
+          <div class="form-group"><label>Quiet hours start</label><input id="edit-task-quiet-start" type="time" value="${esc(heartbeatPolicy.quietHours?.start || '')}"></div>
+          <div class="form-group"><label>Quiet hours end</label><input id="edit-task-quiet-end" type="time" value="${esc(heartbeatPolicy.quietHours?.end || '')}"></div>
+          <div class="form-group"><label>Force stale after min</label><input id="edit-task-stale-after-minutes" type="number" min="1" step="1" value="${esc(heartbeatPolicy.staleAfterMinutes || '')}"></div>
         </div>
         <div class="form-group"><label>Prompt</label><textarea id="edit-task-prompt" style="width:100%;min-height:120px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--font);font-size:13px;resize:vertical">${esc(task.prompt)}</textarea></div>
         <div class="form-group"><label>Script (optional)</label><textarea id="edit-task-script" style="width:100%;min-height:60px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:12px;resize:vertical">${esc(task.script || '')}</textarea></div>
@@ -7190,10 +7797,24 @@ window.editTask = async (id) => {
     const r = await api('/tasks/' + id, {
       method: 'PUT',
       body: JSON.stringify({
+        title: document.getElementById('edit-task-title').value,
+        routineType: document.getElementById('edit-task-routine-type').value,
         prompt: document.getElementById('edit-task-prompt').value,
+        script: document.getElementById('edit-task-script').value,
         schedule_type: document.getElementById('edit-task-type').value,
         schedule_value: document.getElementById('edit-task-schedule').value,
         status: document.getElementById('edit-task-status').value,
+        contextMode: document.getElementById('edit-task-context-mode').value,
+        deliveryMode: document.getElementById('edit-task-delivery-mode').value,
+        deliveryTarget: document.getElementById('edit-task-delivery-target').value,
+        sessionKey: document.getElementById('edit-task-session-key').value,
+        toolPolicy: document.getElementById('edit-task-tool-policy').value,
+        silentMarker: document.getElementById('edit-task-silent-marker').value,
+        skills: parseCommaList(document.getElementById('edit-task-skills').value),
+        contextTaskIds: parseCommaList(
+          document.getElementById('edit-task-context-task-ids').value,
+        ),
+        heartbeatPolicy: heartbeatPolicyFromFields('edit-task'),
         provider: provider || undefined,
         model: model || undefined,
       }),

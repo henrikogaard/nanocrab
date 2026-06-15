@@ -106,7 +106,7 @@ async function renderDashboard(el) {
         ['Model Metrics', 'Latency and reliability', "navigate('monitoring')"],
         ['Connector Catalog', 'Setup and permissions', "navigate('integrations')"],
         ['Assistant Profile', 'Avatar and identity', "navigate('settings')"],
-        ['Agent Access', 'Scopes and connectors', "navigate('agents')"],
+        ['Assign Work', 'Tasks, issues, auto-pickup', "navigate('agents')"],
         ['Connector Skills', 'Review enabled skills', "navigate('skills')"],
       ];
 

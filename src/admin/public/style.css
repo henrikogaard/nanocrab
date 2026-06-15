@@ -184,6 +184,491 @@ body {
   align-items: center;
 }
 
+.autofix-project-controls,
+.autofix-automation-panel {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.autofix-automation-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  padding: 10px;
+}
+
+.autofix-inline-control {
+  align-items: center;
+  color: var(--text-muted);
+  display: inline-flex;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.autofix-small-input {
+  max-width: 74px;
+  min-width: 64px;
+  padding: 6px 8px;
+}
+
+.assign-wizard {
+  border-left: 3px solid var(--accent);
+}
+
+.assign-wizard-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.assign-wizard-subtitle,
+.field-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.assign-mode-tabs,
+.assign-template-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.assign-mode {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 7px 10px;
+}
+
+.assign-mode.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--text);
+}
+
+.assign-grid-compact {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.assign-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.input-error {
+  border-color: var(--error) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--error) 18%, transparent);
+}
+
+.coding-stepper {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.coding-step {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  padding: 6px;
+}
+
+.coding-step-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border);
+  flex: 0 0 auto;
+}
+
+.coding-step.is-done {
+  color: var(--text-secondary);
+}
+
+.coding-step.is-done .coding-step-dot {
+  background: var(--success);
+}
+
+.coding-step.is-active {
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.coding-step.is-active .coding-step-dot {
+  background: var(--accent);
+}
+
+.coding-step.is-muted {
+  opacity: 0.45;
+}
+
+.routine-page-header,
+.routine-wizard-head,
+.routine-detail-head,
+.routine-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.routine-page-subtitle {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+}
+
+.routine-header-actions,
+.routine-task-actions,
+.routine-form-actions,
+.routine-chip-row,
+.routine-preset-row,
+.routine-radio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.routine-command-card,
+.routine-status-strip,
+.routine-blueprint-card,
+.routine-task-card,
+.routine-empty {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.routine-command-card {
+  margin-bottom: 14px;
+  padding: 14px;
+}
+
+.routine-command-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
+.routine-search {
+  width: 100%;
+}
+
+.routine-chip-row {
+  margin-top: 10px;
+}
+
+.routine-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface2);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.routine-chip:hover,
+.routine-blueprint-card:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.routine-status-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.routine-status-note {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.routine-wizard {
+  border-left: 3px solid var(--accent);
+  margin-bottom: 16px;
+}
+
+.routine-textarea,
+.routine-script {
+  width: 100%;
+  min-height: 90px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  resize: vertical;
+}
+
+.routine-script {
+  min-height: 74px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.routine-check,
+.routine-radio-row label {
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.routine-field-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(180px, 0.8fr);
+  gap: 12px;
+}
+
+.routine-field-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 5px;
+}
+
+.routine-wizard input:disabled {
+  opacity: 0.55;
+}
+
+.routine-blueprint-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 10px 0 18px;
+}
+
+.routine-blueprint-card {
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  min-height: 104px;
+  padding: 12px;
+  text-align: left;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+
+.routine-card-icon {
+  color: var(--text);
+  flex: 0 0 auto;
+  font-size: 18px;
+  line-height: 1;
+  width: 22px;
+}
+
+.routine-card-main {
+  min-width: 0;
+}
+
+.routine-card-title,
+.routine-task-title {
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.routine-card-desc,
+.routine-task-prompt {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 6px;
+}
+
+.routine-card-meta,
+.routine-task-meta {
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  margin-top: 8px;
+}
+
+.routine-task-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.routine-task-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  padding: 12px;
+}
+
+.routine-task-side {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.routine-task-badges {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.routine-empty {
+  color: var(--text-muted);
+  padding: 56px 16px;
+  text-align: center;
+}
+
+.routine-empty-icon {
+  color: var(--text);
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+
+.routine-detail-card {
+  border-left: 3px solid var(--accent);
+  margin-bottom: 16px;
+}
+
+.routine-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.routine-detail-grid > div {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+}
+
+.routine-approval-callout {
+  align-items: center;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin: 10px 0;
+  padding: 10px;
+}
+
+.routine-approval-callout strong,
+.routine-approval-callout span {
+  display: block;
+}
+
+.routine-approval-callout span {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.routine-detail-label {
+  color: var(--text-muted);
+  display: block;
+  font-size: 10px;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.routine-detail-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.routine-detail-section pre {
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
+.routine-metadata-body {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.routine-metadata-body p {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.routine-inline-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.routine-log-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: auto 140px 80px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.routine-operation-card {
+  margin-top: 8px;
+}
+
 .autofix-review-meta {
   display: flex;
   flex-wrap: wrap;
@@ -233,8 +718,41 @@ body {
 
 @media (max-width: 860px) {
   .autofix-filter-grid,
+  .assign-grid-compact,
   .autofix-review-grid {
     grid-template-columns: 1fr;
+  }
+
+  .autofix-project-controls,
+  .autofix-automation-panel {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .coding-stepper {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .routine-command-row,
+  .routine-field-grid,
+  .routine-blueprint-grid,
+  .routine-task-card,
+  .routine-detail-grid,
+  .routine-log-row {
+    grid-template-columns: 1fr;
+  }
+
+  .routine-approval-callout {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .routine-task-side {
+    align-items: flex-start;
+  }
+
+  .routine-status-note {
+    margin-left: 0;
   }
 }
 

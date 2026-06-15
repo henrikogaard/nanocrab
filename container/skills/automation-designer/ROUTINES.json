@@ -1,0 +1,25 @@
+[
+  {
+    "id": "skill-automation-safety-review",
+    "title": "Automation safety review",
+    "description": "Review scheduled routines for unsafe delivery, missing approvals, stale connectors, and noisy triggers.",
+    "routineType": "monitor",
+    "schedule": {
+      "type": "cron",
+      "value": "0 10 * * 1",
+      "label": "Mondays at 10:00"
+    },
+    "prompt": "Review configured routines and scheduled tasks. Flag unsafe delivery modes, missing approval gates, stale connector requirements, noisy schedules, failing scripts, and routines that should use dashboard-only or file delivery instead of chat.",
+    "scriptMode": "none",
+    "contextMode": "isolated",
+    "deliveryMode": "dashboard",
+    "sessionKey": "automation-safety-review",
+    "providerProfileId": "default_automation",
+    "toolPolicy": "dry-run",
+    "skills": ["automation-designer", "security-reviewer"],
+    "contextTaskIds": [],
+    "maxActiveRuns": 1,
+    "requiredConnectors": [],
+    "tags": ["automation", "safety", "routines"]
+  }
+]

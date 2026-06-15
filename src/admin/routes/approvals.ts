@@ -7,6 +7,7 @@ import {
   listApprovals,
   reviewApproval,
 } from '../../approvals.js';
+import { executeWebhookDeliveryApproval } from '../../webhook-delivery.js';
 import { requireRole } from '../middleware.js';
 import { auditLog } from '../security.js';
 
@@ -75,7 +76,7 @@ router.post('/', requireRole('admin'), (req: Request, res: Response) => {
 router.post(
   '/:id/approve',
   requireRole('admin'),
-  (req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const approval = reviewApproval(
         req.params.id as string,
@@ -83,6 +84,14 @@ router.post(
         req.user?.username || 'dashboard',
         typeof req.body.note === 'string' ? req.body.note : undefined,
       );
+      if (approval.kind === 'webhook-delivery') {
+        await executeWebhookDeliveryApproval(approval);
+        auditLog(
+          req,
+          'approval_webhook_delivered',
+          `${approval.kind}/${approval.id}`,
+        );
+      }
       auditLog(req, 'approval_approved', `${approval.kind}/${approval.id}`);
       res.json({ ok: true, approval });
     } catch (err) {

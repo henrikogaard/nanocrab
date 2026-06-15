@@ -1,5 +1,7 @@
 import type { Request, Response } from 'express';
 
+import { listRoutineBlueprints } from '../routine-blueprints.js';
+
 type JsonValue = unknown;
 
 const now = new Date('2026-06-09T20:45:00.000Z');
@@ -426,6 +428,34 @@ const approvals = [
     decisionNote: null,
   },
   {
+    id: 'approval-webhook-release',
+    kind: 'webhook-delivery',
+    title: 'Send release webhook',
+    summary:
+      'Deliver the drafted release payload to the configured external webhook.',
+    risk: 'medium',
+    requester: 'task-scheduler',
+    targetType: 'scheduled-task',
+    targetId: 'task-release-webhook',
+    source: 'scheduled-task',
+    correlationId: 'scheduled-task:task-release-webhook',
+    expiresAt: iso(-240),
+    actionPreview:
+      '{"highlights":["Dashboard routines"],"risks":["Monitor webhook receiver"]}',
+    resourceSummary: 'https://example.com/hooks/releases',
+    policyDecisionId: null,
+    payload: {
+      taskId: 'task-release-webhook',
+      url: 'https://example.com/hooks/releases',
+      result: '{"highlights":["Dashboard routines"]}',
+    },
+    status: 'pending',
+    createdAt: iso(35),
+    reviewedAt: null,
+    reviewedBy: null,
+    decisionNote: null,
+  },
+  {
     id: 'approval-provider-risk',
     kind: 'provider-fallback',
     title: 'Fallback from Codex to OpenRouter',
@@ -655,19 +685,29 @@ const tasks = [
     id: 'task-daily-summary',
     group_folder: 'operations',
     chat_jid: 'tg:operations-room',
+    title: 'Daily operations summary',
+    description: 'Dashboard-only daily summary for the operations room.',
+    routine_type: 'briefing',
     prompt: 'Generate a daily casual-player summary from the last 24h.',
     schedule_type: 'cron',
     schedule_value: '0 20 * * *',
     next_run: iso(-75),
     last_run: day(-1) + 'T20:00:00.000Z',
     status: 'active',
-    context_mode: 'group',
+    context_mode: 'session',
+    delivery_mode: 'dashboard',
+    session_key: 'daily-operations-summary',
+    skills_json: JSON.stringify(['meeting-briefing', 'journalist']),
+    max_active_runs: 1,
     created_at: day(-12) + 'T10:15:00.000Z',
   },
   {
     id: 'task-operation-reminder',
     group_folder: 'main',
     chat_jid: 'wa:alliance-command',
+    title: 'Shield watch reminders',
+    description: 'Approved chat reminder for active operation confirmations.',
+    routine_type: 'operation',
     prompt:
       '[operation-schedule]\nTitle: Shield watch reminders\nIntent: reminder\n\nRepeat active operation orders and list missing confirmations every 30 minutes.',
     schedule_type: 'interval',
@@ -680,12 +720,19 @@ const tasks = [
     provider_profile_id: 'default_automation',
     tool_policy: 'approval-required',
     context_mode: 'group',
+    delivery_mode: 'chat',
+    delivery_target: 'wa:alliance-command',
+    session_key: 'operation-shield-watch',
+    skills_json: JSON.stringify(['ops-commander']),
     created_at: day(-3) + 'T18:00:00.000Z',
   },
   {
     id: 'task-weekly-report',
     group_folder: 'main',
     chat_jid: 'wa:alliance-command',
+    title: 'Weekly alliance report',
+    description: 'Writes a report artifact instead of sending chat noise.',
+    routine_type: 'release',
     prompt: 'Produce a weekly report of notable attacks, diplomacy, and spend.',
     schedule_type: 'cron',
     schedule_value: '0 9 * * MON',
@@ -696,7 +743,74 @@ const tasks = [
     provider: 'openrouter',
     model: 'openrouter/auto',
     context_mode: 'isolated',
+    delivery_mode: 'file',
+    delivery_target: 'reports/weekly-alliance.md',
+    skills_json: JSON.stringify(['report-writer']),
     created_at: day(-20) + 'T09:00:00.000Z',
+  },
+  {
+    id: 'task-health-heartbeat',
+    group_folder: 'main',
+    chat_jid: 'wa:alliance-command',
+    title: 'System health heartbeat',
+    description:
+      'Silent dashboard heartbeat unless the health check wakes the agent.',
+    routine_type: 'heartbeat',
+    prompt:
+      'Review the script output and summarize system health, outages, stale files, errors, and the next recommended operator action.',
+    script:
+      '#!/usr/bin/env bash\n' +
+      'echo \'{"wakeAgent":true,"data":{"check":"system health","source":"mock"}}\'',
+    schedule_type: 'interval',
+    schedule_value: '3600000',
+    next_run: iso(-35),
+    last_run: iso(25),
+    last_result: 'Completed: system health normal',
+    active_run_count: 1,
+    last_started_at: iso(20),
+    max_active_runs: 1,
+    max_runtime_ms: 120000,
+    heartbeat_policy_json: JSON.stringify({
+      quietHours: { start: '22:00', end: '07:00' },
+      staleAfterMinutes: 120,
+    }),
+    status: 'active',
+    provider_profile_id: 'default_automation',
+    tool_policy: 'dry-run',
+    context_mode: 'isolated',
+    delivery_mode: 'dashboard',
+    silent_marker: 'HEARTBEAT_OK',
+    session_key: 'system-health-heartbeat',
+    skills_json: JSON.stringify(['incident-analyst']),
+    created_at: day(-2) + 'T08:00:00.000Z',
+  },
+  {
+    id: 'task-release-webhook',
+    group_folder: 'main',
+    chat_jid: 'wa:alliance-command',
+    title: 'Release webhook approval',
+    description: 'Drafts release payloads and requires approval before POST.',
+    routine_type: 'release',
+    prompt:
+      'Draft a release webhook payload from recently merged PRs and notable commits.',
+    schedule_type: 'cron',
+    schedule_value: '30 9 * * FRI',
+    next_run: day(3) + 'T09:30:00.000Z',
+    last_run: iso(40),
+    last_result: 'Webhook payload drafted and awaiting approval.',
+    active_run_count: 0,
+    last_started_at: iso(45),
+    max_active_runs: 1,
+    max_runtime_ms: 180000,
+    status: 'active',
+    provider_profile_id: 'default_reports',
+    tool_policy: 'approval-required',
+    context_mode: 'isolated',
+    delivery_mode: 'webhook',
+    delivery_target: 'https://example.com/hooks/releases',
+    session_key: 'release-webhook-approval',
+    skills_json: JSON.stringify(['github-connector', 'release-manager']),
+    created_at: day(-3) + 'T09:30:00.000Z',
   },
 ];
 
@@ -1861,7 +1975,7 @@ function cockpitApprovals(
 
 function cockpitDeliverables(
   id: string,
-  session: (typeof cockpitSessions)[number],
+  _session: (typeof cockpitSessions)[number],
 ): JsonValue[] {
   const fixtures: Record<string, JsonValue[]> = {
     'cockpit-running-001': [
@@ -2179,6 +2293,9 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         id: 'mock-operation-schedule',
         group_folder: req.body?.groupFolder || 'operations',
         chat_jid: req.body?.chatJid || 'tg:operations-room',
+        title: req.body?.title || 'Mock operation reminder',
+        description: 'Mock operation schedule created without live mutation.',
+        routine_type: 'operation',
         prompt:
           '[operation-schedule]\nTitle: Mock operation reminder\nIntent: reminder\n\nRepeat rally orders and ask for missing confirmations.',
         schedule_type: req.body?.scheduleType || 'interval',
@@ -2188,7 +2305,24 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         provider_profile_id: 'default_automation',
         tool_policy: deliveryApproved ? 'approval-required' : 'dry-run',
         context_mode: 'group',
+        delivery_mode: deliveryApproved ? 'chat' : 'dashboard',
+        delivery_target: req.body?.chatJid || 'tg:operations-room',
+        session_key: 'mock-operation-schedule',
+        skills_json: JSON.stringify(['ops-commander']),
         created_at: iso(0),
+      },
+    });
+  }
+  if (method === 'POST' && pathname === '/autofix/auto-pick/run') {
+    return ok({
+      result: {
+        scanned: 1,
+        started: 1,
+        skippedCapacity: 0,
+        skippedDuplicate: 1,
+        skippedLabel: 0,
+        skippedNotDue: 0,
+        errors: 0,
       },
     });
   }
@@ -2441,6 +2575,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       .filter((item) => !q.kind || item.kind === q.kind)
       .filter((item) => !q.requester || item.requester === q.requester)
       .filter((item) => !q.targetType || item.targetType === q.targetType)
+      .filter((item) => !q.targetId || item.targetId === q.targetId)
       .filter(
         (item) => !q.correlationId || item.correlationId === q.correlationId,
       )
@@ -2727,8 +2862,30 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname === '/messages/recent') return messages;
   if (pathname === '/messages/pinned') return [messages[1]];
   if (pathname.startsWith('/messages/')) return messages;
+  if (pathname === '/tasks/blueprints') return listRoutineBlueprints();
   if (pathname === '/tasks') return tasks;
   if (pathname === '/agents/boundaries') return agentBoundaries;
+  if (pathname.match(/^\/tasks\/[^/]+\/logs$/)) {
+    const id = decodeURIComponent(pathname.split('/')[2] || '');
+    return [
+      {
+        task_id: id,
+        run_at: iso(25),
+        duration_ms: 4200,
+        status: 'success',
+        result: 'Completed: mock run output looked healthy.',
+        error: null,
+      },
+      {
+        task_id: id,
+        run_at: day(-1) + 'T08:00:00.000Z',
+        duration_ms: 6100,
+        status: 'success',
+        result: 'Completed: prior mock run.',
+        error: null,
+      },
+    ];
+  }
   if (pathname.startsWith('/tasks/')) {
     const id = decodeURIComponent(pathname.split('/')[2] || '');
     return tasks.find((t) => t.id === id) || tasks[0];
@@ -4820,11 +4977,31 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         owner: 'henrikogaard',
         repo: 'nanocrab',
         triggerLabel: 'autofix',
+        provider: 'codex',
         model: 'gpt-5.4',
         notifyJid: 'wa:alliance-command',
         autoReview: true,
+        createPr: true,
+        maxActiveJobs: 1,
+        autoPickEnabled: true,
+        pollIntervalMinutes: 15,
+        lastAutoPickAt: iso(35),
       },
     ];
+  }
+  if (pathname === '/autofix/auto-pick/run') {
+    return {
+      ok: true,
+      result: {
+        scanned: 1,
+        started: 1,
+        skippedCapacity: 0,
+        skippedDuplicate: 1,
+        skippedLabel: 0,
+        skippedNotDue: 0,
+        errors: 0,
+      },
+    };
   }
   if (pathname === '/autofix/jobs') {
     return [

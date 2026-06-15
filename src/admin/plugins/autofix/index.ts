@@ -1,5 +1,8 @@
 import { AdminPlugin } from '../types.js';
-import router from './routes.js';
+import router, {
+  startAutofixAutoPickLoop,
+  stopAutofixAutoPickLoop,
+} from './routes.js';
 
 const autofixPlugin: AdminPlugin = {
   id: 'autofix',
@@ -14,6 +17,8 @@ const autofixPlugin: AdminPlugin = {
   },
   router,
   pageId: 'autofix',
+  onInit: () => startAutofixAutoPickLoop(),
+  onDestroy: () => stopAutofixAutoPickLoop(),
 };
 
 export default autofixPlugin;

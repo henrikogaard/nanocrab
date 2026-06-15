@@ -48,13 +48,29 @@ function createSchema(database: Database.Database): void {
       id TEXT PRIMARY KEY,
       group_folder TEXT NOT NULL,
       chat_jid TEXT NOT NULL,
+      title TEXT,
+      description TEXT,
+      routine_type TEXT,
       prompt TEXT NOT NULL,
+      script TEXT,
       provider_profile_id TEXT,
       provider TEXT,
       model TEXT,
       tool_policy TEXT,
       schedule_type TEXT NOT NULL,
       schedule_value TEXT NOT NULL,
+      context_mode TEXT DEFAULT 'isolated',
+      delivery_mode TEXT,
+      delivery_target TEXT,
+      skills_json TEXT,
+      max_runtime_ms INTEGER,
+      max_active_runs INTEGER,
+      active_run_count INTEGER DEFAULT 0,
+      last_started_at TEXT,
+      heartbeat_policy_json TEXT,
+      silent_marker TEXT,
+      session_key TEXT,
+      context_task_ids_json TEXT,
       next_run TEXT,
       last_run TEXT,
       last_result TEXT,
@@ -215,6 +231,31 @@ function createSchema(database: Database.Database): void {
     database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN tool_policy TEXT`);
   } catch {
     /* column already exists */
+  }
+
+  for (const [column, definition] of [
+    ['title', 'TEXT'],
+    ['description', 'TEXT'],
+    ['routine_type', 'TEXT'],
+    ['delivery_mode', 'TEXT'],
+    ['delivery_target', 'TEXT'],
+    ['skills_json', 'TEXT'],
+    ['max_runtime_ms', 'INTEGER'],
+    ['max_active_runs', 'INTEGER'],
+    ['active_run_count', 'INTEGER DEFAULT 0'],
+    ['last_started_at', 'TEXT'],
+    ['heartbeat_policy_json', 'TEXT'],
+    ['silent_marker', 'TEXT'],
+    ['session_key', 'TEXT'],
+    ['context_task_ids_json', 'TEXT'],
+  ]) {
+    try {
+      database.exec(
+        `ALTER TABLE scheduled_tasks ADD COLUMN ${column} ${definition}`,
+      );
+    } catch {
+      /* column already exists */
+    }
   }
 
   for (const [column, definition] of [
@@ -594,16 +635,22 @@ export function createTask(
   db.prepare(
     `
     INSERT INTO scheduled_tasks (
-      id, group_folder, chat_jid, prompt, script, provider_profile_id,
-      provider, model, tool_policy, schedule_type, schedule_value,
-      context_mode, next_run, status, created_at
+      id, group_folder, chat_jid, title, description, routine_type,
+      prompt, script, provider_profile_id, provider, model, tool_policy,
+      schedule_type, schedule_value, context_mode, delivery_mode,
+      delivery_target, skills_json, max_runtime_ms, max_active_runs,
+      active_run_count, last_started_at, heartbeat_policy_json, silent_marker,
+      session_key, context_task_ids_json, next_run, status, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
     task.group_folder,
     task.chat_jid,
+    task.title || null,
+    task.description || null,
+    task.routine_type || null,
     task.prompt,
     task.script || null,
     task.provider_profile_id || null,
@@ -613,6 +660,17 @@ export function createTask(
     task.schedule_type,
     task.schedule_value,
     task.context_mode || 'isolated',
+    task.delivery_mode || null,
+    task.delivery_target || null,
+    task.skills_json || null,
+    task.max_runtime_ms ?? null,
+    task.max_active_runs ?? null,
+    task.active_run_count ?? 0,
+    task.last_started_at ?? null,
+    task.heartbeat_policy_json || null,
+    task.silent_marker || null,
+    task.session_key || null,
+    task.context_task_ids_json || null,
     task.next_run,
     task.status,
     task.created_at,
@@ -644,6 +702,9 @@ export function updateTask(
   updates: Partial<
     Pick<
       ScheduledTask,
+      | 'title'
+      | 'description'
+      | 'routine_type'
       | 'prompt'
       | 'script'
       | 'provider_profile_id'
@@ -652,6 +713,18 @@ export function updateTask(
       | 'tool_policy'
       | 'schedule_type'
       | 'schedule_value'
+      | 'context_mode'
+      | 'delivery_mode'
+      | 'delivery_target'
+      | 'skills_json'
+      | 'max_runtime_ms'
+      | 'max_active_runs'
+      | 'active_run_count'
+      | 'last_started_at'
+      | 'heartbeat_policy_json'
+      | 'silent_marker'
+      | 'session_key'
+      | 'context_task_ids_json'
       | 'next_run'
       | 'status'
     >
@@ -660,6 +733,18 @@ export function updateTask(
   const fields: string[] = [];
   const values: unknown[] = [];
 
+  if (updates.title !== undefined) {
+    fields.push('title = ?');
+    values.push(updates.title || null);
+  }
+  if (updates.description !== undefined) {
+    fields.push('description = ?');
+    values.push(updates.description || null);
+  }
+  if (updates.routine_type !== undefined) {
+    fields.push('routine_type = ?');
+    values.push(updates.routine_type || null);
+  }
   if (updates.prompt !== undefined) {
     fields.push('prompt = ?');
     values.push(updates.prompt);
@@ -691,6 +776,54 @@ export function updateTask(
   if (updates.schedule_value !== undefined) {
     fields.push('schedule_value = ?');
     values.push(updates.schedule_value);
+  }
+  if (updates.context_mode !== undefined) {
+    fields.push('context_mode = ?');
+    values.push(updates.context_mode);
+  }
+  if (updates.delivery_mode !== undefined) {
+    fields.push('delivery_mode = ?');
+    values.push(updates.delivery_mode || null);
+  }
+  if (updates.delivery_target !== undefined) {
+    fields.push('delivery_target = ?');
+    values.push(updates.delivery_target || null);
+  }
+  if (updates.skills_json !== undefined) {
+    fields.push('skills_json = ?');
+    values.push(updates.skills_json || null);
+  }
+  if (updates.max_runtime_ms !== undefined) {
+    fields.push('max_runtime_ms = ?');
+    values.push(updates.max_runtime_ms ?? null);
+  }
+  if (updates.max_active_runs !== undefined) {
+    fields.push('max_active_runs = ?');
+    values.push(updates.max_active_runs ?? null);
+  }
+  if (updates.active_run_count !== undefined) {
+    fields.push('active_run_count = ?');
+    values.push(updates.active_run_count ?? 0);
+  }
+  if (updates.last_started_at !== undefined) {
+    fields.push('last_started_at = ?');
+    values.push(updates.last_started_at || null);
+  }
+  if (updates.heartbeat_policy_json !== undefined) {
+    fields.push('heartbeat_policy_json = ?');
+    values.push(updates.heartbeat_policy_json || null);
+  }
+  if (updates.silent_marker !== undefined) {
+    fields.push('silent_marker = ?');
+    values.push(updates.silent_marker || null);
+  }
+  if (updates.session_key !== undefined) {
+    fields.push('session_key = ?');
+    values.push(updates.session_key || null);
+  }
+  if (updates.context_task_ids_json !== undefined) {
+    fields.push('context_task_ids_json = ?');
+    values.push(updates.context_task_ids_json || null);
   }
   if (updates.next_run !== undefined) {
     fields.push('next_run = ?');
@@ -757,6 +890,24 @@ export function logTaskRun(log: TaskRunLog): void {
     log.result,
     log.error,
   );
+}
+
+export function getTaskRunLogs(
+  taskId: string,
+  limit: number = 10,
+): TaskRunLog[] {
+  const safeLimit = Math.min(Math.max(limit || 10, 1), 200);
+  return db
+    .prepare(
+      `
+    SELECT task_id, run_at, duration_ms, status, result, error
+    FROM task_run_logs
+    WHERE task_id = ?
+    ORDER BY run_at DESC
+    LIMIT ?
+  `,
+    )
+    .all(taskId, safeLimit) as TaskRunLog[];
 }
 
 export interface AuditEventRow {

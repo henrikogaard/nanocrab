@@ -139,6 +139,10 @@ export function createOperationSchedule(
     id,
     group_folder: groupFolder,
     chat_jid: chatJid,
+    title,
+    description:
+      input.intent === 'orders' ? 'Operation orders' : 'Operation reminder',
+    routine_type: 'operation',
     prompt: buildOperationPrompt({
       title,
       orders,
@@ -152,6 +156,11 @@ export function createOperationSchedule(
     schedule_type: input.scheduleType,
     schedule_value: schedule.value,
     context_mode: input.contextMode || 'group',
+    delivery_mode: deliveryMode === 'send' ? 'chat' : 'dashboard',
+    delivery_target: chatJid,
+    skills_json: JSON.stringify(['ops-commander']),
+    max_active_runs: 1,
+    session_key: `operation-${id}`,
     next_run: schedule.nextRun,
     status: 'active',
     created_at: now.toISOString(),

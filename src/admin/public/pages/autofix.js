@@ -22,14 +22,50 @@ function autofixStatusBadge(status) {
   return 'badge-error';
 }
 
+function autofixLastPollLabel(value) {
+  return value ? `last scan ${timeAgo(value)}` : 'not scanned yet';
+}
+
 async function renderAutofix(el) {
   el.innerHTML = '<div class="loading">Loading autofix</div>';
   try {
-    const [projects, jobs, groups] = await Promise.all([
+    const [projects, jobs, groups, providers, webhookHealth] = await Promise.all([
       api('/autofix/projects').catch(() => []),
       api('/autofix/jobs').catch(() => []),
       api('/groups').catch(() => []),
+      api('/agents/providers').catch(() => []),
+      api('/webhooks/github-health').catch(() => null),
     ]);
+
+    const codingProviders = (Array.isArray(providers) ? providers : []).filter(
+      (provider) =>
+        provider.id === 'claude' ||
+        provider.id === 'codex' ||
+        provider.id === 'opencode',
+    );
+    const providerOptions =
+      codingProviders
+        .map((provider) => `<option value="${esc(provider.id)}">${esc(provider.name)}</option>`)
+        .join('') || '<option value="claude">Claude</option>';
+    const modelMap = {};
+    for (const provider of codingProviders) {
+      modelMap[provider.id] = provider.models || [];
+    }
+    const healthClass =
+      webhookHealth?.status === 'ready'
+        ? 'badge-success'
+        : webhookHealth?.status === 'blocked'
+          ? 'badge-error'
+          : 'badge-warning';
+    const healthChecks = (webhookHealth?.checks || [])
+      .slice(0, 4)
+      .map(
+        (check) => `<div class="channel-card" style="padding:6px 0">
+          <div style="font-size:12px">${esc(check.label)}</div>
+          <span class="badge ${check.ok ? 'badge-success' : check.severity === 'required' ? 'badge-error' : 'badge-warning'}" style="font-size:10px">${check.ok ? 'OK' : 'Needs attention'}</span>
+        </div>`,
+      )
+      .join('');
 
     const groupOpts = (Array.isArray(groups) ? groups : [])
       .map((g) => {
@@ -37,24 +73,45 @@ async function renderAutofix(el) {
         return `<option value="${esc(g.jid)}">${esc(ch)} (${esc(g.name)})</option>`;
       })
       .join('');
+    const enabledAutoPickCount = projects.filter((p) => p.autoPickEnabled).length;
 
     const projectCards = projects
       .map(
-        (p) => `
+        (p) => {
+          const autoPickBadge = p.autoPickEnabled
+            ? '<span class="badge badge-success" style="font-size:9px;margin-left:4px">Auto-pick</span>'
+            : '<span class="badge badge-muted" style="font-size:9px;margin-left:4px">Manual</span>';
+          return `
       <div class="channel-card" style="padding:10px 0">
         <div style="flex:1">
           <strong>${esc(p.owner)}/${esc(p.repo)}</strong>
           <span class="badge badge-muted" style="font-size:9px;margin-left:6px">label: ${esc(p.triggerLabel)}</span>
-          <span class="badge badge-muted" style="font-size:9px;margin-left:4px">${esc(p.model)}</span>
+          <span class="badge badge-muted" style="font-size:9px;margin-left:4px">${esc(p.provider || 'claude')}/${esc(p.model)}</span>
+          <span class="badge badge-muted" style="font-size:9px;margin-left:4px">max ${esc(p.maxActiveJobs || 1)}</span>
+          ${p.createPr === false ? '<span class="badge badge-warning" style="font-size:9px;margin-left:4px">No PR</span>' : '<span class="badge badge-info" style="font-size:9px;margin-left:4px">PR flow</span>'}
           ${p.autoReview ? '<span class="badge badge-success" style="font-size:9px;margin-left:4px">Auto-review</span>' : ''}
+          ${autoPickBadge}
           <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(p.workDir)}</div>
+          <div class="autofix-project-controls">
+            <label class="autofix-inline-control">
+              <input type="checkbox" ${p.autoPickEnabled ? 'checked' : ''} onchange="autofixUpdateProject('${esc(p.id)}',{autoPickEnabled:this.checked})">
+              Auto-pick labeled issues
+            </label>
+            <label class="autofix-inline-control">
+              Poll every
+              <input class="search-input autofix-small-input" type="number" min="5" step="1" value="${esc(p.pollIntervalMinutes || 15)}" onchange="autofixUpdateProject('${esc(p.id)}',{pollIntervalMinutes:Number(this.value||15)})">
+              min
+            </label>
+            <span class="field-hint">${esc(autofixLastPollLabel(p.lastAutoPickAt))}</span>
+          </div>
         </div>
         <div style="display:flex;gap:4px">
           <button class="btn btn-sm btn-primary" onclick="autofixPickIssue('${esc(p.id)}','${esc(p.owner)}','${esc(p.repo)}','${esc(p.triggerLabel)}')">Fix Issue</button>
           <button class="btn btn-sm btn-ghost" onclick="autofixDeleteProject('${esc(p.id)}',this)" style="color:var(--error)">Remove</button>
         </div>
       </div>
-    `,
+    `;
+        },
       )
       .join('');
 
@@ -79,11 +136,25 @@ async function renderAutofix(el) {
     el.innerHTML = `
       <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
         <h2>GitHub Autofix</h2>
-        <button class="btn btn-sm btn-primary" onclick="document.getElementById('autofix-add-form').style.display=document.getElementById('autofix-add-form').style.display==='none'?'block':'none'">Add Project</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-ghost" onclick="autofixRunAutoPickNow(this)">Run scan now</button>
+          <button class="btn btn-sm btn-primary" onclick="document.getElementById('autofix-add-form').style.display=document.getElementById('autofix-add-form').style.display==='none'?'block':'none'">Add Project</button>
+        </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px;border-left:3px solid var(--accent);padding:12px 16px;font-size:12px;color:var(--text-muted)">
-        Label an issue with <strong>${projects[0]?.triggerLabel || 'autofix'}</strong> to trigger Claude Code automatically. Or click "Fix Issue" to pick one manually.
+      <div class="card" style="margin-bottom:16px;border-left:3px solid var(--accent);padding:12px 16px">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--text)">Automatic GitHub issue pickup</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:4px">Label an issue with a project trigger label to start the configured coding agent, or click "Fix Issue" for manual selection. ${enabledAutoPickCount} project${enabledAutoPickCount === 1 ? '' : 's'} currently scan GitHub on a schedule.</div>
+            ${webhookHealth?.webhookUrl ? `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;font-family:var(--mono)">${esc(webhookHealth.webhookUrl)}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <span class="badge ${healthClass}" style="font-size:10px">${esc(webhookHealth?.status || 'unknown')}</span>
+            <button class="btn btn-sm btn-ghost" onclick="navigate('webhooks')">Webhook Setup</button>
+          </div>
+        </div>
+        ${healthChecks ? `<div style="margin-top:10px">${healthChecks}</div>` : ''}
       </div>
 
       <div id="autofix-add-form" class="card" style="display:none;margin-bottom:16px">
@@ -94,13 +165,11 @@ async function renderAutofix(el) {
         </div>
         <div class="grid grid-2">
           <div class="form-group"><label>Trigger label</label><input class="search-input" id="af-label" value="autofix" style="width:100%"></div>
-          <div class="form-group"><label>Model</label>
-            <select class="search-input" id="af-model" style="width:100%">
-              <option value="sonnet">Sonnet 4.6 (fast)</option>
-              <option value="opus">Opus 4.6 (powerful)</option>
-              <option value="haiku">Haiku 4.5 (cheapest)</option>
-            </select>
-          </div>
+          <div class="form-group"><label>Provider</label><select class="search-input" id="af-provider" onchange="autofixUpdateModels()" style="width:100%">${providerOptions}</select></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Model</label><select class="search-input" id="af-model" style="width:100%"><option value="">Default model</option></select></div>
+          <div class="form-group"><label>Max active jobs</label><input class="search-input" id="af-max-active" type="number" min="1" step="1" value="1" style="width:100%"></div>
         </div>
         <div class="grid grid-2">
           <div class="form-group"><label>Working directory (auto-cloned if empty)</label><input class="search-input" id="af-workdir" placeholder="/home/user/repos/myrepo" style="width:100%"></div>
@@ -112,8 +181,21 @@ async function renderAutofix(el) {
           </div>
         </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);margin-bottom:12px">
-          <input type="checkbox" id="af-autoreview"> Auto-review new PRs with Claude
+          <input type="checkbox" id="af-autoreview"> Auto-review new PRs with the selected model
         </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);margin-bottom:12px">
+          <input type="checkbox" id="af-create-pr" checked> Open PR flow after implementation
+        </label>
+        <div class="autofix-automation-panel">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted)">
+            <input type="checkbox" id="af-auto-pick"> Automatically pick up labeled GitHub issues
+          </label>
+          <label class="autofix-inline-control">
+            Poll every
+            <input class="search-input autofix-small-input" id="af-poll-interval" type="number" min="5" step="1" value="15">
+            min
+          </label>
+        </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-primary" onclick="autofixAddProject()">Add Project</button>
           <button class="btn btn-ghost" onclick="document.getElementById('autofix-add-form').style.display='none'">Cancel</button>
@@ -137,20 +219,37 @@ async function renderAutofix(el) {
           : ''
       }
     `;
+    window._autofixModelsByProvider = modelMap;
+    autofixUpdateModels();
   } catch (e) {
     el.innerHTML = `<div class="card empty">Failed to load: ${esc(e.message)}</div>`;
   }
 }
+
+window.autofixUpdateModels = function () {
+  const providerEl = document.getElementById('af-provider');
+  const modelEl = document.getElementById('af-model');
+  if (!providerEl || !modelEl) return;
+  const models = (window._autofixModelsByProvider || {})[providerEl.value] || [];
+  modelEl.innerHTML = `<option value="">Default model</option>${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
+};
 
 window.autofixAddProject = async function () {
   const owner = document.getElementById('af-owner').value.trim();
   const repo = document.getElementById('af-repo').value.trim();
   const triggerLabel =
     document.getElementById('af-label').value.trim() || 'autofix';
+  const provider = document.getElementById('af-provider').value;
   const model = document.getElementById('af-model').value;
   const workDir = document.getElementById('af-workdir').value.trim();
   const notifyJid = document.getElementById('af-notify').value;
   const autoReview = document.getElementById('af-autoreview').checked;
+  const createPr = document.getElementById('af-create-pr').checked;
+  const maxActiveJobs = Number(document.getElementById('af-max-active').value || 1);
+  const autoPickEnabled = document.getElementById('af-auto-pick').checked;
+  const pollIntervalMinutes = Number(
+    document.getElementById('af-poll-interval').value || 15,
+  );
   if (!owner || !repo) {
     toast('Owner and repo required', 'warning');
     return;
@@ -162,10 +261,15 @@ window.autofixAddProject = async function () {
         owner,
         repo,
         triggerLabel,
+        provider,
         model,
         workDir,
         notifyJid,
         autoReview,
+        createPr,
+        maxActiveJobs,
+        autoPickEnabled,
+        pollIntervalMinutes,
       }),
     });
     if (r.ok) {
@@ -174,6 +278,51 @@ window.autofixAddProject = async function () {
     } else toast(r.error || 'Failed', 'error');
   } catch (e) {
     toast('Failed: ' + e.message, 'error');
+  }
+};
+
+window.autofixUpdateProject = async function (id, patch) {
+  try {
+    const r = await api('/autofix/projects/' + id, {
+      method: 'PUT',
+      body: JSON.stringify(patch || {}),
+    });
+    if (!r.ok) {
+      toast(r.error || 'Failed to update project', 'error');
+      return;
+    }
+    toast('Project updated', 'success');
+    navigate('autofix');
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+};
+
+window.autofixRunAutoPickNow = async function (btn) {
+  const previous = btn?.textContent || 'Run scan now';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+  }
+  try {
+    const r = await api('/autofix/auto-pick/run', { method: 'POST' });
+    if (!r.ok) {
+      toast(r.error || 'Auto-pick scan failed', 'error');
+      return;
+    }
+    const result = r.result || {};
+    toast(
+      `Scan complete: ${result.started || 0} started, ${result.scanned || 0} project${result.scanned === 1 ? '' : 's'} scanned`,
+      result.errors ? 'warning' : 'success',
+    );
+    navigate('autofix');
+  } catch (e) {
+    toast('Failed: ' + e.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = previous;
+    }
   }
 };
 

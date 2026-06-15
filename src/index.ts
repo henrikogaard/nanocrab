@@ -98,7 +98,6 @@ import {
 } from './coding-jobs.js';
 import { handleMobileCodingCommand } from './mobile-coding-commands.js';
 import { getAllProviders } from './providers/index.js';
-import { liveProbeService } from './providers/live-probe.js';
 import {
   getProviderCapabilityMatrix,
   loadProviderProfiles,
@@ -597,10 +596,13 @@ async function runAgent(
     tasks.map((t) => ({
       id: t.id,
       groupFolder: t.group_folder,
+      title: t.title,
+      routine_type: t.routine_type,
       prompt: t.prompt,
       script: t.script || undefined,
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
+      delivery_mode: t.delivery_mode,
       status: t.status,
       next_run: t.next_run,
     })),
@@ -1114,6 +1116,10 @@ async function main(): Promise<void> {
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
+    saveSession: (key, sessionId) => {
+      sessions[key] = sessionId;
+      setSession(key, sessionId);
+    },
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder) =>
       queue.registerProcess(groupJid, proc, containerName, groupFolder),
