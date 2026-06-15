@@ -5415,3 +5415,136 @@ select {
   padding: 10px;
   overflow-y: auto;
 }
+
+/* ── Web-chat thread sidebar ─────────────────────────────────────────────── */
+
+/* Scrollable thread list container inside the sidebar-nav */
+.thread-list {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  max-height: 52vh;
+  padding: 2px 0;
+  /* thin scrollbar so it doesn't visually dominate */
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface3) transparent;
+}
+
+/* Empty-state hint shown when there are no threads yet */
+.nav-empty {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font);
+}
+
+/* "Channel messages" secondary link — follows .thread-list or .nav-empty.
+   De-emphasised with a separator and reduced opacity.
+   Targets the nav-link that comes after the thread block. */
+.thread-list + .nav-link,
+.nav-empty + .nav-link {
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  opacity: 0.72;
+}
+.thread-list + .nav-link:hover,
+.nav-empty + .nav-link:hover {
+  opacity: 1;
+}
+
+/* ── New-conversation modal ──────────────────────────────────────────────── */
+
+/* Overlay backdrop — the JS injects inline styles; these reinforce theme
+   tokens and enable smooth fade-in via the .visible toggle if added later */
+#webchat-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: webchat-fade-in 0.15s ease;
+}
+
+@keyframes webchat-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Modal panel */
+#webchat-modal-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  width: min(440px, 92vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+  animation: webchat-slide-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes webchat-slide-in {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+#webchat-modal-panel h3 {
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  font-family: var(--font);
+}
+
+/* Template radio rows */
+.webchat-template-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--text);
+  transition: color var(--transition);
+}
+.webchat-template-option:last-child {
+  border-bottom: none;
+}
+.webchat-template-option:hover {
+  color: var(--accent);
+}
+.webchat-template-option input[type='radio'] {
+  margin-top: 3px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+.webchat-template-option strong {
+  color: var(--text);
+}
+.webchat-template-option span > span {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+/* Advanced fields section sits inside the modal */
+#wc-advanced-fields {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Modal action row */
+#webchat-modal-panel .modal-actions,
+#webchat-modal-panel > div:last-child {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
