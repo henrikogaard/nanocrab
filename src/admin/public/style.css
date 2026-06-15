@@ -5309,3 +5309,109 @@ select {
     flex-direction: column;
   }
 }
+
+/* --- Mode-first shell --- */
+.mode-switcher {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin: 8px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.mode-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.mode-tab:hover {
+  color: var(--text);
+  background: var(--surface3);
+}
+.mode-tab svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.mode-tab.active {
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.sidebar-pinned {
+  margin-top: auto;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.more-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition);
+  z-index: 19;
+}
+.more-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.more-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: -340px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  transition: left var(--transition);
+  z-index: 20;
+}
+.more-drawer.open {
+  left: 0;
+}
+.more-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+  color: var(--text);
+}
+.more-close {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--transition);
+}
+.more-close:hover {
+  color: var(--text);
+}
+.more-drawer-body {
+  flex: 1;
+  padding: 10px;
+  overflow-y: auto;
+}
