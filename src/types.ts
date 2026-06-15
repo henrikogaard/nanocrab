@@ -58,6 +58,11 @@ export interface RegisteredGroup {
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
   enabled?: boolean; // False pauses agent processing for this registered bot/channel
   isPrimary?: boolean; // Primary owner bot for startup notices and owner-facing status
+  // 'web' marks a synthetic web-conversation thread (Chat mode). Web groups are
+  // excluded from channel/group management surfaces. Undefined = a real channel group.
+  kind?: 'web';
+  // User-facing conversation title (web threads). Channel groups use `name`.
+  title?: string;
 }
 
 export interface NewMessage {
