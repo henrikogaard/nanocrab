@@ -348,4 +348,111 @@ describe('/api/threads CRUD', () => {
       expect(res.status).toBe(404);
     });
   });
+
+  // ------- GET /:id/messages -------
+
+  it('GET /:id/messages non-web jid returns 404', async () => {
+    await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads/123@g.us/messages`);
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('Thread not found');
+    });
+  });
+
+  it('GET /:id/messages for a created web thread returns 200 with an array', async () => {
+    setRegisteredGroup('web:msg-test-thread', {
+      name: 'Web Conversation',
+      title: 'Messages test',
+      kind: 'web',
+      folder: 'web-msg-test-thread',
+      trigger: '^',
+      added_at: '2026-06-01T00:00:00Z',
+      requiresTrigger: false,
+    });
+
+    await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads/web:msg-test-thread/messages`);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(Array.isArray(body)).toBe(true);
+    });
+  });
+
+  // ------- POST /:id/messages -------
+
+  it('POST /:id/messages non-web jid returns 404', async () => {
+    await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads/123@g.us/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'hi' }),
+      });
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('Thread not found');
+    });
+  });
+
+  it('POST /:id/messages unknown web jid (valid prefix, no group) returns 404', async () => {
+    await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads/web:does-not-exist-xyz/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'hi' }),
+      });
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe('Thread not found');
+    });
+  });
+
+  it('POST /:id/messages valid thread returns 200 {ok:true}', async () => {
+    setRegisteredGroup('web:send-msg-thread', {
+      name: 'Web Conversation',
+      title: 'Send test',
+      kind: 'web',
+      folder: 'web-send-msg-thread',
+      trigger: '^',
+      added_at: '2026-06-01T00:00:00Z',
+      requiresTrigger: false,
+    });
+
+    await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads/web:send-msg-thread/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'hi' }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean };
+      expect(body.ok).toBe(true);
+    });
+  });
+
+  // ------- PATCH /:id — non-web kind guard -------
+
+  it('PATCH /:id on a non-web group returns 404 and does not rename it', async () => {
+    setRegisteredGroup('wa:real-group@g.us', {
+      name: 'RealGroup',
+      folder: 'real-group-patch-test',
+      trigger: '!',
+      added_at: '2026-06-01T00:00:00Z',
+    });
+
+    await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads/wa:real-group@g.us`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Should not be set' }),
+      });
+      expect(res.status).toBe(404);
+    });
+
+    // Group must still be unchanged (no title was written)
+    const stored = getRegisteredGroup('wa:real-group@g.us');
+    expect(stored).toBeDefined();
+    expect(stored!.title).toBeUndefined();
+    expect(stored!.name).toBe('RealGroup');
+  });
 });
