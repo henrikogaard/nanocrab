@@ -85,3 +85,14 @@ describe('saveActiveMode', () => {
     expect(s.getItem('active_mode')).toBeNull();
   });
 });
+
+describe('storage-throws resilience', () => {
+  it('loadActiveMode returns the first mode when storage.getItem throws', () => {
+    const s = { getItem: () => { throw new Error('blocked'); }, setItem: () => {} };
+    expect(M().loadActiveMode(s)).toBe('chat');
+  });
+  it('saveActiveMode returns false when storage.setItem throws', () => {
+    const s = { getItem: () => null, setItem: () => { throw new Error('blocked'); } };
+    expect(M().saveActiveMode('work', s)).toBe(false);
+  });
+});
