@@ -1402,6 +1402,15 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   return result;
 }
 
+export function deleteRegisteredGroup(jid: string): void {
+  db.prepare('DELETE FROM registered_groups WHERE jid = ?').run(jid);
+}
+
+export function deleteMessagesForJid(chatJid: string): void {
+  db.prepare('DELETE FROM messages WHERE chat_jid = ?').run(chatJid);
+  db.prepare('DELETE FROM chats WHERE jid = ?').run(chatJid);
+}
+
 export function getNonWebRegisteredGroups(): Record<string, RegisteredGroup> {
   const all = getAllRegisteredGroups();
   const out: Record<string, RegisteredGroup> = {};
