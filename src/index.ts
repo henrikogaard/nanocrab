@@ -1209,6 +1209,9 @@ async function main(): Promise<void> {
     updateRegisteredGroup: (jid, group) => {
       registeredGroups[jid] = group;
     },
+    removeRegisteredGroup: (jid) => {
+      delete registeredGroups[jid];
+    },
     queue,
     sendMessage: async (jid, text) => {
       const group = registeredGroups[jid];

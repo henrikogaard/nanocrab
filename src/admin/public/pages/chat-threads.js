@@ -41,7 +41,6 @@
         threads
           .map(function (t) {
             var isActive = t.id === currentId;
-            var encodedId = encodeURIComponent(t.id.replace(/^web:/, ''));
             return (
               '<a class="nav-link' +
               (isActive ? ' active' : '') +
@@ -266,8 +265,11 @@
       // Always call the original for non-chat events (notifications, terminal etc.)
       origHandler(msg);
 
-      // Only handle chat events that belong to this thread
-      if (msg.data && msg.data.chat_jid !== threadId) return;
+      // Only handle chat events that belong to this thread.
+      // new_message uses data.chat_jid; task_progress/tool_call/tool_result/
+      // approval_request are broadcast with data.groupJid — accept either.
+      var evJid = msg.data ? (msg.data.chat_jid ?? msg.data.groupJid) : undefined;
+      if (evJid !== undefined && evJid !== threadId) return;
 
       if (msg.type === 'task_progress') {
         if (window._progressTimeout) {

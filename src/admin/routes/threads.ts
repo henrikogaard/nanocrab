@@ -137,6 +137,7 @@ router.post('/', (req: Request, res: Response) => {
       config,
     });
     setRegisteredGroup(jid, group);
+    getState().updateRegisteredGroup?.(jid, group);
 
     res.json({ id: jid });
   } catch (err) {
@@ -281,6 +282,11 @@ router.delete('/:id', async (_req: Request, res: Response) => {
     deleteRegisteredGroup(id);
   } catch (regErr) {
     logger.warn({ regErr, id }, 'Could not delete registered group for web thread (best-effort)');
+  }
+  try {
+    getState().removeRegisteredGroup?.(id);
+  } catch (memErr) {
+    logger.warn({ memErr, id }, 'Could not remove web thread from in-memory map (best-effort)');
   }
 
   res.json({ ok: true });
