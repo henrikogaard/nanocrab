@@ -9995,12 +9995,10 @@ window.addEventListener('hashchange', () => {
   const hash = window.location.hash;
   const chatRoute = parseChatHash(hash);
   if (chatRoute) {
+    // Set the active thread id before showShell so renderChatPage renders the
+    // conversation exactly once (installing a single WS handler).
+    if (window.WebChat) WebChat.setActiveThreadId(chatRoute.threadId);
     showShell('chat');
-    const el = document.getElementById('page-content');
-    if (el && window.WebChat) {
-      if (chatRoute.threadId) window._webchatActiveThreadId = chatRoute.threadId;
-      WebChat.renderConversation(el, chatRoute.threadId);
-    }
     return;
   }
   const p = canonicalPage(hash.replace('#/', ''));
@@ -10016,17 +10014,24 @@ window.addEventListener('hashchange', () => {
     const hash = window.location.hash;
     const chatRoute = parseChatHash(hash);
     if (chatRoute) {
-      // Deep link into a chat thread — render after shell is up
-      showShell('chat');
-      // WebChat may not be defined yet (script loads deferred); defer to next tick
-      setTimeout(() => {
-        const el = document.getElementById('page-content');
-        if (el && window.WebChat) {
-          WebChat.renderConversation(el, chatRoute.threadId);
-        } else if (el) {
-          el.innerHTML = '<div class="loading">Loading conversation…</div>';
-        }
-      }, 0);
+      // Deep link into a chat thread. If WebChat is ready, set the active id and
+      // let showShell render the conversation once (one WS handler install).
+      if (window.WebChat) {
+        WebChat.setActiveThreadId(chatRoute.threadId);
+        showShell('chat');
+      } else {
+        // WebChat not loaded yet (script loads deferred); defer to next tick.
+        showShell('chat');
+        setTimeout(() => {
+          const el = document.getElementById('page-content');
+          if (el && window.WebChat) {
+            WebChat.setActiveThreadId(chatRoute.threadId);
+            WebChat.renderConversation(el, chatRoute.threadId);
+          } else if (el) {
+            el.innerHTML = '<div class="loading">Loading conversation…</div>';
+          }
+        }, 0);
+      }
     } else {
       const hashPage = canonicalPage(hash.replace('#/', ''));
       if (hash && pages[hashPage]) {

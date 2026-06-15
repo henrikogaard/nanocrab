@@ -4,6 +4,7 @@
   'use strict';
 
   var _activeThreadId = null;
+  var _activeThreadTitle = null;
   var _modalEl = null;
 
   // ── helpers ────────────────────────────────────────────────────────────────
@@ -46,6 +47,8 @@
               (isActive ? ' active' : '') +
               '" onclick="WebChat.openThread(' +
               JSON.stringify(t.id) +
+              ', ' +
+              JSON.stringify(t.title || t.id) +
               ')">' +
               navIcon('messages') +
               '<span class="nav-label">' +
@@ -65,13 +68,20 @@
     return newBtn + threadItems + channelBtn;
   }
 
-  function openThread(id) {
+  function setActiveThreadId(id) {
     _activeThreadId = id;
+  }
+
+  function openThread(id, title) {
+    _activeThreadId = id;
+    if (typeof title === 'string') _activeThreadTitle = title;
     location.hash = '#/chat/' + encodeURIComponent(id.replace(/^web:/, ''));
   }
 
   // Render thread conversation into el, or an empty state if threadId is null.
-  async function renderConversation(el, threadId) {
+  // When `title` is provided (sidebar nav), use it directly instead of fetching
+  // the full thread list. Deep-link/reload paths pass no title → fallback fetch.
+  async function renderConversation(el, threadId, title) {
     // Clean up any leftover progress timer from a previous page
     if (window._progressTimeout) {
       clearTimeout(window._progressTimeout);
@@ -154,21 +164,33 @@
     }
     renderMessages();
 
-    // Load title
-    try {
-      var threads = await api('/threads');
-      var thisThread = threads.find(function (t) { return t.id === threadId; });
-      var titleEl = document.getElementById('thread-title');
-      if (titleEl && thisThread) titleEl.textContent = thisThread.title || threadId;
-    } catch (_) {}
+    // Load title — use the known title when provided, otherwise fetch the list.
+    var knownTitle = typeof title === 'string' ? title : null;
+    if (knownTitle) {
+      _activeThreadTitle = knownTitle;
+      var titleElDirect = document.getElementById('thread-title');
+      if (titleElDirect) titleElDirect.textContent = knownTitle;
+    } else {
+      try {
+        var threads = await api('/threads');
+        var thisThread = threads.find(function (t) { return t.id === threadId; });
+        var titleEl = document.getElementById('thread-title');
+        if (titleEl && thisThread) {
+          titleEl.textContent = thisThread.title || threadId;
+          _activeThreadTitle = thisThread.title || threadId;
+        }
+      } catch (_) {}
+    }
 
     // Send message
     async function sendMessage() {
       var input = document.getElementById('chat-msg-input');
-      if (!input) return;
+      var btn = document.getElementById('chat-send-btn');
+      if (!input || !btn || btn.disabled) return;
       var msg = input.value.trim();
       if (!msg) return;
       input.value = '';
+      btn.disabled = true;
 
       // Fallback progress timer
       if (window._progressTimeout) clearTimeout(window._progressTimeout);
@@ -202,7 +224,14 @@
           body: JSON.stringify({ message: msg }),
         });
       } catch (_) {
+        if (window._progressTimeout) {
+          clearTimeout(window._progressTimeout);
+          window._progressTimeout = null;
+        }
         toast('Failed to send message', 'error');
+      } finally {
+        btn.disabled = false;
+        if (input) input.focus();
       }
     }
 
@@ -445,7 +474,7 @@
       '</div>' +
       '<div style="margin-bottom:12px">' +
       '<button type="button" id="wc-advanced-toggle" class="btn btn-sm btn-ghost" style="font-size:12px">&#9654; Advanced</button>' +
-      '<div id="wc-advanced-fields" style="display:none;margin-top:10px;display:none">' +
+      '<div id="wc-advanced-fields" style="display:none;margin-top:10px">' +
       '<div style="margin-bottom:8px"><label style="font-size:12px;color:var(--text-muted)">Provider<br>' +
       '<input type="text" id="wc-provider-input" class="search-input" placeholder="e.g. anthropic" style="margin-top:4px;width:100%"></label></div>' +
       '<div><label style="font-size:12px;color:var(--text-muted)">Model<br>' +
@@ -533,6 +562,7 @@
     loadThreads: loadThreads,
     renderThreadList: renderThreadList,
     openThread: openThread,
+    setActiveThreadId: setActiveThreadId,
     renderConversation: renderConversation,
     openNewConversationModal: openNewConversationModal,
     get activeThreadId() { return _activeThreadId; },
