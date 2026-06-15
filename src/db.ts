@@ -110,7 +110,9 @@ function createSchema(database: Database.Database): void {
       requires_trigger INTEGER DEFAULT 1,
       is_main INTEGER DEFAULT 0,
       enabled INTEGER DEFAULT 1,
-      is_primary INTEGER DEFAULT 0
+      is_primary INTEGER DEFAULT 0,
+      kind TEXT,
+      title TEXT
     );
     CREATE TABLE IF NOT EXISTS admin_sessions (
       token TEXT PRIMARY KEY,
@@ -324,6 +326,20 @@ function createSchema(database: Database.Database): void {
        AND NOT EXISTS (
          SELECT 1 FROM registered_groups WHERE is_primary = 1
        )`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN kind TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN title TEXT`,
     );
   } catch {
     /* column already exists */
@@ -1288,6 +1304,8 @@ export function getRegisteredGroup(
         is_main: number | null;
         enabled: number | null;
         is_primary: number | null;
+        kind: string | null;
+        title: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -1312,6 +1330,8 @@ export function getRegisteredGroup(
     isMain: row.is_main === 1 ? true : undefined,
     enabled: row.enabled === 0 ? false : undefined,
     isPrimary: row.is_primary === 1 ? true : undefined,
+    kind: row.kind === 'web' ? 'web' : undefined,
+    title: row.title ?? undefined,
   };
 }
 
@@ -1320,8 +1340,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, enabled, is_primary)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, enabled, is_primary, kind, title)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -1333,6 +1353,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.isMain ? 1 : 0,
     group.enabled === false ? 0 : 1,
     group.isPrimary ? 1 : 0,
+    group.kind ?? null,
+    group.title ?? null,
   );
 }
 
@@ -1348,6 +1370,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     is_main: number | null;
     enabled: number | null;
     is_primary: number | null;
+    kind: string | null;
+    title: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -1371,6 +1395,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       isMain: row.is_main === 1 ? true : undefined,
       enabled: row.enabled === 0 ? false : undefined,
       isPrimary: row.is_primary === 1 ? true : undefined,
+      kind: row.kind === 'web' ? 'web' : undefined,
+      title: row.title ?? undefined,
     };
   }
   return result;
