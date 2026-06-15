@@ -2,6 +2,7 @@
 
 const app = document.getElementById('app');
 let currentPage = '';
+let activeMode = 'chat';
 let pollTimers = [];
 let ws = null;
 let sessionToken = null;
@@ -498,6 +499,14 @@ function brandLogo(extraClass = '', variant = 'mark') {
 function showShell(page) {
   stopPolling();
   currentPage = page;
+  // Derive the active mode from the page being shown (deep links land in the
+  // correct mode). Admin/More pages resolve to null and keep the last mode.
+  const NM = window.NanoModes;
+  const ownerMode = NM.resolveMode(page);
+  if (ownerMode) {
+    activeMode = ownerMode;
+    NM.saveActiveMode(activeMode, window.localStorage);
+  }
   // Core navigation
   const navItems = [
     { id: 'dashboard', icon: 'dashboard', label: 'Dashboard', section: 'Home' },
@@ -625,6 +634,12 @@ function showShell(page) {
       <div class="sidebar-overlay" onclick="toggleMobileMenu()"></div>
       <nav class="sidebar">
         <div class="sidebar-header"><span class="brand-mark">${brandLogo()}</span><div><h1>${esc(botName)}</h1><span>${window._editionShort || 'NanoCrab'}</span></div></div>
+        <div class="mode-switcher">
+          ${window.NanoModes.MODE_ORDER.map((m) => {
+            const cfg = window.NanoModes.MODES[m];
+            return `<button class="mode-tab ${activeMode === m ? 'active' : ''}" onclick="setMode('${m}')" type="button">${navIcon(cfg.icon)}<span>${cfg.label}</span></button>`;
+          }).join('')}
+        </div>
         <div class="sidebar-nav">${navHtml}</div>
         <div class="sidebar-footer">
           <div class="sidebar-footer-actions">
@@ -669,6 +684,16 @@ function showShell(page) {
       .catch((err) => renderPageError(el, err, 'Could not load plugin page'));
   }
 }
+
+window.setMode = function (mode) {
+  const NM = window.NanoModes;
+  if (NM.MODE_ORDER.indexOf(mode) === -1) return;
+  activeMode = mode;
+  NM.saveActiveMode(mode, window.localStorage);
+  // Open the first page of the chosen mode.
+  const first = NM.navPagesForMode(mode)[0];
+  if (first) navigate(first);
+};
 
 window.logout = async function () {
   await fetch('/api/logout', { method: 'POST' }).catch(() => {});
