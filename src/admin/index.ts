@@ -24,7 +24,7 @@ import {
   buildChannelStatus,
   isChannelEnabledForRegisteredGroups,
 } from '../channel-status.js';
-import { NanoCrabState, setState, getState } from './state.js';
+import { NanoCrabState, setState, getState, nonWebGroups } from './state.js';
 import { initAuth } from './auth.js';
 import { requireAuth, requireRole } from './middleware.js';
 import { initWebSocket } from './websocket.js';
@@ -80,6 +80,7 @@ import developerRoutes, {
   recordMonitoringSnapshot,
 } from './routes/developer.js';
 import assistantProfileRoutes from './routes/assistant-profile.js';
+import threadsRoutes from './routes/threads.js';
 
 // Plugin system
 import {
@@ -199,7 +200,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   // Public health endpoint (no auth required)
   app.get('/health', (_req, res) => {
     const state = getState();
-    const groups = state.registeredGroups();
+    const groups = nonWebGroups(state.registeredGroups());
     const channels = state.channels
       .filter((ch) => isChannelEnabledForRegisteredGroups(ch.name, groups))
       .map((ch) => buildChannelStatus(ch));
@@ -248,6 +249,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/questions', requireAuth, questionsRoutes);
   app.use('/api/approvals', requireAuth, approvalsRoutes);
   app.use('/api/chat', requireAuth, chatRoutes);
+  app.use('/api/threads', requireAuth, threadsRoutes);
   app.use('/api/assistant-profile', requireAuth, assistantProfileRoutes);
 
   // Admin role required

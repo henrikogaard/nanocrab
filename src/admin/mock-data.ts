@@ -69,6 +69,23 @@ const groups = [
   },
 ];
 
+let mockThreads: Array<Record<string, string>> = [
+  {
+    id: 'web:mock-1',
+    title: 'Deploy plan review',
+    addedAt: '2026-06-15T10:00:00Z',
+    lastMessage: 'Looks good — ship it.',
+    lastMessageAt: '2026-06-15T10:05:00Z',
+  },
+  {
+    id: 'web:mock-2',
+    title: 'Refactor ideas',
+    addedAt: '2026-06-14T09:00:00Z',
+    lastMessage: 'Let me draft a plan.',
+    lastMessageAt: '2026-06-14T09:02:00Z',
+  },
+];
+
 const channels = [
   { name: 'whatsapp', connected: true, status: 'healthy', lastSeen: iso(1) },
   { name: 'telegram', connected: true, status: 'healthy', lastSeen: iso(3) },
@@ -2326,6 +2343,68 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       },
     });
   }
+  // ── threads API (all methods, before the GET-only guard below) ────────────
+  if (pathname.startsWith('/threads/') && pathname.endsWith('/messages')) {
+    const threadId = decodeURIComponent(
+      pathname.slice('/threads/'.length, -'/messages'.length),
+    );
+    if (method === 'GET') {
+      void threadId;
+      return [
+        {
+          sender_name: 'You',
+          content: 'What do you think about this change?',
+          is_bot_message: false,
+          timestamp: new Date('2026-06-15T10:00:30Z').toISOString(),
+        },
+        {
+          sender_name: 'Agent',
+          content: 'Looks good — ship it.',
+          is_bot_message: true,
+          timestamp: new Date('2026-06-15T10:00:45Z').toISOString(),
+        },
+      ];
+    }
+    if (method === 'POST') return { ok: true };
+  }
+  if (pathname === '/threads/agent-templates' && method === 'GET') {
+    return groups.map((g) => ({
+      id: g.jid,
+      label: g.name,
+      provider: g.containerConfig?.provider ?? null,
+      model: g.containerConfig?.model ?? null,
+    }));
+  }
+  if (pathname === '/threads') {
+    if (method === 'GET') return mockThreads;
+    if (method === 'POST') {
+      const body = req.body as Record<string, string> | undefined;
+      const newThread: Record<string, string> = {
+        id: 'web:mock-' + String(Date.now()),
+        title: body?.title || 'New conversation',
+        addedAt: new Date().toISOString(),
+      };
+      mockThreads.unshift(newThread);
+      return { id: newThread.id };
+    }
+  }
+  if (pathname.startsWith('/threads/') && !pathname.endsWith('/messages')) {
+    const threadId = decodeURIComponent(pathname.split('/')[2] || '');
+    if (method === 'GET') {
+      return mockThreads.find((t) => t.id === threadId) || { id: threadId };
+    }
+    if (method === 'PATCH') {
+      const body = req.body as Record<string, string> | undefined;
+      const entry = mockThreads.find((t) => t.id === threadId);
+      if (entry && body?.title) entry.title = body.title;
+      return { ok: true };
+    }
+    if (method === 'DELETE') {
+      mockThreads = mockThreads.filter((t) => t.id !== threadId);
+      return { ok: true };
+    }
+  }
+
   if (method !== 'GET') return writeResponse(pathname);
 
   if (pathname === '/me') {

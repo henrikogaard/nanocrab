@@ -17,7 +17,7 @@ import {
   DEFAULT_AGENT_MODELS,
   getProviderAvailability,
 } from '../../agent-provider.js';
-import { getAllRegisteredGroups } from '../../db.js';
+import { getAllRegisteredGroups, getNonWebRegisteredGroups } from '../../db.js';
 import {
   deriveRuntimeCapabilities,
   resolveAgentBoundary,
@@ -115,7 +115,7 @@ router.get('/providers', (_req: Request, res: Response) => {
 
 router.get('/boundaries', (_req: Request, res: Response) => {
   const connectorIds = loadConfiguredConnectorIds();
-  const groups = getAllRegisteredGroups();
+  const groups = getNonWebRegisteredGroups();
   res.json(
     Object.entries(groups).map(([jid, group]) => {
       const boundary = resolveAgentBoundary({

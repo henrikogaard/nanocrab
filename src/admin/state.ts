@@ -5,10 +5,23 @@
 import { Channel, RegisteredGroup } from '../types.js';
 import { GroupQueue } from '../group-queue.js';
 
+/**
+ * Returns only the non-web groups from a registered-groups record.
+ * Use this everywhere we need to exclude web-thread groups from channel/health surfaces.
+ */
+export function nonWebGroups(
+  groups: Record<string, RegisteredGroup>,
+): Record<string, RegisteredGroup> {
+  return Object.fromEntries(
+    Object.entries(groups).filter(([, g]) => g.kind !== 'web'),
+  );
+}
+
 export interface NanoCrabState {
   channels: Channel[];
   registeredGroups: () => Record<string, RegisteredGroup>;
   updateRegisteredGroup?: (jid: string, group: RegisteredGroup) => void;
+  removeRegisteredGroup?: (jid: string) => void;
   queue: GroupQueue;
   sendMessage: (jid: string, text: string) => Promise<void>;
   startTime: number;
