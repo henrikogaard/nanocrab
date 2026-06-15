@@ -637,11 +637,11 @@ function showShell(page) {
       </div>
       <div class="bottom-tabs">
         <nav>
-          <button class="bottom-tab ${page === 'dashboard' ? 'active' : ''}" onclick="navigate('dashboard')">${navIcon('dashboard', 'tab-icon')}<span>Home</span></button>
-          <button class="bottom-tab ${page === 'chat' ? 'active' : ''}" onclick="navigate('chat')">${navIcon('chat', 'tab-icon')}<span>Chat</span></button>
-          <button class="bottom-tab ${page === 'agents' ? 'active' : ''}" onclick="navigate('agents')">${navIcon('agents', 'tab-icon')}<span>Agents</span></button>
-          <button class="bottom-tab ${page === 'messages' ? 'active' : ''}" onclick="navigate('messages')">${navIcon('messages', 'tab-icon')}<span>Messages</span></button>
-          <button class="bottom-tab" onclick="toggleMobileMenu()">${navIcon('menu', 'tab-icon')}<span>More</span></button>
+          ${window.NanoModes.MODE_ORDER.map((m) => {
+            const cfg = window.NanoModes.MODES[m];
+            return `<button class="bottom-tab ${activeMode === m ? 'active' : ''}" onclick="setMode('${m}')">${navIcon(cfg.icon, 'tab-icon')}<span>${cfg.label}</span></button>`;
+          }).join('')}
+          <button class="bottom-tab" onclick="toggleMoreDrawer()">${navIcon('menu', 'tab-icon')}<span>More</span></button>
         </nav>
       </div>
     </div>`;
