@@ -2,6 +2,70 @@
 
 const app = document.getElementById('app');
 let currentPage = '';
+// Seed from the persisted last-used mode so deep-links to admin/More pages
+// (which don't resolve to a mode) still show the correct mode in the switcher.
+let activeMode =
+  (window.NanoModes &&
+    window.NanoModes.loadActiveMode(window.localStorage)) ||
+  'chat';
+// Page display metadata (label + icon) for every navigable page id — used by
+// the mode-scoped sidebar and the More drawer.
+const PAGE_META = {
+  chat: { label: 'Chat', icon: 'chat' },
+  messages: { label: 'Messages', icon: 'messages' },
+  agents: { label: 'Agents', icon: 'agents' },
+  groups: { label: 'Groups', icon: 'groups' },
+  tasks: { label: 'Tasks', icon: 'tasks' },
+  approvals: { label: 'Approvals', icon: 'approvals' },
+  sessions: { label: 'Sessions', icon: 'sessions' },
+  workflows: { label: 'Workflows', icon: 'workflows' },
+  reports: { label: 'Reports', icon: 'audit' },
+  artifacts: { label: 'Artifacts', icon: 'artifacts' },
+  memory: { label: 'Memory', icon: 'memory' },
+  timeline: { label: 'Timeline', icon: 'timeline' },
+  gitcode: { label: 'Git & Code', icon: 'gitcode' },
+  devhub: { label: 'Terminal', icon: 'devhub' },
+  autofix: { label: 'AutoFix', icon: 'autofix' },
+  skills: { label: 'Skills', icon: 'skills' },
+  marketplace: { label: 'Marketplace', icon: 'marketplace' },
+  dashboard: { label: 'Dashboard', icon: 'dashboard' },
+  pipelines: { label: 'Deploy', icon: 'pipelines' },
+  monitoring: { label: 'Monitoring', icon: 'monitoring' },
+  containers: { label: 'Containers', icon: 'containers' },
+  integrations: { label: 'Integrations', icon: 'integrations' },
+  webhooks: { label: 'Webhooks', icon: 'webhooks' },
+  credentials: { label: 'Credentials', icon: 'credentials' },
+  security: { label: 'Security', icon: 'security' },
+  audit: { label: 'Audit', icon: 'audit' },
+  uptime: { label: 'Uptime', icon: 'uptime' },
+  copilot: { label: 'Copilot', icon: 'copilot' },
+  backup: { label: 'Backup', icon: 'backup' },
+  usage: { label: 'Usage', icon: 'usage' },
+  settings: { label: 'Settings', icon: 'settings' },
+  help: { label: 'Help', icon: 'help' },
+};
+function metaLabel(id) {
+  return (PAGE_META[id] && PAGE_META[id].label) || id;
+}
+function metaIcon(id) {
+  return (PAGE_META[id] && PAGE_META[id].icon) || 'integrations';
+}
+// Pages hidden from the 'viewer' role. Owners and admins see everything.
+const VIEWER_HIDDEN = [
+  'devhub',
+  'gitcode',
+  'pipelines',
+  'containers',
+  'audit',
+  'security',
+  'integrations',
+  'marketplace',
+];
+function isVisibleForRole(id) {
+  const role = window._userRole || 'owner';
+  if (role === 'viewer') return !VIEWER_HIDDEN.includes(id);
+  return true;
+}
 let pollTimers = [];
 let ws = null;
 let sessionToken = null;
@@ -477,6 +541,18 @@ const navIconPaths = {
     '<path d="M9.5 5.5h-3A1.5 1.5 0 0 0 5 7v10a1.5 1.5 0 0 0 1.5 1.5h3"/><path d="M13.5 8.5 17 12l-3.5 3.5"/><path d="M17 12H9"/>',
   menu: '<path d="M5 7h14"/><path d="M5 12h14"/><path d="M5 17h14"/>',
   chevron: '<path d="m8 10 4 4 4-4"/>',
+  sessions:
+    '<rect x="4.5" y="6" width="15" height="10" rx="1.5"/><path d="M4.5 9h15"/><path d="M6.5 7.6h.01"/><path d="M8.5 7.6h.01"/><path d="M9.5 19h5"/><path d="M12 16v3"/>',
+  webhooks:
+    '<circle cx="8" cy="8" r="2"/><circle cx="16.5" cy="10.5" r="2"/><circle cx="9.5" cy="17" r="2"/><path d="m9.5 9.3 5.3 2.7"/><path d="M15.5 12.3 11 16"/><path d="M7.6 15.2 8 9.9"/>',
+  credentials:
+    '<circle cx="8" cy="12" r="3.5"/><path d="M11.5 12h8"/><path d="M16.5 12v3"/><path d="M19.5 12v2.5"/>',
+  backup:
+    '<path d="M4.5 6h15v3.5h-15z"/><path d="M6 9.5v8.5a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.5"/><path d="M10 13h4"/>',
+  usage:
+    '<path d="M4.5 16a7.5 7.5 0 1 1 15 0"/><path d="M12 16l3.5-4.5"/><circle cx="12" cy="16" r=".7"/>',
+  artifacts:
+    '<path d="M9 4.5h5l3.5 3.5v8a1.5 1.5 0 0 1-1.5 1.5H9A1.5 1.5 0 0 1 7.5 16V6A1.5 1.5 0 0 1 9 4.5Z"/><path d="M14 4.5V8h3.5"/><path d="M4.5 8.5V18.5A1 1 0 0 0 5.5 19.5h7.5"/>',
 };
 
 function navIcon(name, extraClass = '') {
@@ -498,118 +574,67 @@ function brandLogo(extraClass = '', variant = 'mark') {
 function showShell(page) {
   stopPolling();
   currentPage = page;
-  // Core navigation
-  const navItems = [
-    { id: 'dashboard', icon: 'dashboard', label: 'Dashboard', section: 'Home' },
-    { id: 'agents', icon: 'agents', label: 'Agents' },
-    { id: 'messages', icon: 'messages', label: 'Messages' },
-    { id: 'approvals', icon: 'approvals', label: 'Approvals' },
-    { id: 'audit', icon: 'audit', label: 'Audit' },
-    { id: 'chat', icon: 'chat', label: 'Chat' },
-    { id: 'groups', icon: 'groups', label: 'Groups', section: 'Workspace' },
-    { id: 'tasks', icon: 'tasks', label: 'Tasks' },
-    { id: 'memory', icon: 'memory', label: 'Memory' },
-    { id: 'skills', icon: 'skills', label: 'Skills' },
-    { id: 'reports', icon: 'audit', label: 'Reports' },
-    { id: 'artifacts', icon: 'files', label: 'Artifacts' },
-    { id: 'timeline', icon: 'timeline', label: 'Timeline' },
-  ];
+  // Derive the active mode from the page being shown (deep links land in the
+  // correct mode). Admin/More pages resolve to null and keep the last mode.
+  const NM = window.NanoModes;
+  const ownerMode = NM.resolveMode(page);
+  if (ownerMode) {
+    activeMode = ownerMode;
+    NM.saveActiveMode(activeMode, window.localStorage);
+  }
+  // Mode-scoped nav: only the pages for the active mode (in config order).
+  const NM2 = window.NanoModes;
+  const navItems = NM2.navPagesForMode(activeMode).map((id) => ({
+    id,
+    icon: metaIcon(id),
+    label: metaLabel(id),
+  }));
 
-  // Inject enabled plugins
+  // Inject enabled plugins whose page belongs to the active mode.
   const cachedPlugins = window._pluginsList || [];
-  if (cachedPlugins.length > 0) {
-    let first = true;
-    for (const p of cachedPlugins) {
-      if (!p.enabled || !p.sidebar) continue;
-      if (p.sidebar.id === 'chat') continue; // chat already in Home
-      navItems.push({
-        id: p.sidebar.id,
-        icon: navIconPaths[p.sidebar.id] ? p.sidebar.id : 'integrations',
-        label: p.sidebar.label,
-        section: first ? 'Tools' : undefined,
-      });
-      first = false;
-    }
+  for (const p of cachedPlugins) {
+    if (!p.enabled || !p.sidebar) continue;
+    if (NM2.resolveMode(p.sidebar.id) !== activeMode) continue;
+    if (navItems.some((n) => n.id === p.sidebar.id)) continue;
+    navItems.push({
+      id: p.sidebar.id,
+      icon: navIconPaths[p.sidebar.id] ? p.sidebar.id : 'integrations',
+      label: p.sidebar.label,
+    });
   }
 
-  // Developer & System
-  navItems.push(
-    { id: 'devhub', icon: 'devhub', label: 'Terminal', section: 'Developer' },
-    { id: 'gitcode', icon: 'gitcode', label: 'Git & Code' },
-    { id: 'pipelines', icon: 'pipelines', label: 'Deploy' },
-    {
-      id: 'monitoring',
-      icon: 'monitoring',
-      label: 'Monitoring',
-      section: 'System',
-    },
-    { id: 'containers', icon: 'containers', label: 'Containers' },
-    { id: 'integrations', icon: 'integrations', label: 'Integrations' },
-    { id: 'security', icon: 'security', label: 'Security' },
-    { id: 'marketplace', icon: 'marketplace', label: 'Marketplace' },
-    { id: 'settings', icon: 'settings', label: 'Settings' },
-  );
+  // Role-based sidebar filtering (see isVisibleForRole at module scope).
+  const filteredNavItems = navItems.filter((item) => isVisibleForRole(item.id));
 
-  // Role-based sidebar filtering
-  const role = window._userRole || 'owner';
-  const viewerHidden = [
-    'devhub',
-    'gitcode',
-    'pipelines',
-    'containers',
-    'audit',
-    'security',
-    'integrations',
-    'marketplace',
-  ];
-  const adminHidden = []; // admins see everything except terminal (checked at runtime)
-  const filteredNavItems = navItems.filter((item) => {
-    if (role === 'owner') return true;
-    if (role === 'viewer') return !viewerHidden.includes(item.id);
-    return true; // admin sees all nav items
-  });
+  let navHtml = filteredNavItems
+    .map(
+      (item) =>
+        `<a class="nav-link ${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`,
+    )
+    .join('');
 
-  // Build nav with collapsible sections
-  const savedCollapsed = JSON.parse(
-    localStorage.getItem('nav_collapsed') || '{}',
-  );
-  let navHtml = '';
-  let lastSection = '';
-  let sectionIdx = 0;
-  for (const item of filteredNavItems) {
-    if (item.section && item.section !== lastSection) {
-      if (lastSection) navHtml += '</div>'; // close previous group
-      const secId = item.section.toLowerCase().replace(/\s/g, '-');
-      const isCollapsed =
-        savedCollapsed[secId] &&
-        !filteredNavItems
-          .filter(
-            (n) =>
-              n.section === item.section ||
-              (!n.section && lastSection === item.section),
-          )
-          .some((n) => n.id === page);
-      navHtml += `<button class="nav-section nav-section-toggle" onclick="toggleNavSection('${secId}')" type="button"><span>${item.section}</span><span class="toggle-arrow ${isCollapsed ? 'collapsed' : ''}" id="arrow-${secId}">${navIcon('chevron', 'nav-icon-sm')}</span></button><div class="nav-group ${isCollapsed ? 'collapsed' : ''}" id="navgroup-${secId}">`;
-      lastSection = item.section;
-      sectionIdx++;
-    }
-    navHtml += `<a class="nav-link ${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`;
-  }
-  if (lastSection) navHtml += '</div>'; // close last group
-
-  // Build mobile menu HTML
-  let mobileMenuHtml = '';
-  let mobileLastSection = '';
-  for (const item of filteredNavItems) {
-    if (item.section && item.section !== mobileLastSection) {
-      mobileMenuHtml += `<div class="mobile-section">${item.section}</div>`;
-      mobileLastSection = item.section;
-    }
-    mobileMenuHtml += `<a class="${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span>${item.label}</span></a>`;
-  }
+  // Build mobile menu HTML (mode-scoped, flat list)
+  const mobileMenuHtml = filteredNavItems
+    .map(
+      (item) =>
+        `<a class="${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span>${item.label}</span></a>`,
+    )
+    .join('');
 
   app.innerHTML = `
     <div class="app">
+      <div class="more-overlay" onclick="toggleMoreDrawer()"></div>
+      <div class="more-drawer" id="more-drawer">
+        <div class="more-drawer-header"><span>Admin & operations</span><button class="more-close" onclick="toggleMoreDrawer()" aria-label="Close">✕</button></div>
+        <div class="more-drawer-body">
+          ${window.NanoModes.MORE_IDS.filter((id) => pages[id] && isVisibleForRole(id) && filteredNavItems.every((n) => n.id !== id))
+            .map(
+              (id) =>
+                `<a class="nav-link" onclick="toggleMoreDrawer(); navigate('${id}')">${navIcon(metaIcon(id))}<span class="nav-label">${metaLabel(id)}</span></a>`,
+            )
+            .join('')}
+        </div>
+      </div>
       <div class="mobile-nav">
         <div class="mobile-nav-header">
           <div class="mobile-brand"><span class="brand-mark">${brandLogo()}</span><div><h1>${esc(botName)}</h1><span>${window._editionShort || 'NanoCrab'}</span></div></div>
@@ -625,7 +650,17 @@ function showShell(page) {
       <div class="sidebar-overlay" onclick="toggleMobileMenu()"></div>
       <nav class="sidebar">
         <div class="sidebar-header"><span class="brand-mark">${brandLogo()}</span><div><h1>${esc(botName)}</h1><span>${window._editionShort || 'NanoCrab'}</span></div></div>
+        <div class="mode-switcher">
+          ${window.NanoModes.MODE_ORDER.map((m) => {
+            const cfg = window.NanoModes.MODES[m];
+            return `<button class="mode-tab ${activeMode === m ? 'active' : ''}" onclick="setMode('${m}')" type="button">${navIcon(cfg.icon)}<span>${cfg.label}</span></button>`;
+          }).join('')}
+        </div>
         <div class="sidebar-nav">${navHtml}</div>
+        <div class="sidebar-pinned">
+          <a class="nav-link" onclick="toggleMoreDrawer()">${navIcon('menu')}<span class="nav-label">More</span></a>
+          <a class="nav-link ${page === 'settings' ? 'active' : ''}" onclick="navigate('settings')">${navIcon('settings')}<span class="nav-label">Customize</span></a>
+        </div>
         <div class="sidebar-footer">
           <div class="sidebar-footer-actions">
             <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme"></button>
@@ -642,11 +677,11 @@ function showShell(page) {
       </div>
       <div class="bottom-tabs">
         <nav>
-          <button class="bottom-tab ${page === 'dashboard' ? 'active' : ''}" onclick="navigate('dashboard')">${navIcon('dashboard', 'tab-icon')}<span>Home</span></button>
-          <button class="bottom-tab ${page === 'chat' ? 'active' : ''}" onclick="navigate('chat')">${navIcon('chat', 'tab-icon')}<span>Chat</span></button>
-          <button class="bottom-tab ${page === 'agents' ? 'active' : ''}" onclick="navigate('agents')">${navIcon('agents', 'tab-icon')}<span>Agents</span></button>
-          <button class="bottom-tab ${page === 'messages' ? 'active' : ''}" onclick="navigate('messages')">${navIcon('messages', 'tab-icon')}<span>Messages</span></button>
-          <button class="bottom-tab" onclick="toggleMobileMenu()">${navIcon('menu', 'tab-icon')}<span>More</span></button>
+          ${window.NanoModes.MODE_ORDER.map((m) => {
+            const cfg = window.NanoModes.MODES[m];
+            return `<button class="bottom-tab ${activeMode === m ? 'active' : ''}" onclick="setMode('${m}')">${navIcon(cfg.icon, 'tab-icon')}<span>${cfg.label}</span></button>`;
+          }).join('')}
+          <button class="bottom-tab" onclick="toggleMoreDrawer()">${navIcon('menu', 'tab-icon')}<span>More</span></button>
         </nav>
       </div>
     </div>`;
@@ -669,6 +704,24 @@ function showShell(page) {
       .catch((err) => renderPageError(el, err, 'Could not load plugin page'));
   }
 }
+
+window.setMode = function (mode) {
+  const NM = window.NanoModes;
+  if (NM.MODE_ORDER.indexOf(mode) === -1) return;
+  activeMode = mode;
+  NM.saveActiveMode(mode, window.localStorage);
+  // Open the first page of the chosen mode that this role can see.
+  const visible = NM.navPagesForMode(mode).filter(isVisibleForRole);
+  const first = visible[0] || NM.navPagesForMode(mode)[0];
+  if (first) navigate(first);
+};
+
+window.toggleMoreDrawer = function () {
+  const drawer = document.getElementById('more-drawer');
+  const overlay = document.querySelector('.more-overlay');
+  if (drawer) drawer.classList.toggle('open');
+  if (overlay) overlay.classList.toggle('visible');
+};
 
 window.logout = async function () {
   await fetch('/api/logout', { method: 'POST' }).catch(() => {});
@@ -9606,17 +9659,6 @@ window.forkSession = async (group, sessionId, messageIndex) => {
 };
 
 // --- Router ---
-window.toggleNavSection = (secId) => {
-  const group = document.getElementById('navgroup-' + secId);
-  const arrow = document.getElementById('arrow-' + secId);
-  if (!group) return;
-  group.classList.toggle('collapsed');
-  if (arrow) arrow.classList.toggle('collapsed');
-  const saved = JSON.parse(localStorage.getItem('nav_collapsed') || '{}');
-  saved[secId] = group.classList.contains('collapsed');
-  localStorage.setItem('nav_collapsed', JSON.stringify(saved));
-};
-
 window.toggleMobileMenu = () => {
   const menu = document.getElementById('mobile-menu');
   const overlay = document.querySelector('.sidebar-overlay');
@@ -9918,8 +9960,16 @@ window.addEventListener('hashchange', () => {
     await loadBotName();
     window._pluginsList = await api('/plugins').catch(() => []);
     connectWs();
-    const p = canonicalPage(window.location.hash.replace('#/', ''));
-    showShell(pages[p] ? p : 'dashboard');
+    const hashPage = canonicalPage(window.location.hash.replace('#/', ''));
+    if (window.location.hash && pages[hashPage]) {
+      // Explicit deep link wins; showShell derives the mode from the page.
+      showShell(hashPage);
+    } else {
+      // No deep link: open the last-used mode's first page.
+      const mode = window.NanoModes.loadActiveMode(window.localStorage);
+      const landing = window.NanoModes.navPagesForMode(mode)[0] || 'chat';
+      navigate(landing);
+    }
   } else showLogin();
 })();
 
