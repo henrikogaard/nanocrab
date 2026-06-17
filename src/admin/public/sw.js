@@ -1,5 +1,5 @@
 // NanoCrab PWA Service Worker — network-first with offline fallback
-const CACHE_NAME = 'nanocrab-v7-beta1';
+const CACHE_NAME = 'nanocrab-v8-rc4';
 const OFFLINE_PAGE = '/offline.html';
 
 // Pre-cache critical assets on install
