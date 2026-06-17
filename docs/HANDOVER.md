@@ -1,6 +1,6 @@
 # NanoCrab Handover
 
-Last updated: 2026-06-15
+Last updated: 2026-06-17
 
 ## Repository State
 
@@ -31,6 +31,21 @@ Last updated: 2026-06-15
 - Reports, research jobs, deliverables, artifacts, approvals, and Playwright support.
 - Optional Infomaniak kSuite MCP preset.
 - P0 release foundations are in place: cockpit/approval inbox, provider probes/fallback approval, memory/skill review timelines, coding workflow approvals/PR/CI tracking, policy/audit/dry-run controls, connector boundaries, and first-run setup preflight.
+
+## Recent Work (2026-06-17)
+
+Two dashboard features landed on `main` (each brainstormed → spec → plan → subagent-driven implementation with spec + code-quality review gates):
+
+- **Mode-first dashboard (Chat / Work / Code).** The admin shell now leads with three modes and a secondary "More" admin drawer instead of a deep nav tree. Frontend-only; routes/pages/backend unchanged. Active mode is derived from the current page (deep links preserved) and the last-used mode is restored on load.
+  - Spec: `docs/superpowers/specs/2026-06-15-mode-first-dashboard-design.md`
+  - Plan: `docs/superpowers/plans/2026-06-15-mode-first-dashboard.md`
+  - Key files: `src/admin/public/modes.js` (config + helpers, vitest-covered), `src/admin/public/app.js` (`showShell`, routing), `src/admin/public/style.css`.
+- **Web chat threads.** Chat mode is now Claude Code-style threaded web conversations via a dedicated internal **web channel**, reusing the existing message pipeline. Threads are isolated `kind:'web'` registered groups cloned from an agent template, exposed through `/api/threads`, and kept out of all channel/group management surfaces.
+  - Spec: `docs/superpowers/specs/2026-06-15-web-chat-threads-design.md`
+  - Plan: `docs/superpowers/plans/2026-06-15-web-chat-threads.md`
+  - Key files: `src/channels/web.ts`, `src/web-threads.ts`, `src/admin/routes/threads.ts`, `src/admin/public/pages/chat-threads.js`; `kind`/`title` added to `RegisteredGroup` (`src/types.ts`, `src/db.ts`); `nonWebGroups` partition helper (`src/admin/state.ts`).
+
+**Testing note:** in this local environment the `better-sqlite3` native binding is not compiled, so every vitest file that imports `src/db.js` fails at module load (~150+ baseline failures). These are environmental, not regressions — judge a change by `npm run typecheck` (0 errors), DB-free unit tests passing, and no non-bindings failures. DB/route logic is verified by inspection and by the mock admin dashboard.
 
 ## VPS State
 

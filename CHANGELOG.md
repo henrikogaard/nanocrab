@@ -2,6 +2,27 @@
 
 All notable changes to NanoCrab are documented here.
 
+## [Unreleased]
+
+### Mode-First Dashboard (Chat / Work / Code)
+
+- Reorganized the admin dashboard shell around three top-level modes — **Chat**, **Work**, and **Code** — replacing the deep admin navigation tree as the primary surface.
+- Each mode shows a mode-scoped sidebar (Chat → conversations/messages; Work → agents, groups, tasks, approvals, sessions, workflows, reports, artifacts, memory, timeline; Code → Git & Code, Terminal, AutoFix, Skills, Marketplace). Operational/admin pages (Dashboard, Deploy, Monitoring, Containers, Integrations, Security, Audit, Uptime, Copilot, Settings, …) moved into a secondary **More** drawer.
+- Added a segmented mode switcher, a "New conversation"/context-aware primary action, and an always-present pinned footer (More + Customize).
+- The app reopens the last-used mode; page-based routes (`#/<page>`) are preserved and the active mode is derived from the current page, so existing deep links and bookmarks keep working.
+- Role-aware navigation: viewer-hidden pages are excluded from the mode sidebar, the More drawer, and mode landing.
+- Mobile bottom bar is now Chat / Work / Code / More.
+- Frontend-only change: page render functions and all backend APIs are unchanged. Navigation config and pure helpers live in `src/admin/public/modes.js` with vitest coverage.
+
+### Web Chat Threads (Claude Code-style conversations)
+
+- The Chat mode is now a threaded web conversation surface instead of a WhatsApp-style channel feed: conversations are listed in the sidebar with a **New conversation** entry, `#/chat/:threadId` routing, and a per-thread conversation view.
+- Threads are delivered through a dedicated, internal **web channel** (`src/channels/web.ts`, owns `web:` JIDs) and ride the existing message loop, queue, container runner, approval flow, and WebSocket pipeline — so tool calls, approvals, and progress render inline per thread.
+- Each thread is an isolated `kind:'web'` registered group with its own folder and session, and a container config cloned from a chosen **agent template** (or a custom provider/model via an Advanced option). Picking a template never copies the source agent's files/memory.
+- New `/api/threads` API: list, create (template or custom), per-thread messages, rename, and delete (with container-stop, folder, message, and registration cleanup).
+- Web threads are kept fully separate from WhatsApp/Signal setup: `kind:'web'` groups are excluded from the Groups page, Channels page, dashboard channel health, public `/health`, Integrations, and agent-boundary listings (via a shared `nonWebGroups` helper), and the group-update route rejects web JIDs.
+- Mock admin dashboard (`npm run mock:admin`) now serves sample `/api/threads` data so the threaded Chat UI can be exercised locally.
+
 ## [2.0.0-beta.1] - 2026-06-10
 
 ### Beta1 Follow-Up Hardening

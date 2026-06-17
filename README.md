@@ -44,6 +44,8 @@ In short: yes, NanoCrab now has governed long-term learning. It remembers what y
 
 Full web dashboard at your domain with 7-layer security (firewall, TLS, IP allowlist, rate limiting, CSP headers, session auth, audit logging).
 
+The dashboard is **mode-first**: the sidebar leads with three top-level modes — **Chat**, **Work**, and **Code** — and the operational/admin surfaces collapse into a secondary **More** drawer. Switching mode swaps the mode-scoped sidebar (Chat → conversations, Work → agents/tasks/approvals/reports/memory/timeline, Code → Git & Code/Terminal/AutoFix/Skills), while Customize and the More drawer (Deploy, Monitoring, Containers, Security, Audit, Integrations, Settings, …) stay reachable from every mode. The app reopens whichever mode you used last, and existing `#/<page>` deep links keep working — opening any page selects the mode that owns it. On mobile the bottom bar is Chat / Work / Code / More.
+
 - **Overview** — live stats, weather, channel status, message feed
 - **Agents** — Assign Work wizard for one-off coding tasks, GitHub issue pickup, Autofix auto-pickup setup, coding-job output, and bot agents
 - **Tasks** — routine blueprints, schedule builder, delivery modes, run history, heartbeat checks, and run-now controls
@@ -61,7 +63,7 @@ Optional features that can be enabled/disabled from the dashboard:
 | **GitHub Autofix** | Label an issue `autofix` → an agent clones repo, writes fix, opens PR. Auto-pick labeled issues and auto-review PRs. |
 | **GitHub Copilot** | Multi-account OAuth, assign Copilot to issues, track PRs                                |
 | **Uptime Monitor** | HTTP + file-freshness health checks with bot alerts                                     |
-| **Chat**           | Send messages to the bot from the dashboard                                             |
+| **Chat**           | Claude Code-style web conversations — threads in the sidebar, "New conversation" with a per-thread agent template, isolated per-thread workspace, inline tool-call/approval/progress rendering (separate from WhatsApp/Signal channels) |
 | **Workflows**      | Automation workflows, routines, missions, runbooks, and tracked operator steps          |
 | **Wiki**           | Markdown knowledge base                                                                 |
 
