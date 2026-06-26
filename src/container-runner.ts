@@ -59,6 +59,7 @@ import {
 import {
   filterAllowedConnectorIds,
   getAllowedConnectorToolPatterns,
+  normalizeConnectorId,
 } from './connector-permissions.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -76,6 +77,7 @@ export interface ContainerInput {
   script?: string;
   allowedMcpServers?: string[];
   allowedMcpToolPatterns?: string[];
+  restrictions?: string;
   model?: string;
   provider?: AgentProvider;
   providerFallbackPurpose?: ProviderPurpose;
@@ -165,7 +167,8 @@ function loadConfiguredConnectorIds(): string[] {
         fs.readFileSync(mcpConfigPath, 'utf-8'),
       ) as Array<{ name?: string }>;
       for (const server of servers) {
-        if (server.name) ids.add(server.name);
+        const connectorId = normalizeConnectorId(server.name);
+        if (connectorId) ids.add(connectorId);
       }
     }
   } catch {}
@@ -180,6 +183,10 @@ function connectorIdsFromMcpToolPatterns(patterns: string[]): string[] {
         .filter((connectorId): connectorId is string => Boolean(connectorId)),
     ),
   );
+}
+
+function isCoworkProjectWebGroup(group: RegisteredGroup): boolean {
+  return group.kind === 'web' && Boolean(group.projectId || group.projectSlug);
 }
 
 function buildVolumeMounts(
@@ -275,6 +282,21 @@ function buildVolumeMounts(
         hostPath: globalDir,
         containerPath: '/workspace/global',
         readonly: true,
+      });
+    }
+  }
+
+  if (
+    group.kind === 'web' &&
+    group.projectSlug &&
+    /^[a-z0-9-]+$/.test(group.projectSlug)
+  ) {
+    const projectDir = path.join(STORE_DIR, 'projects', group.projectSlug);
+    if (fs.existsSync(projectDir)) {
+      mounts.push({
+        hostPath: projectDir,
+        containerPath: `/workspace/extra/project-${group.projectSlug}`,
+        readonly: false,
       });
     }
   }
@@ -445,11 +467,11 @@ function buildContainerArgs(
     DEFAULT_AGENT_MODELS[effectiveProvider];
   const providerDefinition = getAgentProviderDefinition(effectiveProvider);
   const allowedMcpServerSet = new Set(
-    (allowedMcpServers || []).map((server) => server.toLowerCase()),
+    (allowedMcpServers || []).map((server) => normalizeConnectorId(server)),
   );
   const isMcpAllowed = (serverName: string): boolean =>
     allowedMcpServers === undefined ||
-    allowedMcpServerSet.has(serverName.toLowerCase());
+    allowedMcpServerSet.has(normalizeConnectorId(serverName));
   const providerEnvKeys = [
     providerDefinition.envKey,
     providerDefinition.baseUrlEnvKey,
@@ -506,14 +528,26 @@ function buildContainerArgs(
     setEnv(key, envValue(key));
   }
 
-  // Pass Google Workspace credentials to container (for Gmail/Calendar MCP)
-  const googleVars = [
-    'GOOGLE_OAUTH_CLIENT_ID',
-    'GOOGLE_OAUTH_CLIENT_SECRET',
-    'GOOGLE_REFRESH_TOKEN',
-  ];
-  for (const key of googleVars) {
-    setEnv(key, envValue(key));
+  // Pass Google Workspace credentials only when a connector inside the active
+  // boundary needs them. This keeps unrelated chat/code containers from
+  // receiving mail/calendar credentials by default.
+  const needsGoogleWorkspaceCredentials =
+    isMcpAllowed('gmail') ||
+    isMcpAllowed('google-mail') ||
+    isMcpAllowed('calendar') ||
+    isMcpAllowed('google-calendar') ||
+    isMcpAllowed('google-docs') ||
+    isMcpAllowed('gdrive') ||
+    isMcpAllowed('google-drive');
+  if (needsGoogleWorkspaceCredentials) {
+    const googleVars = [
+      'GOOGLE_OAUTH_CLIENT_ID',
+      'GOOGLE_OAUTH_CLIENT_SECRET',
+      'GOOGLE_REFRESH_TOKEN',
+    ];
+    for (const key of googleVars) {
+      setEnv(key, envValue(key));
+    }
   }
 
   // Pass GitHub token only when the GitHub connector is inside the boundary.
@@ -664,6 +698,7 @@ export async function runContainerAgent(
     groupFolder: input.groupFolder,
     agentId: agentBoundary.agentId,
     isMain: input.isMain,
+    isCoworkProject: isCoworkProjectWebGroup(group),
     action: 'tools.expose',
   });
   const allowedMcpToolPatterns = getAllowedConnectorToolPatterns({
@@ -671,6 +706,7 @@ export async function runContainerAgent(
     groupFolder: input.groupFolder,
     agentId: agentBoundary.agentId,
     isMain: input.isMain,
+    isCoworkProject: isCoworkProjectWebGroup(group),
     dryRun: input.dryRun,
   });
   const executableConnectorIds = connectorIdsFromMcpToolPatterns(

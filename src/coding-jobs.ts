@@ -15,8 +15,10 @@ import { readEnvFile } from './env.js';
 import {
   AgentProvider,
   DEFAULT_AGENT_MODELS,
+  codingProviderUnavailableReason,
   getAgentProviderConfig,
   isAgentProvider,
+  isCodingCapableProvider,
 } from './agent-provider.js';
 import {
   CONTAINER_HOST_GATEWAY,
@@ -42,8 +44,13 @@ const CODING_JOB_PROVIDERS = new Set<AgentProvider>([
   'claude',
   'codex',
   'opencode',
+  'openrouter',
+  'ollama',
 ]);
-type CodingProvider = Extract<AgentProvider, 'claude' | 'codex' | 'opencode'>;
+type CodingProvider = Extract<
+  AgentProvider,
+  'claude' | 'codex' | 'opencode' | 'openrouter' | 'ollama'
+>;
 
 export type CodingJobStatus =
   | 'queued'
@@ -449,17 +456,32 @@ export async function listGitHubIssues(input: {
     .filter((issue): issue is GitHubIssueSummary => issue !== null);
 }
 
-function isCodingProvider(provider: AgentProvider): provider is CodingProvider {
-  return CODING_JOB_PROVIDERS.has(provider);
+function isCodingProvider(
+  provider: AgentProvider,
+  model?: string,
+): provider is CodingProvider {
+  return (
+    CODING_JOB_PROVIDERS.has(provider) &&
+    isCodingCapableProvider(provider, model)
+  );
 }
 
-function codingProvider(inputProvider?: string): CodingProvider {
+function codingProvider(
+  inputProvider?: string,
+  inputModel?: string,
+): CodingProvider {
   if (inputProvider && isAgentProvider(inputProvider)) {
-    if (isCodingProvider(inputProvider)) return inputProvider;
-    throw new Error(`${inputProvider} is not a coding-job runtime`);
+    if (isCodingProvider(inputProvider, inputModel)) return inputProvider;
+    throw new Error(
+      codingProviderUnavailableReason(inputProvider, inputModel) ||
+        `${inputProvider} is not a coding-job runtime`,
+    );
   }
   const config = getAgentProviderConfig();
-  return isCodingProvider(config.provider) ? config.provider : 'claude';
+  const model =
+    config.modelsByProvider[config.provider] ||
+    DEFAULT_AGENT_MODELS[config.provider];
+  return isCodingProvider(config.provider, model) ? config.provider : 'claude';
 }
 
 function defaultModelForProvider(provider: CodingProvider): string {
@@ -630,6 +652,9 @@ function buildCodingContainerEnv(
     'GIT_AUTHOR_EMAIL',
     'CODING_JOB_MAX_BUDGET_USD',
     'OPENCODE_API_KEY',
+    'OPENROUTER_API_KEY',
+    'OPENROUTER_BASE_URL',
+    'OLLAMA_BASE_URL',
   ]);
   const env: Record<string, string> = {
     TZ: TIMEZONE,
@@ -671,6 +696,21 @@ function buildCodingContainerEnv(
   const opencodeKey = envValue(envFileValues, 'OPENCODE_API_KEY');
   if (job.provider === 'opencode' && opencodeKey) {
     env.OPENCODE_API_KEY = opencodeKey;
+  }
+  if (job.provider === 'openrouter') {
+    const openrouterKey = envValue(envFileValues, 'OPENROUTER_API_KEY');
+    if (openrouterKey) {
+      env.OPENROUTER_API_KEY = 'placeholder';
+      env.AGENT_PROVIDER_API_KEY = 'placeholder';
+    }
+    const openrouterProxyUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/openrouter`;
+    env.OPENROUTER_BASE_URL = openrouterProxyUrl;
+    env.AGENT_PROVIDER_BASE_URL = openrouterProxyUrl;
+  }
+  if (job.provider === 'ollama') {
+    env.OLLAMA_BASE_URL =
+      envValue(envFileValues, 'OLLAMA_BASE_URL') ||
+      'http://host.docker.internal:11434/v1';
   }
 
   return env;
@@ -735,6 +775,17 @@ function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
       '    ;;',
       '  opencode)',
       '    opencode run --model "$JOB_MODEL" "$PROMPT"',
+      '    ;;',
+      '  openrouter)',
+      '    opencode run --model "$JOB_MODEL" "$PROMPT"',
+      '    ;;',
+      '  ollama)',
+      '    OLLAMA_JOB_MODEL="$JOB_MODEL"',
+      '    case "$OLLAMA_JOB_MODEL" in',
+      '      ollama/*) ;;',
+      '      *) OLLAMA_JOB_MODEL="ollama/$OLLAMA_JOB_MODEL" ;;',
+      '    esac',
+      '    opencode run --model "$OLLAMA_JOB_MODEL" "$PROMPT"',
       '    ;;',
       '  claude)',
       '    claude -p --model "$JOB_MODEL" --output-format text --dangerously-skip-permissions --max-budget-usd "$CODING_JOB_MAX_BUDGET_USD" "$PROMPT"',
@@ -1050,8 +1101,11 @@ async function runCodingJob(job: CodingJob): Promise<void> {
     return;
   }
   if (fallback.provider && fallback.provider !== job.provider) {
-    if (!isCodingProvider(fallback.provider)) {
-      throw new Error(`${fallback.provider} is not a coding-job runtime`);
+    if (!isCodingProvider(fallback.provider, fallback.model)) {
+      throw new Error(
+        codingProviderUnavailableReason(fallback.provider, fallback.model) ||
+          `${fallback.provider} is not a coding-job runtime`,
+      );
     }
     updateJobOutput(
       job,
@@ -1176,7 +1230,17 @@ export async function startCodingJob(
     throw new Error(`Repo ${input.repo} is not registered for coding jobs`);
   }
 
-  const provider = codingProvider(input.provider);
+  const requestedProvider =
+    input.provider && isAgentProvider(input.provider)
+      ? input.provider
+      : undefined;
+  const requestedModel =
+    input.model ||
+    (requestedProvider
+      ? getAgentProviderConfig().modelsByProvider[requestedProvider] ||
+        DEFAULT_AGENT_MODELS[requestedProvider]
+      : undefined);
+  const provider = codingProvider(input.provider, requestedModel);
   const model = input.model || defaultModelForProvider(provider);
   let prompt = input.prompt || '';
   let issueTitle: string | null = null;

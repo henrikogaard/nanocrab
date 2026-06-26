@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b0d0f">
+  <title>NanoCrab offline</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0d0f;
+      --panel: #15181b;
+      --panel-strong: #1d2226;
+      --border: #30373d;
+      --text: #f5f1ea;
+      --muted: #a8a099;
+      --accent: #4db6a7;
+      --accent-soft: rgba(77, 182, 167, 0.14);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100dvh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 32px 18px;
+      background:
+        radial-gradient(circle at 28% 24%, rgba(77, 182, 167, 0.1), transparent 28rem),
+        linear-gradient(145deg, #0b0d0f 0%, #121416 54%, #0e1113 100%);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(100%, 720px);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: color-mix(in srgb, var(--panel) 94%, transparent);
+      box-shadow: 0 22px 80px rgba(0, 0, 0, 0.38);
+      padding: clamp(24px, 5vw, 44px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 34px;
+    }
+
+    .brand img {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: var(--panel-strong);
+    }
+
+    .eyebrow {
+      margin: 0 0 4px;
+      color: var(--muted);
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.8rem);
+      line-height: 0.98;
+      text-wrap: balance;
+    }
+
+    p {
+      max-width: 62ch;
+      color: var(--muted);
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+
+    .lanes {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin: 26px 0 30px;
+    }
+
+    .lane {
+      min-height: 92px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      background: var(--panel-strong);
+    }
+
+    .lane strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.95rem;
+    }
+
+    .lane span {
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.45;
+    }
+
+    .recovery {
+      display: grid;
+      gap: 10px;
+      margin: 0 0 28px;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .recovery strong {
+      font-size: 0.95rem;
+    }
+
+    .recovery ul {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding-left: 20px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .offline-work-plan {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin: 0 0 28px;
+    }
+
+    .offline-work-card {
+      display: grid;
+      gap: 8px;
+      min-height: 132px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .offline-work-card span {
+      color: var(--accent);
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .offline-work-card strong {
+      font-size: 0.94rem;
+      line-height: 1.25;
+    }
+
+    .offline-work-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.45;
+    }
+
+    .resume-targets {
+      display: grid;
+      gap: 12px;
+      margin: 0 0 28px;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background:
+        linear-gradient(135deg, rgba(77, 182, 167, 0.08), transparent 58%),
+        rgba(255, 255, 255, 0.025);
+    }
+
+    .resume-targets h2 {
+      margin: 0;
+      font-size: 1rem;
+      line-height: 1.25;
+    }
+
+    .resume-targets > p {
+      margin: 0;
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+
+    .resume-target-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .resume-target {
+      display: grid;
+      gap: 6px;
+      min-height: 112px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel-strong);
+    }
+
+    .resume-target span {
+      color: var(--accent);
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .resume-target strong {
+      font-size: 0.86rem;
+      line-height: 1.25;
+    }
+
+    .resume-target p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+      line-height: 1.42;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    button {
+      min-height: 44px;
+      border: 1px solid color-mix(in srgb, var(--accent) 66%, white);
+      border-radius: 10px;
+      padding: 0 18px;
+      background: var(--accent);
+      color: #07100f;
+      font: inherit;
+      font-weight: 750;
+      cursor: pointer;
+      transition: transform 160ms ease, background 160ms ease;
+    }
+
+    button.secondary {
+      background: transparent;
+      color: var(--text);
+      border-color: var(--border);
+    }
+
+    button:hover {
+      background: color-mix(in srgb, var(--accent) 88%, white);
+      transform: translateY(-1px);
+    }
+
+    button.secondary:hover {
+      background: var(--panel-strong);
+      color: var(--text);
+    }
+
+    button:active {
+      transform: translateY(0) scale(0.98);
+    }
+
+    button:focus-visible {
+      outline: 3px solid var(--accent-soft);
+      outline-offset: 3px;
+    }
+
+    .copy-status {
+      min-height: 20px;
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .manual-copy {
+      display: none;
+      gap: 10px;
+      margin-top: 14px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .manual-copy.is-visible {
+      display: grid;
+    }
+
+    .manual-copy label {
+      color: var(--text);
+      font-size: 0.9rem;
+      font-weight: 750;
+    }
+
+    .manual-copy textarea {
+      width: 100%;
+      min-height: 190px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #0f1214;
+      color: var(--text);
+      font: 0.86rem/1.55 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      resize: vertical;
+    }
+
+    .manual-copy textarea:focus-visible {
+      border-color: var(--accent);
+      outline: 3px solid var(--accent-soft);
+      outline-offset: 2px;
+    }
+
+    @media (max-width: 620px) {
+      .lanes,
+      .offline-work-plan,
+      .resume-target-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">
+      <img src="/static/nanocrab-mark.png" alt="NanoCrab mark">
+      <div>
+        <p class="eyebrow">Personal AI workspace</p>
+        <h1>NanoCrab is offline</h1>
+      </div>
+    </div>
+    <p>
+      This local dashboard needs the NanoCrab server for live Copilot, Cowork,
+      Code, memory, and operations data. Check the connection or restart the
+      service, then try again.
+    </p>
+    <section class="lanes" aria-label="Workspace areas unavailable while offline">
+      <div class="lane">
+        <strong>Copilot</strong>
+        <span>Plain chat and personal assistant conversations pause until the server responds.</span>
+      </div>
+      <div class="lane">
+        <strong>Cowork</strong>
+        <span>Projects, files, artifacts, and MCP-backed agent work need live workspace access.</span>
+      </div>
+      <div class="lane">
+        <strong>Code</strong>
+        <span>Repository agents, GitHub Copilot, and coding pipelines resume when NanoCrab is reachable.</span>
+      </div>
+    </section>
+    <section class="recovery" aria-label="Offline recovery checklist">
+      <strong>Recovery checklist</strong>
+      <ul>
+        <li>Check that the NanoCrab server process is running and reachable from this browser.</li>
+        <li>Use cached notes or local files for drafting, but wait before sending email, publishing documents, or changing third-party systems.</li>
+        <li>When the server returns, review Monitoring, Logs, and Approvals before restarting long-running agent work.</li>
+      </ul>
+    </section>
+    <section class="offline-work-plan" aria-label="Offline work plan">
+      <article class="offline-work-card">
+        <span>01 Draft only</span>
+        <strong>Keep useful work local</strong>
+        <p>Write notes, outlines, and reply drafts in local files while Copilot, Cowork, Code, and MCP tools are unavailable.</p>
+      </article>
+      <article class="offline-work-card">
+        <span>02 Hold changes</span>
+        <strong>Do not publish externally</strong>
+        <p>Wait on email sends, document publishing, webhook triggers, calendar updates, repository pushes, and third-party writes.</p>
+      </article>
+      <article class="offline-work-card">
+        <span>03 Reconcile</span>
+        <strong>Restart with evidence</strong>
+        <p>After reconnecting, check Monitoring, Logs, Approvals, and project history before resuming agents or scheduled work.</p>
+      </article>
+    </section>
+    <section class="resume-targets" aria-label="Reconnect resume targets">
+      <h2>When NanoCrab is reachable again</h2>
+      <p>Resume from the surface that can prove the current state before handing work back to agents.</p>
+      <div class="resume-target-grid">
+        <article class="resume-target">
+          <span>Health</span>
+          <strong>Monitoring</strong>
+          <p>Confirm the runtime is fresh before restarting scheduled or long-running work.</p>
+        </article>
+        <article class="resume-target">
+          <span>Evidence</span>
+          <strong>Logs</strong>
+          <p>Check outage timing and failed actions before retrying channels or MCP tools.</p>
+        </article>
+        <article class="resume-target">
+          <span>Context</span>
+          <strong>Cowork</strong>
+          <p>Attach offline notes to the project before asking agents to continue.</p>
+        </article>
+        <article class="resume-target">
+          <span>Output</span>
+          <strong>Reports</strong>
+          <p>Regenerate summaries or documents after source systems are reachable.</p>
+        </article>
+        <article class="resume-target">
+          <span>Gate</span>
+          <strong>Approvals</strong>
+          <p>Review pending external writes before sending, publishing, or updating systems.</p>
+        </article>
+      </div>
+    </section>
+    <div class="actions">
+      <button type="button" onclick="location.reload()">Retry</button>
+      <button class="secondary" type="button" onclick="copyOfflineBrief()">Copy outage brief</button>
+      <button class="secondary" type="button" onclick="copyOfflineProjectNote()">Copy project note</button>
+    </div>
+    <p class="copy-status" id="copy-status" role="status" aria-live="polite"></p>
+    <section class="manual-copy" id="manual-copy-panel" aria-label="Manual outage brief copy">
+      <label for="manual-copy-text">Clipboard access is unavailable. Select and copy the brief below.</label>
+      <textarea id="manual-copy-text" readonly></textarea>
+    </section>
+  </main>
+  <script>
+    const offlineBriefText = [
+        'NanoCrab offline recovery brief',
+        '',
+        'Status: dashboard cannot reach the NanoCrab server.',
+        'Affected lanes: Copilot chat, Cowork projects, Code agents, memory, approvals, MCP tools, and operations data.',
+        '',
+        'Recovery steps:',
+        '- Check that the NanoCrab server process is running and reachable.',
+        '- Use cached notes or local files only for drafting while offline.',
+        '- Do not send email, publish documents, trigger webhooks, update calendars, or change third-party systems until connectivity is restored and approvals are reviewed.',
+        '- After reconnecting, review Monitoring, Logs, and Approvals before restarting long-running work.',
+        '',
+        'Offline work plan:',
+        '- Draft only: write notes, outlines, and reply drafts in local files.',
+        '- Hold changes: do not publish, push, send, or trigger third-party writes.',
+        '- Reconcile: check Monitoring, Logs, Approvals, and project history before resuming agents or schedules.',
+        '',
+        'Reconnect resume targets:',
+        '- Monitoring: confirm the runtime is fresh before restarting scheduled or long-running work.',
+        '- Logs: check outage timing and failed actions before retrying channels or MCP tools.',
+        '- Cowork: attach offline notes to the project before asking agents to continue.',
+        '- Reports: regenerate summaries or documents after source systems are reachable.',
+        '- Approvals: review pending external writes before sending, publishing, or updating systems.',
+      ].join('\n');
+
+    const offlineProjectNoteText = [
+      'Offline Cowork project note',
+      '',
+      'Project:',
+      'Date window:',
+      'Offline source files or notes:',
+      '',
+      'What changed while NanoCrab was offline:',
+      '- ',
+      '',
+      'Drafted work:',
+      '- Notes:',
+      '- Reply drafts:',
+      '- Document or report outline:',
+      '- Code or repository observations:',
+      '',
+      'Decisions and open questions:',
+      '- Decisions:',
+      '- Risks:',
+      '- Waiting items:',
+      '- Open questions:',
+      '',
+      'Reconnect checklist:',
+      '- Attach this note to the Cowork project before asking agents to continue.',
+      '- Check Monitoring and Logs for outage timing before retrying MCP, channel, or scheduled work.',
+      '- Review Approvals before sending email, publishing documents, triggering webhooks, updating calendars, pushing repositories, or changing third-party systems.',
+      '- Regenerate summaries or reports only after source systems are reachable again.',
+      '',
+      'Next safe action:',
+      'Ask Cowork to reconcile this note with project files, recent chats, source systems, and pending approvals before resuming automation.',
+    ].join('\n');
+
+    function showManualCopy(text) {
+      const panel = document.getElementById('manual-copy-panel');
+      const textarea = document.getElementById('manual-copy-text');
+      const status = document.getElementById('copy-status');
+      textarea.value = text;
+      panel.classList.add('is-visible');
+      status.textContent = 'Clipboard access is unavailable. The outage brief is ready for manual copy.';
+      textarea.focus();
+      textarea.select();
+    }
+
+    async function copyOfflineBrief() {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(offlineBriefText);
+          document.getElementById('copy-status').textContent = 'Outage brief copied.';
+          return;
+        } catch {
+          showManualCopy(offlineBriefText);
+          return;
+        }
+      }
+      showManualCopy(offlineBriefText);
+    }
+
+    async function copyOfflineProjectNote() {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(offlineProjectNoteText);
+          document.getElementById('copy-status').textContent = 'Offline project note copied.';
+          return;
+        } catch {
+          showManualCopy(offlineProjectNoteText);
+          return;
+        }
+      }
+      showManualCopy(offlineProjectNoteText);
+    }
+  </script>
+</body>
+</html>

@@ -124,6 +124,40 @@ describe('agent boundaries', () => {
     expect(capabilities.allowedToolActions).not.toContain('external.write');
   });
 
+  it('allows project web chats to use MCP write tools with approval', () => {
+    const boundary = resolveAgentBoundary({
+      group: {
+        name: 'Web Conversation',
+        folder: 'web-project-thread',
+        trigger: '^',
+        added_at: '2026-06-17T12:00:00.000Z',
+        kind: 'web',
+        projectId: 'project-1',
+        projectSlug: 'research-notes',
+      },
+      isMain: false,
+      availableConnectorIds: ['nanocrab', 'gmail', 'google-docs'],
+    });
+    const capabilities = deriveRuntimeCapabilities(boundary, {
+      connectorIds: ['nanocrab', 'gmail', 'google-docs'],
+    });
+
+    expect(boundary.externalWrites).toEqual({
+      allowed: true,
+      requiresApproval: true,
+    });
+    expect(boundary.filesystemScopes).toContainEqual({
+      containerPath: '/workspace/extra/project-research-notes',
+      access: 'read-write',
+    });
+    expect(capabilities.allowedConnectorIds).toEqual([
+      'nanocrab',
+      'gmail',
+      'google-docs',
+    ]);
+    expect(capabilities.allowedToolActions).toContain('external.write');
+  });
+
   it('keeps explicit group MCP restrictions inside the broader boundary', () => {
     const boundary = resolveAgentBoundary({
       group: {

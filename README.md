@@ -20,7 +20,7 @@ NanoCrab is its own product now. It is not an upstream-compatible fork of any up
 
 NanoCrab 2.0-RC3 is a major step toward a long-running personal agent. It can learn over time, keep memories, reuse those memories across channels, and grow its own provider-neutral skills, but it does this with review and provenance instead of silently absorbing everything it sees.
 
-RC3 focuses on making the new autonomy surfaces easier to operate: the dashboard now exposes guided coding assignment, GitHub issue pickup, Autofix auto-pickup, routine blueprints, scheduled task delivery controls, webhook approvals, and clearer operator documentation.
+RC3 focuses on making the new workspace surfaces easier to operate: the dashboard now separates pure chat, project collaboration, and repository work while still exposing guided coding assignment, GitHub issue pickup, Autofix auto-pickup, Cowork projects, routine blueprints, scheduled task delivery controls, webhook approvals, and clearer operator documentation.
 
 - **Structured memory** is stored as reviewed records with scope, type, content, source, confidence, sensitivity, visibility, stale-review state, and contradiction metadata.
 - **Shared context** is generated from approved memories into runtime `MEMORY.md` files, so chat, automations, coding jobs, journal extraction, and reports can all benefit from the same remembered facts and preferences.
@@ -44,15 +44,28 @@ In short: yes, NanoCrab now has governed long-term learning. It remembers what y
 
 Full web dashboard at your domain with 7-layer security (firewall, TLS, IP allowlist, rate limiting, CSP headers, session auth, audit logging).
 
-The dashboard is **mode-first**: the sidebar leads with three top-level modes — **Chat**, **Work**, and **Code** — and the operational/admin surfaces collapse into a secondary **More** drawer. Switching mode swaps the mode-scoped sidebar (Chat → conversations, Work → agents/tasks/approvals/reports/memory/timeline, Code → Git & Code/Terminal/AutoFix/Skills), while Customize and the More drawer (Deploy, Monitoring, Containers, Security, Audit, Integrations, Settings, …) stay reachable from every mode. The app reopens whichever mode you used last, and existing `#/<page>` deep links keep working — opening any page selects the mode that owns it. On mobile the bottom bar is Chat / Work / Code / More.
+The dashboard is **mode-first**: the sidebar leads with three top-level focus modes — **Copilot**, **Cowork**, and **Code** — and operational/admin surfaces live in a secondary **More** drawer. Switching mode swaps the mode-scoped sidebar:
 
-- **Overview** — live stats, weather, channel status, message feed
-- **Agents** — Assign Work wizard for one-off coding tasks, GitHub issue pickup, Autofix auto-pickup setup, coding-job output, and bot agents
-- **Tasks** — routine blueprints, schedule builder, delivery modes, run history, heartbeat checks, and run-now controls
-- **Messages** — search, filter, export conversations across all channels
-- **Approvals** — unified inbox for pending and reviewed risky actions with provenance, filters, and approve/deny controls
-- **Memory** — shared cross-channel memory + wiki knowledge base
-- **Settings** — 2FA (TOTP), themes, API tokens, bot personality editor, plugin management
+- **Copilot** — ChatGPT-style plain conversations. Start a new chat by choosing a provider/model and optional title; there is no agent template or project workspace. If no title is supplied, NanoCrab can name the thread after the first user message.
+- **Cowork** — Projects, agents, tasks, workflows, approvals, reports, artifacts, documents, source ledgers, and MCP-backed collaboration. Cowork projects are virtual folders with files, artifacts, documents, chats, previous thread history, project instructions, provider/model selection, and approved MCP server access for source-backed work such as email summaries or document drafts.
+- **Code** — Git & Code, Terminal/Developer Hub, Autofix, and GitHub Copilot. Use this mode for repositories, issues, PRs, tests, review rules, snippets, and coding-agent handoffs.
+- **More** — Dashboard, Channels, Messages, Deploy, Monitoring, Containers, Integrations, Webhooks, Credentials, Security, Audit, Uptime, Backup, Usage, Groups, Sessions, Marketplace, Help, and personal setup surfaces.
+
+Memory and Skills are intentionally not buried in Cowork. They live in the personal/shared tooling area because durable memories, learned preferences, reusable skills, assistant identity, provider profiles, credentials, and access controls can affect Copilot, Cowork, Code, scheduled tasks, and channel agents. The app reopens whichever focus mode you used last, migrates the previous `work` saved mode to `cowork`, and existing `#/<page>` deep links keep working by selecting the mode that owns the route. On mobile the bottom bar is Copilot / Cowork / Code / More.
+
+Channel agents use the same workspace map. From WhatsApp, Signal, Telegram, or another registered channel, prompts such as "check Cowork for project Aurora Docs, update the summary, and send me the file" can resolve Cowork projects, read or write project files, and send the selected project file back through the current channel when that adapter supports file delivery.
+
+- **Dashboard** — live stats, weather, channel status, message feed, cockpit, smart refresh, and workspace route guidance
+- **Copilot chat** — pure web conversations with thread history, provider/model selection, optional title, generated title fallback, inline progress/tool visibility, and no agent templates
+- **Cowork Projects** — virtual project folders with files, artifacts, documents, project chats, previous thread history, instructions, MCP source workflows, and local draft-first output
+- **Agents** — assignment flows for delegated tasks, GitHub issue pickup, Autofix auto-pickup setup, coding-job output, and bot agents
+- **Tasks & Workflows** — routine blueprints, schedule builder, missions, runbooks, delivery modes, run history, heartbeat checks, and run-now controls
+- **Reports & Artifacts** — source-backed deliverables, briefing schedules, generated files, vault search, retention, and Cowork handoff prompts
+- **Messages & Channels** — search, filter, export, channel intake, registration, and routing into Copilot or Cowork when needed
+- **Approvals, Security, Audit** — unified review for pending/reviewed risky actions, provenance, policy decisions, and recovery paths
+- **Memory, Wiki, Skills** — personal/cross-agent memory, durable reference pages, reusable workflow packages, suggestions, drafts, validation, and rollback
+- **Settings & Integrations** — 2FA (TOTP), themes, API tokens, assistant profile, providers, MCP servers, credentials, plugin management, and connector readiness
+- **Code workspace** — Git Ops, editor, test runner, snippets, review rules, Terminal/Developer Hub, Autofix, and GitHub Copilot
 
 ### Plugin System
 
@@ -63,7 +76,7 @@ Optional features that can be enabled/disabled from the dashboard:
 | **GitHub Autofix** | Label an issue `autofix` → an agent clones repo, writes fix, opens PR. Auto-pick labeled issues and auto-review PRs. |
 | **GitHub Copilot** | Multi-account OAuth, assign Copilot to issues, track PRs                                |
 | **Uptime Monitor** | HTTP + file-freshness health checks with bot alerts                                     |
-| **Chat**           | Claude Code-style web conversations — threads in the sidebar, "New conversation" with a per-thread agent template, isolated per-thread workspace, inline tool-call/approval/progress rendering (separate from WhatsApp/Signal channels) |
+| **Chat**           | Copilot plain web conversations — threads in the sidebar, "New conversation" with provider/model selection and optional title, generated title fallback after the first message, no agent templates, and no project workspace |
 | **Workflows**      | Automation workflows, routines, missions, runbooks, and tracked operator steps          |
 | **Wiki**           | Markdown knowledge base                                                                 |
 
@@ -71,7 +84,7 @@ Additional plugins can be installed from git URLs via the Marketplace page, or c
 
 ### Autonomous Coding
 
-- **Assign Work Wizard** — start a freeform coding task from templates, pick the next matching GitHub issue, or enable Autofix auto-pickup from the Agents dashboard
+- **Assign Work Wizard** — start a freeform coding task from templates, pick the next matching GitHub issue, or enable Autofix auto-pickup from the Code/Cowork agent surfaces
 - **GitHub Coding Jobs** — register enabled repos, pick issues by repo/label/assignee/milestone/number, inspect diffs/output/tests/CI, approve implementation, approve PRs, retry, cancel, and revert
 - **Repo Coding Rules** — save reviewed repo preferences such as required runtimes, test commands, and safety conventions; approved rules are injected into coding-job prompts without exposing secrets.
 - **Isolated Coding Jobs** — WhatsApp/Signal/Telegram agents can request repo coding jobs through MCP; an ephemeral coding container clones and edits inside `data/coding-workspaces`
@@ -96,7 +109,8 @@ Create a scheduled task that periodically asks the main agent to pick an autofix
 The agent calls MCP tools such as `register_coding_repo`,
 `list_github_issues`, `start_coding_job`, `pick_github_issue`, and
 the scheduled-task tools. The dashboard exposes the same flow under
-**Agents -> Assign Work**, **Agents -> GitHub Coding Jobs**, and **Autofix**.
+**Cowork -> Agents**, **Code -> Git & Code**, **Code -> GitHub Copilot**, and
+**Code -> Autofix**.
 Issue pickup only runs for
 enabled repo configs and supports repo, label, assignee, milestone, and direct
 issue-number filters. Jobs move through `queued -> investigate -> plan ->
@@ -121,9 +135,13 @@ stored in `store/coding-jobs.json`, registered repos live in
 `store/coding-repos.json`, and workspaces live under
 `data/coding-workspaces/jobs/`.
 
-Coding runtimes are limited to `claude`, `codex`, and `opencode`; chat-only
-providers such as Ollama/OpenRouter/Google stay in the normal agent path unless
-a dedicated coding runtime is added.
+Coding jobs support `claude`, `codex`, `opencode`, `openrouter`, and code-capable
+Ollama models. OpenRouter and local Ollama coding jobs run through the agentic
+OpenCode shell so repository work still edits files in the isolated job
+workspace. Ollama's default chat models remain chat/local-task oriented; choose
+an explicit code model such as `codestral` before assigning local coding work.
+Google and other OpenAI-compatible chat providers stay in the normal agent path
+unless a dedicated coding runtime is added.
 
 ### Browser Automation
 
@@ -147,9 +165,11 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The mock server serves
 the same dashboard frontend as production, but intercepts `/api/*` and `/ws`
 with sample data. The dashboard auto-authenticates as a mock owner, shows a
 visible mock-mode banner, and includes placeholder content for the main
-surfaces: Dashboard, Agents, Chat, Messages, Groups, Tasks, Memory,
-Approvals, Integrations, Developer tools, Git & Code, Monitoring, Containers,
-Security, Settings, Marketplace, Uptime, Wiki, Workflows, Autofix, and Copilot.
+surfaces: Dashboard, Copilot chat, Cowork Projects, Agents, Tasks, Workflows,
+Reports, Artifacts, Approvals, Channels, Messages, Groups, Sessions, Memory,
+Wiki, Skills, Settings, Integrations, Credentials, Webhooks, Developer Hub,
+Git & Code, Terminal, Mounts, Files, Monitoring, Containers, Security, Audit,
+Backup, Usage, Marketplace, Uptime, Autofix, and GitHub Copilot.
 The cockpit and session surfaces include richer sample runs for active,
 approval-blocked, failed, and completed agents, including timelines, artifacts,
 approvals, stats, and tool-call transcripts.
@@ -184,6 +204,7 @@ success responses and do not mutate live files or services.
 - **Terminal Session History** — owner-only terminal sessions persist transcripts with session ownership, read-only history, and searchable context snippets while rejecting unsafe session IDs before file access.
 - **Assistant Profile** — Settings groups assistant name, trigger preview, avatar choice, personality instructions, and skill preference summaries so owners can make NanoCrab feel like their own assistant.
 - **Assistant Avatar Gallery** — Settings includes the NanoCrab default mark, an uploaded-avatar slot, and five built-in SVG assistant avatars with metadata for small dashboard identity use.
+- **Copilot, Cowork, And Code Split** — the dashboard separates lightweight chat from durable project work and repository automation. Cowork projects keep files, artifacts, documents, chats, history, instructions, and approved MCP context together; Code owns repos, GitHub Copilot, tests, snippets, and review rules; Copilot stays as plain conversation.
 - **Scheduled Briefings** — Report Studio can create daily or weekly briefing schedules backed by scheduled tasks. Briefings include an explicit provider-profile selector, journal/memory sources, selected output formats, and keep external delivery behind approval.
 - **Routines & Operation Schedules** — Tasks now starts from routine blueprints such as daily briefings, issue triage, PR digests, dependency/security watches, flaky-test tracking, inbox SLA monitoring, release notes, approval-gated webhooks, skill-declared templates, and script-gated heartbeat checks. Routines can stay dashboard-only, send to chat, write review files under `store/task-deliveries`, create webhook-delivery approvals, keep named sessions, enforce heartbeat quiet hours/stale checks, cap active runs, and chain recent results from other tasks. Operation reminders still default to preview-only dry runs unless the admin explicitly approves scheduled chat delivery.
 - **Missions And Runbooks** — the Workflows page can define reusable runbooks, start missions from those runbooks, and track step state (`pending`, `running`, `completed`, `blocked`, or `skipped`). Steps marked as approval-required cannot be completed without an approval reference.
@@ -240,10 +261,16 @@ Install and build NanoCrab:
 ```bash
 git clone https://github.com/henrikogaard/nanocrab.git
 cd nanocrab
+nvm use # or: mise exec node@24 -- npm install
 npm install
 npm run build
 ./container/build.sh
 ```
+
+NanoCrab supports Node `>=20 <26`; `.nvmrc` pins Node 22. DB-backed tests use
+`better-sqlite3`, so Node 26 currently fails at native binding load time. If
+your shell is newer than the supported range, run commands through a supported
+runtime, for example `mise exec node@24 -- npm test`.
 
 Then choose which engine should power bot replies.
 
@@ -329,8 +356,17 @@ npx tsx setup/index.ts --step provider -- \
 OpenRouter defaults to `https://openrouter.ai/api/v1`. Google defaults to
 `https://generativelanguage.googleapis.com/v1beta/openai/`. In containers,
 OpenRouter and Google traffic goes through NanoCrab's credential proxy, so the
-real API keys stay on the host. Ollama is translated to the Docker host gateway
-when needed, which is the normal VPS/Linux container path.
+real API keys stay on the host for normal agent runs. OpenRouter coding jobs
+also use the proxy URL with a placeholder key. Ollama is translated to the
+Docker host gateway when needed, which is the normal VPS/Linux container path.
+
+Credential exceptions are intentional and narrow: OpenCode coding jobs may pass
+`OPENCODE_API_KEY`, GitHub coding jobs may pass `GITHUB_TOKEN` through
+`GIT_ASKPASS`, custom MCP servers receive only their configured env vars when
+inside the active connector boundary, Google Workspace OAuth vars are forwarded
+only for mail/calendar/docs/drive connectors, image helpers may receive their
+provider keys, and `NANOCRAB_API_TOKEN` is available to bundled local skills.
+Keep these secrets out of prompts, logs, handoff briefs, issues, and commits.
 
 ### Switching Providers Later
 
@@ -481,8 +517,9 @@ Single Node.js process. Channels self-register at startup. Agents execute in iso
 NanoCrab 2.0-RC3 is tested with Node.js 24. Node.js 20-24 are the supported range; avoid Node.js 26 for now because native dependencies such as SQLite bindings may not install cleanly there yet.
 
 RC3 documentation adds a user guide, refreshes the release handover, and
-clarifies the dashboard path for scheduled routines, coding jobs, approvals,
-Autofix pickup, and operational checks.
+clarifies the dashboard path for Copilot chat, Cowork projects, MCP-backed
+document/source work, scheduled routines, coding jobs, approvals, Autofix
+pickup, GitHub Copilot, and operational checks.
 
 Useful release checks:
 

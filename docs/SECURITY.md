@@ -56,7 +56,7 @@ Each group has isolated provider session state under `data/sessions/{group}/`. C
 - Session data includes full message history and file contents read
 - Prevents cross-group information disclosure
 
-Hosted OpenAI-compatible provider calls such as OpenRouter and Google Gemini are routed through NanoCrab's credential proxy. Containers receive a local proxy URL and placeholder bearer token; the real provider API keys stay on the host. Ollama uses its configured local/LAN endpoint and normally does not require a secret.
+Hosted OpenAI-compatible provider calls such as OpenRouter and Google Gemini are routed through NanoCrab's credential proxy for normal agent containers. Containers receive a local proxy URL and placeholder bearer token; the real provider API keys stay on the host. Ollama uses its configured local/LAN endpoint and normally does not require a secret. Some tool runtimes still require scoped secrets inside the container; these are listed under Credential Isolation.
 
 Shared runtime memory files such as `groups/global/MEMORY.md` are operator data and are ignored by git. They should be backed up with runtime state, not committed to the repository.
 
@@ -117,7 +117,7 @@ Messages and task operations are verified against group identity:
 
 ### 5. Credential Isolation (Built-In Proxy)
 
-Real API credentials **never enter containers**. NanoCrab uses its built-in credential proxy (`src/credential-proxy.ts`) to proxy provider requests and inject credentials in the trusted host process.
+Provider credentials should stay behind NanoCrab's built-in credential proxy whenever the runtime supports it. The proxy (`src/credential-proxy.ts`) forwards provider requests and injects credentials in the trusted host process.
 
 **How it works:**
 
@@ -125,10 +125,19 @@ Real API credentials **never enter containers**. NanoCrab uses its built-in cred
 2. NanoCrab starts a loopback-only credential proxy on the host.
 3. Containers receive provider base URLs that route through the proxy plus placeholder tokens where needed.
 4. The proxy matches the provider route, injects the real credential, and forwards the request.
-5. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`.
+5. For proxied providers, agents cannot discover real credentials — not in environment, stdin, files, or `/proc`.
 
 **Provider routes:**
-Claude, OpenRouter, and Google Gemini API traffic can be proxied this way. Ollama normally uses a local or LAN endpoint without a secret. NanoCrab has provider profiles for chat, coding, automations, memory, journal extraction, skill factory, reports, documents, and vision. Write-capable profiles should keep `approval-required` tool policy unless the deployment is explicitly trusted. Live per-model capability probes and fallback enforcement are implemented, with future work focused on broader provider coverage and release diagnostics.
+Claude, OpenRouter, and Google Gemini API traffic can be proxied this way. OpenRouter coding jobs also use the proxy URL plus a placeholder key. Ollama normally uses a local or LAN endpoint without a secret. NanoCrab has provider profiles for chat, coding, automations, memory, journal extraction, skill factory, reports, documents, and vision. Write-capable profiles should keep `approval-required` tool policy unless the deployment is explicitly trusted. Live per-model capability probes and fallback enforcement are implemented, with future work focused on broader provider coverage and release diagnostics.
+
+**Explicit Runtime Secret Exceptions:**
+
+- OpenCode coding jobs may receive `OPENCODE_API_KEY` because the OpenCode CLI reads its own credential environment.
+- GitHub coding jobs may receive `GITHUB_TOKEN` through an env file plus `GIT_ASKPASS` so clone/fetch/PR flows can run without interactive prompts.
+- Custom MCP servers receive only the env vars listed on that server and only when the connector is inside the agent boundary.
+- Google Workspace OAuth vars are forwarded only when a mail, calendar, docs, or drive connector is inside the active boundary.
+- Image-generation helpers may receive provider keys such as `FAL_KEY`, `LEONARDO_API_KEY`, or `OPENAI_API_KEY` when those helpers are enabled.
+- `NANOCRAB_API_TOKEN` is passed to containers so bundled skills can call the local NanoCrab API; keep it scoped to local runtime use and out of logs, handoff briefs, issue comments, and commits.
 
 **NOT Mounted:**
 
@@ -173,7 +182,7 @@ Claude, OpenRouter, and Google Gemini API traffic can be proxied this way. Ollam
 │  • Agent execution                                                │
 │  • Bash commands (sandboxed)                                      │
 │  • File operations (limited to mounts)                            │
-│  • API calls routed through NanoCrab credential proxy            │
-│  • No real credentials in environment or filesystem              │
+│  • Provider API calls routed through NanoCrab credential proxy   │
+│  • Runtime secrets limited to explicit tool/CLI exceptions       │
 └──────────────────────────────────────────────────────────────────┘
 ```

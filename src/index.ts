@@ -50,6 +50,7 @@ import {
   storeChatMetadata,
   storeMessage,
   storeMessageDirect,
+  updateChatName,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -82,7 +83,13 @@ import {
   broadcastToolResult,
   broadcastApprovalRequest,
   broadcastTaskProgress,
+  broadcastThreadTitle,
 } from './admin/websocket.js';
+import {
+  needsGeneratedThreadTitle,
+  normalizeGeneratedThreadTitle,
+  withThreadTitleRequest,
+} from './web-thread-title.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startProbeScheduler } from './probe-scheduler.js';
 import {
@@ -401,7 +408,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  const prompt = withThreadTitleRequest(
+    formatMessages(missedMessages, TIMEZONE),
+    group,
+  );
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -492,6 +502,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             message: marker.message,
             groupJid: chatJid,
           });
+        } else if (marker.type === 'thread_title') {
+          if (needsGeneratedThreadTitle(group)) {
+            const title = normalizeGeneratedThreadTitle(marker.title);
+            if (title) {
+              const updatedGroup = { ...group, title };
+              registeredGroups[chatJid] = updatedGroup;
+              setRegisteredGroup(chatJid, updatedGroup);
+              updateChatName(chatJid, title);
+              broadcastThreadTitle({
+                groupJid: chatJid,
+                title,
+                timestamp: now,
+              });
+            }
+          }
         }
       }
 
@@ -639,6 +664,7 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
         allowedMcpServers: group.containerConfig?.allowedMcpServers,
+        restrictions: group.containerConfig?.restrictions,
         provider: group.containerConfig?.provider,
         model: effectiveModel,
         providerFallbackPurpose: 'default_chat',

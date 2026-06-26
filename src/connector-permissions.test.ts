@@ -50,6 +50,28 @@ describe('connector permissions', () => {
     expect(decision.reason).toContain('not in connector scope');
   });
 
+  it('treats cowork project chats as owner-controlled connector surfaces', () => {
+    const decision = authorizeConnectorAction({
+      permissions: [
+        {
+          ...basePermission,
+          connectorId: 'gmail',
+          scope: 'main',
+          allowedActions: ['mail.read', 'tools.expose'],
+        },
+      ],
+      connectorId: 'gmail',
+      action: 'mail.read',
+      groupFolder: 'web-project-thread',
+      agentId: 'web-project-thread',
+      isMain: false,
+      isCoworkProject: true,
+    });
+
+    expect(decision.allowed).toBe(true);
+    expect(decision.decision).toBe('allowed');
+  });
+
   it('requires approval for write-capable external connector actions', () => {
     const decision = authorizeConnectorAction({
       permissions: [
@@ -93,7 +115,7 @@ describe('connector permissions', () => {
     expect(patterns).not.toContain('mcp__github__delete_*');
   });
 
-  it('does not expose executable MCP tools for approval-required connectors', () => {
+  it('exposes read MCP tools for approval-required connectors', () => {
     const patterns = getAllowedConnectorToolPatterns({
       permissions: [
         {
@@ -108,7 +130,59 @@ describe('connector permissions', () => {
       isMain: true,
     });
 
-    expect(patterns).toEqual([]);
+    expect(patterns).toEqual(
+      expect.arrayContaining([
+        'mcp__github__get_issues*',
+        'mcp__github__search_issues*',
+      ]),
+    );
+  });
+
+  it('does not expose write MCP tools for approval-required connectors', () => {
+    const patterns = getAllowedConnectorToolPatterns({
+      permissions: [
+        {
+          ...basePermission,
+          allowedActions: ['issues.read', 'issues.write'],
+          requiresApproval: true,
+        },
+      ],
+      connectorIds: ['github'],
+      groupFolder: 'main',
+      agentId: 'main',
+      isMain: true,
+    });
+
+    expect(patterns).toContain('mcp__github__search_issues*');
+    expect(patterns).not.toContain('mcp__github__update_issues*');
+    expect(patterns).not.toContain('mcp__github__delete_issues*');
+  });
+
+  it('uses known connector tool manifests before semantic fallbacks', () => {
+    const patterns = getAllowedConnectorToolPatterns({
+      permissions: [
+        {
+          ...basePermission,
+          allowedActions: ['pulls.read', 'pulls.write'],
+          requiresApproval: true,
+        },
+      ],
+      connectorIds: ['GitHub'],
+      groupFolder: 'main',
+      agentId: 'main',
+      isMain: true,
+    });
+
+    expect(patterns).toEqual(
+      expect.arrayContaining([
+        'mcp__github__get_pull*',
+        'mcp__github__list_pulls*',
+        'mcp__github__search_pull*',
+      ]),
+    );
+    expect(patterns).not.toContain('mcp__github__pulls_read');
+    expect(patterns).not.toContain('mcp__github__merge_pull*');
+    expect(patterns).not.toContain('mcp__github__update_pulls*');
   });
 
   it('filters connector ids using group and agent scope', () => {
@@ -137,6 +211,58 @@ describe('connector permissions', () => {
     });
 
     expect(filtered).toEqual(['github', 'infomaniak']);
+  });
+
+  it('exposes main-scoped MCP read tools to cowork project chats only', () => {
+    const permissions: ConnectorPermission[] = [
+      {
+        ...basePermission,
+        connectorId: 'gmail',
+        scope: 'main',
+        allowedActions: ['mail.read', 'tools.expose'],
+        requiresApproval: false,
+        groups: [],
+      },
+    ];
+
+    expect(
+      filterAllowedConnectorIds({
+        connectorIds: ['gmail'],
+        permissions,
+        groupFolder: 'web-project-thread',
+        agentId: 'web-project-thread',
+        isMain: false,
+        isCoworkProject: true,
+        action: 'tools.expose',
+      }),
+    ).toEqual(['gmail']);
+
+    expect(
+      getAllowedConnectorToolPatterns({
+        connectorIds: ['gmail'],
+        permissions,
+        groupFolder: 'web-project-thread',
+        agentId: 'web-project-thread',
+        isMain: false,
+        isCoworkProject: true,
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        'mcp__gmail__get_mail*',
+        'mcp__gmail__search_mail*',
+      ]),
+    );
+
+    expect(
+      filterAllowedConnectorIds({
+        connectorIds: ['gmail'],
+        permissions,
+        groupFolder: 'regular-channel',
+        agentId: 'regular-channel',
+        isMain: false,
+        action: 'tools.expose',
+      }),
+    ).toEqual([]);
   });
 
   it('normalizes malformed permission records to conservative defaults', () => {

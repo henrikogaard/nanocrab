@@ -13,6 +13,7 @@ import { logger } from '../../logger.js';
 
 const router = Router();
 const SUBS_PATH = path.join(STORE_DIR, 'push-subscriptions.json');
+const PUSH_ICON_PATH = '/static/nanocrab-mark.png';
 
 interface PushSubscription {
   endpoint: string;
@@ -137,8 +138,8 @@ export async function sendPush(
   const payload = JSON.stringify({
     title,
     body,
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
+    icon: PUSH_ICON_PATH,
+    badge: PUSH_ICON_PATH,
     data: data || {},
   });
 

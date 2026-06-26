@@ -579,6 +579,14 @@ export function broadcastTaskProgress(data: {
   broadcast({ type: 'task_progress', data });
 }
 
+export function broadcastThreadTitle(data: {
+  groupJid: string;
+  title: string;
+  timestamp: string;
+}): void {
+  broadcast({ type: 'thread_title', data });
+}
+
 export function broadcastCockpitSessionUpdate(data: {
   id: string;
   group: string;

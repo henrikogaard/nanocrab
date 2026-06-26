@@ -33,4 +33,16 @@ describe('agent-runner connector tool boundaries', () => {
     expect(tools).toContain('mcp__nanocrab__*');
     expect(tools).not.toContain('mcp__github__*');
   });
+
+  it('canonicalizes allowed MCP server names before exposing wildcard tools', () => {
+    const tools = buildAllowedTools({
+      prompt: 'check issue status',
+      groupFolder: 'main',
+      chatJid: 'wa:main',
+      isMain: false,
+      allowedMcpServers: ['GitHub'],
+    });
+
+    expect(tools).toContain('mcp__github__*');
+  });
 });

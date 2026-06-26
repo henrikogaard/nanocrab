@@ -54,26 +54,6 @@ router.get('/search', (req: Request, res: Response) => {
   }
 });
 
-router.get('/:chatJid', (req: Request, res: Response) => {
-  const { chatJid } = req.params;
-  const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
-  const before = (req.query.before as string) || new Date().toISOString();
-  const db = getDb();
-  try {
-    const rows = db
-      .prepare(
-        `SELECT id, chat_jid, sender_name, content, timestamp, is_from_me, is_bot_message
-         FROM messages
-         WHERE chat_jid = ? AND timestamp < ?
-         ORDER BY timestamp DESC LIMIT ?`,
-      )
-      .all(chatJid, before, limit);
-    res.json(rows.reverse());
-  } finally {
-    db.close();
-  }
-});
-
 // Pinned messages
 router.get('/pinned', (_req: Request, res: Response) => {
   const db = getDb();
@@ -89,6 +69,26 @@ router.get('/pinned', (_req: Request, res: Response) => {
       )
       .all();
     res.json(rows);
+  } finally {
+    db.close();
+  }
+});
+
+router.get('/:chatJid', (req: Request, res: Response) => {
+  const { chatJid } = req.params;
+  const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+  const before = (req.query.before as string) || new Date().toISOString();
+  const db = getDb();
+  try {
+    const rows = db
+      .prepare(
+        `SELECT id, chat_jid, sender_name, content, timestamp, is_from_me, is_bot_message
+         FROM messages
+         WHERE chat_jid = ? AND timestamp < ?
+         ORDER BY timestamp DESC LIMIT ?`,
+      )
+      .all(chatJid, before, limit);
+    res.json(rows.reverse());
   } finally {
     db.close();
   }

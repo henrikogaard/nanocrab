@@ -146,7 +146,7 @@ server.tool(
 
 server.tool(
   'send_file',
-  'Send a file (document, image, video, audio) to the user or group via WhatsApp. The file must exist in the container filesystem (e.g. /workspace/group/, /tmp/, or a downloaded file). Use this after creating or downloading a file that the user requested.',
+  'Send a file (document, image, video, audio) to the user or group through the current channel when supported. The file must exist in the container filesystem (e.g. /workspace/group/, /workspace/project/, /tmp/, or a downloaded file). Use this after creating or downloading a file that the user requested.',
   {
     file_path: z
       .string()
@@ -1223,6 +1223,124 @@ server.tool(
       return hostErrorContent('Only the main group can list research jobs.');
     try {
       return hostResultContent(await requestHostTask('list_research_jobs', {}));
+    } catch (err) {
+      return hostErrorContent(err);
+    }
+  },
+);
+
+server.tool(
+  'list_cowork_projects',
+  'List Cowork dashboard projects. Use when the user asks from WhatsApp, Signal, Telegram, or another channel to check Cowork, inspect a project, work with project files, or find a project by name.',
+  {},
+  async () => {
+    try {
+      return hostResultContent(await requestHostTask('list_cowork_projects', {}));
+    } catch (err) {
+      return hostErrorContent(err);
+    }
+  },
+);
+
+server.tool(
+  'get_cowork_project',
+  'Get a Cowork project summary and file manifest by project id, slug, or exact name.',
+  {
+    project_id: z.string().optional(),
+    project_slug: z.string().optional(),
+    project_name: z.string().optional(),
+  },
+  async (args) => {
+    try {
+      return hostResultContent(
+        await requestHostTask('get_cowork_project', {
+          projectId: args.project_id,
+          projectSlug: args.project_slug,
+          projectName: args.project_name,
+        }),
+      );
+    } catch (err) {
+      return hostErrorContent(err);
+    }
+  },
+);
+
+server.tool(
+  'read_cowork_project_file',
+  'Read or preview a file from a Cowork project by project id, slug, or exact name. Text-like files return content; binary files return metadata.',
+  {
+    project_id: z.string().optional(),
+    project_slug: z.string().optional(),
+    project_name: z.string().optional(),
+    file_path: z.string().describe('Relative path inside the Cowork project'),
+  },
+  async (args) => {
+    try {
+      return hostResultContent(
+        await requestHostTask('read_cowork_project_file', {
+          projectId: args.project_id,
+          projectSlug: args.project_slug,
+          projectName: args.project_name,
+          filePath: args.file_path,
+        }),
+      );
+    } catch (err) {
+      return hostErrorContent(err);
+    }
+  },
+);
+
+server.tool(
+  'write_cowork_project_file',
+  'Create or update a text, markdown, JSON, CSV, or other text artifact in a Cowork project. Use for durable project outputs requested from channel chats.',
+  {
+    project_id: z.string().optional(),
+    project_slug: z.string().optional(),
+    project_name: z.string().optional(),
+    file_path: z.string().describe('Relative path inside the Cowork project'),
+    content: z.string().describe('File content to write'),
+  },
+  async (args) => {
+    try {
+      return hostResultContent(
+        await requestHostTask('write_cowork_project_file', {
+          projectId: args.project_id,
+          projectSlug: args.project_slug,
+          projectName: args.project_name,
+          filePath: args.file_path,
+          fileContent: args.content,
+        }),
+      );
+    } catch (err) {
+      return hostErrorContent(err);
+    }
+  },
+);
+
+server.tool(
+  'send_cowork_project_file',
+  'Send an existing Cowork project file back to the current chat through the channel. Use after reading or updating a project file when the user asks to receive the file.',
+  {
+    project_id: z.string().optional(),
+    project_slug: z.string().optional(),
+    project_name: z.string().optional(),
+    file_path: z.string().describe('Relative path inside the Cowork project'),
+    caption: z.string().optional(),
+    filename: z.string().optional(),
+  },
+  async (args) => {
+    try {
+      return hostResultContent(
+        await requestHostTask('send_cowork_project_file', {
+          chatJid,
+          projectId: args.project_id,
+          projectSlug: args.project_slug,
+          projectName: args.project_name,
+          filePath: args.file_path,
+          caption: args.caption,
+          filename: args.filename,
+        }),
+      );
     } catch (err) {
       return hostErrorContent(err);
     }

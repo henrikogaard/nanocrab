@@ -63,6 +63,28 @@ describe('extractStructuredMarkers', () => {
     }
   });
 
+  it('extracts thread title markers', () => {
+    const markers = extractStructuredMarkers(
+      '<thread_title title="Deploy Plan Review" />',
+    );
+    expect(markers).toHaveLength(1);
+    if (markers[0].type === 'thread_title') {
+      expect(markers[0].title).toBe('Deploy Plan Review');
+    } else {
+      expect.unreachable('Expected thread_title');
+    }
+  });
+
+  it('decodes escaped thread title attributes', () => {
+    const markers = extractStructuredMarkers(
+      '<thread_title title="Research &amp; notes" />',
+    );
+    expect(markers[0]).toEqual({
+      type: 'thread_title',
+      title: 'Research & notes',
+    });
+  });
+
   it('extracts multiple markers in one string', () => {
     const text = [
       '<progress phase="writing" pct="50">Writing...</progress>',
@@ -101,5 +123,11 @@ describe('stripStructuredMarkers', () => {
     const text =
       'before<progress phase="test" pct="10">message</progress>after';
     expect(stripStructuredMarkers(text)).toBe('beforeafter');
+  });
+
+  it('removes thread title marker from visible text', () => {
+    const text =
+      '<thread_title title="Weekend Plans" />Sure, here is the plan.';
+    expect(stripStructuredMarkers(text)).toBe('Sure, here is the plan.');
   });
 });

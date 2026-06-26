@@ -519,6 +519,7 @@ async function runTask(
         assistantName: ASSISTANT_NAME,
         script: task.script || undefined,
         allowedMcpServers: runnerGroup.containerConfig?.allowedMcpServers,
+        restrictions: runnerGroup.containerConfig?.restrictions,
         provider: effectiveProvider,
         model: effectiveModel,
         providerFallbackPurpose: fallbackPurpose,

@@ -34,6 +34,7 @@ export interface ConnectorAuthorizationInput {
   groupFolder: string;
   agentId?: string;
   isMain?: boolean;
+  isCoworkProject?: boolean;
   dryRun?: boolean;
   context?: unknown;
 }
@@ -56,12 +57,188 @@ const WRITE_TOOL_PREFIXES = [
   'merge',
   'write',
 ];
+type ConnectorToolMode = 'read' | 'write';
+
+interface ConnectorToolManifestEntry {
+  mode: ConnectorToolMode;
+  patterns: string[];
+}
+
+const CONNECTOR_TOOL_MANIFESTS: Record<
+  string,
+  Record<string, ConnectorToolManifestEntry>
+> = {
+  github: {
+    'issues.read': {
+      mode: 'read',
+      patterns: [
+        'get_issue*',
+        'list_issue*',
+        'search_issue*',
+        'get_issues*',
+        'list_issues*',
+        'search_issues*',
+      ],
+    },
+    'pulls.read': {
+      mode: 'read',
+      patterns: [
+        'get_pull*',
+        'list_pull*',
+        'search_pull*',
+        'get_pulls*',
+        'list_pulls*',
+        'search_pulls*',
+      ],
+    },
+    'issues.write': {
+      mode: 'write',
+      patterns: [
+        'create_issue*',
+        'update_issue*',
+        'delete_issue*',
+        'create_issues*',
+        'update_issues*',
+        'delete_issues*',
+      ],
+    },
+    'pulls.write': {
+      mode: 'write',
+      patterns: [
+        'create_pull*',
+        'update_pull*',
+        'merge_pull*',
+        'create_pulls*',
+        'update_pulls*',
+        'merge_pulls*',
+      ],
+    },
+  },
+  gmail: {
+    'mail.read': {
+      mode: 'read',
+      patterns: [
+        'get_mail*',
+        'list_mail*',
+        'read_mail*',
+        'search_mail*',
+        'fetch_mail*',
+      ],
+    },
+    'mail.write': {
+      mode: 'write',
+      patterns: [
+        'create_mail*',
+        'send_mail*',
+        'update_mail*',
+        'delete_mail*',
+        'upload_mail*',
+      ],
+    },
+  },
+  'google-mail': {
+    'mail.read': {
+      mode: 'read',
+      patterns: [
+        'get_mail*',
+        'list_mail*',
+        'read_mail*',
+        'search_mail*',
+        'fetch_mail*',
+      ],
+    },
+    'mail.write': {
+      mode: 'write',
+      patterns: [
+        'create_mail*',
+        'send_mail*',
+        'update_mail*',
+        'delete_mail*',
+        'upload_mail*',
+      ],
+    },
+  },
+  'google-docs': {
+    'document.read': {
+      mode: 'read',
+      patterns: [
+        'get_document*',
+        'list_document*',
+        'read_document*',
+        'search_document*',
+        'fetch_document*',
+      ],
+    },
+    'document.write': {
+      mode: 'write',
+      patterns: [
+        'create_document*',
+        'update_document*',
+        'delete_document*',
+        'upload_document*',
+      ],
+    },
+  },
+  'google-drive': {
+    'file.read': {
+      mode: 'read',
+      patterns: [
+        'get_file*',
+        'list_file*',
+        'read_file*',
+        'search_file*',
+        'fetch_file*',
+      ],
+    },
+    'file.write': {
+      mode: 'write',
+      patterns: [
+        'create_file*',
+        'update_file*',
+        'delete_file*',
+        'upload_file*',
+      ],
+    },
+  },
+  calendar: {
+    'calendar.read': {
+      mode: 'read',
+      patterns: [
+        'get_calendar*',
+        'list_calendar*',
+        'read_calendar*',
+        'search_calendar*',
+        'fetch_calendar*',
+      ],
+    },
+    'calendar.write': {
+      mode: 'write',
+      patterns: ['create_calendar*', 'update_calendar*', 'delete_calendar*'],
+    },
+  },
+  'google-calendar': {
+    'calendar.read': {
+      mode: 'read',
+      patterns: [
+        'get_calendar*',
+        'list_calendar*',
+        'read_calendar*',
+        'search_calendar*',
+        'fetch_calendar*',
+      ],
+    },
+    'calendar.write': {
+      mode: 'write',
+      patterns: ['create_calendar*', 'update_calendar*', 'delete_calendar*'],
+    },
+  },
+};
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function normalizeConnectorId(value: unknown): string {
+export function normalizeConnectorId(value: unknown): string {
   return String(value || '')
     .trim()
     .toLowerCase()
@@ -203,10 +380,13 @@ function inScope(
     groupFolder: string;
     agentId?: string;
     isMain?: boolean;
+    isCoworkProject?: boolean;
   },
 ): boolean {
   if (permission.scope === 'all') return true;
-  if (permission.scope === 'main') return input.isMain === true;
+  if (permission.scope === 'main') {
+    return input.isMain === true || input.isCoworkProject === true;
+  }
   if (permission.scope === 'groups') {
     return permission.groups.includes(input.groupFolder);
   }
@@ -236,6 +416,37 @@ function isWriteAction(action: string): boolean {
 
 function toolPattern(connectorId: string, toolNamePattern: string): string {
   return `mcp__${connectorId}__${toolNamePattern}`;
+}
+
+function connectorToolManifestEntry(
+  connectorId: string,
+  action: string,
+): ConnectorToolManifestEntry | null {
+  const manifest = CONNECTOR_TOOL_MANIFESTS[normalizeConnectorId(connectorId)];
+  if (!manifest) return null;
+  return (
+    manifest[
+      String(action || '')
+        .trim()
+        .toLowerCase()
+    ] || null
+  );
+}
+
+function connectorActionMode(
+  connectorId: string,
+  action: string,
+): ConnectorToolMode | null {
+  const explicit = connectorToolManifestEntry(connectorId, action);
+  if (explicit) return explicit.mode;
+  if (isWriteAction(action)) return 'write';
+  if (
+    String(action || '')
+      .trim()
+      .match(/^(.+)\.read$/i)
+  )
+    return 'read';
+  return null;
 }
 
 function actionNameVariants(action: string): string[] {
@@ -283,6 +494,16 @@ export function connectorActionToToolPatterns(
   }
   if (normalizedAction === '*')
     return [toolPattern(normalizedConnectorId, '*')];
+
+  const explicit = connectorToolManifestEntry(
+    normalizedConnectorId,
+    normalizedAction,
+  );
+  if (explicit) {
+    return explicit.patterns.map((pattern) =>
+      toolPattern(normalizedConnectorId, pattern),
+    );
+  }
 
   const semantic = normalizedAction.match(/^(.+)\.(read|write)$/i);
   if (semantic) {
@@ -343,7 +564,11 @@ export function authorizeConnectorAction(
     };
   }
 
-  if (permission.requiresApproval && !isExposureAction(input.action)) {
+  if (
+    permission.requiresApproval &&
+    !isExposureAction(input.action) &&
+    connectorActionMode(connectorId, input.action) === 'write'
+  ) {
     return {
       allowed: false,
       connectorId,
@@ -402,6 +627,7 @@ export function filterAllowedConnectorIds(input: {
   groupFolder: string;
   agentId?: string;
   isMain?: boolean;
+  isCoworkProject?: boolean;
   action?: string;
 }): string[] {
   const seen = new Set<string>();
@@ -418,6 +644,7 @@ export function filterAllowedConnectorIds(input: {
         groupFolder: input.groupFolder,
         agentId: input.agentId,
         isMain: input.isMain,
+        isCoworkProject: input.isCoworkProject,
       });
       return decision.allowed;
     });
@@ -429,6 +656,7 @@ export function getAllowedConnectorToolPatterns(input: {
   groupFolder: string;
   agentId?: string;
   isMain?: boolean;
+  isCoworkProject?: boolean;
   dryRun?: boolean;
 }): string[] {
   const permissions = input.permissions || loadConnectorPermissions();
@@ -436,11 +664,16 @@ export function getAllowedConnectorToolPatterns(input: {
   for (const connectorId of input.connectorIds) {
     const permission = findPermission(permissions, connectorId);
     if (!permission || !inScope(permission, input)) continue;
-    if (permission.requiresApproval && permission.connectorId !== 'nanocrab') {
-      continue;
-    }
     for (const action of permission.allowedActions) {
       if (action === 'tools.expose' || action === 'connector.expose') continue;
+      if (
+        permission.requiresApproval &&
+        permission.connectorId !== 'nanocrab' &&
+        (action === '*' ||
+          connectorActionMode(permission.connectorId, action) === 'write')
+      ) {
+        continue;
+      }
       const decision = authorizeConnectorAction({
         permissions,
         connectorId: permission.connectorId,
@@ -448,6 +681,7 @@ export function getAllowedConnectorToolPatterns(input: {
         groupFolder: input.groupFolder,
         agentId: input.agentId,
         isMain: input.isMain,
+        isCoworkProject: input.isCoworkProject,
         dryRun: input.dryRun,
       });
       if (!decision.allowed) continue;

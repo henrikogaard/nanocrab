@@ -35,6 +35,7 @@ interface ContainerInput {
   script?: string;
   allowedMcpServers?: string[];
   allowedMcpToolPatterns?: string[];
+  restrictions?: string;
   provider?:
     | 'claude'
     | 'codex'
@@ -237,6 +238,23 @@ function readProviderNeutralSkillsContext(request = ''): string | undefined {
   ].join('\n');
 }
 
+function readDashboardWorkspaceContext(): string {
+  return [
+    'NanoCrab dashboard workspace map:',
+    '- Copilot: plain AI chat and quick thinking. Use it when the user just wants a conversation and no durable project or repository state is needed.',
+    '- Cowork: project workspaces, files, artifacts, documents, project chats, history, scheduled work, and approved MCP source tools. When a channel user says "check Cowork", "project", "artifact", "document", or asks to update/send a project file, use the Cowork project MCP tools.',
+    '- Code: repositories, GitHub Copilot, coding agents, tests, pull requests, snippets, review rules, terminal, and repository automation.',
+    '- More/Settings: integrations, credentials, providers, channels, approvals, memory, skills, marketplace, logs, backups, monitoring, and platform setup.',
+    'Memory is personal/shared knowledge across agents. Skills are reusable agent capabilities and workflows. Keep Cowork project facts in the project workspace unless the user explicitly asks for cross-agent memory.',
+  ].join('\n');
+}
+
+function readRuntimeRestrictionsContext(restrictions?: string): string | undefined {
+  const trimmed = restrictions?.trim();
+  if (!trimmed) return undefined;
+  return ['Runtime dashboard instructions and restrictions:', trimmed].join('\n');
+}
+
 function joinSystemContext(
   parts: Array<string | undefined>,
 ): string | undefined {
@@ -279,6 +297,7 @@ function discoverExtraDirs(): string[] {
 function buildSharedSystemContext(
   extraDirs: string[] | undefined = discoverExtraDirs(),
   request = '',
+  restrictions?: string,
 ): string {
   const resolvedExtraDirs = extraDirs || discoverExtraDirs();
   return (
@@ -286,6 +305,8 @@ function buildSharedSystemContext(
       readAgentInstructionsFromDir('/workspace/group'),
       readAgentInstructionsFromDir('/workspace/global'),
       ...resolvedExtraDirs.map(readAgentInstructionsFromDir),
+      readDashboardWorkspaceContext(),
+      readRuntimeRestrictionsContext(restrictions),
       readProviderNeutralSkillsContext(request),
     ]) || ''
   );
@@ -539,6 +560,14 @@ function connectorNameFromToolPattern(pattern: string): string | null {
   return match ? match[1] : null;
 }
 
+function normalizeConnectorId(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function explicitMcpToolPatterns(
   containerInput: ContainerInput,
 ): string[] | null {
@@ -559,11 +588,13 @@ function isMcpServerAllowedByToolPatterns(
 ): boolean {
   if (!patterns) return true;
   const serverPatterns = patterns.filter(
-    (pattern) => connectorNameFromToolPattern(pattern) === serverName,
+    (pattern) =>
+      normalizeConnectorId(connectorNameFromToolPattern(pattern)) ===
+      normalizeConnectorId(serverName),
   );
   if (serverPatterns.length === 0) return false;
   if (!requireWildcardToolAccess) return true;
-  return serverPatterns.includes(`mcp__${serverName}__*`);
+  return serverPatterns.includes(`mcp__${normalizeConnectorId(serverName)}__*`);
 }
 
 function buildMcpServers(
@@ -605,12 +636,13 @@ function buildMcpServers(
         envVars?: string[];
       }>;
       for (const srv of custom) {
-        if (srv.name && srv.command && !allServers[srv.name]) {
+        const serverName = normalizeConnectorId(srv.name);
+        if (serverName && srv.command && !allServers[serverName]) {
           const env: Record<string, string> = {};
           for (const key of srv.envVars || []) {
             if (process.env[key]) env[key] = process.env[key]!;
           }
-          allServers[srv.name] = {
+          allServers[serverName] = {
             command: srv.command,
             args: srv.args || [],
             env,
@@ -638,9 +670,10 @@ function buildMcpServers(
   // Filter: nanocrab is always included, others must be in allowlist
   const filtered: typeof allServers = { nanocrab: allServers.nanocrab };
   const allowedNames = new Set([
-    ...(allowed || []),
+    ...(allowed || []).map((name) => normalizeConnectorId(name)),
     ...(toolPatterns || [])
       .map((pattern) => connectorNameFromToolPattern(pattern))
+      .map((name) => normalizeConnectorId(name))
       .filter((name): name is string => Boolean(name)),
   ]);
   for (const name of allowedNames) {
@@ -698,7 +731,8 @@ export function buildAllowedTools(containerInput: ContainerInput): string[] {
         name: string;
       }>;
       for (const srv of custom) {
-        if (srv.name) allMcpTools.push(`mcp__${srv.name}__*`);
+        const serverName = normalizeConnectorId(srv.name);
+        if (serverName) allMcpTools.push(`mcp__${serverName}__*`);
       }
     }
   } catch (err) {
@@ -717,7 +751,7 @@ export function buildAllowedTools(containerInput: ContainerInput): string[] {
   // Add MCP tool wildcards only for allowed servers
   const tools = [...baseTools];
   for (const name of allowed) {
-    const toolPattern = `mcp__${name}__*`;
+    const toolPattern = `mcp__${normalizeConnectorId(name)}__*`;
     if (allMcpTools.includes(toolPattern)) tools.push(toolPattern);
   }
   return tools;
@@ -782,6 +816,7 @@ async function runQuery(
   const sharedSystemContext = buildSharedSystemContext(
     extraDirs,
     containerInput.prompt,
+    containerInput.restrictions,
   );
 
   for await (const message of query({
@@ -935,7 +970,11 @@ async function runQueryCodex(
   // Build system prompt from instruction and skill files.
   // AGENTS.md is canonical; CLAUDE.md is only a backward-compatible fallback.
   const extraDirs = discoverExtraDirs();
-  const systemPrompt = buildSharedSystemContext(extraDirs, prompt);
+  const systemPrompt = buildSharedSystemContext(
+    extraDirs,
+    prompt,
+    containerInput.restrictions,
+  );
 
   const tomlString = (value: string) => JSON.stringify(value);
   const tomlArray = (values: string[]) =>
@@ -1089,7 +1128,11 @@ async function runQueryOpenAiCompatible(
     );
   }
 
-  const systemPrompt = buildSharedSystemContext(undefined, prompt);
+  const systemPrompt = buildSharedSystemContext(
+    undefined,
+    prompt,
+    containerInput.restrictions,
+  );
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -1235,6 +1278,7 @@ async function runQueryOpenCode(
   const systemPrompt = buildSharedSystemContext(
     undefined,
     containerInput.prompt,
+    containerInput.restrictions,
   );
   const effectivePrompt = systemPrompt.trim()
     ? `${systemPrompt.trim()}\n\nUser request:\n${prompt}`

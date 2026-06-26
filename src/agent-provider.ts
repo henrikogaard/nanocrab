@@ -217,6 +217,40 @@ export const DEFAULT_AGENT_MODELS: Record<AgentProvider, string> = {
   'openai-compatible': 'model-id',
 };
 
+const CODING_PROVIDER_IDS = new Set<AgentProvider>([
+  'claude',
+  'codex',
+  'opencode',
+  'openrouter',
+  'ollama',
+]);
+
+const OLLAMA_CODING_MODEL_PATTERNS = [/^codestral(?::|$)/i, /code/i, /coder/i];
+
+export function isCodingCapableProvider(
+  provider: AgentProvider,
+  model?: string,
+): boolean {
+  if (!CODING_PROVIDER_IDS.has(provider)) return false;
+  if (provider !== 'ollama') return true;
+  const selectedModel = model || DEFAULT_AGENT_MODELS.ollama;
+  return OLLAMA_CODING_MODEL_PATTERNS.some((pattern) =>
+    pattern.test(selectedModel),
+  );
+}
+
+export function codingProviderUnavailableReason(
+  provider: AgentProvider,
+  model?: string,
+): string | null {
+  if (isCodingCapableProvider(provider, model)) return null;
+  if (provider === 'ollama') {
+    const selectedModel = model || DEFAULT_AGENT_MODELS.ollama;
+    return `Ollama model "${selectedModel}" is chat/local-task only. Choose a code-capable local model such as codestral for coding jobs.`;
+  }
+  return `${provider} is not a coding-job runtime`;
+}
+
 export function isAgentProvider(value: unknown): value is AgentProvider {
   return (
     typeof value === 'string' &&

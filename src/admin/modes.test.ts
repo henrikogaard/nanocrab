@@ -11,7 +11,20 @@ const M = () => (globalThis as any).NanoModes;
 
 describe('MODES config', () => {
   it('exposes three modes in order', () => {
-    expect(M().MODE_ORDER).toEqual(['chat', 'work', 'code']);
+    expect(M().MODE_ORDER).toEqual(['chat', 'cowork', 'code']);
+  });
+
+  it('labels the top-level focus modes', () => {
+    expect(M().MODES.chat.label).toBe('Copilot');
+    expect(M().MODES.cowork.label).toBe('Cowork');
+    expect(M().MODES.code.label).toBe('Code');
+  });
+
+  it('describes when to use each focus mode', () => {
+    expect(M().modeGuidance('chat')).toContain('Plain chat');
+    expect(M().modeGuidance('cowork')).toContain('Projects, files');
+    expect(M().modeGuidance('code')).toContain('Repos');
+    expect(M().modeGuidance('unknown')).toBe('');
   });
 
   it('every mode page id is unique across modes', () => {
@@ -22,16 +35,44 @@ describe('MODES config', () => {
 
 describe('resolveMode', () => {
   it('maps a chat page to the chat mode', () => {
-    expect(M().resolveMode('messages')).toBe('chat');
+    expect(M().resolveMode('chat')).toBe('chat');
   });
-  it('maps a work page to the work mode', () => {
-    expect(M().resolveMode('approvals')).toBe('work');
+  it('maps a cowork page to the cowork mode', () => {
+    expect(M().resolveMode('approvals')).toBe('cowork');
+  });
+  it('maps Projects to the cowork mode', () => {
+    expect(M().resolveMode('projects')).toBe('cowork');
+  });
+  it('maps document outputs to the cowork mode', () => {
+    expect(M().resolveMode('reports')).toBe('cowork');
+    expect(M().resolveMode('artifacts')).toBe('cowork');
+    expect(M().navPagesForMode('cowork')).toContain('reports');
+    expect(M().navPagesForMode('cowork')).toContain('artifacts');
+    expect(M().MORE_IDS).not.toContain('reports');
+    expect(M().MORE_IDS).not.toContain('artifacts');
+  });
+  it('maps hidden project chat routes to the cowork mode', () => {
+    expect(M().resolveMode('project-chat')).toBe('cowork');
+    expect(M().navPagesForMode('cowork')).not.toContain('project-chat');
   });
   it('maps a code page to the code mode', () => {
     expect(M().resolveMode('gitcode')).toBe('code');
   });
+  it('maps GitHub Copilot to the code mode', () => {
+    expect(M().resolveMode('copilot')).toBe('code');
+  });
   it('returns null for an admin/ops (More) page', () => {
     expect(M().resolveMode('security')).toBeNull();
+  });
+  it('keeps personal knowledge pages in More', () => {
+    expect(M().resolveMode('memory')).toBeNull();
+    expect(M().resolveMode('skills')).toBeNull();
+    expect(M().resolveMode('settings')).toBeNull();
+    expect(M().MORE_IDS).toContain('settings');
+  });
+  it('keeps channel administration in More instead of a focus mode', () => {
+    expect(M().resolveMode('channels')).toBeNull();
+    expect(M().MORE_IDS).toContain('channels');
   });
   it('returns null for an unknown page', () => {
     expect(M().resolveMode('does-not-exist')).toBeNull();
@@ -41,9 +82,9 @@ describe('resolveMode', () => {
 describe('navPagesForMode', () => {
   it('returns the page list for a mode (a copy, not the original)', () => {
     const pages = M().navPagesForMode('chat');
-    expect(pages).toEqual(['chat', 'messages']);
+    expect(pages).toEqual(['chat']);
     pages.push('tampered');
-    expect(M().MODES.chat.pages).toEqual(['chat', 'messages']);
+    expect(M().MODES.chat.pages).toEqual(['chat']);
   });
   it('returns an empty array for an unknown mode', () => {
     expect(M().navPagesForMode('nope')).toEqual([]);
@@ -67,6 +108,11 @@ describe('loadActiveMode', () => {
     s.setItem('active_mode', 'code');
     expect(M().loadActiveMode(s)).toBe('code');
   });
+  it('migrates the previous work mode to cowork', () => {
+    const s = mkStore();
+    s.setItem('active_mode', 'work');
+    expect(M().loadActiveMode(s)).toBe('cowork');
+  });
   it('falls back to the first mode when saved value is invalid', () => {
     const s = mkStore();
     s.setItem('active_mode', 'garbage');
@@ -77,8 +123,8 @@ describe('loadActiveMode', () => {
 describe('saveActiveMode', () => {
   it('persists a valid mode and reports success', () => {
     const s = mkStore();
-    expect(M().saveActiveMode('work', s)).toBe(true);
-    expect(s.getItem('active_mode')).toBe('work');
+    expect(M().saveActiveMode('cowork', s)).toBe(true);
+    expect(s.getItem('active_mode')).toBe('cowork');
   });
   it('rejects an invalid mode without writing', () => {
     const s = mkStore();
@@ -89,11 +135,21 @@ describe('saveActiveMode', () => {
 
 describe('storage-throws resilience', () => {
   it('loadActiveMode returns the first mode when storage.getItem throws', () => {
-    const s = { getItem: () => { throw new Error('blocked'); }, setItem: () => {} };
+    const s = {
+      getItem: () => {
+        throw new Error('blocked');
+      },
+      setItem: () => {},
+    };
     expect(M().loadActiveMode(s)).toBe('chat');
   });
   it('saveActiveMode returns false when storage.setItem throws', () => {
-    const s = { getItem: () => null, setItem: () => { throw new Error('blocked'); } };
+    const s = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('blocked');
+      },
+    };
     expect(M().saveActiveMode('work', s)).toBe(false);
   });
 });

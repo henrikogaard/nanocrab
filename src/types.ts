@@ -63,6 +63,20 @@ export interface RegisteredGroup {
   kind?: 'web';
   // User-facing conversation title (web threads). Channel groups use `name`.
   title?: string;
+  // Optional Cowork project association for project-scoped web threads.
+  projectId?: string;
+  // Sanitized project folder slug used for internal project workspace mounts.
+  projectSlug?: string;
+}
+
+export interface CoworkProject {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  instructions: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface NewMessage {

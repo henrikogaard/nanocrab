@@ -192,7 +192,7 @@ const STATIC_CAPABILITIES: Record<AgentProvider, ProviderCapabilities> = {
     structured_output: true,
     streaming: true,
     vision: true,
-    code_strength: 'basic',
+    code_strength: 'agentic',
     context_window: 128000,
     cost_tier: 'medium',
     privacy_tier: 'third-party',

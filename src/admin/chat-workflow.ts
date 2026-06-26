@@ -29,14 +29,20 @@ export interface ProgressMarker {
   message: string;
 }
 
+export interface ThreadTitleMarker {
+  type: 'thread_title';
+  title: string;
+}
+
 export type ParsedMarker =
   | ToolCallMarker
   | ToolResultMarker
   | ApprovalRequestMarker
-  | ProgressMarker;
+  | ProgressMarker
+  | ThreadTitleMarker;
 
 const MARKER_RE =
-  /<(tool_call|tool_result|approval_request|progress)\s+([^>]*?)(?:\/>|(>)([\s\S]*?)<\/\1>)/g;
+  /<(tool_call|tool_result|approval_request|progress|thread_title)\s+([^>]*?)(?:\/>|(>)([\s\S]*?)<\/\1>)/g;
 const ATTR_RE = /(\w+)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g;
 
 function parseAttributes(attrsStr: string): Record<string, string> {
@@ -46,6 +52,16 @@ function parseAttributes(attrsStr: string): Record<string, string> {
     attrs[m[1]] = m[2].slice(1, -1);
   }
   return attrs;
+}
+
+function decodeAttr(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
 }
 
 export function extractStructuredMarkers(text: string): ParsedMarker[] {
@@ -90,6 +106,12 @@ export function extractStructuredMarkers(text: string): ParsedMarker[] {
             message: innerText || attrs.message || '',
           });
           break;
+        case 'thread_title':
+          markers.push({
+            type: 'thread_title',
+            title: decodeAttr(attrs.title || innerText || ''),
+          });
+          break;
       }
     } catch (err) {
       logger.warn({ err, tagName, attrs }, 'Failed to parse structured marker');
@@ -100,7 +122,7 @@ export function extractStructuredMarkers(text: string): ParsedMarker[] {
 
 export function stripStructuredMarkers(text: string): string {
   return text.replace(
-    /<(tool_call|tool_result|approval_request|progress)\s+[^>]*?(?:\/>|>[\s\S]*?<\/\1>)/g,
+    /<(tool_call|tool_result|approval_request|progress|thread_title)\s+[^>]*?(?:\/>|>[\s\S]*?<\/\1>)/g,
     '',
   );
 }
