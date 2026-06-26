@@ -1,8 +1,9 @@
 /**
  * Signal channel for NanoCrab.
  * Uses signal-cli daemon with:
- *   - stdout JSON lines for receiving messages (-o json)
+ *   - HTTP SSE events for receiving messages (--http /api/v1/events)
  *   - HTTP JSON-RPC for sending messages (--http)
+ *   - stdout JSON lines as a fallback for older signal-cli behavior (-o json)
  * Requires: signal-cli installed and registered.
  */
 import { ChildProcess, spawn } from 'child_process';
@@ -80,6 +81,7 @@ export class SignalChannel implements Channel {
   private daemonRestarts = 0;
   private rpcId = 0;
   private lastTimestamps = new Set<number>();
+  private eventController: AbortController | null = null;
   // Map UUID → phone number for JID resolution
   private uuidToPhone = new Map<string, string>();
 
@@ -135,6 +137,8 @@ export class SignalChannel implements Channel {
         'daemon',
         '--http',
         `localhost:${this.port}`,
+        '--receive-mode',
+        'on-start',
       ],
       {
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -186,6 +190,7 @@ export class SignalChannel implements Channel {
         this.lastError = null;
         this.daemonRestarts = 0;
         this.startMemoryWatchdog();
+        this.startEventStream();
         return;
       } catch {
         await new Promise((r) => setTimeout(r, 1000));
@@ -266,6 +271,82 @@ export class SignalChannel implements Channel {
     }, DAEMON_MEMORY_CHECK_INTERVAL);
   }
 
+  private startEventStream(): void {
+    this.eventController?.abort();
+    const controller = new AbortController();
+    this.eventController = controller;
+    void this.consumeEventStream(controller);
+  }
+
+  private async consumeEventStream(controller: AbortController): Promise<void> {
+    while (!controller.signal.aborted) {
+      try {
+        const res = await fetch(`http://localhost:${this.port}/api/v1/events`, {
+          signal: controller.signal,
+        });
+
+        if (!res.ok || !res.body) {
+          throw new Error(`signal-cli events endpoint returned ${res.status}`);
+        }
+
+        this.lastReadyAt = new Date().toISOString();
+        let buffer = '';
+        const decoder = new TextDecoder();
+        const reader = res.body.getReader();
+
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done || controller.signal.aborted) break;
+          buffer += decoder.decode(value, { stream: true });
+          buffer = this.processEventBuffer(buffer);
+        }
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        this.lastError = err instanceof Error ? err.message : String(err);
+        logger.warn({ err }, 'Signal event stream disconnected');
+      }
+
+      if (!controller.signal.aborted) {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  }
+
+  private processEventBuffer(buffer: string): string {
+    let remaining = buffer;
+    for (;;) {
+      const splitIndex = remaining.search(/\r?\n\r?\n/);
+      if (splitIndex === -1) return remaining;
+
+      const rawEvent = remaining.slice(0, splitIndex);
+      const separatorLength = remaining[splitIndex] === '\r' ? 4 : 2;
+      remaining = remaining.slice(splitIndex + separatorLength);
+
+      const data = rawEvent
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart())
+        .join('\n');
+
+      if (!data) continue;
+
+      try {
+        this.processSignalEvent(JSON.parse(data));
+      } catch (err) {
+        logger.debug({ err, data: data.slice(0, 200) }, 'Invalid Signal event');
+      }
+    }
+  }
+
+  private processSignalEvent(event: unknown): void {
+    const message = unwrapSignalEvent(event);
+    if (!message) return;
+
+    this.processMessage(message).catch((err) => {
+      logger.error({ err }, 'Error processing Signal event');
+    });
+  }
+
   private async processMessage(msg: SignalJsonMessage): Promise<void> {
     this.lastMessageAt = new Date().toISOString();
     const envelope = msg.envelope;
@@ -291,28 +372,24 @@ export class SignalChannel implements Channel {
       this.uuidToPhone.set(uuid, phoneFromEnvelope);
     }
 
-    // Resolve sender: phone number if known, else UUID
-    const phone = phoneFromEnvelope || this.uuidToPhone.get(uuid) || null;
+    const isGroup = !!data.groupInfo;
+    const groups = this.opts.registeredGroups();
+
+    // Resolve sender: phone number if known, else UUID. Direct messages from
+    // signal-cli can arrive UUID-only; existing registrations are commonly
+    // phone-based, so resolve before choosing the chat JID.
+    let phone = phoneFromEnvelope || this.uuidToPhone.get(uuid) || null;
+    if (!phone && uuid && !isGroup && hasPhoneBasedSignalGroup(groups)) {
+      phone = await this.resolveUuidToPhone(uuid);
+    }
     const sender = phone || uuid;
     const senderName = envelope.sourceName || sender;
-    const isGroup = !!data.groupInfo;
 
     // Build JID: prefer phone number so replies land in the right thread
     const chatJid = isGroup
       ? `sig:group.${data.groupInfo!.groupId}`
       : `sig:${sender}`;
 
-    // If we only have UUID, try to look up phone via registered groups
-    if (!phone && uuid) {
-      const groups = this.opts.registeredGroups();
-      for (const [jid] of Object.entries(groups)) {
-        if (jid.startsWith('sig:+')) {
-          // We have a phone-based JID registered — try to resolve this UUID
-          this.resolveUuidToPhone(uuid).catch(() => {});
-          break;
-        }
-      }
-    }
     const timestamp = new Date(ts).toISOString();
     const msgId = ts.toString();
 
@@ -554,6 +631,8 @@ export class SignalChannel implements Channel {
   async disconnect(): Promise<void> {
     this.connected = false;
     this.lastError = 'Signal channel disconnected';
+    this.eventController?.abort();
+    this.eventController = null;
 
     if (this.daemon) {
       this.daemon.kill('SIGTERM');
@@ -634,6 +713,30 @@ function maxIso(a: string | null, b: string | null): string | null {
   if (!a) return b;
   if (!b) return a;
   return Date.parse(a) >= Date.parse(b) ? a : b;
+}
+
+function unwrapSignalEvent(event: unknown): SignalJsonMessage | null {
+  if (!isRecord(event)) return null;
+  if (isRecord(event.envelope)) return event as unknown as SignalJsonMessage;
+
+  const params = event.params;
+  if (!isRecord(params)) return null;
+  if (isRecord(params.envelope)) return params as unknown as SignalJsonMessage;
+
+  const result = params.result;
+  if (isRecord(result) && isRecord(result.envelope)) {
+    return result as unknown as SignalJsonMessage;
+  }
+
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function hasPhoneBasedSignalGroup(groups: Record<string, unknown>): boolean {
+  return Object.keys(groups).some((jid) => jid.startsWith('sig:+'));
 }
 
 function mimeToExt(mime: string): string {

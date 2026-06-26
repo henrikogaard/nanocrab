@@ -33,10 +33,12 @@ describe('SignalChannel connection status', () => {
   };
 
   beforeEach(() => {
+    vi.clearAllMocks();
     channel = new SignalChannel('+4712345678', mockOpts as any);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await channel.disconnect();
     vi.unstubAllGlobals();
   });
 
@@ -50,10 +52,15 @@ describe('SignalChannel connection status', () => {
   });
 
   it('startDaemon sets connected = true on RPC readiness', async () => {
-    const fetchMock = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ jsonrpc: '2.0', id: 1, result: 'v1.2.3' }),
-    }));
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/api/v1/events')) {
+        return eventResponse('');
+      }
+      return {
+        ok: true,
+        json: async () => ({ jsonrpc: '2.0', id: 1, result: 'v1.2.3' }),
+      };
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     await channel.connect();
@@ -71,6 +78,136 @@ describe('SignalChannel connection status', () => {
     );
   });
 
+  it('delivers Signal HTTP event stream messages to onMessage', async () => {
+    mockOpts.registeredGroups.mockReturnValue({
+      'sig:+4747303055': {
+        jid: 'sig:+4747303055',
+        name: 'Henrik Signal',
+        folder: 'signal_main',
+        trigger: '@Taskekrabben',
+        enabled: true,
+      },
+    });
+
+    const event = {
+      jsonrpc: '2.0',
+      method: 'receive',
+      params: {
+        envelope: {
+          sourceNumber: '+4747303055',
+          sourceUuid: '9d83cde4-e0c4-4676-a04d-9a14328e5356',
+          sourceName: 'Henrik',
+          timestamp: 1782255000000,
+          dataMessage: {
+            timestamp: 1782255000000,
+            message: 'Har jeg noen nye mailer?',
+          },
+        },
+        account: '+4712345678',
+      },
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/api/v1/events')) {
+        return eventResponse(`data: ${JSON.stringify(event)}\n\n`);
+      }
+      return {
+        ok: true,
+        json: async () => ({ jsonrpc: '2.0', id: 1, result: 'v1.2.3' }),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await channel.connect();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(mockOpts.onChatMetadata).toHaveBeenCalledWith(
+      'sig:+4747303055',
+      '2026-06-23T22:50:00.000Z',
+      'Henrik',
+      'signal',
+      false,
+    );
+    expect(mockOpts.onMessage).toHaveBeenCalledWith(
+      'sig:+4747303055',
+      expect.objectContaining({
+        chat_jid: 'sig:+4747303055',
+        sender: '+4747303055',
+        sender_name: 'Henrik',
+        content: 'Har jeg noen nye mailer?',
+        is_from_me: false,
+      }),
+    );
+  });
+
+  it('resolves UUID-only direct messages to a registered phone JID', async () => {
+    mockOpts.registeredGroups.mockReturnValue({
+      'sig:+4747303055': {
+        jid: 'sig:+4747303055',
+        name: 'Henrik Signal',
+        folder: 'signal_main',
+        trigger: '@Taskekrabben',
+        enabled: true,
+      },
+    });
+
+    const uuid = '9d83cde4-e0c4-4676-a04d-9a14328e5356';
+    const event = {
+      jsonrpc: '2.0',
+      method: 'receive',
+      params: {
+        envelope: {
+          sourceUuid: uuid,
+          sourceName: 'Henrik',
+          timestamp: 1782255060000,
+          dataMessage: {
+            timestamp: 1782255060000,
+            message: '@Taskekrabben ping',
+          },
+        },
+        account: '+4712345678',
+      },
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/api/v1/events')) {
+        return eventResponse(`data: ${JSON.stringify(event)}\n\n`);
+      }
+
+      const body =
+        typeof init?.body === 'string'
+          ? JSON.parse(init.body)
+          : { method: 'version' };
+      if (body.method === 'listContacts') {
+        return {
+          ok: true,
+          json: async () => ({
+            jsonrpc: '2.0',
+            id: body.id,
+            result: [{ uuid, number: '+4747303055' }],
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ jsonrpc: '2.0', id: body.id, result: 'v1.2.3' }),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await channel.connect();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(mockOpts.onMessage).toHaveBeenCalledWith(
+      'sig:+4747303055',
+      expect.objectContaining({
+        chat_jid: 'sig:+4747303055',
+        sender: '+4747303055',
+        sender_name: 'Henrik',
+        content: '@Taskekrabben ping',
+      }),
+    );
+  });
+
   it('reports a diagnostic reason after disconnect', async () => {
     await channel.disconnect();
 
@@ -82,3 +219,16 @@ describe('SignalChannel connection status', () => {
     });
   });
 });
+
+function eventResponse(data: string) {
+  return {
+    ok: true,
+    status: 200,
+    body: new ReadableStream({
+      start(controller) {
+        if (data) controller.enqueue(new TextEncoder().encode(data));
+        controller.close();
+      },
+    }),
+  };
+}
