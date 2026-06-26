@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { execSync, spawn } from 'child_process';
 
 vi.mock('../env.js', () => ({
   readEnvFile: vi.fn(() => ({ SIGNAL_PHONE_NUMBER: '+4712345678' })),
@@ -51,7 +52,7 @@ describe('SignalChannel connection status', () => {
     expect(channel.isConnected()).toBe(false);
   });
 
-  it('startDaemon sets connected = true on RPC readiness', async () => {
+  it('reuses an existing RPC-ready daemon without killing host daemons', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/api/v1/events')) {
         return eventResponse('');
@@ -76,6 +77,8 @@ describe('SignalChannel connection status', () => {
       expect.stringContaining('/api/v1/rpc'),
       expect.any(Object),
     );
+    expect(spawn).not.toHaveBeenCalled();
+    expect(execSync).not.toHaveBeenCalled();
   });
 
   it('delivers Signal HTTP event stream messages to onMessage', async () => {

@@ -71,6 +71,7 @@ export class SignalChannel implements Channel {
   name = 'signal';
 
   private daemon: ChildProcess | null = null;
+  private ownsDaemon = false;
   private opts: ChannelOpts;
   private phoneNumber: string;
   private port: number;
@@ -109,17 +110,19 @@ export class SignalChannel implements Channel {
   private async startDaemon(): Promise<void> {
     const signalCliBin = process.env.SIGNAL_CLI_PATH || 'signal-cli';
 
-    // Always kill any existing daemon — we need our own for stdout reading
     try {
       await this.rpc('version', {});
-      logger.info(
-        { port: this.port },
-        'Signal: killing existing daemon (need our own for stdout)',
-      );
-      await this.killExistingDaemon();
-      await new Promise((r) => setTimeout(r, 2000));
+      logger.info({ port: this.port }, 'Signal: reusing existing daemon');
+      this.daemon = null;
+      this.ownsDaemon = false;
+      this.connected = true;
+      this.lastReadyAt = new Date().toISOString();
+      this.lastError = null;
+      this.daemonRestarts = 0;
+      this.startEventStream();
+      return;
     } catch {
-      // No existing daemon — good
+      // No existing daemon; start one below.
     }
 
     logger.info(
@@ -145,6 +148,7 @@ export class SignalChannel implements Channel {
         detached: false,
       },
     );
+    this.ownsDaemon = true;
 
     // Read JSON lines from stdout for incoming messages
     if (this.daemon.stdout) {
@@ -226,27 +230,6 @@ export class SignalChannel implements Channel {
       logger.error({ err }, 'Failed to restart signal-cli daemon');
       this.connected = false;
       this.lastError = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  private async killExistingDaemon(): Promise<void> {
-    try {
-      const { execSync } = await import('child_process');
-      const pids = execSync(`pgrep -f "signal-cli.*daemon.*--http"`, {
-        encoding: 'utf-8',
-      })
-        .trim()
-        .split('\n')
-        .filter(Boolean);
-      for (const pid of pids) {
-        try {
-          process.kill(parseInt(pid), 'SIGTERM');
-        } catch {}
-      }
-      if (pids.length > 0)
-        logger.info({ pids }, 'Killed existing signal-cli daemon(s)');
-    } catch {
-      // No matching processes
     }
   }
 
@@ -634,7 +617,7 @@ export class SignalChannel implements Channel {
     this.eventController?.abort();
     this.eventController = null;
 
-    if (this.daemon) {
+    if (this.daemon && this.ownsDaemon) {
       this.daemon.kill('SIGTERM');
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
@@ -648,8 +631,9 @@ export class SignalChannel implements Channel {
           resolve();
         });
       });
-      this.daemon = null;
     }
+    this.daemon = null;
+    this.ownsDaemon = false;
 
     logger.info('Signal channel stopped');
   }
