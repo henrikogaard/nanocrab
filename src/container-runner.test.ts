@@ -516,7 +516,7 @@ describe('container-runner MCP env forwarding', () => {
     );
   });
 
-  it('does not pass MCP env vars for approval-required connectors without executable tools', async () => {
+  it('passes MCP env vars for approval-required read connectors', async () => {
     vi.mocked(fs.readFileSync).mockImplementation((file) => {
       if (String(file).endsWith('mcp-servers.json')) {
         return JSON.stringify([
@@ -561,10 +561,283 @@ describe('container-runner MCP env forwarding', () => {
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
 
-    expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalledWith(
+    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
       '/tmp/nanocrab-env-test/env',
       expect.stringContaining('MAIL_PASSWORD=secret'),
       { mode: 0o600 },
+    );
+  });
+
+  it('does not pass Google Workspace credentials outside allowed connectors', async () => {
+    const restrictedGroup: RegisteredGroup = {
+      ...testGroup,
+      containerConfig: { allowedMcpServers: ['github'] },
+    };
+    vi.mocked(fs.existsSync).mockImplementation((file) =>
+      String(file).endsWith('connector-permissions.json'),
+    );
+    vi.mocked(fs.readFileSync).mockImplementation((file) => {
+      if (String(file).endsWith('connector-permissions.json')) {
+        return JSON.stringify([
+          {
+            connectorId: 'github',
+            scope: 'all',
+            allowedActions: ['tools.expose', 'issues.read'],
+            requiresApproval: false,
+            groups: [],
+            agents: [],
+            createdAt: '2026-06-13T10:00:00.000Z',
+            updatedAt: '2026-06-13T10:00:00.000Z',
+          },
+        ]);
+      }
+      return '';
+    });
+    mockedReadEnvFile.mockReturnValue({
+      GOOGLE_OAUTH_CLIENT_ID: 'client-id',
+      GOOGLE_OAUTH_CLIENT_SECRET: 'client-secret',
+      GOOGLE_REFRESH_TOKEN: 'refresh-token',
+    });
+    vi.mocked(fs.writeFileSync).mockClear();
+
+    const resultPromise = runContainerAgent(
+      restrictedGroup,
+      {
+        ...testInput,
+        groupFolder: restrictedGroup.folder,
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const envFileWrite = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find((call) => call[0] === '/tmp/nanocrab-env-test/env');
+    expect(String(envFileWrite?.[1] || '')).not.toContain(
+      'GOOGLE_REFRESH_TOKEN=refresh-token',
+    );
+    expect(String(envFileWrite?.[1] || '')).not.toContain(
+      'GOOGLE_OAUTH_CLIENT_SECRET=client-secret',
+    );
+  });
+
+  it('passes Google Workspace credentials for allowed mail connectors', async () => {
+    vi.mocked(fs.existsSync).mockImplementation(
+      (file) =>
+        String(file).endsWith('connector-permissions.json') ||
+        String(file).endsWith('mcp-servers.json'),
+    );
+    vi.mocked(fs.readFileSync).mockImplementation((file) => {
+      if (String(file).endsWith('mcp-servers.json')) {
+        return JSON.stringify([
+          {
+            name: 'gmail',
+            command: 'npx',
+            args: ['-y', '@example/gmail-mcp'],
+          },
+        ]);
+      }
+      if (String(file).endsWith('connector-permissions.json')) {
+        return JSON.stringify([
+          {
+            connectorId: 'gmail',
+            scope: 'all',
+            allowedActions: ['tools.expose', 'mail.read'],
+            requiresApproval: false,
+            groups: [],
+            agents: [],
+            createdAt: '2026-06-13T10:00:00.000Z',
+            updatedAt: '2026-06-13T10:00:00.000Z',
+          },
+        ]);
+      }
+      return '';
+    });
+    mockedReadEnvFile.mockReturnValue({
+      GOOGLE_OAUTH_CLIENT_ID: 'client-id',
+      GOOGLE_OAUTH_CLIENT_SECRET: 'client-secret',
+      GOOGLE_REFRESH_TOKEN: 'refresh-token',
+    });
+    vi.mocked(fs.writeFileSync).mockClear();
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        allowedMcpServers: ['gmail'],
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const envFileWrite = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find((call) => call[0] === '/tmp/nanocrab-env-test/env');
+    expect(String(envFileWrite?.[1] || '')).toContain(
+      'GOOGLE_REFRESH_TOKEN=refresh-token',
+    );
+    expect(String(envFileWrite?.[1] || '')).toContain(
+      'GOOGLE_OAUTH_CLIENT_SECRET=client-secret',
+    );
+  });
+});
+
+describe('container-runner cowork project mounts', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    mockedReadEnvFile.mockReturnValue({});
+    vi.mocked(spawn).mockClear();
+    vi.mocked(fs.existsSync).mockImplementation((file) =>
+      String(file).includes('/tmp/nanocrab-test-store/projects/research-notes'),
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.readFileSync).mockReset();
+  });
+
+  it('mounts a project workspace for project-scoped web threads', async () => {
+    const projectGroup: RegisteredGroup = {
+      ...testGroup,
+      kind: 'web',
+      projectId: 'project-1',
+      projectSlug: 'research-notes',
+    };
+
+    const resultPromise = runContainerAgent(
+      projectGroup,
+      {
+        ...testInput,
+        groupFolder: projectGroup.folder,
+        chatJid: 'web:project-thread',
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnArgs = vi.mocked(spawn).mock.calls.at(-1)?.[1] as string[];
+    expect(spawnArgs).toContain(
+      '/tmp/nanocrab-test-store/projects/research-notes:/workspace/extra/project-research-notes',
+    );
+  });
+
+  it('passes MCP runtime capabilities into project-scoped web threads', async () => {
+    const stdinChunks: string[] = [];
+    fakeProc.stdin.on('data', (chunk) => {
+      stdinChunks.push(chunk.toString());
+    });
+    vi.mocked(fs.existsSync).mockImplementation((file) => {
+      const value = String(file);
+      return (
+        value.includes('/tmp/nanocrab-test-store/projects/research-notes') ||
+        value.endsWith('mcp-servers.json') ||
+        value.endsWith('connector-permissions.json')
+      );
+    });
+    vi.mocked(fs.readFileSync).mockImplementation((file) => {
+      if (String(file).endsWith('mcp-servers.json')) {
+        return JSON.stringify([
+          {
+            name: 'gmail',
+            command: 'npx',
+            args: ['-y', '@example/gmail-mcp'],
+          },
+          {
+            name: 'Google Docs',
+            command: 'npx',
+            args: ['-y', '@example/google-docs-mcp'],
+          },
+        ]);
+      }
+      if (String(file).endsWith('connector-permissions.json')) {
+        return JSON.stringify([
+          {
+            connectorId: 'gmail',
+            scope: 'main',
+            allowedActions: ['mail.read', 'tools.expose'],
+            requiresApproval: true,
+            groups: [],
+            agents: [],
+            createdAt: '2026-06-17T12:00:00.000Z',
+            updatedAt: '2026-06-17T12:00:00.000Z',
+          },
+          {
+            connectorId: 'google-docs',
+            scope: 'main',
+            allowedActions: ['document.write', 'tools.expose'],
+            requiresApproval: false,
+            groups: [],
+            agents: [],
+            createdAt: '2026-06-17T12:00:00.000Z',
+            updatedAt: '2026-06-17T12:00:00.000Z',
+          },
+        ]);
+      }
+      return '';
+    });
+
+    const projectGroup: RegisteredGroup = {
+      ...testGroup,
+      kind: 'web',
+      projectId: 'project-1',
+      projectSlug: 'research-notes',
+    };
+
+    const resultPromise = runContainerAgent(
+      projectGroup,
+      {
+        ...testInput,
+        groupFolder: projectGroup.folder,
+        chatJid: 'web:project-thread',
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const payload = JSON.parse(stdinChunks.join(''));
+    expect(payload.allowedMcpServers).toEqual(
+      expect.arrayContaining(['github', 'gmail', 'google-docs']),
+    );
+    expect(payload.allowedMcpToolPatterns).toEqual(
+      expect.arrayContaining([
+        'mcp__gmail__list_mail*',
+        'mcp__google-docs__create_document*',
+      ]),
+    );
+    expect(payload.runtimeCapabilities).toEqual(
+      expect.objectContaining({
+        allowExternalWrites: true,
+        externalWritesRequireApproval: true,
+      }),
+    );
+    expect(payload.runtimeCapabilities.allowedConnectorIds).toEqual(
+      expect.arrayContaining(['nanocrab', 'github', 'gmail', 'google-docs']),
+    );
+    expect(payload.runtimeCapabilities.allowedToolActions).toContain(
+      'external.write',
     );
   });
 });

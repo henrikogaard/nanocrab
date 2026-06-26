@@ -6,6 +6,124 @@
   var _activeThreadId = null;
   var _activeThreadTitle = null;
   var _modalEl = null;
+  function setProgressFill(el, pct) {
+    if (!el) return;
+    el.style.setProperty('--progress-pct', Math.min(Number(pct) || 0, 100) + '%');
+  }
+  var CHAT_STARTERS = [
+    {
+      title: 'Triage my inbox',
+      description: 'Find what needs attention and turn it into a short action list.',
+      prompt:
+        'Help me triage what needs my attention today. If you need access to email, calendar, or another source, tell me what you can check and ask before taking actions that write or send anything.',
+    },
+    {
+      title: 'Draft a decision',
+      description: 'Turn a messy situation into options, tradeoffs, and a recommendation.',
+      prompt:
+        'Help me make a decision. Ask me for the context you need, then summarize the options, tradeoffs, risks, and a recommended next step.',
+    },
+    {
+      title: 'Plan the work',
+      description: 'Break an idea into practical next steps with crisp sequencing.',
+      prompt:
+        'Help me plan this work. Start by asking for the goal and constraints, then turn it into a prioritized checklist with next actions.',
+    },
+    {
+      title: 'Polish my writing',
+      description: 'Improve tone, structure, and clarity while keeping my voice.',
+      prompt:
+        'Help me polish a piece of writing. Ask me to paste the draft, then improve it for clarity, tone, and structure while keeping my voice.',
+    },
+  ];
+  var PROJECT_TOOL_STARTERS = [
+    {
+      title: 'Latest email summary',
+      description: 'Use configured mail MCP, then save a project brief if document tools are available.',
+      prompt:
+        'Use the configured mail MCP server to review the latest relevant emails for this project. Summarize important updates, decisions, deadlines, risks, and follow-up actions. Include a source ledger naming the MCP server, query window, and files created. If document tools are available, create or update a concise project summary document in the project workspace. Ask before sending email or writing to external systems.',
+    },
+    {
+      title: 'Emails from someone',
+      description: 'Check a sender or domain and turn the thread into decisions and next actions.',
+      prompt:
+        'Use the configured mail MCP server to check recent emails from [person or domain]. Create a concise summary of the thread, open questions, deadlines, promised follow-ups, and suggested replies. Include a source ledger naming the sender filter, query window, MCP calls used, and project artifact path. Ask me before sending anything or writing to external systems.',
+    },
+    {
+      title: 'Create document',
+      description: 'Use project files, chat history, and document MCP tools to draft an artifact.',
+      prompt:
+        'Create a polished document for this project using project files, chat history, and any approved document MCP tools. Draft it in markdown in the project workspace first, include assumptions, missing facts, and a source ledger with MCP servers, tool-call purpose, source files, and output path. Ask before publishing or updating external documents.',
+    },
+    {
+      title: 'Calendar follow-up',
+      description: 'Check meetings and commitments, then produce a short action brief.',
+      prompt:
+        'Use approved calendar and mail MCP tools to find recent meetings and follow-ups related to this project. Summarize commitments, owners, dates, blockers, and the next three actions. Do not create or modify calendar events without approval.',
+    },
+    {
+      title: 'Custom MCP task',
+      description: 'Use any approved connector to gather context and produce a project artifact.',
+      prompt:
+        'Use the approved MCP servers that fit this project request. Gather the needed external context, summarize what you found, cite the source systems or files you used, and create a durable project artifact when useful. Ask before publishing, sending, or changing anything outside NanoCrab.',
+    },
+  ];
+  var PROJECT_MCP_COMMANDS = [
+    {
+      title: 'Latest emails -> summary doc',
+      source: 'Mail MCP',
+      output: 'Project summary draft',
+      approval: 'Ask before publishing externally',
+      prompt:
+        'Use the configured mail MCP server to review the latest emails relevant to this Cowork project. Produce a markdown summary document in the project workspace with sections for source window, decisions, deadlines, risks, waiting items, next actions, and a source ledger naming MCP server, query window, tool-call purpose, and output path. Ask before creating or updating any external document.',
+    },
+    {
+      title: 'Emails from sender -> brief',
+      source: 'Mail MCP',
+      output: 'Sender/thread brief',
+      approval: 'Ask before sending replies',
+      prompt:
+        'Use the configured mail MCP server to check recent emails from [person or domain] for this Cowork project. Generate a concise brief with thread summary, commitments, deadlines, open questions, suggested replies, source citations, and a source ledger naming sender filter, query window, MCP calls, and created project files. Save the draft in the project workspace when useful. Ask before sending or changing anything outside NanoCrab.',
+    },
+    {
+      title: 'Project context -> document',
+      source: 'Files + chats + MCP',
+      output: 'Durable project document',
+      approval: 'Approve external document writes',
+      prompt:
+        'Combine project files, recent project chat history, and approved MCP source context into a concise project summary document. Save the draft in this project workspace, cite source systems and files used, include a source ledger with MCP servers, tool-call purpose, source files, and artifact path, list assumptions, and flag any external document write that needs approval.',
+    },
+    {
+      title: 'Mailbox topic sweep',
+      source: 'Mail search MCP',
+      output: 'Evidence-backed action list',
+      approval: 'Read-only until approved',
+      prompt:
+        'Use the configured mail MCP server to search for emails about [topic, customer, project, or keyword]. Summarize the evidence, decisions, promised follow-ups, owners, and due dates. Create a project action list draft with a source ledger naming query terms, date window, MCP calls, and artifact path. Ask before sending messages or modifying external records.',
+    },
+  ];
+  var PROJECT_MCP_SOURCE_STEPS = [
+    {
+      label: 'Source',
+      detail: 'Name the MCP server, sender/topic, date window, and project question.',
+    },
+    {
+      label: 'Evidence',
+      detail: 'Collect citations, decisions, deadlines, waiting items, and gaps.',
+    },
+    {
+      label: 'Draft',
+      detail: 'Save a markdown summary or document in the Cowork project workspace first.',
+    },
+    {
+      label: 'Ledger',
+      detail: 'Record MCP server, tool-call purpose, query window or sender filter, and created project files.',
+    },
+    {
+      label: 'Approval',
+      detail: 'Ask before publishing documents, sending mail, or changing external systems.',
+    },
+  ];
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -16,13 +134,581 @@
     }
   }
 
+  function openConfirmModal(options) {
+    closeModal();
+    var wrapper = document.createElement('div');
+    wrapper.innerHTML =
+      '<div id="webchat-modal-overlay">' +
+      '<div id="webchat-modal-panel" class="webchat-confirm-panel" role="dialog" aria-modal="true" aria-labelledby="webchat-confirm-title">' +
+      '<div class="webchat-modal-head">' +
+      '<h3 id="webchat-confirm-title">' + esc(options.title || 'Confirm action') + '</h3>' +
+      '<p>' + esc(options.body || '') + '</p>' +
+      '</div>' +
+      '<div class="modal-actions">' +
+      '<button class="btn btn-sm btn-ghost" id="webchat-confirm-cancel">Cancel</button>' +
+      '<button class="btn btn-sm btn-danger" id="webchat-confirm-action">' + esc(options.actionLabel || 'Confirm') + '</button>' +
+      '</div>' +
+      '</div>' +
+      '</div>';
+    _modalEl = wrapper.firstElementChild;
+    document.body.appendChild(_modalEl);
+    var cancelBtn = document.getElementById('webchat-confirm-cancel');
+    var actionBtn = document.getElementById('webchat-confirm-action');
+    if (cancelBtn) cancelBtn.onclick = closeModal;
+    if (actionBtn) {
+      actionBtn.onclick = async function () {
+        actionBtn.disabled = true;
+        try {
+          await options.onConfirm();
+          closeModal();
+        } catch (e) {
+          actionBtn.disabled = false;
+          toast((options.errorPrefix || 'Action failed') + ': ' + e.message, 'error');
+        }
+      };
+      actionBtn.focus();
+    }
+    _modalEl.addEventListener('click', function (e) {
+      if (e.target === _modalEl) closeModal();
+    });
+  }
+
+  function openInputModal(options) {
+    closeModal();
+    var wrapper = document.createElement('div');
+    wrapper.innerHTML =
+      '<div id="webchat-modal-overlay">' +
+      '<div id="webchat-modal-panel" class="webchat-input-panel" role="dialog" aria-modal="true" aria-labelledby="webchat-input-title">' +
+      '<div class="webchat-modal-head">' +
+      '<h3 id="webchat-input-title">' + esc(options.title || 'Update value') + '</h3>' +
+      '<p>' + esc(options.body || '') + '</p>' +
+      '</div>' +
+      '<label class="webchat-modal-field">' + esc(options.label || 'Value') +
+      '<input class="search-input" id="webchat-input-value" value="' + esc(options.value || '') + '">' +
+      '</label>' +
+      '<div class="modal-actions">' +
+      '<button class="btn btn-sm btn-ghost" id="webchat-input-cancel">Cancel</button>' +
+      '<button class="btn btn-sm btn-primary" id="webchat-input-action">' + esc(options.actionLabel || 'Save') + '</button>' +
+      '</div>' +
+      '</div>' +
+      '</div>';
+    _modalEl = wrapper.firstElementChild;
+    document.body.appendChild(_modalEl);
+    var input = document.getElementById('webchat-input-value');
+    var cancelBtn = document.getElementById('webchat-input-cancel');
+    var actionBtn = document.getElementById('webchat-input-action');
+    async function submit() {
+      var value = input ? input.value.trim() : '';
+      if (!value) {
+        toast(options.emptyMessage || 'Enter a value', 'warning');
+        if (input) input.focus();
+        return;
+      }
+      if (actionBtn) actionBtn.disabled = true;
+      try {
+        await options.onSubmit(value);
+        closeModal();
+      } catch (e) {
+        if (actionBtn) actionBtn.disabled = false;
+        toast((options.errorPrefix || 'Save failed') + ': ' + e.message, 'error');
+      }
+    }
+    if (cancelBtn) cancelBtn.onclick = closeModal;
+    if (actionBtn) actionBtn.onclick = submit;
+    if (input) {
+      input.onkeydown = function (e) {
+        if (e.key === 'Enter') submit();
+      };
+      input.focus();
+      input.select();
+    }
+    _modalEl.addEventListener('click', function (e) {
+      if (e.target === _modalEl) closeModal();
+    });
+  }
+
+  function getStarter(index) {
+    var numeric = Number(index);
+    if (!Number.isInteger(numeric)) return null;
+    return CHAT_STARTERS[numeric] || null;
+  }
+
+  function getProjectToolStarter(index) {
+    var numeric = Number(index);
+    if (!Number.isInteger(numeric)) return null;
+    return PROJECT_TOOL_STARTERS[numeric] || null;
+  }
+
+  function renderStarterCards() {
+    return CHAT_STARTERS.map(function (starter, index) {
+      return (
+        '<button type="button" class="webchat-starter-card" onclick="WebChat.startFromPrompt(' +
+        index +
+        ')">' +
+        '<span class="webchat-starter-title">' +
+        esc(starter.title) +
+        '</span>' +
+        '<span class="webchat-starter-desc">' +
+        esc(starter.description) +
+        '</span>' +
+        '</button>'
+      );
+    }).join('');
+  }
+
+  function renderWebchatLoadingState() {
+    return (
+      '<section class="webchat-loading-state" aria-busy="true" aria-label="Loading conversation context">' +
+      '<div>' +
+      '<span>Conversation loading</span>' +
+      '<strong>Loading chat context</strong>' +
+      '<p>Checking whether this is plain Copilot chat or a Cowork project thread, then loading messages, context, MCP access, and starter actions.</p>' +
+      '</div>' +
+      '<div class="webchat-loading-flow">' +
+      '<span>Thread</span>' +
+      '<span>Context</span>' +
+      '<span>Messages</span>' +
+      '<span>Actions</span>' +
+      '</div>' +
+      '</section>'
+    );
+  }
+
+  function renderEmptyThreadState() {
+    return (
+      '<section class="webchat-thread-empty-state">' +
+      '<div class="webchat-thread-empty-copy">' +
+      '<span>First message</span>' +
+      '<strong>Start with a plain chat prompt.</strong>' +
+      '<p>This thread has no project files, artifacts, or agent template. Use it for quick thinking, writing, planning, and questions. Move to Cowork when you need durable project context or MCP-backed documents.</p>' +
+      '</div>' +
+      '<div class="webchat-thread-empty-actions">' +
+      '<button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById(\'chat-msg-input\')?.focus()">Write message</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="navigate(\'projects\')">Open Cowork projects</button>' +
+      '</div>' +
+      '<div class="webchat-thread-empty-starters">' +
+      CHAT_STARTERS.slice(0, 3)
+        .map(function (starter, index) {
+          return (
+            '<button type="button" onclick="WebChat.useStarterPrompt(' +
+            index +
+            ')">' +
+            '<strong>' +
+            esc(starter.title) +
+            '</strong>' +
+            '<small>' +
+            esc(starter.description) +
+            '</small>' +
+            '</button>'
+          );
+        })
+        .join('') +
+      '</div>' +
+      '</section>'
+    );
+  }
+
+  function renderThreadMessageLoadIssue(message) {
+    return (
+      '<section class="webchat-message-error-state" role="status">' +
+      '<span>Messages unavailable</span>' +
+      '<strong>Could not load this chat history.</strong>' +
+      '<p>' +
+      esc(message || 'The composer still works, but previous messages are not visible right now. Retry the thread before relying on this conversation context.') +
+      '</p>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="WebChat.renderConversation(document.getElementById(\'main\'), WebChat.activeThreadId)">Retry thread</button>' +
+      '</section>'
+    );
+  }
+
+  function resizeChatInput(input) {
+    if (!input || input.tagName !== 'TEXTAREA') return;
+    input.style.setProperty(
+      '--chat-input-height',
+      Math.min(input.scrollHeight, 148) + 'px',
+    );
+  }
+
+  function jsStringAttr(value) {
+    return JSON.stringify(String(value || '')).replace(/"/g, '&quot;');
+  }
+
+  function renderThreadContextBanner(threadMeta) {
+    if (!threadMeta || !threadMeta.projectId) return '';
+    var projectName = threadMeta.projectName || 'Project';
+    var mcpAccess = threadMeta.mcpAccess || {};
+    var toolsAvailable = mcpAccess.enabled !== false;
+    var mcpScope =
+      mcpAccess.scope === 'configured'
+        ? 'All configured MCP servers allowed by connector permissions'
+        : mcpAccess.scope === 'restricted'
+          ? 'Restricted MCP servers: ' + (mcpAccess.servers || []).join(', ')
+          : 'Internal NanoCrab tools only';
+    var writeGuard = mcpAccess.requiresApprovalForWrites
+      ? 'External writes and document publishing request approval first.'
+      : 'External writes are not enabled for this chat.';
+    return (
+      '<div class="webchat-context-banner" data-project-id="' +
+      esc(threadMeta.projectId) +
+      '" data-mcp-enabled="' +
+      esc(String(toolsAvailable)) +
+      '">' +
+      '<div class="webchat-context-copy">' +
+      '<span>Cowork project</span>' +
+      '<strong>' +
+      esc(projectName) +
+      '</strong>' +
+      '<small>' +
+      esc(
+        toolsAvailable
+          ? 'Project files, prior project chats, and approved MCP tools are available to this chat.'
+          : 'Project files and prior project chats are available. External MCP tools are not enabled for this chat.',
+      ) +
+      '</small>' +
+      '<div class="webchat-mcp-status">' +
+      '<span>' +
+      esc(mcpScope) +
+      '</span>' +
+      '<span>' +
+      esc(writeGuard) +
+      '</span>' +
+      '</div>' +
+      '</div>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="WebChat.openProjectContext(' +
+      jsStringAttr(threadMeta.projectId) +
+      ')">Back to project</button>' +
+      '</div>' +
+      (toolsAvailable ? renderProjectToolStarters(threadMeta) : '')
+    );
+  }
+
+  function renderThreadContextUnavailable(threadId) {
+    return (
+      '<section class="webchat-context-warning" role="status">' +
+      '<div>' +
+      '<span>Context unavailable</span>' +
+      '<strong>Thread metadata could not be loaded.</strong>' +
+      '<p>This chat may be plain Copilot or a Cowork project thread. Project files, MCP scope, and artifact context are hidden until the thread detail request recovers.</p>' +
+      '</div>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="WebChat.renderConversation(document.getElementById(\'main\'), ' +
+      jsStringAttr(threadId) +
+      ')">Retry context</button>' +
+      '</section>'
+    );
+  }
+
+  function chatActionErrorMessage(kind, error) {
+    var detail = error && error.message ? ' Detail: ' + error.message : '';
+    if (kind === 'send') {
+      return 'Message was not sent. Your draft was restored so you can retry after the thread recovers.' + detail;
+    }
+    if (kind === 'starter') {
+      return 'Conversation was created, but the starter prompt was not sent. Open the chat and resend the prompt if it still matters.' + detail;
+    }
+    if (kind === 'create') {
+      return 'Conversation was not created. Check provider/model readiness and thread storage before retrying.' + detail;
+    }
+    return 'Chat action failed.' + detail;
+  }
+
+  function renderProjectMcpServerRibbon(threadMeta) {
+    var mcpAccess = (threadMeta && threadMeta.mcpAccess) || {};
+    var servers = Array.isArray(mcpAccess.servers) ? mcpAccess.servers.filter(Boolean) : [];
+    var examples = Array.isArray(mcpAccess.examples) ? mcpAccess.examples.filter(Boolean) : [];
+    var serverCopy = servers.length
+      ? servers.slice(0, 8).join(', ')
+      : mcpAccess.scope === 'configured'
+        ? 'All configured MCP servers allowed by connector permissions'
+        : 'Approved project MCP servers';
+    var extraCount = servers.length > 8 ? ' +' + (servers.length - 8) + ' more' : '';
+    var exampleCopy = examples.length
+      ? examples.slice(0, 3).join(' / ')
+      : 'Latest emails, sender summaries, document drafts, and custom source reads';
+    return (
+      '<div class="webchat-mcp-server-ribbon" aria-label="Available MCP server scope">' +
+      '<span>Available MCP scope</span>' +
+      '<strong>' +
+      esc(serverCopy + extraCount) +
+      '</strong>' +
+      '<small>Use these for read-only source gathering. External document publishing, email sends, calendar edits, and third-party updates ask for approval first.</small>' +
+      '<small>Examples: ' +
+      esc(exampleCopy) +
+      '</small>' +
+      '</div>'
+    );
+  }
+
+  function renderProjectToolStarters(threadMeta) {
+    return (
+      '<div class="webchat-project-tools" aria-label="Cowork MCP starters">' +
+      '<div class="webchat-project-tools-head">' +
+      '<span>MCP actions</span>' +
+      '<small>Ask for email summaries, sender checks, project documents, calendar follow-ups, or any approved connector workflow. Writes stay behind approvals.</small>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="WebChat.useProjectMcpRunbook()">Use MCP runbook</button>' +
+      '</div>' +
+      renderProjectMcpServerRibbon(threadMeta) +
+      '<div class="webchat-project-tool-grid">' +
+      PROJECT_TOOL_STARTERS.map(function (starter, index) {
+        return (
+          '<button type="button" class="webchat-project-tool" onclick="WebChat.useProjectToolPrompt(' +
+          index +
+          ')">' +
+          '<span>' +
+          esc(starter.title) +
+          '</span>' +
+          '<small>' +
+          esc(starter.description) +
+          '</small>' +
+          '</button>'
+        );
+      }).join('') +
+      '</div>' +
+      '<div class="webchat-mcp-command-strip">' +
+      PROJECT_MCP_COMMANDS.map(function (command, index) {
+        return (
+          '<button type="button" onclick="WebChat.useProjectMcpCommand(' +
+          index +
+          ')">' +
+          '<span>' +
+          esc(command.title) +
+          '</span>' +
+          '<small><strong>Source</strong> ' +
+          esc(command.source) +
+          '</small>' +
+          '<small><strong>Output</strong> ' +
+          esc(command.output) +
+          '</small>' +
+          '<small><strong>Approval</strong> ' +
+          esc(command.approval) +
+          '</small>' +
+          '</button>'
+        );
+      }).join('') +
+      '</div>' +
+      '<div class="webchat-mcp-source-flow" aria-label="MCP source-to-document checklist">' +
+      PROJECT_MCP_SOURCE_STEPS.map(function (step, index) {
+        return (
+          '<article>' +
+          '<span>' +
+          esc('0' + (index + 1)) +
+          '</span>' +
+          '<strong>' +
+          esc(step.label) +
+          '</strong>' +
+          '<small>' +
+          esc(step.detail) +
+          '</small>' +
+          '</article>'
+        );
+      }).join('') +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  function projectMcpRunbookPromptText(state) {
+    state = state || window._webchatThreadBriefState || {};
+    var threadMeta = state.threadMeta || {};
+    var projectName = threadMeta.projectName || threadMeta.projectId || 'this Cowork project';
+    var mcpAccess = threadMeta.mcpAccess || {};
+    var servers = Array.isArray(mcpAccess.servers) ? mcpAccess.servers.filter(Boolean) : [];
+    var scope =
+      mcpAccess.scope === 'configured'
+        ? 'all configured MCP servers allowed by connector permissions'
+        : servers.length
+          ? servers.join(', ')
+          : 'approved MCP servers exposed to this project chat';
+    return [
+      'Use MCP tools from this Cowork project chat.',
+      '',
+      'Project: ' + projectName,
+      'Available MCP scope: ' + scope,
+      'Goal: gather approved external context, then create a durable local project artifact.',
+      '',
+      'Source request',
+      '- If I ask for latest emails, use the configured mail MCP server and state the date/window you searched.',
+      '- If I ask for emails from someone, search that sender or domain and summarize commitments, deadlines, open questions, and suggested replies.',
+      '- If I ask for a document or summary, combine MCP evidence with project files and previous project chat context when useful.',
+      '',
+      'Output rules',
+      '- Save the first summary, brief, or document draft inside the Cowork project workspace before publishing anywhere else.',
+      '- Include a source ledger naming each MCP server, tool-call purpose, query window or sender filter, and created project file path.',
+      '- Separate confirmed facts, assumptions, missing facts, and recommended next actions.',
+      '',
+      'Approval boundary',
+      '- Reading approved source systems and writing local project drafts can happen in chat.',
+      '- Ask for approval before sending email, publishing or updating external documents, changing calendar events, calling webhooks, or updating third-party records.',
+      '- If the needed MCP tool is not exposed, say exactly what connector or permission is missing instead of inventing source results.',
+    ].join('\n');
+  }
+
+  function projectMcpPromptContextText(state) {
+    state = state || window._webchatThreadBriefState || {};
+    var threadMeta = state.threadMeta || {};
+    var projectName = threadMeta.projectName || threadMeta.projectId || 'this Cowork project';
+    var mcpAccess = threadMeta.mcpAccess || {};
+    var servers = Array.isArray(mcpAccess.servers) ? mcpAccess.servers.filter(Boolean) : [];
+    var scope =
+      mcpAccess.scope === 'configured'
+        ? 'all configured MCP servers allowed by connector permissions'
+        : servers.length
+          ? servers.join(', ')
+          : 'approved MCP servers exposed to this project chat';
+    return [
+      'Cowork MCP context:',
+      '- Project: ' + projectName,
+      '- Available MCP scope: ' + scope,
+      '- Use approved MCP servers for email, calendar, document, storage, or custom source gathering when they fit the request.',
+      '- Local output default: save the first summary, brief, document, or artifact inside the Cowork project workspace.',
+      '- Source ledger required: MCP server, tool-call purpose, query window or sender/topic filter, cited evidence, and created project file path.',
+      '- Approval boundary: ask before sending email, publishing or updating external documents, changing calendar events, calling webhooks, or mutating third-party systems.',
+      '- Missing tool behavior: say which connector or permission is missing instead of inventing source results.',
+    ].join('\n');
+  }
+
+  function projectMcpScopedPrompt(prompt, state) {
+    return [
+      projectMcpPromptContextText(state),
+      '',
+      'Request:',
+      String(prompt || '').trim(),
+    ].join('\n');
+  }
+
+  function renderPlainThreadBrief(threadMeta) {
+    var title = threadMeta?.title || _activeThreadTitle || 'New conversation';
+    return (
+      '<section class="webchat-plain-brief" aria-label="Plain chat context">' +
+      '<div class="webchat-plain-main">' +
+      '<span>Plain chat</span>' +
+      '<strong>' +
+      esc(title) +
+      '</strong>' +
+      '<p>Quick AI conversation without project files or agent templates. Use it for thinking, writing, planning, and lightweight questions.</p>' +
+      '</div>' +
+      '<div class="webchat-plain-meta">' +
+      '<span>No project context</span>' +
+      '<span>External writes ask first</span>' +
+      '</div>' +
+      '<div class="webchat-plain-starters">' +
+      CHAT_STARTERS.map(function (starter, index) {
+        return (
+          '<button type="button" onclick="WebChat.useStarterPrompt(' +
+          index +
+          ')">' +
+          esc(starter.title) +
+          '</button>'
+        );
+      }).join('') +
+      '</div>' +
+      '</section>'
+    );
+  }
+
+  function chatThreadBriefText(state) {
+    state = state || window._webchatThreadBriefState || {};
+    var threadMeta = state.threadMeta || {};
+    var isProjectChat = Boolean(threadMeta.projectId);
+    var title = state.title || threadMeta.title || _activeThreadTitle || 'New conversation';
+    var messages = Array.isArray(state.messages) ? state.messages : [];
+    var messageLines = messages
+      .slice(0, 6)
+      .map(function (message) {
+        var speaker = message.is_bot_message ? 'Agent' : 'User';
+        var content = String(message.content || '').replace(/\s+/g, ' ').trim();
+        if (content.length > 180) content = content.slice(0, 177) + '...';
+        return '- ' + speaker + ': ' + content;
+      })
+      .filter(Boolean);
+    var starters = Array.isArray(state.starters) ? state.starters : CHAT_STARTERS;
+    var projectCommands = Array.isArray(state.projectCommands)
+      ? state.projectCommands
+      : PROJECT_MCP_COMMANDS;
+    var loadIssues = Array.isArray(state.loadIssues)
+      ? state.loadIssues.filter(Boolean)
+      : [];
+    var mcpAccess = threadMeta.mcpAccess || {};
+    var mcpScope =
+      mcpAccess.scope === 'configured'
+        ? 'all configured MCP servers allowed by connector permissions'
+        : mcpAccess.scope === 'restricted'
+          ? 'restricted MCP servers: ' + (mcpAccess.servers || []).join(', ')
+          : 'internal NanoCrab tools only';
+    var mcpEnabled = isProjectChat && mcpAccess.enabled !== false;
+    var lines = [
+      'Web chat thread brief',
+      'Title: ' + title,
+      'Thread id: ' + (state.threadId || _activeThreadId || 'unknown'),
+      '',
+      isProjectChat
+        ? 'Mode: Cowork project chat. Project chat can use Cowork context, approved MCP tools, and project artifacts.'
+        : 'Mode: Plain chat. Plain chat has no project files, artifacts, or agent template.',
+      isProjectChat
+        ? 'Project: ' + (threadMeta.projectName || threadMeta.projectId || 'Project')
+        : 'Scope: Quick AI conversation for thinking, writing, planning, and lightweight questions.',
+      isProjectChat
+        ? 'MCP access: ' + (mcpEnabled ? mcpScope : 'not enabled for this project chat')
+        : 'MCP access: no project connector context by default.',
+      'Approval boundary: External writes, sent messages, published documents, and calendar changes stay approval-gated.',
+      'Data health: ' +
+        (loadIssues.length
+          ? loadIssues.join('; ')
+          : 'Thread messages and metadata loaded without known fallback.'),
+      '',
+      'Useful starters:',
+    ];
+    starters.slice(0, 4).forEach(function (starter) {
+      lines.push('- ' + starter.title + ': ' + starter.description);
+    });
+    if (isProjectChat && mcpEnabled) {
+      lines.push('', 'Cowork MCP commands:');
+      projectCommands.forEach(function (command) {
+        lines.push(
+          '- ' +
+            command.title +
+            ' | source: ' +
+            command.source +
+            ' | output: ' +
+            command.output +
+            ' | approval: ' +
+            command.approval,
+        );
+      });
+      if (Array.isArray(mcpAccess.examples) && mcpAccess.examples.length) {
+        lines.push('', 'MCP request examples:');
+        mcpAccess.examples.forEach(function (example) {
+          lines.push('- ' + example);
+        });
+      }
+      lines.push('', 'MCP source-to-document checklist:');
+      PROJECT_MCP_SOURCE_STEPS.forEach(function (step) {
+        lines.push('- ' + step.label + ': ' + step.detail);
+      });
+    }
+    lines.push('', 'Recent visible messages:');
+    lines.push(messageLines.length ? messageLines.join('\n') : '- No messages yet.');
+    return lines.join('\n');
+  }
+
+  function openProjectContext(projectId) {
+    if (projectId) {
+      try {
+        sessionStorage.setItem('project_focus_id', String(projectId));
+      } catch (_) {}
+    }
+    navigate('projects');
+  }
+
   // ── public API ─────────────────────────────────────────────────────────────
 
   async function loadThreads() {
     try {
       var t = await api('/threads');
+      window._webchatThreadListLoadIssue = '';
       return Array.isArray(t) ? t : [];
-    } catch (_) {
+    } catch (e) {
+      window._webchatThreadListLoadIssue =
+        'Thread list unavailable' + (e && e.message ? ': ' + e.message : '');
       return [];
     }
   }
@@ -36,8 +722,9 @@
 
     var threadItems = '';
     if (!threads || threads.length === 0) {
-      threadItems =
-        '<div class="nav-empty" style="padding:8px 16px;font-size:12px;color:var(--text-muted)">No conversations yet</div>';
+      threadItems = renderThreadSidebarEmptyState(
+        window._webchatThreadListLoadIssue ? 'error' : 'empty',
+      );
     } else {
       threadItems =
         '<div class="thread-list">' +
@@ -62,12 +749,38 @@
         '</div>';
     }
 
-    var channelBtn =
-      '<a class="nav-link" onclick="navigate(\'messages\')">' +
-      navIcon('messages') +
-      '<span class="nav-label">Channel messages</span></a>';
+    return newBtn + threadItems;
+  }
 
-    return newBtn + threadItems + channelBtn;
+  function renderThreadSidebarEmptyState(kind) {
+    var isError = kind === 'error';
+    var issue = window._webchatThreadListLoadIssue || 'Thread list unavailable';
+    return (
+      '<section class="thread-sidebar-empty' +
+      (isError ? ' is-error' : '') +
+      '" aria-label="' +
+      (isError ? 'Copilot conversation list unavailable' : 'No Copilot conversations yet') +
+      '">' +
+      '<span>' +
+      (isError ? 'Data health' : 'Copilot queue') +
+      '</span>' +
+      '<strong>' +
+      (isError ? 'Chat list unavailable' : 'No chats yet') +
+      '</strong>' +
+      '<p>' +
+      (isError
+        ? esc(issue) + '. Retry the list, or start a new chat if thread storage is healthy.'
+        : 'Start a plain chat for quick thinking. Use Cowork when the request needs project files, MCP tools, or durable artifacts.') +
+      '</p>' +
+      '<button type="button" onclick="' +
+      (isError
+        ? 'WebChat.loadThreads().then(function(ts){var nav=document.getElementById(\'chat-thread-nav\'); if(nav) nav.innerHTML=WebChat.renderThreadList(ts, WebChat.activeThreadId);})'
+        : 'WebChat.openNewConversationModal()') +
+      '">' +
+      (isError ? 'Retry list' : 'New chat') +
+      '</button>' +
+      '</section>'
+    );
   }
 
   function setActiveThreadId(id) {
@@ -92,36 +805,48 @@
 
     if (!threadId) {
       el.innerHTML =
-        '<div class="card empty" style="margin:40px auto;max-width:420px;text-align:center">' +
-        '<div class="card-title">Web Conversations</div>' +
-        '<p style="color:var(--text-muted);margin-bottom:16px">Start a new AI conversation thread that lives in the browser — independent of your chat channels.</p>' +
+        '<section class="webchat-empty">' +
+        '<div class="webchat-empty-kicker">Copilot chat</div>' +
+        '<h2>What can I help with?</h2>' +
+        '<p>Start a plain AI conversation for questions, writing, planning, and quick thinking.</p>' +
+        '<div class="webchat-empty-actions">' +
         '<button class="btn btn-primary" onclick="WebChat.openNewConversationModal()">＋ New conversation</button>' +
-        '</div>';
+        '</div>' +
+        '<div class="webchat-starter-grid">' +
+        renderStarterCards() +
+        '</div>' +
+        '</section>';
       return;
     }
 
     _activeThreadId = threadId;
+    var threadLoadIssues = [];
+    var messagesLoadFailed = false;
 
     // Render shell immediately so the user sees the layout fast
     el.innerHTML =
-      '<div class="page-header"><h2 id="thread-title" style="margin:0">Loading…</h2></div>' +
-      '<div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column">' +
-      '<div class="chat-messages" id="chat-messages-area"><div class="loading">Loading</div></div>' +
+      '<div class="page-header webchat-thread-head"><h2 class="webchat-thread-title" id="thread-title">Loading…</h2></div>' +
+      '<div id="thread-context-banner"></div>' +
+      '<div class="card webchat-thread-card">' +
+      '<div class="chat-messages" id="chat-messages-area">' +
+      renderWebchatLoadingState() +
+      '</div>' +
       '<div class="chat-progress-bar" id="chat-progress-bar" onclick="toggleProgressHistory()">' +
       '<span class="progress-spinner" id="progress-spinner"></span>' +
       '<span class="progress-phase" id="progress-phase">Thinking…</span>' +
-      '<div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>' +
+      '<div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>' +
       '<span class="progress-pct" id="progress-pct">0%</span>' +
       '</div>' +
       '<div class="chat-progress-history" id="chat-progress-history"></div>' +
       '<div class="chat-input">' +
-      '<input type="text" id="chat-msg-input" placeholder="Type a message…" autocomplete="off">' +
+      '<textarea id="chat-msg-input" rows="1" placeholder="Type a message…" autocomplete="off"></textarea>' +
       '<button class="btn btn-sm btn-primary" id="chat-send-btn">Send</button>' +
       '</div>' +
       '</div>' +
-      '<div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end">' +
-      '<button class="btn btn-sm btn-ghost" id="thread-rename-btn" style="font-size:11px">Rename</button>' +
-      '<button class="btn btn-sm btn-danger" id="thread-delete-btn" style="font-size:11px">Delete</button>' +
+      '<div class="webchat-thread-actions">' +
+      '<button class="btn btn-sm btn-ghost webchat-thread-action" id="thread-copy-brief-btn">Copy chat brief</button>' +
+      '<button class="btn btn-sm btn-ghost webchat-thread-action" id="thread-rename-btn">Rename</button>' +
+      '<button class="btn btn-sm btn-danger webchat-thread-action" id="thread-delete-btn">Delete</button>' +
       '</div>';
 
     var chatMessages = [];
@@ -129,9 +854,14 @@
 
     function renderMessages() {
       if (!messagesArea) return;
+      if (messagesLoadFailed) {
+        messagesArea.innerHTML = renderThreadMessageLoadIssue(
+          'The message API failed while opening this thread.',
+        );
+        return;
+      }
       if (chatMessages.length === 0) {
-        messagesArea.innerHTML =
-          '<div class="empty">No messages yet. Send one below.</div>';
+        messagesArea.innerHTML = renderEmptyThreadState();
         return;
       }
       messagesArea.innerHTML = chatMessages
@@ -157,21 +887,66 @@
       messagesArea.scrollTop = messagesArea.scrollHeight;
     }
 
+    function updateThreadBriefState(threadMeta) {
+      window._webchatThreadBriefState = {
+        threadId: threadId,
+        title: _activeThreadTitle || title || (threadMeta && threadMeta.title) || 'New conversation',
+        threadMeta: threadMeta || {},
+        messages: chatMessages.slice(),
+        starters: CHAT_STARTERS,
+        projectCommands: PROJECT_MCP_COMMANDS,
+        loadIssues: threadLoadIssues.slice(),
+      };
+    }
+
     // Load messages
     try {
       var data = await api('/threads/' + encodeURIComponent(threadId) + '/messages');
       chatMessages = Array.isArray(data) ? data : [];
     } catch (e) {
+      messagesLoadFailed = true;
+      threadLoadIssues.push(
+        'Thread messages unavailable' + (e && e.message ? ': ' + e.message : ''),
+      );
       chatMessages = [];
     }
     renderMessages();
 
-    // Load title — use the known title when provided, otherwise fetch the list.
+    // Load thread metadata and title. Project-scoped threads are intentionally
+    // hidden from the plain thread list, so detail lookup is the canonical path.
+    var threadMeta = null;
+    try {
+      threadMeta = await api('/threads/' + encodeURIComponent(threadId));
+    } catch (e) {
+      threadLoadIssues.push(
+        'Thread metadata unavailable' + (e && e.message ? ': ' + e.message : ''),
+      );
+      threadMeta = null;
+    }
+    updateThreadBriefState(threadMeta);
+    var contextBanner = document.getElementById('thread-context-banner');
+    if (contextBanner) {
+      contextBanner.innerHTML =
+        threadLoadIssues.some(function (issue) {
+          return issue.indexOf('Thread metadata unavailable') === 0;
+        })
+          ? renderThreadContextUnavailable(threadId)
+          : renderThreadContextBanner(threadMeta) || renderPlainThreadBrief(threadMeta);
+    }
+
+    // Load title — use the known title when provided, then detail metadata,
+    // otherwise fetch the list for older/mock routes.
     var knownTitle = typeof title === 'string' ? title : null;
     if (knownTitle) {
       _activeThreadTitle = knownTitle;
+      updateThreadBriefState(threadMeta);
       var titleElDirect = document.getElementById('thread-title');
       if (titleElDirect) titleElDirect.textContent = knownTitle;
+    } else if (threadMeta && threadMeta.title) {
+      _activeThreadTitle = threadMeta.title;
+      updateThreadBriefState(threadMeta);
+      var titleElMeta = document.getElementById('thread-title');
+      if (titleElMeta) titleElMeta.textContent = threadMeta.title;
     } else {
       try {
         var threads = await api('/threads');
@@ -180,8 +955,17 @@
         if (titleEl && thisThread) {
           titleEl.textContent = thisThread.title || threadId;
           _activeThreadTitle = thisThread.title || threadId;
+          updateThreadBriefState(threadMeta);
         }
-      } catch (_) {}
+      } catch (e) {
+        threadLoadIssues.push(
+          'Thread title lookup unavailable' + (e && e.message ? ': ' + e.message : ''),
+        );
+        updateThreadBriefState(threadMeta);
+        var titleElFallback = document.getElementById('thread-title');
+        if (titleElFallback) titleElFallback.textContent = threadId;
+        _activeThreadTitle = threadId;
+      }
     }
 
     // Send message
@@ -192,6 +976,7 @@
       var msg = input.value.trim();
       if (!msg) return;
       input.value = '';
+      resizeChatInput(input);
       btn.disabled = true;
 
       // Fallback progress timer
@@ -200,12 +985,10 @@
         var bar = document.getElementById('chat-progress-bar');
         if (bar && !bar.classList.contains('visible')) {
           bar.classList.add('visible');
-          var spinner = document.getElementById('progress-spinner');
-          if (spinner) spinner.style.display = '';
           var phase = document.getElementById('progress-phase');
           if (phase) phase.textContent = 'Agent is thinking…';
           var fill = document.getElementById('progress-fill');
-          if (fill) fill.style.width = '0%';
+          setProgressFill(fill, 0);
           var pct = document.getElementById('progress-pct');
           if (pct) pct.textContent = '';
         }
@@ -219,18 +1002,29 @@
         timestamp: new Date().toISOString(),
       });
       renderMessages();
+      updateThreadBriefState(threadMeta);
 
       try {
         await api('/threads/' + encodeURIComponent(threadId) + '/messages', {
           method: 'POST',
           body: JSON.stringify({ message: msg }),
         });
-      } catch (_) {
+      } catch (e) {
         if (window._progressTimeout) {
           clearTimeout(window._progressTimeout);
           window._progressTimeout = null;
         }
-        toast('Failed to send message', 'error');
+        chatMessages = chatMessages.filter(function (message) {
+          return message.content !== msg || message.sender_name !== 'You' || message.is_bot_message !== false;
+        });
+        input.value = msg;
+        resizeChatInput(input);
+        renderMessages();
+        threadLoadIssues.push(
+          'Last message send failed' + (e && e.message ? ': ' + e.message : ''),
+        );
+        updateThreadBriefState(threadMeta);
+        toast(chatActionErrorMessage('send', e), 'error');
       } finally {
         btn.disabled = false;
         if (input) input.focus();
@@ -241,52 +1035,77 @@
     if (sendBtn) sendBtn.onclick = sendMessage;
     var inputEl = document.getElementById('chat-msg-input');
     if (inputEl) {
+      inputEl.oninput = function () {
+        resizeChatInput(inputEl);
+      };
       inputEl.onkeydown = function (e) {
-        if (e.key === 'Enter') sendMessage();
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      };
+      resizeChatInput(inputEl);
+    }
+
+    var copyBriefBtn = document.getElementById('thread-copy-brief-btn');
+    if (copyBriefBtn) {
+      copyBriefBtn.onclick = function () {
+        updateThreadBriefState(threadMeta);
+        WebChat.copyThreadBrief();
       };
     }
 
     // Rename
     var renameBtn = document.getElementById('thread-rename-btn');
     if (renameBtn) {
-      renameBtn.onclick = async function () {
+      renameBtn.onclick = function () {
         var titleEl = document.getElementById('thread-title');
         var current = titleEl ? titleEl.textContent : '';
-        var newTitle = window.prompt('Rename conversation:', current);
-        if (!newTitle || !newTitle.trim()) return;
-        try {
-          await api('/threads/' + encodeURIComponent(threadId), {
-            method: 'PATCH',
-            body: JSON.stringify({ title: newTitle.trim() }),
-          });
-          if (titleEl) titleEl.textContent = newTitle.trim();
-          toast('Renamed', 'success');
-          // Refresh sidebar
-          var navEl = document.getElementById('chat-thread-nav');
-          if (navEl && window.WebChat) {
-            WebChat.loadThreads().then(function (ts) {
-              navEl.innerHTML = WebChat.renderThreadList(ts, _activeThreadId);
+        openInputModal({
+          title: 'Rename conversation',
+          body: 'Give this chat a title that makes it easy to find later.',
+          label: 'Conversation title',
+          value: current,
+          actionLabel: 'Rename',
+          emptyMessage: 'Enter a conversation title',
+          errorPrefix: 'Rename failed',
+          onSubmit: async function (newTitle) {
+            await api('/threads/' + encodeURIComponent(threadId), {
+              method: 'PATCH',
+              body: JSON.stringify({ title: newTitle }),
             });
-          }
-        } catch (e) {
-          toast('Rename failed: ' + e.message, 'error');
-        }
+            if (titleEl) titleEl.textContent = newTitle;
+            _activeThreadTitle = newTitle;
+            updateThreadBriefState(threadMeta);
+            toast('Renamed', 'success');
+            // Refresh sidebar
+            var navEl = document.getElementById('chat-thread-nav');
+            if (navEl && window.WebChat) {
+              WebChat.loadThreads().then(function (ts) {
+                navEl.innerHTML = WebChat.renderThreadList(ts, _activeThreadId);
+              });
+            }
+          },
+        });
       };
     }
 
     // Delete
     var deleteBtn = document.getElementById('thread-delete-btn');
     if (deleteBtn) {
-      deleteBtn.onclick = async function () {
-        if (!window.confirm('Delete this conversation?')) return;
-        try {
-          await api('/threads/' + encodeURIComponent(threadId), { method: 'DELETE' });
-          toast('Deleted', 'success');
-          _activeThreadId = null;
-          location.hash = '#/chat';
-        } catch (e) {
-          toast('Delete failed: ' + e.message, 'error');
-        }
+      deleteBtn.onclick = function () {
+        openConfirmModal({
+          title: 'Delete conversation',
+          body: 'This removes the conversation and its local thread history from the chat workspace.',
+          actionLabel: 'Delete',
+          errorPrefix: 'Delete failed',
+          onConfirm: async function () {
+            await api('/threads/' + encodeURIComponent(threadId), { method: 'DELETE' });
+            toast('Deleted', 'success');
+            _activeThreadId = null;
+            location.hash = '#/chat';
+          },
+        });
       };
     }
 
@@ -311,11 +1130,10 @@
         var phase = document.getElementById('progress-phase');
         var fill = document.getElementById('progress-fill');
         var pct = document.getElementById('progress-pct');
-        var spinner = document.getElementById('progress-spinner');
         if (!bar || !phase || !fill || !pct) return;
         bar.classList.add('visible');
         phase.textContent = msg.data.message || msg.data.phase;
-        fill.style.width = Math.min(msg.data.pct, 100) + '%';
+        setProgressFill(fill, msg.data.pct);
         pct.textContent = msg.data.pct + '%';
         var history = document.getElementById('chat-progress-history');
         if (history) {
@@ -323,7 +1141,7 @@
           entry.className =
             'phase-entry' + (msg.data.pct >= 100 ? ' done' : ' active');
           entry.innerHTML =
-            '<span style="font-size:10px">' +
+            '<span class="phase-entry-marker">' +
             (msg.data.pct >= 100 ? '✓' : '●') +
             '</span> ' +
             esc(msg.data.message || msg.data.phase);
@@ -334,8 +1152,6 @@
           setTimeout(function () {
             bar.classList.remove('visible');
           }, 3000);
-        } else if (spinner) {
-          spinner.style.display = '';
         }
         return;
       }
@@ -344,6 +1160,21 @@
         var m = msg.data;
         chatMessages.unshift(m);
         renderMessages();
+        updateThreadBriefState(threadMeta);
+        return;
+      }
+
+      if (msg.type === 'thread_title') {
+        _activeThreadTitle = msg.data.title;
+        updateThreadBriefState(threadMeta);
+        var threadTitleEl = document.getElementById('thread-title');
+        if (threadTitleEl) threadTitleEl.textContent = msg.data.title;
+        var threadNavEl = document.getElementById('chat-thread-nav');
+        if (threadNavEl && window.WebChat) {
+          WebChat.loadThreads().then(function (ts) {
+            threadNavEl.innerHTML = WebChat.renderThreadList(ts, _activeThreadId);
+          });
+        }
         return;
       }
 
@@ -398,7 +1229,7 @@
           if (body2) {
             var resultDiv = document.createElement('div');
             resultDiv.innerHTML =
-              '<div class="section-label" style="margin-top:8px">Result</div>' +
+              '<div class="section-label section-label-result">Result</div>' +
               '<pre>' + esc(prettyPrint(msg.data.output)) + '</pre>';
             body2.appendChild(resultDiv);
           }
@@ -438,55 +1269,113 @@
     handleWsMessage = threadWsHandler;
   }
 
-  async function openNewConversationModal() {
+  async function openNewConversationModal(starter) {
     // Close any existing modal
     closeModal();
+    var selectedStarter =
+      starter && typeof starter.prompt === 'string' ? starter : null;
 
-    var templates = [];
+    var providerInfo = {};
     try {
-      var tmpl = await api('/threads/agent-templates');
-      templates = Array.isArray(tmpl) ? tmpl : [];
+      providerInfo = await api('/system/provider');
     } catch (_) {
-      templates = [];
+      providerInfo = {};
     }
 
-    var lastTemplate = localStorage.getItem('webchat_last_template') || '';
+    var fallbackDefinitions = {
+      claude: { id: 'claude', name: 'Claude' },
+      codex: { id: 'codex', name: 'Codex' },
+      ollama: { id: 'ollama', name: 'Ollama' },
+      openrouter: { id: 'openrouter', name: 'OpenRouter' },
+      'openai-responses': { id: 'openai-responses', name: 'OpenAI' },
+      'anthropic-messages': { id: 'anthropic-messages', name: 'Anthropic' },
+      gemini: { id: 'gemini', name: 'Gemini' },
+      mistral: { id: 'mistral', name: 'Mistral' },
+      'openai-compatible': { id: 'openai-compatible', name: 'OpenAI-compatible' },
+    };
+    var providerDefinitions = providerInfo.definitions || fallbackDefinitions;
+    var providerModels = providerInfo.models || {};
+    var providerDefaults = providerInfo.defaults || {};
+    var available = providerInfo.available || {};
+    var providerOptions = Object.values(providerDefinitions)
+      .filter(function (p) { return p && p.selectable !== false; })
+      .map(function (p) {
+        return {
+          id: p.id,
+          name: p.name || p.id,
+          available: available[p.id] !== false,
+        };
+      });
+    if (!providerOptions.length) {
+      providerOptions = Object.values(fallbackDefinitions).map(function (p) {
+        return { id: p.id, name: p.name || p.id, available: true };
+      });
+    }
 
-    var templateRadios = templates.length
-      ? templates
-          .map(function (t) {
-            var checked = t.id === lastTemplate ? ' checked' : (lastTemplate === '' && templates[0].id === t.id ? ' checked' : '');
-            return (
-              '<label class="webchat-template-option" style="display:flex;align-items:flex-start;gap:8px;padding:8px 0;cursor:pointer;border-bottom:1px solid var(--border-subtle, var(--border))">' +
-              '<input type="radio" name="wc_template" value="' + esc(t.id) + '"' + checked + ' style="margin-top:3px">' +
-              '<span><strong>' + esc(t.label || t.id) + '</strong>' +
-              '<span style="color:var(--text-muted);font-size:11px;margin-left:6px">' + esc(t.provider) + ' / ' + esc(t.model) + '</span></span>' +
-              '</label>'
-            );
-          })
-          .join('')
-      : '<p style="color:var(--text-muted);font-size:12px">No agent templates configured.</p>';
+    var lastProvider = localStorage.getItem('webchat_last_provider') || providerInfo.provider || providerOptions[0].id;
+    if (!providerOptions.some(function (p) { return p.id === lastProvider; })) {
+      lastProvider = providerOptions[0].id;
+    }
+
+    function modelsFor(providerId) {
+      var models = providerModels[providerId] || [];
+      if (models.length) return models;
+      if (providerDefaults[providerId]) return [providerDefaults[providerId]];
+      if (providerId === providerInfo.provider && providerInfo.model) return [providerInfo.model];
+      return ['model-id'];
+    }
+
+    var lastModel = localStorage.getItem('webchat_last_model_' + lastProvider) || providerDefaults[lastProvider] || providerInfo.model || modelsFor(lastProvider)[0];
+    if (!modelsFor(lastProvider).includes(lastModel)) {
+      lastModel = modelsFor(lastProvider)[0];
+    }
+
+    function renderProviderOptions() {
+      return providerOptions
+        .map(function (p) {
+          return (
+            '<option value="' + esc(p.id) + '"' + (p.id === lastProvider ? ' selected' : '') + '>' +
+            esc(p.name) +
+            (p.available ? '' : ' (not configured)') +
+            '</option>'
+          );
+        })
+        .join('');
+    }
+
+    function renderModelOptions(providerId, selectedModel) {
+      return modelsFor(providerId)
+        .map(function (model) {
+          return '<option value="' + esc(model) + '"' + (model === selectedModel ? ' selected' : '') + '>' + esc(model) + '</option>';
+        })
+        .join('');
+    }
+
+    var starterPreview = selectedStarter
+      ? '<div class="webchat-starter-preview">' +
+        '<div class="webchat-starter-preview-label">Starter prompt</div>' +
+        '<div class="webchat-starter-preview-title">' + esc(selectedStarter.title) + '</div>' +
+        '<div class="webchat-starter-preview-text">' + esc(selectedStarter.prompt) + '</div>' +
+        '</div>'
+      : '';
 
     var modalHtml =
-      '<div id="webchat-modal-overlay" style="position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center">' +
-      '<div id="webchat-modal-panel" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px;width:min(440px,92vw);max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-lg)">' +
-      '<h3 style="margin:0 0 16px">New conversation</h3>' +
-      '<div style="margin-bottom:12px">' +
-      '<div class="section-label" style="margin-bottom:6px">Agent template</div>' +
-      templateRadios +
+      '<div id="webchat-modal-overlay">' +
+      '<div id="webchat-modal-panel" role="dialog" aria-modal="true" aria-labelledby="webchat-modal-title">' +
+      '<div class="webchat-modal-head">' +
+      '<h3 id="webchat-modal-title">New conversation</h3>' +
+      '<p>Choose the provider for this chat. Leave the title blank to let the first exchange name it.</p>' +
       '</div>' +
-      '<div style="margin-bottom:12px">' +
-      '<button type="button" id="wc-advanced-toggle" class="btn btn-sm btn-ghost" style="font-size:12px">&#9654; Advanced</button>' +
-      '<div id="wc-advanced-fields" style="display:none;margin-top:10px">' +
-      '<div style="margin-bottom:8px"><label style="font-size:12px;color:var(--text-muted)">Provider<br>' +
-      '<input type="text" id="wc-provider-input" class="search-input" placeholder="e.g. anthropic" style="margin-top:4px;width:100%"></label></div>' +
-      '<div><label style="font-size:12px;color:var(--text-muted)">Model<br>' +
-      '<input type="text" id="wc-model-input" class="search-input" placeholder="e.g. claude-opus-4-5" style="margin-top:4px;width:100%"></label></div>' +
+      starterPreview +
+      '<div class="webchat-modal-grid">' +
+      '<label class="webchat-modal-field">Provider' +
+      '<select id="wc-provider-select" class="search-input">' + renderProviderOptions() + '</select></label>' +
+      '<label class="webchat-modal-field">Model' +
+      '<select id="wc-model-select" class="search-input">' + renderModelOptions(lastProvider, lastModel) + '</select></label>' +
       '</div>' +
-      '</div>' +
-      '<div style="margin-bottom:20px"><label style="font-size:12px;color:var(--text-muted)">Title (optional)<br>' +
-      '<input type="text" id="wc-title-input" class="search-input" placeholder="My conversation" style="margin-top:4px;width:100%"></label></div>' +
-      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+      '<label class="webchat-modal-field">Title <span>(optional)</span>' +
+      '<input type="text" id="wc-title-input" class="search-input" placeholder="Optional"></label>' +
+      '<div class="modal-actions">' +
       '<button type="button" class="btn btn-ghost" id="wc-cancel-btn">Cancel</button>' +
       '<button type="button" class="btn btn-primary" id="wc-create-btn">Create</button>' +
       '</div>' +
@@ -498,15 +1387,16 @@
     _modalEl = wrapper.firstElementChild;
     document.body.appendChild(_modalEl);
 
-    // Advanced toggle
-    var advToggle = document.getElementById('wc-advanced-toggle');
-    var advFields = document.getElementById('wc-advanced-fields');
-    var _advancedOpen = false;
-    if (advToggle && advFields) {
-      advToggle.onclick = function () {
-        _advancedOpen = !_advancedOpen;
-        advFields.style.display = _advancedOpen ? 'block' : 'none';
-        advToggle.textContent = (_advancedOpen ? '▼' : '►') + ' Advanced';
+    var providerSelect = document.getElementById('wc-provider-select');
+    var modelSelect = document.getElementById('wc-model-select');
+    if (providerSelect && modelSelect) {
+      providerSelect.onchange = function () {
+        var selectedProvider = providerSelect.value;
+        var selectedModel =
+          localStorage.getItem('webchat_last_model_' + selectedProvider) ||
+          providerDefaults[selectedProvider] ||
+          modelsFor(selectedProvider)[0];
+        modelSelect.innerHTML = renderModelOptions(selectedProvider, selectedModel);
       };
     }
 
@@ -523,16 +1413,16 @@
       createBtn.onclick = async function () {
         var body = {};
 
-        var advProvider = document.getElementById('wc-provider-input');
-        var advModel = document.getElementById('wc-model-input');
-        if (_advancedOpen && advProvider && advProvider.value.trim() && advModel && advModel.value.trim()) {
-          body.provider = advProvider.value.trim();
-          body.model = advModel.value.trim();
-        } else {
-          var selectedRadio = _modalEl.querySelector('input[name="wc_template"]:checked');
-          if (selectedRadio) {
-            body.templateAgentId = selectedRadio.value;
-            localStorage.setItem('webchat_last_template', selectedRadio.value);
+        var selectedProvider = document.getElementById('wc-provider-select');
+        var selectedModel = document.getElementById('wc-model-select');
+        if (selectedProvider && selectedProvider.value) {
+          body.provider = selectedProvider.value;
+          localStorage.setItem('webchat_last_provider', selectedProvider.value);
+        }
+        if (selectedModel && selectedModel.value) {
+          body.model = selectedModel.value;
+          if (selectedProvider && selectedProvider.value) {
+            localStorage.setItem('webchat_last_model_' + selectedProvider.value, selectedModel.value);
           }
         }
 
@@ -548,15 +1438,97 @@
             method: 'POST',
             body: JSON.stringify(body),
           });
+          var starterError = null;
+          if (selectedStarter && selectedStarter.prompt) {
+            createBtn.textContent = 'Starting…';
+            try {
+              await api('/threads/' + encodeURIComponent(resp.id) + '/messages', {
+                method: 'POST',
+                body: JSON.stringify({ message: selectedStarter.prompt }),
+              });
+            } catch (e) {
+              starterError = e;
+            }
+          }
           closeModal();
           openThread(resp.id);
+          if (starterError) {
+            toast(chatActionErrorMessage('starter', starterError), 'error');
+          }
         } catch (e) {
-          toast('Failed to create: ' + e.message, 'error');
+          toast(chatActionErrorMessage('create', e), 'error');
           createBtn.disabled = false;
           createBtn.textContent = 'Create';
         }
       };
     }
+  }
+
+  function startFromPrompt(index) {
+    var starter = getStarter(index);
+    if (!starter) return;
+    openNewConversationModal(starter);
+  }
+
+  function useProjectToolPrompt(index) {
+    var starter = getProjectToolStarter(index);
+    if (!starter) return;
+    var input = document.getElementById('chat-msg-input');
+    if (!input) {
+      toast('Open the chat input before using this prompt', 'warning');
+      return;
+    }
+    input.value = projectMcpScopedPrompt(starter.prompt, window._webchatThreadBriefState);
+    resizeChatInput(input);
+    input.focus();
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function useProjectMcpCommand(index) {
+    var numeric = Number(index);
+    if (!Number.isInteger(numeric)) return;
+    var command = PROJECT_MCP_COMMANDS[numeric];
+    if (!command) return;
+    var input = document.getElementById('chat-msg-input');
+    if (!input) {
+      toast('Open the chat input before using this command', 'warning');
+      return;
+    }
+    input.value = projectMcpScopedPrompt(command.prompt, window._webchatThreadBriefState);
+    resizeChatInput(input);
+    input.focus();
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function useProjectMcpRunbook() {
+    var input = document.getElementById('chat-msg-input');
+    if (!input) {
+      toast('Open the chat input before using the MCP runbook', 'warning');
+      return;
+    }
+    input.value = projectMcpRunbookPromptText(window._webchatThreadBriefState);
+    resizeChatInput(input);
+    input.focus();
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function useStarterPrompt(index) {
+    var starter = getStarter(index);
+    if (!starter) return;
+    var input = document.getElementById('chat-msg-input');
+    if (!input) {
+      openNewConversationModal(starter);
+      return;
+    }
+    input.value = starter.prompt;
+    resizeChatInput(input);
+    input.focus();
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  async function copyThreadBrief() {
+    var text = chatThreadBriefText(window._webchatThreadBriefState);
+    await copyTextWithFallback(text, 'Copied chat brief', 'Copy web chat thread brief');
   }
 
   // ── expose ─────────────────────────────────────────────────────────────────
@@ -568,6 +1540,15 @@
     setActiveThreadId: setActiveThreadId,
     renderConversation: renderConversation,
     openNewConversationModal: openNewConversationModal,
+    startFromPrompt: startFromPrompt,
+    useStarterPrompt: useStarterPrompt,
+    useProjectToolPrompt: useProjectToolPrompt,
+    useProjectMcpCommand: useProjectMcpCommand,
+    useProjectMcpRunbook: useProjectMcpRunbook,
+    projectMcpRunbookPromptText: projectMcpRunbookPromptText,
+    openProjectContext: openProjectContext,
+    chatThreadBriefText: chatThreadBriefText,
+    copyThreadBrief: copyThreadBrief,
     get activeThreadId() { return _activeThreadId; },
   };
 })();

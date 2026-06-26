@@ -340,6 +340,50 @@ describe('mock admin data', () => {
     });
   });
 
+  it('serves a Cowork MCP document approval in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/approvals?kind=tool-action&targetType=cowork-project&targetId=project-auroradocs`,
+      );
+      const approvals = (await response.json()) as Array<{
+        id: string;
+        actionPreview: string;
+        resourceSummary: string;
+        status: string;
+      }>;
+
+      expect(approvals).toEqual([
+        expect.objectContaining({
+          id: 'approval-cowork-mcp-document',
+          actionPreview: expect.stringContaining('mcp__docs__create_document'),
+          resourceSummary: expect.stringContaining('AuroraDocs'),
+          status: 'pending',
+        }),
+      ]);
+    });
+  });
+
+  it('serves Cowork project file previews in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/projects/project-auroradocs/files/read?path=${encodeURIComponent('docs/brief.md')}`,
+      );
+      const data = (await response.json()) as {
+        file: {
+          path: string;
+          content: string;
+          previewable: boolean;
+        };
+      };
+
+      expect(data.file).toMatchObject({
+        path: 'docs/brief.md',
+        previewable: true,
+      });
+      expect(data.file.content).toContain('AuroraDocs project brief');
+    });
+  });
+
   it('serves autofix auto-pick settings and mock scan results', async () => {
     await withServer(async (baseUrl) => {
       const projectsResponse = await fetch(`${baseUrl}/api/autofix/projects`);

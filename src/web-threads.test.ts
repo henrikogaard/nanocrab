@@ -26,7 +26,11 @@ describe('buildThreadGroup', () => {
       jid,
       title: 'Deploy review',
       addedAt: '2026-06-15T00:00:00Z',
-      config: { provider: 'codex', model: 'gpt-5.4', allowedMcpServers: ['nanocrab'] },
+      config: {
+        provider: 'codex',
+        model: 'gpt-5.4',
+        allowedMcpServers: ['nanocrab'],
+      },
     });
     expect(g.kind).toBe('web');
     expect(g.title).toBe('Deploy review');
@@ -34,31 +38,52 @@ describe('buildThreadGroup', () => {
     expect(g.enabled).toBe(true);
     expect(g.isMain).toBeFalsy();
     expect(g.folder).toBe('web-fixed-id');
-    expect(g.containerConfig).toEqual({ provider: 'codex', model: 'gpt-5.4', allowedMcpServers: ['nanocrab'] });
+    expect(g.containerConfig).toEqual({
+      provider: 'codex',
+      model: 'gpt-5.4',
+      allowedMcpServers: ['nanocrab'],
+    });
   });
 
-  it('defaults title and tolerates no config', () => {
-    const g = buildThreadGroup({ jid: 'web:x', addedAt: '2026-06-15T00:00:00Z' });
-    expect(g.title).toBe('New conversation');
+  it('leaves title unset and tolerates no config', () => {
+    const g = buildThreadGroup({
+      jid: 'web:x',
+      addedAt: '2026-06-15T00:00:00Z',
+    });
+    expect(g.title).toBeUndefined();
     expect(g.containerConfig).toBeUndefined();
     expect(g.folder).toBe('web-x');
   });
 
   it('does not mutate the source config (deep clone)', () => {
-    const config: ContainerConfig = { provider: 'codex', model: 'gpt-5.4', allowedMcpServers: ['nanocrab'] };
-    const g = buildThreadGroup({ jid: 'web:iso', addedAt: '2026-06-15T00:00:00Z', config });
+    const config: ContainerConfig = {
+      provider: 'codex',
+      model: 'gpt-5.4',
+      allowedMcpServers: ['nanocrab'],
+    };
+    const g = buildThreadGroup({
+      jid: 'web:iso',
+      addedAt: '2026-06-15T00:00:00Z',
+      config,
+    });
     (g.containerConfig!.allowedMcpServers as string[]).push('tampered');
     g.containerConfig!.provider = 'openai-compatible';
     expect(config.allowedMcpServers).toEqual(['nanocrab']);
     expect(config.provider).toBe('codex');
   });
 
-  it('defaults a whitespace-only title to "New conversation"', () => {
-    const g = buildThreadGroup({ jid: 'web:ws', title: '   ', addedAt: '2026-06-15T00:00:00Z' });
-    expect(g.title).toBe('New conversation');
+  it('leaves a whitespace-only title unset', () => {
+    const g = buildThreadGroup({
+      jid: 'web:ws',
+      title: '   ',
+      addedAt: '2026-06-15T00:00:00Z',
+    });
+    expect(g.title).toBeUndefined();
   });
 
   it('throws on a non-web jid', () => {
-    expect(() => buildThreadGroup({ jid: '123@g.us', addedAt: '2026-06-15T00:00:00Z' })).toThrow();
+    expect(() =>
+      buildThreadGroup({ jid: '123@g.us', addedAt: '2026-06-15T00:00:00Z' }),
+    ).toThrow();
   });
 });

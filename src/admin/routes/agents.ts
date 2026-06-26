@@ -16,6 +16,8 @@ import {
   AGENT_PROVIDER_MODELS,
   DEFAULT_AGENT_MODELS,
   getProviderAvailability,
+  isCodingCapableProvider,
+  codingProviderUnavailableReason,
 } from '../../agent-provider.js';
 import { getAllRegisteredGroups, getNonWebRegisteredGroups } from '../../db.js';
 import {
@@ -99,17 +101,31 @@ function saveTasks(tasks: AgentTask[]): void {
 router.get('/providers', (_req: Request, res: Response) => {
   const availability = getProviderAvailability();
   res.json(
-    Object.values(AGENT_PROVIDER_DEFINITIONS).map((provider) => ({
-      id: provider.id,
-      name: provider.name,
-      runtime: provider.runtime,
-      available: availability[provider.id],
-      models: AGENT_PROVIDER_MODELS[provider.id].map((id) => ({
-        id,
-        label: id,
-      })),
-      defaultModel: DEFAULT_AGENT_MODELS[provider.id],
-    })),
+    Object.values(AGENT_PROVIDER_DEFINITIONS).map((provider) => {
+      const modelIds = AGENT_PROVIDER_MODELS[provider.id];
+      const codingCapable = modelIds.some((model) =>
+        isCodingCapableProvider(provider.id, model),
+      );
+      return {
+        id: provider.id,
+        name: provider.name,
+        runtime: provider.runtime,
+        available: availability[provider.id],
+        codingCapable,
+        codingUnavailableReason: codingCapable
+          ? null
+          : codingProviderUnavailableReason(
+              provider.id,
+              DEFAULT_AGENT_MODELS[provider.id],
+            ),
+        models: modelIds.map((id) => ({
+          id,
+          label: id,
+          codingCapable: isCodingCapableProvider(provider.id, id),
+        })),
+        defaultModel: DEFAULT_AGENT_MODELS[provider.id],
+      };
+    }),
   );
 });
 

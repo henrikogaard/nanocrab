@@ -10,6 +10,7 @@
     "dev": "tsx src/index.ts",
     "mock:admin": "tsx src/admin/mock-server.ts",
     "mock:admin:build": "npm run build && node dist/admin/mock-server.js",
+    "qa:admin": "node scripts/admin-workspace-qa.mjs",
     "update:nanocrab": "node scripts/update-nanocrab.mjs",
     "migrate:nanocrab": "node scripts/migrate-nanoclaw-to-nanocrab.mjs",
     "deploy": "bash scripts/deploy.sh",
@@ -27,6 +28,8 @@
     "auth": "tsx src/whatsapp-auth.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
+    "check:runtime": "node scripts/check-node-runtime.mjs",
+    "pretest": "npm run check:runtime",
     "test": "vitest run",
     "test:watch": "vitest"
   },

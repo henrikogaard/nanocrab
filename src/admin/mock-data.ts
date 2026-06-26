@@ -86,6 +86,120 @@ let mockThreads: Array<Record<string, string>> = [
   },
 ];
 
+let mockProjects: Array<Record<string, JsonValue>> = [
+  {
+    id: 'project-auroradocs',
+    name: 'AuroraDocs',
+    slug: 'auroradocs',
+    description: 'Launch notes, docs, and research drafts for AuroraDocs.',
+    instructions: 'Keep project writing crisp, sourced, and operator-friendly.',
+    path: '/mock/store/projects/auroradocs',
+    created_at: '2026-06-12T08:30:00Z',
+    updated_at: '2026-06-15T10:05:00Z',
+    updatedAt: '2026-06-15T10:05:00Z',
+    fileCount: 3,
+    chatCount: 2,
+  },
+  {
+    id: 'project-ops-briefs',
+    name: 'Ops Briefs',
+    slug: 'ops-briefs',
+    description: 'Recurring operation summaries and dispatch artifacts.',
+    instructions: 'Use short action lists and preserve source notes.',
+    path: '/mock/store/projects/ops-briefs',
+    created_at: '2026-06-10T11:00:00Z',
+    updated_at: '2026-06-14T18:20:00Z',
+    updatedAt: '2026-06-14T18:20:00Z',
+    fileCount: 2,
+    chatCount: 1,
+  },
+];
+
+const mockProjectFiles: Record<string, Array<Record<string, JsonValue>>> = {
+  'project-auroradocs': [
+    {
+      path: 'docs/brief.md',
+      kind: 'document',
+      size: 1340,
+      updatedAt: '2026-06-15T10:02:00Z',
+    },
+    {
+      path: 'artifacts/hero-copy.txt',
+      kind: 'document',
+      size: 812,
+      updatedAt: '2026-06-15T09:48:00Z',
+    },
+    {
+      path: 'research/competitors.md',
+      kind: 'document',
+      size: 2410,
+      updatedAt: '2026-06-14T16:20:00Z',
+    },
+  ],
+  'project-ops-briefs': [
+    {
+      path: 'dispatch/friday-plan.md',
+      kind: 'document',
+      size: 990,
+      updatedAt: '2026-06-14T18:20:00Z',
+    },
+    {
+      path: 'artifacts/checklist.txt',
+      kind: 'artifact',
+      size: 420,
+      updatedAt: '2026-06-14T18:18:00Z',
+    },
+  ],
+};
+
+const mockProjectFileContents: Record<string, Record<string, string>> = {
+  'project-auroradocs': {
+    'docs/brief.md':
+      '# AuroraDocs project brief\n\n- Latest email summary is ready for review.\n- Draft launch notes need source links before publishing.\n- Next action: ask the document MCP server to create a clean customer-facing summary.',
+    'artifacts/hero-copy.txt':
+      'AuroraDocs turns scattered launch notes into clear, sourced product documentation that teams can keep current.',
+    'research/competitors.md':
+      '# Competitor notes\n\nAuroraDocs should differentiate on traceable source context, project memory, and approval-aware document publishing.',
+  },
+  'project-ops-briefs': {
+    'dispatch/friday-plan.md':
+      '# Friday operations plan\n\n1. Confirm owner for the release webhook.\n2. Review stale monitor alerts.\n3. Send a concise dispatch brief after approval.',
+    'artifacts/checklist.txt':
+      '- Check pending approvals\n- Summarize open incidents\n- Confirm next scheduled run',
+  },
+};
+
+const mockProjectThreads: Record<
+  string,
+  Array<Record<string, string | null>>
+> = {
+  'project-auroradocs': [
+    {
+      id: 'web:mock-project-1',
+      title: 'Test AuroraDocs app features',
+      addedAt: '2026-06-15T09:30:00Z',
+      lastMessage: 'I drafted the feature checklist.',
+      lastMessageAt: '2026-06-15T09:45:00Z',
+    },
+    {
+      id: 'web:mock-project-2',
+      title: 'Expense summary spreadsheet',
+      addedAt: '2026-06-14T13:15:00Z',
+      lastMessage: 'The formulas are ready to review.',
+      lastMessageAt: '2026-06-14T13:30:00Z',
+    },
+  ],
+  'project-ops-briefs': [
+    {
+      id: 'web:mock-project-3',
+      title: 'What needs my attention',
+      addedAt: '2026-06-14T17:50:00Z',
+      lastMessage: 'Three items need a decision.',
+      lastMessageAt: '2026-06-14T18:00:00Z',
+    },
+  ],
+};
+
 const channels = [
   { name: 'whatsapp', connected: true, status: 'healthy', lastSeen: iso(1) },
   { name: 'telegram', connected: true, status: 'healthy', lastSeen: iso(3) },
@@ -373,6 +487,35 @@ function mockAssistantProfile(selectedAvatarId = 'tidal-crab'): JsonValue {
 }
 
 const approvals = [
+  {
+    id: 'approval-cowork-mcp-document',
+    kind: 'tool-action',
+    title: 'Create AuroraDocs summary document',
+    summary:
+      'Use configured mail and document MCP servers to summarize recent project email and draft a project brief.',
+    risk: 'medium',
+    requester: 'cowork-project',
+    targetType: 'cowork-project',
+    targetId: 'project-auroradocs',
+    source: 'cowork-chat',
+    correlationId: 'web:mock-project-1',
+    expiresAt: iso(-180),
+    actionPreview:
+      'mcp__mail__search(query:"AuroraDocs latest") -> mcp__docs__create_document(title:"AuroraDocs project brief")',
+    resourceSummary: 'AuroraDocs project workspace and configured document MCP',
+    policyDecisionId: 'policy-mcp-external-write',
+    payload: {
+      projectId: 'project-auroradocs',
+      requestedByThread: 'web:mock-project-1',
+      tools: ['mcp__mail__search', 'mcp__docs__create_document'],
+      writeTarget: 'project document',
+    },
+    status: 'pending',
+    createdAt: iso(5),
+    reviewedAt: null,
+    reviewedBy: null,
+    decisionNote: null,
+  },
   {
     id: 'approval-message-risk',
     kind: 'external-message',
@@ -2343,6 +2486,112 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       },
     });
   }
+  if (pathname === '/projects') {
+    if (method === 'GET') return { projects: mockProjects };
+    if (method === 'POST') {
+      const name =
+        String(req.body?.name || 'New project').trim() || 'New project';
+      const slug =
+        name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '') || 'project';
+      const project = {
+        id: 'project-mock-' + Date.now(),
+        name,
+        slug,
+        description: String(req.body?.description || ''),
+        instructions: String(req.body?.instructions || ''),
+        path: `/mock/store/projects/${slug}`,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        fileCount: 0,
+        chatCount: 0,
+      };
+      mockProjects.unshift(project);
+      mockProjectFiles[project.id] = [];
+      mockProjectThreads[project.id] = [];
+      return { project };
+    }
+  }
+  if (pathname.startsWith('/projects/')) {
+    const parts = pathname.split('/').filter(Boolean);
+    const projectId = decodeURIComponent(parts[1] || '');
+    const project = mockProjects.find((p) => p.id === projectId);
+    if (!project) return { error: 'Project not found' };
+    if (parts.length === 2 && method === 'GET') {
+      return {
+        project,
+        files: mockProjectFiles[projectId] || [],
+        threads: mockProjectThreads[projectId] || [],
+      };
+    }
+    if (
+      parts.length === 4 &&
+      parts[2] === 'files' &&
+      parts[3] === 'read' &&
+      method === 'GET'
+    ) {
+      const filePath = String(req.query?.path || '');
+      if (!filePath || filePath.startsWith('/') || filePath.includes('..')) {
+        return { error: 'Invalid project file path' };
+      }
+      const file = (mockProjectFiles[projectId] || []).find(
+        (item) => String(item.path) === filePath,
+      );
+      if (!file) return { error: 'Project file not found' };
+      const content = mockProjectFileContents[projectId]?.[filePath] || '';
+      return {
+        file: {
+          ...file,
+          content,
+          previewable: true,
+          truncated: false,
+        },
+      };
+    }
+    if (parts.length === 3 && parts[2] === 'files' && method === 'POST') {
+      const filePath = String(req.body?.path || 'notes/untitled.md');
+      const content = String(req.body?.content || '');
+      const file = {
+        path: filePath,
+        kind: 'document',
+        size: content.length,
+        updatedAt: new Date().toISOString(),
+      };
+      mockProjectFiles[projectId] = [
+        file,
+        ...(mockProjectFiles[projectId] || []),
+      ];
+      mockProjectFileContents[projectId] = {
+        ...(mockProjectFileContents[projectId] || {}),
+        [filePath]: content,
+      };
+      project.fileCount = mockProjectFiles[projectId].length;
+      return { file };
+    }
+    if (parts.length === 3 && parts[2] === 'threads' && method === 'POST') {
+      const id = 'web:mock-project-' + Date.now();
+      const thread = {
+        id,
+        title: String(req.body?.title || 'New conversation'),
+        addedAt: new Date().toISOString(),
+        lastMessage: '',
+        lastMessageAt: '',
+        projectId: String(project.id),
+        projectSlug: String(project.slug || ''),
+        projectName: String(project.name || 'Project'),
+      };
+      mockProjectThreads[projectId] = [
+        thread,
+        ...(mockProjectThreads[projectId] || []),
+      ];
+      mockThreads.unshift(thread as Record<string, string>);
+      project.chatCount = mockProjectThreads[projectId].length;
+      return { id };
+    }
+  }
   // ── threads API (all methods, before the GET-only guard below) ────────────
   if (pathname.startsWith('/threads/') && pathname.endsWith('/messages')) {
     const threadId = decodeURIComponent(
@@ -2391,7 +2640,23 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname.startsWith('/threads/') && !pathname.endsWith('/messages')) {
     const threadId = decodeURIComponent(pathname.split('/')[2] || '');
     if (method === 'GET') {
-      return mockThreads.find((t) => t.id === threadId) || { id: threadId };
+      const thread = mockThreads.find((t) => t.id === threadId);
+      if (thread) return thread;
+      for (const project of mockProjects) {
+        const projectId = String(project.id || '');
+        const projectThread = (mockProjectThreads[projectId] || []).find(
+          (t) => t.id === threadId,
+        );
+        if (projectThread) {
+          return {
+            ...projectThread,
+            projectId,
+            projectSlug: String(project.slug || ''),
+            projectName: String(project.name || 'Project'),
+          };
+        }
+      }
+      return { id: threadId };
     }
     if (method === 'PATCH') {
       const body = req.body as Record<string, string> | undefined;
@@ -4617,20 +4882,33 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       {
         id: 'u1',
         name: 'llm.ogard.cloud',
-        type: 'http',
         url: 'https://llm.ogard.cloud/health',
-        status: 'up',
+        method: 'GET',
+        expectedStatus: 200,
+        interval: 300,
+        timeout: 10000,
+        enabled: true,
+        isDown: false,
         lastCheck: iso(4),
-        responseMs: 84,
+        lastResponseTime: 84,
+        alertAfter: 3,
+        consecutiveFailures: 0,
       },
       {
         id: 'u2',
         name: 'Game manual freshness',
-        type: 'file',
         url: 'store/manual/index.json',
-        status: 'warning',
+        method: 'GET',
+        expectedStatus: 200,
+        interval: 600,
+        timeout: 10000,
+        enabled: true,
+        isDown: true,
         lastCheck: iso(35),
-        responseMs: 0,
+        lastResponseTime: 0,
+        lastError: 'Manual index is stale',
+        alertAfter: 2,
+        consecutiveFailures: 2,
       },
     ];
   }
@@ -4666,6 +4944,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         title: 'Provider preflight checklist',
         language: 'md',
         tags: ['ops'],
+        code: '- Check base URL\n- Check model\n- Check credentials\n',
         updatedAt: iso(70),
       },
       {
@@ -4673,6 +4952,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         title: 'Discord bot deployment notes',
         language: 'bash',
         tags: ['deploy'],
+        code: 'npm run build\nsystemctl --user restart nanocrab\njournalctl --user -u nanocrab -f\n',
         updatedAt: iso(300),
       },
     ];
@@ -4687,15 +4967,22 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       updatedAt: iso(70),
     };
   }
-  if (pathname === '/dev/pipelines') {
+  if (pathname === '/dev/pipelines' || pathname === '/dev/deploy') {
     return [
       {
         id: 'pipe-1',
         name: 'Build and smoke test',
         repo: 'nanocrab',
-        status: 'idle',
+        lastStatus: 'success',
         lastRun: iso(360),
-        steps: ['typecheck', 'build', 'smoke'],
+        steps: [
+          { name: 'Typecheck', command: 'npm run typecheck' },
+          { name: 'Build', command: 'npm run build' },
+          {
+            name: 'Smoke test',
+            command: 'npm test -- src/admin/pipelines-ui.test.ts',
+          },
+        ],
       },
     ];
   }
@@ -4720,8 +5007,21 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   }
   if (pathname.match(/^\/dev\/test\/[^/]+\/results$/)) {
     return {
-      status: 'passed',
+      repo: pathname.split('/')[3] || 'nanocrab',
+      timestamp: iso(24),
+      passed: true,
+      duration: 2840,
       output: '80 tests passed in mock sample output.',
+    };
+  }
+  if (pathname.match(/^\/dev\/test\/[^/]+\/run$/)) {
+    return {
+      repo: pathname.split('/')[3] || 'nanocrab',
+      timestamp: new Date().toISOString(),
+      passed: true,
+      duration: 3170,
+      output:
+        '80 tests passed in mock sample output.\nVerification evidence refreshed.',
     };
   }
   if (pathname === '/custom-containers') {

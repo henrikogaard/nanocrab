@@ -2,8 +2,20 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import * as db from './db.js';
 
 describe('registered group kind/title round-trip', () => {
-  beforeAll(() => {
-    // db.js opens its database on import; tests use the same instance.
+  beforeEach(() => {
+    try {
+      db._closeDatabase();
+    } catch {
+      /* may not be initialized */
+    }
+    db._initTestDatabase();
+  });
+  afterEach(() => {
+    try {
+      db._closeDatabase();
+    } catch {
+      /* ok */
+    }
   });
 
   it('persists and reads back kind and title', () => {
@@ -38,15 +50,38 @@ describe('registered group kind/title round-trip', () => {
 });
 
 describe('web vs non-web partition', () => {
+  beforeEach(() => {
+    try {
+      db._closeDatabase();
+    } catch {
+      /* may not be initialized */
+    }
+    db._initTestDatabase();
+  });
+  afterEach(() => {
+    try {
+      db._closeDatabase();
+    } catch {
+      /* ok */
+    }
+  });
+
   it('getNonWebRegisteredGroups excludes web threads; getWebThreads returns only web', () => {
     const webJid = 'web:partition-1';
     const realJid = 'real:partition-2';
     db.setRegisteredGroup(webJid, {
-      name: 'Web', title: 'T', kind: 'web', folder: 'web-partition-1',
-      trigger: '^', added_at: '2026-06-15T00:00:00Z', requiresTrigger: false,
+      name: 'Web',
+      title: 'T',
+      kind: 'web',
+      folder: 'web-partition-1',
+      trigger: '^',
+      added_at: '2026-06-15T00:00:00Z',
+      requiresTrigger: false,
     });
     db.setRegisteredGroup(realJid, {
-      name: 'Real', folder: 'real-partition-2', trigger: '^',
+      name: 'Real',
+      folder: 'real-partition-2',
+      trigger: '^',
       added_at: '2026-06-15T00:00:00Z',
     });
     const nonWeb = db.getNonWebRegisteredGroups();
@@ -60,11 +95,19 @@ describe('web vs non-web partition', () => {
 
 describe('deleteRegisteredGroup round-trip', () => {
   beforeEach(() => {
-    try { db._closeDatabase(); } catch { /* may not be initialized */ }
+    try {
+      db._closeDatabase();
+    } catch {
+      /* may not be initialized */
+    }
     db._initTestDatabase();
   });
   afterEach(() => {
-    try { db._closeDatabase(); } catch { /* ok */ }
+    try {
+      db._closeDatabase();
+    } catch {
+      /* ok */
+    }
   });
 
   it('deletes a group so getRegisteredGroup returns undefined and it is absent from getAllRegisteredGroups', () => {
@@ -95,11 +138,19 @@ describe('deleteRegisteredGroup round-trip', () => {
 
 describe('deleteMessagesForJid round-trip', () => {
   beforeEach(() => {
-    try { db._closeDatabase(); } catch { /* may not be initialized */ }
+    try {
+      db._closeDatabase();
+    } catch {
+      /* may not be initialized */
+    }
     db._initTestDatabase();
   });
   afterEach(() => {
-    try { db._closeDatabase(); } catch { /* ok */ }
+    try {
+      db._closeDatabase();
+    } catch {
+      /* ok */
+    }
   });
 
   it('deleteMessagesForJid with no messages does not throw', () => {
@@ -108,15 +159,17 @@ describe('deleteMessagesForJid round-trip', () => {
 
   it('deletes stored messages so storeMessage + deleteMessagesForJid leaves no rows', () => {
     const jid = 'web:msgs-delete-test';
+    const timestamp = new Date().toISOString();
 
     // Store a chat row (required by FK constraint) and a message
+    db.storeChatMetadata(jid, timestamp, 'Test thread', 'web');
     db.storeMessageDirect({
       id: 'msg-1',
       chat_jid: jid,
       sender: 'user',
       sender_name: 'Tester',
       content: 'Hello world',
-      timestamp: new Date().toISOString(),
+      timestamp,
       is_from_me: false,
       is_bot_message: false,
     });
@@ -126,7 +179,12 @@ describe('deleteMessagesForJid round-trip', () => {
 
     // After deletion no new messages should be retrievable for that jid
     // (We verify via getNewMessages which is exported and accepts an array of jids)
-    const { messages } = db.getNewMessages([jid], '1970-01-01T00:00:00.000Z', '__bot__', 100);
+    const { messages } = db.getNewMessages(
+      [jid],
+      '1970-01-01T00:00:00.000Z',
+      '__bot__',
+      100,
+    );
     expect(messages).toHaveLength(0);
   });
 });

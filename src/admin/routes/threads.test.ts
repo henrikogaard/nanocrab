@@ -1,11 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import os from 'os';
 import path from 'path';
+import fs from 'fs';
 import express from 'express';
 
 const STORE_DIR = path.join(os.tmpdir(), `nanocrab-threads-test-${Date.now()}`);
 const DATA_DIR = path.join(os.tmpdir(), `nanocrab-threads-data-${Date.now()}`);
-const GROUPS_DIR = path.join(os.tmpdir(), `nanocrab-threads-groups-${Date.now()}`);
+const GROUPS_DIR = path.join(
+  os.tmpdir(),
+  `nanocrab-threads-groups-${Date.now()}`,
+);
 
 vi.mock('../../config.js', () => ({
   STORE_DIR,
@@ -38,7 +42,8 @@ const {
   setRegisteredGroup,
   getRegisteredGroup,
   getWebThreads,
-  getNonWebRegisteredGroups,
+  getAllChats,
+  createCoworkProject,
 } = await import('../../db.js');
 
 function buildApp(role: 'viewer' | 'admin' | 'owner' = 'admin') {
@@ -91,44 +96,15 @@ describe('/api/threads CRUD', () => {
 
   // ------- POST / -------
 
-  it('POST / with templateAgentId creates a web group', async () => {
-    // Insert a non-web template group first
-    setRegisteredGroup('wa:123@g.us', {
-      name: 'MyAgent',
-      folder: 'myagent',
-      trigger: '!',
-      added_at: '2026-06-01T00:00:00Z',
-      containerConfig: { provider: 'claude', model: 'claude-3-5-sonnet' } as any,
-    });
-
-    const result = await withServer('admin', async (base) => {
-      const res = await fetch(`${base}/api/threads`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ templateAgentId: 'wa:123@g.us', title: 'Test thread' }),
-      });
-      expect(res.status).toBe(200);
-      return res.json() as Promise<{ id: string }>;
-    });
-
-    expect(result.id).toMatch(/^web:/);
-
-    const stored = getRegisteredGroup(result.id);
-    expect(stored).toBeDefined();
-    expect(stored!.kind).toBe('web');
-    expect(stored!.requiresTrigger).toBe(false);
-    expect(stored!.title).toBe('Test thread');
-    // Config cloned from template
-    expect((stored!.containerConfig as any)?.provider).toBe('claude');
-    expect((stored!.containerConfig as any)?.model).toBe('claude-3-5-sonnet');
-  });
-
   it('POST / with provider/model creates custom web group', async () => {
     const result = await withServer('admin', async (base) => {
       const res = await fetch(`${base}/api/threads`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ provider: 'openai', model: 'gpt-4o' }),
+        body: JSON.stringify({
+          provider: 'openai-responses',
+          model: 'gpt-4.1',
+        }),
       });
       expect(res.status).toBe(200);
       return res.json() as Promise<{ id: string }>;
@@ -138,46 +114,153 @@ describe('/api/threads CRUD', () => {
     const stored = getRegisteredGroup(result.id);
     expect(stored!.kind).toBe('web');
     expect(stored!.requiresTrigger).toBe(false);
-    expect((stored!.containerConfig as any)?.provider).toBe('openai');
-    expect((stored!.containerConfig as any)?.model).toBe('gpt-4o');
+    expect(stored!.title).toBeUndefined();
+    expect((stored!.containerConfig as any)?.provider).toBe('openai-responses');
+    expect((stored!.containerConfig as any)?.model).toBe('gpt-4.1');
+    expect((stored!.containerConfig as any)?.allowedMcpServers).toEqual([]);
   });
 
-  it('POST / with bad templateAgentId returns 400 and creates no group', async () => {
+  it('POST / creates pure chat threads without external MCP access by default', async () => {
+    const result = await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Simple question' }),
+      });
+      expect(res.status).toBe(200);
+      return res.json() as Promise<{ id: string }>;
+    });
+
+    expect(getRegisteredGroup(result.id)?.containerConfig).toEqual({
+      allowedMcpServers: [],
+    });
+  });
+
+  it('POST / preserves an explicit title when provided', async () => {
+    const result = await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'codex',
+          model: 'gpt-5.4',
+          title: 'Launch notes',
+        }),
+      });
+      expect(res.status).toBe(200);
+      return res.json() as Promise<{ id: string }>;
+    });
+
+    expect(getRegisteredGroup(result.id)!.title).toBe('Launch notes');
+  });
+
+  it('POST / treats a blank title as absent so chats can be auto-titled', async () => {
+    const result = await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'codex',
+          model: 'gpt-5.4',
+          title: '   ',
+        }),
+      });
+      expect(res.status).toBe(200);
+      return res.json() as Promise<{ id: string }>;
+    });
+
+    expect(getRegisteredGroup(result.id)!.title).toBeUndefined();
+  });
+
+  it('GET /:id reports Cowork project MCP access, including restricted connector scopes', async () => {
+    const now = new Date().toISOString();
+    const project = createCoworkProject({
+      id: 'project-mail-docs',
+      name: 'Mail Briefs',
+      slug: 'mail-briefs',
+      description: null,
+      instructions: null,
+      created_at: now,
+      updated_at: now,
+    });
+    setRegisteredGroup('web:project-mail-docs-thread', {
+      name: 'Web Conversation',
+      title: 'Sender summary',
+      folder: 'web-project-mail-docs-thread',
+      trigger: '^',
+      added_at: now,
+      requiresTrigger: false,
+      enabled: true,
+      kind: 'web',
+      projectId: project.id,
+      projectSlug: project.slug,
+      containerConfig: {
+        allowedMcpServers: ['gmail', 'google-docs'],
+      } as any,
+    });
+
+    const meta = await withServer('admin', async (base) => {
+      const res = await fetch(
+        `${base}/api/threads/web%3Aproject-mail-docs-thread`,
+      );
+      expect(res.status).toBe(200);
+      return res.json() as Promise<{
+        projectId: string;
+        projectName: string;
+        mcpAccess: {
+          enabled: boolean;
+          scope: string;
+          servers: string[];
+          requiresApprovalForWrites: boolean;
+          examples: string[];
+        };
+      }>;
+    });
+
+    expect(meta.projectId).toBe(project.id);
+    expect(meta.projectName).toBe('Mail Briefs');
+    expect(meta.mcpAccess).toEqual({
+      enabled: true,
+      scope: 'restricted',
+      servers: ['gmail', 'google-docs'],
+      requiresApprovalForWrites: true,
+      examples: [
+        'Latest emails -> sourced project summary',
+        'Emails from a person or domain -> commitments and follow-ups',
+        'External MCP context -> local markdown document draft',
+        'Project files plus MCP evidence -> source ledger and artifact',
+      ],
+    });
+  });
+
+  it('POST / rejects agent templates for plain web chat threads', async () => {
+    setRegisteredGroup('wa:template@g.us', {
+      name: 'TemplateAgent',
+      folder: 'template-agent',
+      trigger: '!',
+      added_at: '2026-06-01T00:00:00Z',
+      containerConfig: {
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      } as any,
+    });
+
     const before = Object.keys(getWebThreads()).length;
 
     await withServer('admin', async (base) => {
       const res = await fetch(`${base}/api/threads`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ templateAgentId: 'nonexistent:jid' }),
+        body: JSON.stringify({ templateAgentId: 'wa:template@g.us' }),
       });
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
-      expect(body.error).toBe('Unknown agent template');
+      expect(body.error).toBe(
+        'Agent templates are not supported for chat threads',
+      );
     });
 
     expect(Object.keys(getWebThreads()).length).toBe(before);
-  });
-
-  it('POST / with web-kind templateAgentId returns 400', async () => {
-    setRegisteredGroup('web:fake-template', {
-      name: 'Web Conversation',
-      title: 'Fake',
-      kind: 'web',
-      folder: 'web-fake-template',
-      trigger: '^',
-      added_at: '2026-06-01T00:00:00Z',
-      requiresTrigger: false,
-    });
-
-    await withServer('admin', async (base) => {
-      const res = await fetch(`${base}/api/threads`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ templateAgentId: 'web:fake-template' }),
-      });
-      expect(res.status).toBe(400);
-    });
   });
 
   // ------- GET / -------
@@ -220,43 +303,93 @@ describe('/api/threads CRUD', () => {
     });
   });
 
-  // ------- GET /agent-templates -------
-
-  it('GET /agent-templates returns non-web groups', async () => {
-    setRegisteredGroup('wa:real@g.us', {
-      name: 'RealGroup',
-      folder: 'realgroup2',
-      trigger: '!',
-      added_at: '2026-06-01T00:00:00Z',
-      containerConfig: { provider: 'claude' } as any,
-    });
-    setRegisteredGroup('web:excluded', {
-      name: 'Web',
+  it('GET / excludes project-scoped web threads from plain chat', async () => {
+    setRegisteredGroup('web:plain-thread', {
+      name: 'Web Conversation',
+      title: 'Plain thread',
       kind: 'web',
-      folder: 'web-excluded',
+      folder: 'web-plain-thread',
       trigger: '^',
-      added_at: '2026-06-01T00:00:00Z',
+      added_at: '2026-06-15T11:00:00Z',
       requiresTrigger: false,
+    });
+    setRegisteredGroup('web:project-thread', {
+      name: 'Web Conversation',
+      title: 'Project thread',
+      kind: 'web',
+      folder: 'web-project-thread',
+      trigger: '^',
+      added_at: '2026-06-15T12:00:00Z',
+      requiresTrigger: false,
+      projectId: 'project-1',
     });
 
     await withServer('admin', async (base) => {
-      const res = await fetch(`${base}/api/threads/agent-templates`);
+      const res = await fetch(`${base}/api/threads`);
       expect(res.status).toBe(200);
-      const list = (await res.json()) as Array<{
+      const list = (await res.json()) as Array<{ id: string }>;
+
+      expect(list.map((thread) => thread.id)).toEqual(['web:plain-thread']);
+    });
+  });
+
+  it('GET /:id returns project metadata for project-scoped web threads', async () => {
+    const now = '2026-06-01T00:00:00Z';
+    const project = createCoworkProject({
+      id: 'project-thread-meta',
+      name: 'Inbox Briefs',
+      slug: 'inbox-briefs',
+      description: null,
+      instructions: null,
+      created_at: now,
+      updated_at: now,
+    });
+    setRegisteredGroup('web:project-thread-detail', {
+      name: 'Web Conversation',
+      title: '',
+      kind: 'web',
+      folder: 'web-project-thread-detail',
+      trigger: '^',
+      added_at: now,
+      requiresTrigger: false,
+      projectId: project.id,
+      projectSlug: project.slug,
+    });
+
+    await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads/web:project-thread-detail`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
         id: string;
-        label: string;
-        provider: string | null;
-        model: string | null;
-      }>;
-
-      const ids = list.map((t) => t.id);
-      expect(ids).toContain('wa:real@g.us');
-      expect(ids).not.toContain('web:excluded');
-
-      const tpl = list.find((t) => t.id === 'wa:real@g.us')!;
-      expect(tpl.label).toBe('RealGroup');
-      expect(tpl.provider).toBe('claude');
-      expect(tpl.model).toBeNull();
+        title: string;
+        projectId: string;
+        projectSlug: string;
+        projectName: string;
+        mcpAccess: {
+          enabled: boolean;
+          scope: string;
+          servers: string[] | null;
+          requiresApprovalForWrites: boolean;
+          examples: string[];
+        };
+      };
+      expect(body).toMatchObject({
+        id: 'web:project-thread-detail',
+        title: 'New conversation',
+        projectId: 'project-thread-meta',
+        projectSlug: 'inbox-briefs',
+        projectName: 'Inbox Briefs',
+        mcpAccess: {
+          enabled: true,
+          scope: 'configured',
+          servers: null,
+          requiresApprovalForWrites: true,
+          examples: expect.arrayContaining([
+            'Latest emails -> sourced project summary',
+            'External MCP context -> local markdown document draft',
+          ]),
+        },
+      });
     });
   });
 
@@ -286,6 +419,9 @@ describe('/api/threads CRUD', () => {
 
     const stored = getRegisteredGroup('web:rename-me');
     expect(stored!.title).toBe('New title');
+    expect(
+      getAllChats().find((chat) => chat.jid === 'web:rename-me')?.name,
+    ).toBe('New title');
   });
 
   it('PATCH non-existent thread returns 404', async () => {
@@ -372,7 +508,9 @@ describe('/api/threads CRUD', () => {
     });
 
     await withServer('admin', async (base) => {
-      const res = await fetch(`${base}/api/threads/web:msg-test-thread/messages`);
+      const res = await fetch(
+        `${base}/api/threads/web:msg-test-thread/messages`,
+      );
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(Array.isArray(body)).toBe(true);
@@ -396,11 +534,14 @@ describe('/api/threads CRUD', () => {
 
   it('POST /:id/messages unknown web jid (valid prefix, no group) returns 404', async () => {
     await withServer('admin', async (base) => {
-      const res = await fetch(`${base}/api/threads/web:does-not-exist-xyz/messages`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message: 'hi' }),
-      });
+      const res = await fetch(
+        `${base}/api/threads/web:does-not-exist-xyz/messages`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ message: 'hi' }),
+        },
+      );
       expect(res.status).toBe(404);
       const body = (await res.json()) as { error: string };
       expect(body.error).toBe('Thread not found');
@@ -419,15 +560,85 @@ describe('/api/threads CRUD', () => {
     });
 
     await withServer('admin', async (base) => {
-      const res = await fetch(`${base}/api/threads/web:send-msg-thread/messages`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message: 'hi' }),
-      });
+      const res = await fetch(
+        `${base}/api/threads/web:send-msg-thread/messages`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ message: 'hi' }),
+        },
+      );
       expect(res.status).toBe(200);
       const body = (await res.json()) as { ok: boolean };
       expect(body.ok).toBe(true);
     });
+  });
+
+  it('POST /:id/messages refreshes MCP access for project-scoped Cowork chats', async () => {
+    const now = '2026-06-01T00:00:00Z';
+    const project = createCoworkProject({
+      id: 'project-thread-mcp-refresh',
+      name: 'Inbox Documents',
+      slug: 'inbox-documents',
+      description: null,
+      instructions: null,
+      created_at: now,
+      updated_at: now,
+    });
+    setRegisteredGroup('web:project-mcp-refresh', {
+      name: 'Web Conversation',
+      title: 'Email summary',
+      kind: 'web',
+      folder: 'web-project-mcp-refresh',
+      trigger: '^',
+      added_at: now,
+      requiresTrigger: false,
+      projectId: project.id,
+      projectSlug: project.slug,
+      containerConfig: { allowedMcpServers: [] },
+    });
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'mcp-servers.json'),
+      JSON.stringify([
+        { name: 'gmail', command: 'npx', args: ['-y', '@example/gmail-mcp'] },
+        {
+          name: 'google-docs',
+          command: 'npx',
+          args: ['-y', '@example/google-docs-mcp'],
+        },
+        { name: 'nanocrab', core: true },
+      ]),
+    );
+
+    await withServer('admin', async (base) => {
+      const res = await fetch(
+        `${base}/api/threads/web:project-mcp-refresh/messages`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            message:
+              'Check the latest emails and create a source-backed project summary.',
+          }),
+        },
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        mcpAccess: { enabled: boolean; servers: string[] };
+      };
+      expect(body.mcpAccess).toMatchObject({
+        enabled: true,
+        servers: ['gmail', 'google-docs'],
+      });
+    });
+
+    const refreshed = getRegisteredGroup('web:project-mcp-refresh');
+    expect(refreshed?.containerConfig?.allowedMcpServers).toEqual([
+      'gmail',
+      'google-docs',
+    ]);
   });
 
   // ------- PATCH /:id — non-web kind guard -------

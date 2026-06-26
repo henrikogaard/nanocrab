@@ -1,4 +1,5 @@
 import type { RegisteredGroup } from './types.js';
+import { normalizeConnectorId } from './connector-permissions.js';
 
 export type AgentChannelScope = 'own' | 'all' | 'none';
 export type AgentFilesystemAccess = 'read-only' | 'read-write';
@@ -77,14 +78,6 @@ const CHANNEL_PROVIDER_PROFILES: AgentProviderProfilePermission[] = [
   'default_vision',
 ];
 
-function normalizeConnectorId(value: string): string {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
 function unique(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
 }
@@ -103,6 +96,23 @@ function explicitConnectorIds(
   );
 }
 
+function isCoworkProjectWebGroup(group: RegisteredGroup): boolean {
+  return group.kind === 'web' && Boolean(group.projectId || group.projectSlug);
+}
+
+function projectFilesystemScopes(
+  group: RegisteredGroup,
+): AgentFilesystemScope[] {
+  if (!isCoworkProjectWebGroup(group) || !group.projectSlug) return [];
+  if (!/^[a-z0-9-]+$/.test(group.projectSlug)) return [];
+  return [
+    {
+      containerPath: `/workspace/extra/project-${group.projectSlug}`,
+      access: 'read-write',
+    },
+  ];
+}
+
 export function resolveAgentBoundary(input: {
   group: RegisteredGroup;
   isMain?: boolean;
@@ -117,6 +127,8 @@ export function resolveAgentBoundary(input: {
     'github',
   ];
   const connectorIds = explicitConnectorIds(input.group, availableConnectorIds);
+  const projectScopes = projectFilesystemScopes(input.group);
+  const allowProjectExternalWrites = isCoworkProjectWebGroup(input.group);
 
   if (isMain) {
     return {
@@ -131,6 +143,7 @@ export function resolveAgentBoundary(input: {
         { containerPath: '/workspace/global', access: 'read-write' },
         { containerPath: '/workspace/ipc', access: 'read-write' },
         { containerPath: '/workspace/skills', access: 'read-only' },
+        ...projectScopes,
       ],
       skillScopes: {
         allowedScopes: ['all', 'main', 'channels'],
@@ -155,6 +168,7 @@ export function resolveAgentBoundary(input: {
       { containerPath: '/workspace/global', access: 'read-only' },
       { containerPath: '/workspace/ipc', access: 'read-write' },
       { containerPath: '/workspace/skills', access: 'read-only' },
+      ...projectScopes,
     ],
     skillScopes: {
       allowedScopes: ['all', 'channels'],
@@ -163,7 +177,7 @@ export function resolveAgentBoundary(input: {
     providerProfiles: CHANNEL_PROVIDER_PROFILES,
     connectorIds,
     externalWrites: {
-      allowed: false,
+      allowed: allowProjectExternalWrites,
       requiresApproval: true,
     },
   };

@@ -1,13 +1,19 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import fs from 'fs';
 
 import {
   _initTestDatabase,
+  createCoworkProject,
   createTask,
   getAllTasks,
   getRegisteredGroup,
   getTaskById,
   setRegisteredGroup,
 } from './db.js';
+import {
+  coworkProjectPath,
+  writeCoworkProjectFile,
+} from './cowork-projects.js';
 import { isSkillVisibleForIpc, processTaskIpc, IpcDeps } from './ipc.js';
 import { RegisteredGroup } from './types.js';
 
@@ -458,6 +464,105 @@ describe('IPC skill visibility', () => {
         false,
       ),
     ).toBe(false);
+  });
+});
+
+// --- Cowork project tools ---
+
+describe('Cowork project IPC tools', () => {
+  it('lets a channel agent update a Cowork project file and send it to the same chat', async () => {
+    const project = createCoworkProject({
+      id: 'project-ipc-1',
+      name: 'Aurora Docs',
+      slug: 'aurora-docs-ipc',
+      description: null,
+      instructions: null,
+      created_at: '2026-06-19T00:00:00.000Z',
+      updated_at: '2026-06-19T00:00:00.000Z',
+    });
+    const sentFiles: Array<{
+      jid: string;
+      filePath: string;
+      filename: string;
+      caption?: string;
+    }> = [];
+    deps.sendFile = async (jid, filePath, filename, caption) => {
+      sentFiles.push({ jid, filePath, filename, caption });
+    };
+
+    try {
+      await processTaskIpc(
+        {
+          type: 'write_cowork_project_file',
+          projectName: 'Aurora Docs',
+          filePath: 'summaries/latest.md',
+          fileContent: '# Latest\n\nUpdated from Signal.',
+        },
+        'other-group',
+        false,
+        deps,
+      );
+
+      await processTaskIpc(
+        {
+          type: 'send_cowork_project_file',
+          projectName: 'Aurora Docs',
+          filePath: 'summaries/latest.md',
+          chatJid: 'other@g.us',
+          caption: 'Updated Cowork summary',
+        },
+        'other-group',
+        false,
+        deps,
+      );
+
+      expect(sentFiles).toHaveLength(1);
+      expect(sentFiles[0]).toMatchObject({
+        jid: 'other@g.us',
+        filename: 'latest.md',
+        caption: 'Updated Cowork summary',
+      });
+      expect(fs.readFileSync(sentFiles[0].filePath, 'utf-8')).toContain(
+        'Updated from Signal.',
+      );
+    } finally {
+      fs.rmSync(coworkProjectPath(project), { recursive: true, force: true });
+    }
+  });
+
+  it('blocks non-main Cowork file sends to unrelated chats', async () => {
+    const project = createCoworkProject({
+      id: 'project-ipc-2',
+      name: 'Private Workspace',
+      slug: 'private-workspace-ipc',
+      description: null,
+      instructions: null,
+      created_at: '2026-06-19T00:00:00.000Z',
+      updated_at: '2026-06-19T00:00:00.000Z',
+    });
+    writeCoworkProjectFile(project, 'brief.md', 'Private brief');
+    const sentFiles: string[] = [];
+    deps.sendFile = async () => {
+      sentFiles.push('sent');
+    };
+
+    try {
+      await processTaskIpc(
+        {
+          type: 'send_cowork_project_file',
+          projectName: 'Private Workspace',
+          filePath: 'brief.md',
+          chatJid: 'third@g.us',
+        },
+        'other-group',
+        false,
+        deps,
+      );
+
+      expect(sentFiles).toHaveLength(0);
+    } finally {
+      fs.rmSync(coworkProjectPath(project), { recursive: true, force: true });
+    }
   });
 });
 

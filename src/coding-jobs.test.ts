@@ -77,6 +77,9 @@ import { createApproval, reviewApproval } from './approvals.js';
 import { listAuditEvents } from './audit-log.js';
 import { _closeDatabase, _initTestDatabase } from './db.js';
 import { resetPolicyRules, savePolicyRules } from './policy-engine.js';
+import { readEnvFile } from './env.js';
+
+const mockedReadEnvFile = vi.mocked(readEnvFile);
 
 const TEST_ROOT = '/tmp/nanocrab-coding-jobs-test';
 
@@ -109,6 +112,7 @@ describe('coding jobs', () => {
     fs.rmSync(TEST_ROOT, { recursive: true, force: true });
     vi.mocked(spawn).mockClear();
     vi.mocked(execFileSync).mockClear();
+    mockedReadEnvFile.mockReturnValue({ GITHUB_TOKEN: 'test-token' });
     vi.mocked(resolveProviderFallbackForAction).mockReset();
     vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
       approved: true,
@@ -312,6 +316,49 @@ describe('coding jobs', () => {
         requestedBy: 'dashboard',
       }),
     ).rejects.toThrow('not registered for coding jobs');
+  });
+
+  it('queues OpenRouter coding jobs as coding-capable provider work', async () => {
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      provider: 'openrouter',
+      model: 'openrouter/auto',
+      requestedBy: 'whatsapp_main',
+    });
+
+    expect(job.provider).toBe('openrouter');
+    expect(job.model).toBe('openrouter/auto');
+    expect(job.status).toBe('queued');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects Ollama coding jobs unless the selected model is code-capable', async () => {
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    await expect(
+      startCodingJob({
+        repo: 'owner/repo',
+        prompt: 'Implement the issue.',
+        provider: 'ollama',
+        model: 'llama3',
+        requestedBy: 'whatsapp_main',
+      }),
+    ).rejects.toThrow('chat/local-task only');
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Implement the issue.',
+      provider: 'ollama',
+      model: 'codestral',
+      requestedBy: 'whatsapp_main',
+    });
+    expect(job.provider).toBe('ollama');
+    expect(job.model).toBe('codestral');
   });
 
   it('throws on invalid workflow state transitions', async () => {
@@ -548,6 +595,75 @@ describe('coding jobs', () => {
       test: expect.any(String),
       completed: expect.any(String),
     });
+  });
+
+  it('routes OpenRouter coding job credentials through the host proxy', async () => {
+    vi.useRealTimers();
+    mockedReadEnvFile.mockReturnValue({
+      GITHUB_TOKEN: 'test-token',
+      OPENROUTER_API_KEY: 'sk-real-openrouter',
+      OPENROUTER_BASE_URL: 'https://openrouter.example/v1',
+    });
+    vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
+      approved: true,
+      profile: {
+        id: 'default_coding',
+        label: 'Coding',
+        purpose: 'default_coding',
+        provider: 'openrouter',
+        model: 'openrouter/auto',
+        toolPolicy: 'approval-required',
+        updatedAt: new Date(0).toISOString(),
+      },
+      provider: 'openrouter',
+      model: 'openrouter/auto',
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    let envFileContent = '';
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const envFilePath = argv[argv.indexOf('--env-file') + 1];
+      envFileContent = fs.readFileSync(envFilePath, 'utf-8');
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, '');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      provider: 'openrouter',
+      model: 'openrouter/auto',
+      requestedBy: 'whatsapp_main',
+    });
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('completed');
+    });
+    expect(envFileContent).toContain('OPENROUTER_API_KEY=placeholder');
+    expect(envFileContent).toContain('AGENT_PROVIDER_API_KEY=placeholder');
+    expect(envFileContent).toContain(
+      'OPENROUTER_BASE_URL=http://host.docker.internal:3001/__nanocrab/providers/openrouter',
+    );
+    expect(envFileContent).toContain(
+      'AGENT_PROVIDER_BASE_URL=http://host.docker.internal:3001/__nanocrab/providers/openrouter',
+    );
+    expect(envFileContent).not.toContain('sk-real-openrouter');
+    expect(envFileContent).not.toContain('openrouter.example');
   });
 
   it('blocks implementation before plan approval', async () => {

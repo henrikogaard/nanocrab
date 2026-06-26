@@ -81,6 +81,7 @@ import developerRoutes, {
 } from './routes/developer.js';
 import assistantProfileRoutes from './routes/assistant-profile.js';
 import threadsRoutes from './routes/threads.js';
+import projectsRoutes from './routes/projects.js';
 
 // Plugin system
 import {
@@ -250,6 +251,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/approvals', requireAuth, approvalsRoutes);
   app.use('/api/chat', requireAuth, chatRoutes);
   app.use('/api/threads', requireAuth, threadsRoutes);
+  app.use('/api/projects', requireAuth, projectsRoutes);
   app.use('/api/assistant-profile', requireAuth, assistantProfileRoutes);
 
   // Admin role required

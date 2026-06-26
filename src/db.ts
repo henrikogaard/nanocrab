@@ -15,6 +15,7 @@ import {
   NewJournalEventRecord,
   NewMemoryRecord,
   RegisteredGroup,
+  CoworkProject,
   ScheduledTask,
   TaskRunLog,
 } from './types.js';
@@ -112,7 +113,18 @@ function createSchema(database: Database.Database): void {
       enabled INTEGER DEFAULT 1,
       is_primary INTEGER DEFAULT 0,
       kind TEXT,
-      title TEXT
+      title TEXT,
+      project_id TEXT,
+      project_slug TEXT
+    );
+    CREATE TABLE IF NOT EXISTS cowork_projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      slug TEXT NOT NULL UNIQUE,
+      description TEXT,
+      instructions TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS admin_sessions (
       token TEXT PRIMARY KEY,
@@ -331,16 +343,22 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
   try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN kind TEXT`,
-    );
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN kind TEXT`);
   } catch {
     /* column already exists */
   }
   try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN title TEXT`,
-    );
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN title TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN project_id TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN project_slug TEXT`);
   } catch {
     /* column already exists */
   }
@@ -643,6 +661,34 @@ export function getMessageContentById(
     .prepare(`SELECT content FROM messages WHERE id = ? AND chat_jid = ?`)
     .get(id, chatJid) as { content: string } | undefined;
   return row?.content;
+}
+
+export function getLatestStoredMessage(
+  chatJid: string,
+): { content: string; timestamp: string } | undefined {
+  return db
+    .prepare(
+      `SELECT content, timestamp FROM messages
+       WHERE chat_jid = ?
+       ORDER BY timestamp DESC LIMIT 1`,
+    )
+    .get(chatJid) as { content: string; timestamp: string } | undefined;
+}
+
+export function getStoredMessagesForJid(
+  chatJid: string,
+  before: string = new Date().toISOString(),
+  limit: number = 100,
+): unknown[] {
+  const rows = db
+    .prepare(
+      `SELECT id, chat_jid, sender_name, content, timestamp, is_from_me, is_bot_message
+       FROM messages
+       WHERE chat_jid = ? AND timestamp < ?
+       ORDER BY timestamp DESC LIMIT ?`,
+    )
+    .all(chatJid, before, limit) as unknown[];
+  return rows.reverse();
 }
 
 export function createTask(
@@ -1306,6 +1352,8 @@ export function getRegisteredGroup(
         is_primary: number | null;
         kind: string | null;
         title: string | null;
+        project_id: string | null;
+        project_slug: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -1332,6 +1380,8 @@ export function getRegisteredGroup(
     isPrimary: row.is_primary === 1 ? true : undefined,
     kind: row.kind === 'web' ? 'web' : undefined,
     title: row.title ?? undefined,
+    projectId: row.project_id ?? undefined,
+    projectSlug: row.project_slug ?? undefined,
   };
 }
 
@@ -1340,8 +1390,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, enabled, is_primary, kind, title)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, enabled, is_primary, kind, title, project_id, project_slug)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -1355,6 +1405,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.isPrimary ? 1 : 0,
     group.kind ?? null,
     group.title ?? null,
+    group.projectId ?? null,
+    group.projectSlug ?? null,
   );
 }
 
@@ -1372,6 +1424,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     is_primary: number | null;
     kind: string | null;
     title: string | null;
+    project_id: string | null;
+    project_slug: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -1397,6 +1451,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       isPrimary: row.is_primary === 1 ? true : undefined,
       kind: row.kind === 'web' ? 'web' : undefined,
       title: row.title ?? undefined,
+      projectId: row.project_id ?? undefined,
+      projectSlug: row.project_slug ?? undefined,
     };
   }
   return result;
@@ -1427,6 +1483,67 @@ export function getWebThreads(): Record<string, RegisteredGroup> {
     if (g.kind === 'web') out[jid] = g;
   }
   return out;
+}
+
+export function createCoworkProject(project: CoworkProject): CoworkProject {
+  db.prepare(
+    `INSERT INTO cowork_projects (id, name, slug, description, instructions, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    project.id,
+    project.name,
+    project.slug,
+    project.description,
+    project.instructions,
+    project.created_at,
+    project.updated_at,
+  );
+  return project;
+}
+
+export function touchCoworkProject(id: string, updatedAt: string): void {
+  db.prepare('UPDATE cowork_projects SET updated_at = ? WHERE id = ?').run(
+    updatedAt,
+    id,
+  );
+}
+
+export function updateCoworkProjectContext(
+  id: string,
+  context: {
+    description: string | null;
+    instructions: string | null;
+    updated_at: string;
+  },
+): CoworkProject | undefined {
+  db.prepare(
+    `UPDATE cowork_projects
+     SET description = ?, instructions = ?, updated_at = ?
+     WHERE id = ?`,
+  ).run(context.description, context.instructions, context.updated_at, id);
+  return getCoworkProject(id);
+}
+
+export function getCoworkProject(id: string): CoworkProject | undefined {
+  return db.prepare('SELECT * FROM cowork_projects WHERE id = ?').get(id) as
+    | CoworkProject
+    | undefined;
+}
+
+export function getCoworkProjectBySlug(
+  slug: string,
+): CoworkProject | undefined {
+  return db
+    .prepare('SELECT * FROM cowork_projects WHERE slug = ?')
+    .get(slug) as CoworkProject | undefined;
+}
+
+export function getCoworkProjects(): CoworkProject[] {
+  return db
+    .prepare(
+      'SELECT * FROM cowork_projects ORDER BY updated_at DESC, created_at DESC',
+    )
+    .all() as CoworkProject[];
 }
 
 // --- JSON migration ---

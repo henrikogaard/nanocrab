@@ -3,11 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="NanoCrab is a local personal AI workspace for Copilot chat, Cowork projects, Code work, and agent operations.">
   <meta name="theme-color" content="#0f0f14">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="NanoCrab">
-  <title>NanoCrab Admin</title>
+  <meta property="og:title" content="NanoCrab">
+  <meta property="og:description" content="A local personal AI workspace for Copilot chat, Cowork projects, Code work, and agent operations.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="/static/nanocrab-logo.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="NanoCrab">
+  <meta name="twitter:description" content="Copilot, Cowork, Code, and operations for your local AI workspace.">
+  <meta name="twitter:image" content="/static/nanocrab-logo.png">
+  <title>NanoCrab — Personal AI Workspace</title>
   <link rel="icon" type="image/png" href="/static/nanocrab-mark.png">
   <link rel="apple-touch-icon" href="/static/nanocrab-mark.png">
   <link rel="manifest" href="/manifest.json?v=2.0.0-rc.4">
@@ -15,9 +24,25 @@
 </head>
 <body>
   <div id="app"></div>
+  <noscript>
+    <main class="noscript-workspace" aria-label="NanoCrab requires JavaScript">
+      <img src="/static/nanocrab-mark.png" alt="NanoCrab mark">
+      <p class="noscript-kicker">Personal AI workspace</p>
+      <h1>Enable JavaScript to open NanoCrab</h1>
+      <p>NanoCrab needs JavaScript for Copilot chat, Cowork projects, Code work, approvals, MCP tools, and live operations data.</p>
+      <section class="noscript-lanes" aria-label="Workspace lanes">
+        <span><strong>Copilot</strong> Plain chat and quick thinking</span>
+        <span><strong>Cowork</strong> Projects, artifacts, documents, and MCP context</span>
+        <span><strong>Code</strong> Repository agents, checks, and handoffs</span>
+      </section>
+      <p class="noscript-note">After enabling JavaScript, reload this page. If it still fails, check the NanoCrab server and use the offline recovery page.</p>
+    </main>
+  </noscript>
   <script defer src="/modes.js?v=2.0.0-rc.4"></script>
+  <script defer src="/ui/data-health.js?v=2.0.0-rc.4"></script>
   <script defer src="/app.js?v=2.0.0-rc.4"></script>
   <script defer src="/pages/dashboard.js?v=2.0.0-rc.4"></script>
+  <script defer src="/pages/projects.js?v=2.0.0-rc.4"></script>
   <script defer src="/pages/agents.js?v=2.0.0-rc.4"></script>
 
   <script defer src="/pages/settings.js?v=2.0.0-rc.4"></script>

@@ -1,6 +1,7 @@
 {
-  "name": "NanoCrab Admin",
+  "name": "NanoCrab Personal AI Workspace",
   "short_name": "NanoCrab",
+  "description": "Local personal AI workspace for Copilot chat, Cowork projects, Code work, and agent operations.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "any",
@@ -27,8 +28,30 @@
       ]
     },
     {
-      "name": "Chat",
+      "name": "Copilot chat",
       "url": "/#/chat",
+      "icons": [
+        {
+          "src": "/static/nanocrab-mark.png",
+          "sizes": "560x560",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Cowork projects",
+      "url": "/#/projects",
+      "icons": [
+        {
+          "src": "/static/nanocrab-mark.png",
+          "sizes": "560x560",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Code workspace",
+      "url": "/#/gitcode",
       "icons": [
         {
           "src": "/static/nanocrab-mark.png",

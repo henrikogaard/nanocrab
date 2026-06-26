@@ -22,6 +22,10 @@ function codingJobStatusBadge(status) {
   return 'badge-error';
 }
 
+function codingDenyNoteId(id) {
+  return `coding-deny-note-${String(id || '').replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+}
+
 function codingJobActive(status) {
   return [
     'queued',
@@ -36,9 +40,271 @@ function codingJobActive(status) {
   ].includes(status);
 }
 
+const TASK_TEMPLATES = {
+  bugfix: {
+    label: 'Fix regression',
+    meta: 'Patch + focused tests',
+    prompt:
+      'Investigate and fix the regression. Reproduce the issue if possible, identify the smallest responsible code path, make a focused change, add or update tests that would fail before the fix, and run the relevant checks. Summarize the root cause, changed files, and verification result.',
+    hint: 'Best when you know the broken behavior or suspect area.',
+  },
+  review: {
+    label: 'Review changes',
+    meta: 'Risks before merge',
+    prompt:
+      'Review the current changes for correctness, regressions, security issues, UX breaks, and missing tests. Lead with actionable findings and include file and line references when possible. If there are no issues, say so and name the remaining risk.',
+    hint: 'Use for a pre-merge review or a second set of eyes.',
+  },
+  docs: {
+    label: 'Update docs',
+    meta: 'README + operator notes',
+    prompt:
+      'Update the documentation for this feature or workflow. Keep README, operator notes, setup instructions, and verification steps consistent with the implementation. Prefer concise, task-oriented writing and call out any behavior that changed.',
+    hint: 'Use after changing behavior, setup, or operations.',
+  },
+  test: {
+    label: 'Add coverage',
+    meta: 'Guard the workflow',
+    prompt:
+      'Add focused test coverage for this workflow. Follow existing test patterns, cover the edge cases most likely to regress, avoid broad rewrites, and run the targeted test command. Summarize what is covered and what remains untested.',
+    hint: 'Use when a feature works but needs safer regression coverage.',
+  },
+  release: {
+    label: 'Release check',
+    meta: 'Build + test sweep',
+    prompt:
+      'Run a release-readiness check for this area. Inspect recent changes, run the relevant typecheck/build/test commands, look for documentation or operator-note gaps, and return a concise go/no-go summary with blockers and follow-up actions.',
+    hint: 'Use before tagging, deploying, or handing work back.',
+  },
+};
+
+function renderTaskTemplateCards() {
+  return Object.entries(TASK_TEMPLATES)
+    .map(
+      ([kind, template]) => `
+        <button class="assign-template-card" onclick="applyTaskTemplate('${kind}')" type="button">
+          <span class="assign-template-title">${esc(template.label)}</span>
+          <span class="assign-template-meta">${esc(template.meta)}</span>
+        </button>`,
+    )
+    .join('');
+}
+
+function renderAgentRecoveryState(kind, message, options = {}) {
+  const title =
+    kind === 'log'
+      ? 'Session log could not load'
+      : kind === 'coding'
+        ? 'Coding job detail could not load'
+        : kind === 'task'
+          ? 'Task output could not load'
+          : 'Agent cockpit could not load';
+  const detail =
+    kind === 'log'
+      ? 'The agent may still be running, or the log file may have rotated. Try the session list again or inspect monitoring logs.'
+      : kind === 'coding'
+        ? 'The GitHub handoff may still be running or the job record may be unavailable. Check Code, Git Ops, or the test evidence before assigning more work.'
+        : kind === 'task'
+          ? 'The task record may still be writing output. Refresh the panel, then use monitoring if the output stays unavailable.'
+          : 'NanoCrab could not reach the delegation data needed for agents, questions, coding jobs, or active tasks.';
+  const retryAction = options.retryAction || "navigate('agents')";
+  return `
+    <section class="agent-recovery-state is-${esc(kind || 'load')}">
+      <div>
+        <span>${kind === 'load' ? 'Delegation unavailable' : 'Detail unavailable'}</span>
+        <strong>${esc(title)}</strong>
+        <p>${esc(detail)}</p>
+        ${message ? `<small>${esc(message)}</small>` : ''}
+      </div>
+      <div class="agent-recovery-actions">
+        <button type="button" class="btn btn-sm btn-primary" onclick="${retryAction}">Retry</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('monitoring')">Monitoring</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('projects')">Cowork</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('gitcode')">Code</button>
+      </div>
+    </section>`;
+}
+
+function agentActionErrorMessage(kind, err) {
+  const message =
+    typeof err === 'string'
+      ? err
+      : err?.message || err?.error || '';
+  const detail = message ? `: ${message}` : '';
+  if (kind === 'launch') {
+    return 'Could not launch the delegated task. Check the selected tool, model, workspace path, and container readiness' + detail;
+  }
+  if (kind === 'repo') {
+    return 'Could not register the coding repo. Confirm the owner/repo name and GitHub access before assigning issues' + detail;
+  }
+  if (kind === 'rule') {
+    return 'Could not save the repo rule. Keep your text in the editor, check the coding repo record, and retry' + detail;
+  }
+  if (kind === 'issue') {
+    return 'Could not start a coding issue handoff. Check repo permissions, labels, provider setup, and Code readiness' + detail;
+  }
+  if (kind === 'autofix') {
+    return 'Could not enable Autofix pickup. Check the GitHub repo, label, provider, and Autofix plugin settings' + detail;
+  }
+  if (kind === 'cancel-task') {
+    return 'Could not cancel the delegated task. It may have already finished; refresh the task history before retrying' + detail;
+  }
+  if (kind === 'share-task') {
+    return 'Could not prepare the task summary for sharing. Refresh the task output and try again' + detail;
+  }
+  if (kind === 'bot-agent') {
+    return 'Could not update the bot agent. Check channel state and keep at least one primary bot enabled' + detail;
+  }
+  if (kind === 'primary-bot') {
+    return 'Could not set the primary bot. Confirm the bot is enabled and the group record is available' + detail;
+  }
+  if (kind === 'coding-job') {
+    return 'Could not update the coding job. Refresh the job evidence, check approvals or CI state, and retry' + detail;
+  }
+  if (kind === 'answer') {
+    return 'Could not send the agent decision. Refresh pending questions before answering again' + detail;
+  }
+  if (kind === 'message') {
+    return 'Could not send the agent message. Check both agent groups are available and retry' + detail;
+  }
+  return 'Agent action could not complete. Refresh the delegation cockpit and retry' + detail;
+}
+
+function renderAgentLoadingState(kind = 'cockpit') {
+  const states = {
+    cockpit: {
+      title: 'Loading delegation cockpit',
+      detail:
+        'Collecting bot agents, channels, pending questions, approvals, coding jobs, and active tasks before you assign more work.',
+      steps: ['Agents', 'Questions', 'Approvals', 'Jobs'],
+    },
+    coding: {
+      title: 'Loading coding job evidence',
+      detail:
+        'Reading branch, workspace, diff, logs, tests, CI, and approval gates before you decide the next Code action.',
+      steps: ['Branch', 'Diff', 'Tests', 'CI'],
+    },
+    log: {
+      title: 'Loading session log',
+      detail:
+        'Opening the agent run transcript so you can inspect progress, tool output, and failure context.',
+      steps: ['Session', 'Output', 'Events'],
+    },
+    task: {
+      title: 'Loading task output',
+      detail:
+        'Reading one-off agent output, exit status, and shareable evidence for this delegated task.',
+      steps: ['Task', 'Status', 'Output'],
+    },
+  };
+  const state = states[kind] || states.cockpit;
+  return `
+    <section class="agent-loading-state is-${esc(kind)}" aria-busy="true" aria-label="${esc(state.title)}">
+      <div>
+        <span>${kind === 'cockpit' ? 'Delegation loading' : 'Evidence loading'}</span>
+        <strong>${esc(state.title)}</strong>
+        <p>${esc(state.detail)}</p>
+      </div>
+      <div class="agent-loading-flow">
+        ${state.steps.map((step) => `<span>${esc(step)}</span>`).join('')}
+      </div>
+    </section>`;
+}
+
+function agentDelegationBriefText(state) {
+  const stats = state?.stats || [];
+  const attentionItems = state?.attentionItems || [];
+  const loadIssues = state?.loadIssues || [];
+  const coding = state?.coding || {};
+  const groups = state?.groups || [];
+  const tools = state?.tools || [];
+  const tasks = state?.tasks || [];
+  const approvals = state?.approvals || [];
+  const questions = state?.questions || [];
+  const channels = state?.channels || [];
+  const enabledAgents = groups.filter((group) => group.enabled !== false);
+  const connectedChannels = channels.filter((channel) => channel.connected === true);
+  const statLines = stats.map((stat) => `- ${stat.label}: ${stat.count} (${stat.detail})`);
+  const attentionLines = attentionItems.map((item) => `- ${item.label}: ${item.detail}`);
+  const runningTaskLines = tasks
+    .filter((task) => task.isRunning)
+    .slice(0, 8)
+    .map((task) => `- ${task.tool}/${task.model}: ${task.prompt?.slice(0, 120) || task.id}`);
+  const questionLines = questions
+    .slice(0, 8)
+    .map(
+      (question) =>
+        `- ${question.group_folder || 'agent'}: ${question.question || 'Question'}${Array.isArray(question.options) && question.options.length ? ` Options: ${question.options.join(', ')}` : ''}`,
+    );
+
+  return [
+    'Agent delegation brief',
+    '',
+    `Enabled bot agents: ${enabledAgents.length}`,
+    `Available delegate tools: ${tools.filter((tool) => tool.available).length}`,
+    `Connected channels: ${connectedChannels.length}/${channels.length}`,
+    `Pending approvals: ${approvals.filter((approval) => approval.status === 'pending').length}`,
+    `Pending questions: ${questions.length}`,
+    `Coding repos: ${coding.repos || 0}`,
+    `Active coding jobs: ${coding.active || 0}`,
+    `Waiting coding gates: ${coding.waiting || 0}`,
+    `Data health: ${loadIssues.length ? loadIssues.join('; ') : 'Delegation feeds loaded without known fallback.'}`,
+    '',
+    'Use this brief before assigning more work to agents. Resolve approval gates, unanswered questions, and waiting coding jobs before launching additional automation.',
+    'Choose Copilot for simple conversation, Cowork projects for artifacts and MCP-backed project work, Code/GitHub handoff for repository changes, and Workflows when a repeated routine needs supervision.',
+    'Prefer one clear owner, one expected output, and one verification path per delegated task.',
+    '',
+    'Delegation readiness checklist',
+    '- Pick the lane first: Copilot for conversation, Cowork for project/MCP/document work, Code for repository changes, Workflows for repeatable routines.',
+    '- Name the owner, expected output, source context, approval boundary, and proof needed before assigning.',
+    '- Keep MCP/email/document/calendar requests in Cowork until sources and artifact paths are visible.',
+    '- Do not launch another agent when approvals, unanswered questions, or coding gates already block the lane.',
+    '',
+    'Delegation stats',
+    ...statLines,
+    `- Data health: ${loadIssues.length ? 'needs review' : 'ready'} (${loadIssues.length || 0} feed issues)`,
+    '',
+    'Needs attention',
+    ...(attentionLines.length ? attentionLines : ['- No agent blockers right now.']),
+    '',
+    'Questions waiting for a decision',
+    ...(questionLines.length ? questionLines : ['- No unanswered agent questions.']),
+    '',
+    'Running tasks',
+    ...(runningTaskLines.length ? runningTaskLines : ['- No one-off agent tasks are currently running.']),
+  ].join('\n');
+}
+
+function agentQuestionDecisionBriefText(state) {
+  const questions = state?.questions || [];
+  const pending = questions.slice(0, 12).map((question) => {
+    const options =
+      Array.isArray(question.options) && question.options.length
+        ? question.options.join(', ')
+        : 'free-form answer';
+    return `- ${question.group_folder || 'agent'}: ${question.question || 'Question'} | options: ${options}`;
+  });
+  return [
+    'Agent question decision brief',
+    '',
+    `Pending questions: ${questions.length}`,
+    '',
+    'Answer these before assigning more automation, because agents are blocked on human intent.',
+    '',
+    ...(pending.length ? pending : ['- No unanswered agent questions.']),
+    '',
+    'Decision guidance:',
+    '- Answer with the narrowest option that preserves user intent.',
+    '- If the question would trigger external sends, document publishing, webhooks, calendar changes, or repository writes, check Approvals first.',
+    '- Route project/document/email/calendar context back to Cowork, repository context to Code, and simple clarification back to Copilot.',
+    '- Capture the chosen lane, owner, expected output, and verification step when the answer creates follow-up work.',
+  ].join('\n');
+}
+
 async function renderAgents(el) {
-  el.innerHTML = '<div class="loading">Loading agents</div>';
+  el.innerHTML = renderAgentLoadingState('cockpit');
   try {
+    const loadIssues = [];
     const [
       groupsRaw,
       containers,
@@ -59,24 +325,78 @@ async function renderAgents(el) {
       boundaries,
       channelInfo,
     ] = await Promise.all([
-      api('/groups').catch(() => []),
-      api('/containers').catch(() => []),
-      api('/containers/recent').catch(() => []),
-      api('/plugins').catch(() => []),
-      api('/agents/tools').catch(() => []),
-      api('/agents/tasks').catch(() => []),
-      api('/agents/coding/repos').catch(() => []),
-      api('/agents/coding/repo-rules').catch(() => []),
-      api('/agents/coding/jobs').catch(() => []),
-      api('/agents/providers').catch(() => []),
-      api('/questions/pending').catch(() => []),
-      api('/agents/messages').catch(() => []),
-      api('/approvals').catch(() => []),
-      api('/reports/jobs').catch(() => []),
-      api('/research/jobs').catch(() => []),
-      api('/sessions/terminal/active').catch(() => []),
-      api('/agents/boundaries').catch(() => []),
-      api('/channels').catch(() => ({ active: [] })),
+      api('/groups').catch(() => {
+        loadIssues.push('Bot agent roster unavailable');
+        return [];
+      }),
+      api('/containers').catch(() => {
+        loadIssues.push('Active container list unavailable');
+        return [];
+      }),
+      api('/containers/recent').catch(() => {
+        loadIssues.push('Recent container history unavailable');
+        return [];
+      }),
+      api('/plugins').catch(() => {
+        loadIssues.push('Plugin registry unavailable');
+        return [];
+      }),
+      api('/agents/tools').catch(() => {
+        loadIssues.push('Delegate tool catalog unavailable');
+        return [];
+      }),
+      api('/agents/tasks').catch(() => {
+        loadIssues.push('Delegated task history unavailable');
+        return [];
+      }),
+      api('/agents/coding/repos').catch(() => {
+        loadIssues.push('Coding repo registry unavailable');
+        return [];
+      }),
+      api('/agents/coding/repo-rules').catch(() => {
+        loadIssues.push('Coding repo rules unavailable');
+        return [];
+      }),
+      api('/agents/coding/jobs').catch(() => {
+        loadIssues.push('Coding job queue unavailable');
+        return [];
+      }),
+      api('/agents/providers').catch(() => {
+        loadIssues.push('Agent provider catalog unavailable');
+        return [];
+      }),
+      api('/questions/pending').catch(() => {
+        loadIssues.push('Pending agent questions unavailable');
+        return [];
+      }),
+      api('/agents/messages').catch(() => {
+        loadIssues.push('Agent message inbox unavailable');
+        return [];
+      }),
+      api('/approvals').catch(() => {
+        loadIssues.push('Approval queue unavailable');
+        return [];
+      }),
+      api('/reports/jobs').catch(() => {
+        loadIssues.push('Report job queue unavailable');
+        return [];
+      }),
+      api('/research/jobs').catch(() => {
+        loadIssues.push('Research job queue unavailable');
+        return [];
+      }),
+      api('/sessions/terminal/active').catch(() => {
+        loadIssues.push('Active terminal sessions unavailable');
+        return [];
+      }),
+      api('/agents/boundaries').catch(() => {
+        loadIssues.push('Agent boundary policy unavailable');
+        return [];
+      }),
+      api('/channels').catch(() => {
+        loadIssues.push('Channel status unavailable');
+        return { active: [] };
+      }),
     ]);
     const groups = Array.isArray(groupsRaw) ? groupsRaw : [];
     const channels = Array.isArray(channelInfo?.active)
@@ -115,7 +435,7 @@ async function renderAgents(el) {
           .slice(0, 4)
           .map(
             (connector) =>
-              `<span class="badge badge-info" style="font-size:8px">${esc(connector)}</span>`,
+              `<span class="badge badge-info agent-bot-mini-badge">${esc(connector)}</span>`,
           )
           .join('');
 
@@ -144,24 +464,26 @@ async function renderAgents(el) {
         const statusReason =
           channelStatus?.statusReason || 'Channel adapter is not active';
 
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);${!isEnabled ? 'opacity:.62' : ''}">
-        <div style="display:flex;align-items:center;gap:10px">
-          <span class="status-dot ${!isEnabled ? '' : channelConnected ? (isActive && isIdle ? 'idle' : 'online') : 'offline'}" style="width:8px;height:8px"></span>
-          <div>
-            <strong>${esc(g.name)}</strong>
-            <span class="badge badge-muted" style="margin-left:6px;font-size:9px">${ch}</span>
-            ${g.isMain ? '<span class="badge badge-success" style="font-size:9px;margin-left:3px">Persistent</span>' : ''}
-            ${isPrimary ? '<span class="badge badge-accent" style="font-size:9px;margin-left:3px">Primary</span>' : ''}
-            <div style="font-size:11px;color:var(--text-muted)">${lastActive ? 'Active ' + timeAgo(lastActive) : 'No activity'} · ${esc(statusReason)}</div>
-            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">
-              <span class="badge badge-muted" style="font-size:8px">${esc((boundary?.channelScopes || ['own']).join(','))} channels</span>
-              <span class="badge ${boundary?.externalWrites?.allowed ? 'badge-warning' : 'badge-success'}" style="font-size:8px">${boundary?.externalWrites?.allowed ? 'writes gated' : 'read/write denied'}</span>
+        return `<div class="agent-bot-row ${!isEnabled ? 'is-disabled' : ''}">
+        <div class="agent-bot-main">
+          <span class="status-dot ${!isEnabled ? '' : channelConnected ? (isActive && isIdle ? 'idle' : 'online') : 'offline'}"></span>
+          <div class="agent-bot-copy">
+            <div class="agent-bot-titleline">
+              <strong class="agent-bot-name">${esc(g.name)}</strong>
+              <span class="badge badge-muted agent-bot-badge">${ch}</span>
+              ${g.isMain ? '<span class="badge badge-success agent-bot-badge">Persistent</span>' : ''}
+              ${isPrimary ? '<span class="badge badge-accent agent-bot-badge">Primary</span>' : ''}
+            </div>
+            <div class="agent-bot-meta">${lastActive ? 'Active ' + timeAgo(lastActive) : 'No activity'} · ${esc(statusReason)}</div>
+            <div class="agent-bot-boundaries">
+              <span class="badge badge-muted agent-bot-mini-badge">${esc((boundary?.channelScopes || ['own']).join(','))} channels</span>
+              <span class="badge ${boundary?.externalWrites?.allowed ? 'badge-warning' : 'badge-success'} agent-bot-mini-badge">${boundary?.externalWrites?.allowed ? 'writes gated' : 'read/write denied'}</span>
               ${connectorBadges}
             </div>
           </div>
         </div>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-          <span class="badge ${statusColor}" style="font-size:10px">${statusBadge}</span>
+        <div class="agent-bot-actions">
+          <span class="badge ${statusColor} agent-tool-badge">${statusBadge}</span>
           <button class="btn btn-sm btn-ghost" onclick="toggleBotAgent('${esc(g.jid)}', ${!isEnabled})">${isEnabled ? 'Disable' : 'Enable'}</button>
           ${g.isMain && isEnabled && !isPrimary ? `<button class="btn btn-sm btn-ghost" onclick="setPrimaryBotAgent('${esc(g.jid)}')">Set Primary</button>` : ''}
         </div>
@@ -195,18 +517,18 @@ async function renderAgents(el) {
               : t.status === 'cancelled'
                 ? 'badge-muted'
                 : 'badge-error';
-        return `<div class="channel-card" style="padding:8px 0">
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:6px">
-            <span class="badge badge-muted" style="font-size:9px">${esc(t.tool)}</span>
-            <span class="badge badge-muted" style="font-size:9px">${esc(t.model)}</span>
-            <span style="font-size:12px;font-weight:500">${esc(t.prompt.slice(0, 80))}${t.prompt.length > 80 ? '...' : ''}</span>
+        return `<div class="agent-task-row">
+        <div class="agent-task-main">
+          <div class="agent-task-head">
+            <span class="badge badge-muted agent-mini-badge">${esc(t.tool)}</span>
+            <span class="badge badge-muted agent-mini-badge">${esc(t.model)}</span>
+            <span class="agent-task-prompt">${esc(t.prompt.slice(0, 80))}${t.prompt.length > 80 ? '...' : ''}</span>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(t.workDir)} \u2022 ${timeAgo(t.createdAt)}</div>
+          <div class="agent-task-meta">${esc(t.workDir)} \u2022 ${timeAgo(t.createdAt)}</div>
         </div>
-        <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
-          <span class="badge ${statusBadge}" style="font-size:10px">${t.isRunning ? 'Running' : t.status}</span>
-          ${t.isRunning ? `<button class="btn btn-sm btn-ghost" onclick="cancelAgentTask('${t.id}')" style="color:var(--error)">Cancel</button>` : ''}
+        <div class="agent-task-actions">
+          <span class="badge ${statusBadge} agent-tool-badge">${t.isRunning ? 'Running' : t.status}</span>
+          ${t.isRunning ? `<button class="btn btn-sm btn-ghost agent-danger-action" onclick="cancelAgentTask('${t.id}')">Cancel</button>` : ''}
           <button class="btn btn-sm btn-ghost" onclick="viewAgentTask('${t.id}')">View</button>
         </div>
       </div>`;
@@ -215,12 +537,14 @@ async function renderAgents(el) {
 
     const enabledPlugins = plugins.filter((p) => p.enabled);
     const codingProviderOptions = agentProviders
-      .filter((p) => ['claude', 'codex', 'opencode'].includes(p.id))
+      .filter((p) => p.codingCapable)
       .map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`)
       .join('');
     const codingModelsByProvider = {};
+    const codingProvidersById = {};
     agentProviders.forEach((p) => {
-      codingModelsByProvider[p.id] = p.models || [];
+      codingProvidersById[p.id] = p;
+      codingModelsByProvider[p.id] = (p.models || []).filter((model) => model.codingCapable !== false);
     });
     const codingRepoOptions = codingRepos
       .map(
@@ -229,17 +553,17 @@ async function renderAgents(el) {
       .join('');
     const codingRepoRuleRows =
       codingRepoRules.length === 0
-        ? '<div class="empty" style="padding:10px">No repo coding rules saved yet</div>'
+        ? renderAgentCodeEmptyState('rules')
         : codingRepoRules
             .map(
               (rule) => `
-        <div style="padding:8px 0;border-bottom:1px solid var(--border)">
-          <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
-            <strong style="font-size:12px;color:var(--text)">${esc(rule.title)}</strong>
-            <span class="badge ${rule.status === 'approved' ? 'badge-success' : 'badge-muted'}">${esc(rule.status)}</span>
+        <div class="agent-rule-row">
+          <div class="agent-rule-head">
+            <strong class="agent-rule-title">${esc(rule.title)}</strong>
+            <span class="badge ${rule.status === 'approved' ? 'badge-success' : 'badge-muted'} agent-tool-badge">${esc(rule.status)}</span>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(rule.repo)} • ${esc(rule.visibility || 'shared')}</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:5px;line-height:1.35">${esc(rule.content)}</div>
+          <div class="agent-rule-meta">${esc(rule.repo)} • ${esc(rule.visibility || 'shared')}</div>
+          <div class="agent-rule-content">${esc(rule.content)}</div>
         </div>`,
             )
             .join('');
@@ -268,104 +592,288 @@ async function renderAgents(el) {
         ]
           .filter(Boolean)
           .join('');
-        return `<div class="channel-card" style="padding:8px 0">
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            <span class="badge badge-muted" style="font-size:9px">${esc(job.repo)}</span>
-            <span class="badge badge-accent" style="font-size:9px">${esc(job.provider)}/${esc(job.model)}</span>
-            ${job.issueNumber ? `<span class="badge badge-info" style="font-size:9px">#${job.issueNumber}</span>` : ''}
-            <span style="font-size:12px;font-weight:500">${esc((job.issueTitle || job.prompt || job.id).slice(0, 100))}</span>
+        return `<div class="agent-task-row">
+        <div class="agent-task-main">
+          <div class="agent-task-head">
+            <span class="badge badge-muted agent-mini-badge">${esc(job.repo)}</span>
+            <span class="badge badge-accent agent-mini-badge">${esc(job.provider)}/${esc(job.model)}</span>
+            ${job.issueNumber ? `<span class="badge badge-info agent-mini-badge">#${job.issueNumber}</span>` : ''}
+            <span class="agent-task-prompt">${esc((job.issueTitle || job.prompt || job.id).slice(0, 100))}</span>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(job.branch)} \u2022 ${timeAgo(job.createdAt)}${job.prUrl ? ` \u2022 <a href="${esc(job.prUrl)}" target="_blank" style="color:var(--accent)">PR</a>` : ''}</div>
+          <div class="agent-task-meta">${esc(job.branch)} \u2022 ${timeAgo(job.createdAt)}${job.prUrl ? ` \u2022 <a class="agent-task-link" href="${esc(job.prUrl)}" target="_blank">PR</a>` : ''}</div>
         </div>
-        <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
-          <span class="badge ${statusBadge}" style="font-size:10px">${esc(job.status)}</span>
+        <div class="agent-task-actions">
+          <span class="badge ${statusBadge} agent-tool-badge">${esc(job.status)}</span>
           ${actions}
           <button class="btn btn-sm btn-ghost" onclick="viewCodingJob('${esc(job.id)}')">View</button>
         </div>
       </div>`;
       })
       .join('');
-    const cockpitRows = [
+    const pendingApprovalCount = approvals.filter(
+      (a) => a.status === 'pending',
+    ).length;
+    const activeCodingJobCount = codingJobs.filter((job) =>
+      codingJobActive(job.status),
+    ).length;
+    const waitingCodingJobCount = codingJobs.filter((job) =>
+      ['await_approval', 'await_pr_approval'].includes(job.status),
+    ).length;
+    const runningAgentTaskCount = agentTasks.filter((t) => t.isRunning).length;
+    const availableToolCount = tools.filter((t) => t.available).length;
+    const connectedChannelCount = channels.filter(
+      (channel) => channel.connected === true,
+    ).length;
+    const enabledAgentCount = groups.filter((g) => g.enabled !== false).length;
+    const latestApproval = approvals.find((a) => a.status === 'pending');
+    const latestCodingJob = codingJobs.find((job) =>
+      ['await_approval', 'await_pr_approval'].includes(job.status),
+    );
+    const latestQuestion = pendingQuestions[0];
+    const runningTask = agentTasks.find((t) => t.isRunning);
+    const codingBoardTone =
+      codingRepos.length === 0
+        ? 'attention'
+        : waitingCodingJobCount > 0
+          ? 'attention'
+          : activeCodingJobCount > 0
+            ? 'active'
+            : 'ready';
+    const codingBoardTitle =
+      codingRepos.length === 0
+        ? 'Register a repo before delegating GitHub work'
+        : waitingCodingJobCount > 0
+          ? 'Review coding gates before launching more jobs'
+          : activeCodingJobCount > 0
+            ? 'Coding agents are working issues'
+            : 'Ready to pick the next GitHub issue';
+    const codingBoardDetail =
+      codingRepos.length === 0
+        ? 'Add owner/repo once, then agents can pick issues, apply repo rules, and open draft PRs from this board.'
+        : waitingCodingJobCount > 0
+          ? 'Implementation or PR approval is waiting. Inspect the job queue before assigning more work.'
+          : activeCodingJobCount > 0
+            ? 'Track active jobs here and use approvals when implementation or PR gates appear.'
+            : 'Pick from registered repos and route the next issue to the best available coding provider.';
+    const agentStats = [
       {
-        label: 'Approvals',
-        count: approvals.filter((a) => a.status === 'pending').length,
-        detail: approvals[0]?.title || 'No pending approvals',
+        label: 'Awaiting you',
+        count:
+          pendingApprovalCount + pendingQuestions.length + waitingCodingJobCount,
+        detail: 'Approvals, questions, and PR gates',
+        tone:
+          pendingApprovalCount + pendingQuestions.length + waitingCodingJobCount >
+          0
+            ? 'attention'
+            : 'ready',
       },
       {
-        label: 'Reports',
-        count: reportJobs.length,
-        detail: reportJobs[0]?.title || 'No report jobs',
+        label: 'Running',
+        count: runningAgentTaskCount + activeCodingJobCount + terminals.length,
+        detail: 'Tasks, coding jobs, and terminals',
+        tone:
+          runningAgentTaskCount + activeCodingJobCount + terminals.length > 0
+            ? 'active'
+            : 'ready',
       },
       {
-        label: 'Research',
-        count: researchJobs.length,
-        detail: researchJobs[0]?.query || 'No research jobs',
+        label: 'Delegates',
+        count: availableToolCount,
+        detail: `${enabledAgentCount} bot agents enabled`,
+        tone: availableToolCount > 0 ? 'ready' : 'muted',
       },
       {
-        label: 'Terminals',
-        count: terminals.length,
-        detail: terminals[0]?.name || 'No active terminal sessions',
+        label: 'Channels',
+        count: connectedChannelCount,
+        detail: `${channels.length} configured channel${channels.length === 1 ? '' : 's'}`,
+        tone: connectedChannelCount > 0 ? 'ready' : 'attention',
+      },
+      {
+        label: 'Data health',
+        count: loadIssues.length,
+        detail: loadIssues.length
+          ? 'Feeds need review before broad delegation'
+          : 'Delegation feeds loaded',
+        tone: loadIssues.length ? 'attention' : 'ready',
       },
     ];
+    const agentAttentionItems = [
+      pendingApprovalCount > 0
+        ? {
+            tone: 'attention',
+            label: `${pendingApprovalCount} approval${pendingApprovalCount === 1 ? '' : 's'} pending`,
+            detail: latestApproval?.title || 'Review approval inbox',
+            action: 'Review',
+            onclick: "navigate('approvals')",
+          }
+        : null,
+      pendingQuestions.length > 0
+        ? {
+            tone: 'attention',
+            label: `${pendingQuestions.length} question${pendingQuestions.length === 1 ? '' : 's'} waiting`,
+            detail: latestQuestion?.question || 'Agents need input',
+            action: 'Answer',
+            onclick: "scrollToAgentSection('pending-questions-card')",
+          }
+        : null,
+      waitingCodingJobCount > 0
+        ? {
+            tone: 'active',
+            label: `${waitingCodingJobCount} coding gate${waitingCodingJobCount === 1 ? '' : 's'}`,
+            detail: latestCodingJob?.issueTitle || latestCodingJob?.prompt || 'Implementation or PR approval needed',
+            action: 'Inspect',
+            onclick: "scrollToAgentSection('github-coding-jobs')",
+          }
+        : null,
+      runningTask
+        ? {
+            tone: 'active',
+            label: `${runningAgentTaskCount} task${runningAgentTaskCount === 1 ? '' : 's'} running`,
+            detail: runningTask.prompt || `${runningTask.tool} is working`,
+            action: 'Watch',
+            onclick: "scrollToAgentSection('coding-tasks-card')",
+          }
+        : null,
+      codingRepos.length === 0
+        ? {
+            tone: 'muted',
+            label: 'No coding repos registered',
+            detail: 'Register a repo before assigning GitHub issues.',
+            action: 'Add repo',
+            onclick: "openAssignWorkWizard('github')",
+          }
+        : null,
+    ].filter(Boolean);
+    window._agentDelegationState = {
+      stats: agentStats,
+      attentionItems: agentAttentionItems,
+      coding: {
+        repos: codingRepos.length,
+        active: activeCodingJobCount,
+        waiting: waitingCodingJobCount,
+      },
+      groups,
+      tools,
+      tasks: agentTasks,
+      approvals,
+      questions: pendingQuestions,
+      channels,
+      loadIssues,
+    };
 
     el.innerHTML = `
-      <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div class="page-header agent-page-header">
         <h2>Agents</h2>
-        <button class="btn btn-sm btn-primary" onclick="openAssignWorkWizard()">Assign Work</button>
+        <button class="btn btn-sm btn-primary" onclick="openAssignWorkWizard()">Assign work</button>
       </div>
 
-      <div id="task-launcher" class="card assign-wizard" style="display:none;margin-bottom:16px">
+      <section class="agent-command-center">
+        <div class="agent-command-main">
+          <div class="agent-command-kicker">Delegation cockpit</div>
+          <h3>Assign, approve, and watch agent work</h3>
+          <p>Use this surface when work should leave your hands: one-off tasks, GitHub issues, recurring automations, coding agents, and human approval gates.</p>
+          <div class="agent-command-actions">
+            <button class="btn btn-sm btn-primary" onclick="openAssignWorkWizard('freeform')">Assign work</button>
+            <button class="btn btn-sm btn-ghost" onclick="copyAgentDelegationBrief()">Copy delegation brief</button>
+            <button class="btn btn-sm btn-ghost" onclick="openAssignWorkWizard('github')">GitHub issue</button>
+            <button class="btn btn-sm btn-ghost" onclick="openAssignWorkWizard('autofix')">Auto-pickup</button>
+            <button class="btn btn-sm btn-ghost" onclick="navigate('approvals')">Approvals</button>
+          </div>
+        </div>
+        <div class="agent-command-stats">
+          ${agentStats
+            .map(
+              (stat) => `<div class="agent-command-stat is-${stat.tone}">
+                <div>
+                  <span>${esc(stat.label)}</span>
+                  <strong>${stat.count}</strong>
+                </div>
+                <small>${esc(stat.detail)}</small>
+              </div>`,
+            )
+            .join('')}
+        </div>
+      </section>
+
+      <section class="agent-attention-panel" aria-label="Agent attention queue">
+        <div class="agent-attention-head">
+          <div>
+            <span>Needs attention</span>
+            <small>${agentAttentionItems.length > 0 ? 'Handle blockers before launching more work.' : 'No agent blockers right now.'}</small>
+          </div>
+          <button class="btn btn-sm btn-ghost" onclick="refresh()">Refresh</button>
+        </div>
+        ${
+          agentAttentionItems.length > 0
+            ? agentAttentionItems
+                .map(
+                  (item) => `<button class="agent-attention-row is-${item.tone}" onclick="${item.onclick}">
+                    <span>
+                      <strong>${esc(item.label)}</strong>
+                      <small>${esc(item.detail).slice(0, 140)}</small>
+                    </span>
+                    <em>${esc(item.action)}</em>
+                  </button>`,
+                )
+                .join('')
+            : '<div class="agent-attention-empty">Ready for the next useful delegation.</div>'
+        }
+      </section>
+
+      <div id="task-launcher" class="card assign-wizard is-hidden">
         <div class="assign-wizard-head">
           <div>
-            <div class="card-title">Assign Work</div>
+            <div class="assign-wizard-title">Assign work</div>
             <div class="assign-wizard-subtitle">Start a one-off task, pick a GitHub issue, or enable automatic issue pickup.</div>
           </div>
-          <button class="btn btn-sm btn-ghost" onclick="document.getElementById('task-launcher').style.display='none'">Close</button>
+          <button class="btn btn-sm btn-ghost" onclick="toggleTaskLauncher(false)">Close</button>
         </div>
         <div class="assign-mode-tabs" role="tablist" aria-label="Assignment type">
-          <button class="assign-mode is-active" id="assign-mode-freeform" onclick="setAssignMode('freeform')">Freeform Task</button>
-          <button class="assign-mode" id="assign-mode-github" onclick="setAssignMode('github')">GitHub Issue</button>
-          <button class="assign-mode" id="assign-mode-autofix" onclick="setAssignMode('autofix')">Auto-Pickup</button>
+          <button class="assign-mode is-active" id="assign-mode-freeform" onclick="setAssignMode('freeform')">Freeform task</button>
+          <button class="assign-mode" id="assign-mode-github" onclick="setAssignMode('github')">GitHub issue</button>
+          <button class="assign-mode" id="assign-mode-autofix" onclick="setAssignMode('autofix')">Auto-pickup</button>
         </div>
 
         <div class="assign-pane" id="assign-pane-freeform">
-          <div class="assign-template-row">
-            <button class="btn btn-sm btn-ghost" onclick="applyTaskTemplate('bugfix')">Bug Fix</button>
-            <button class="btn btn-sm btn-ghost" onclick="applyTaskTemplate('review')">Code Review</button>
-            <button class="btn btn-sm btn-ghost" onclick="applyTaskTemplate('docs')">Docs Update</button>
-            <button class="btn btn-sm btn-ghost" onclick="applyTaskTemplate('test')">Add Tests</button>
+          <div class="assign-template-head">
+            <div>
+              <span>Start from a known outcome</span>
+              <small>These prompts include scope, expected result, and verification.</small>
+            </div>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="assign-template-row">
+            ${renderTaskTemplateCards()}
+          </div>
+          <div class="assign-form-grid">
             <div class="form-group">
               <label>Tool</label>
-              <select class="search-input" id="task-tool" onchange="updateTaskModels()" style="width:100%">${toolOptions}</select>
+              <select class="search-input assign-full-input" id="task-tool" onchange="updateTaskModels()">${toolOptions}</select>
             </div>
             <div class="form-group">
               <label>Model</label>
-              <select class="search-input" id="task-model" style="width:100%"></select>
+              <select class="search-input assign-full-input" id="task-model"></select>
             </div>
             <div class="form-group">
               <label>Budget (USD, optional)</label>
-              <input class="search-input" id="task-budget" type="number" step="0.1" min="0" placeholder="e.g. 5" style="width:100%">
+              <input class="search-input assign-full-input" id="task-budget" type="number" step="0.1" min="0" placeholder="e.g. 5">
             </div>
           </div>
           <div class="form-group">
             <label>Working directory</label>
-            <input class="search-input" id="task-workdir" value="${esc(window._lastWorkDir || window._projectRoot || '.')}" placeholder="/path/to/repo" style="width:100%">
+            <input class="search-input assign-full-input" id="task-workdir" value="${esc(window._lastWorkDir || window._projectRoot || '.')}" placeholder="/path/to/repo">
           </div>
           <div class="form-group">
             <label>Task description</label>
-            <textarea class="search-input" id="task-prompt" rows="4" placeholder="Describe the outcome you want, the repo area, and any checks to run." style="width:100%;resize:vertical;font-family:var(--font)"></textarea>
+            <textarea class="search-input assign-prompt-input" id="task-prompt" rows="4" placeholder="Describe the outcome you want, the repo area, and any checks to run."></textarea>
             <div class="field-hint" id="task-prompt-hint">A good task names the target files or workflow, expected behavior, and verification command.</div>
           </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div class="assign-action-row">
             <button class="btn btn-primary" onclick="launchAgentTask()">Launch Task</button>
-            <button class="btn btn-ghost" onclick="document.getElementById('task-launcher').style.display='none'">Cancel</button>
+            <button class="btn btn-ghost" onclick="toggleTaskLauncher(false)">Cancel</button>
           </div>
         </div>
 
-        <div class="assign-pane" id="assign-pane-github" style="display:none">
+        <div class="assign-pane is-hidden" id="assign-pane-github">
           <div class="assign-grid-compact">
             <div class="form-group"><label>Repository</label><select class="search-input" id="assign-coding-repo-select">${codingRepoOptions || '<option value="">No repos registered</option>'}</select></div>
             <div class="form-group"><label>Provider</label><select class="search-input" id="assign-coding-provider-select" onchange="updateAssignCodingModels()">${codingProviderOptions || '<option value="claude">Claude</option>'}</select></div>
@@ -373,13 +881,13 @@ async function renderAgents(el) {
             <div class="form-group"><label>Labels</label><input class="search-input" id="assign-coding-labels" placeholder="p0, autofix, bug"></div>
           </div>
           <label class="assign-check"><input type="checkbox" id="assign-coding-create-pr" checked> Create a draft PR when changes are ready</label>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div class="assign-action-row">
             <button class="btn btn-primary" onclick="assignPickCodingIssue()">Pick Next Issue</button>
             <button class="btn btn-ghost" onclick="document.getElementById('coding-repo-new')?.focus()">Register Repo Below</button>
           </div>
         </div>
 
-        <div class="assign-pane" id="assign-pane-autofix" style="display:none">
+        <div class="assign-pane is-hidden" id="assign-pane-autofix">
           <div class="assign-grid-compact">
             <div class="form-group"><label>Owner</label><input class="search-input" id="assign-af-owner" placeholder="owner"></div>
             <div class="form-group"><label>Repo</label><input class="search-input" id="assign-af-repo" placeholder="nanocrab"></div>
@@ -389,7 +897,7 @@ async function renderAgents(el) {
             <div class="form-group"><label>Max active jobs</label><input class="search-input" id="assign-af-max-active" type="number" min="1" step="1" value="1"></div>
           </div>
           <label class="assign-check"><input type="checkbox" id="assign-af-create-pr" checked> Open PR flow after implementation</label>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div class="assign-action-row">
             <button class="btn btn-primary" onclick="assignCreateAutofixProject()">Enable Auto-Pickup</button>
             <button class="btn btn-ghost" onclick="navigate('autofix')">Open Autofix Settings</button>
             <button class="btn btn-ghost" onclick="navigate('webhooks')">Check Webhook</button>
@@ -397,68 +905,73 @@ async function renderAgents(el) {
         </div>
       </div>
 
-      <div id="task-output-panel" style="display:none;margin-bottom:16px"></div>
+      <div id="task-output-panel" class="task-output-panel is-hidden"></div>
 
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-title">Agent Cockpit</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
-          ${cockpitRows
-            .map(
-              (
-                row,
-              ) => `<div style="border:1px solid var(--border);border-radius:8px;padding:12px;min-height:82px">
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-                  <span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em">${esc(row.label)}</span>
-                  <span class="badge badge-muted" style="font-size:10px">${row.count}</span>
-                </div>
-                <div style="font-size:13px;font-weight:600;margin-top:10px;line-height:1.35">${esc(row.detail)}</div>
-              </div>`,
-            )
-            .join('')}
-        </div>
-      </div>
-
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-title">GitHub Coding Jobs <span class="badge badge-muted" style="font-size:10px">${codingJobs.length}</span></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+      <section class="agent-coding-board" id="github-coding-jobs">
+        <div class="agent-coding-brief is-${codingBoardTone}">
           <div>
-            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Register repo</div>
-            <div style="display:flex;gap:6px">
-              <input class="search-input" id="coding-repo-new" placeholder="owner/repo" style="flex:1">
+            <span>GitHub handoff</span>
+            <strong>${esc(codingBoardTitle)}</strong>
+            <p>${esc(codingBoardDetail)}</p>
+          </div>
+          <div class="agent-coding-brief-stats">
+            <span><strong>${codingRepos.length}</strong><small>repos</small></span>
+            <span><strong>${activeCodingJobCount}</strong><small>active</small></span>
+            <span><strong>${waitingCodingJobCount}</strong><small>gates</small></span>
+          </div>
+        </div>
+        <div class="agent-coding-controls">
+          <div class="agent-coding-panel">
+            <div class="agent-coding-panel-head">
+              <span>Register repo</span>
+              <small>Add a repository once, then reuse it for issue pickup and repo rules.</small>
+            </div>
+            <div class="agent-coding-inline-form">
+              <input class="search-input" id="coding-repo-new" placeholder="owner/repo">
               <button class="btn btn-sm btn-ghost" onclick="registerCodingRepo()">Add</button>
             </div>
           </div>
-          <div>
-            <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Pick next issue</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <div class="agent-coding-panel">
+            <div class="agent-coding-panel-head">
+              <span>Pick next issue</span>
+              <small>Choose labels, provider, and whether the agent should open a draft PR.</small>
+            </div>
+            <div class="agent-coding-pick-grid">
               <select class="search-input" id="coding-repo-select">${codingRepoOptions || '<option value="">No repos registered</option>'}</select>
               <select class="search-input" id="coding-provider-select" onchange="updateCodingModels()">${codingProviderOptions || '<option value="claude">Claude</option>'}</select>
-              <select class="search-input" id="coding-model-select" style="grid-column:1/2"><option value="">Default model</option></select>
-              <input class="search-input" id="coding-labels" placeholder="labels, comma-separated" style="grid-column:1/-1">
-              <label style="font-size:12px;color:var(--text-muted);display:flex;gap:6px;align-items:center"><input type="checkbox" id="coding-create-pr" checked> create draft PR when changes are ready</label>
+              <select class="search-input" id="coding-model-select"><option value="">Default model</option></select>
+              <input class="search-input" id="coding-labels" placeholder="labels, comma-separated">
+              <label class="agent-coding-check"><input type="checkbox" id="coding-create-pr" checked> Create draft PR when changes are ready</label>
               <button class="btn btn-sm btn-primary" onclick="pickCodingIssue()">Pick Issue</button>
             </div>
           </div>
         </div>
+        <div class="agent-coding-queue-head">
+          <div>
+            <span>Coding jobs</span>
+            <small>${codingJobs.length} job${codingJobs.length === 1 ? '' : 's'} tracked in this workspace</small>
+          </div>
+          <button class="btn btn-sm btn-ghost" onclick="refresh()">Refresh</button>
+        </div>
         ${
           codingJobs.length === 0
-            ? '<div class="empty" style="padding:12px">No dedicated coding jobs yet</div>'
+            ? renderAgentCodeEmptyState('jobs')
             : codingJobRows
         }
-      </div>
+      </section>
 
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-title">Repo Coding Rules <span class="badge badge-muted" style="font-size:10px">${codingRepoRules.length}</span></div>
-        <div style="display:grid;grid-template-columns:minmax(160px,220px) 1fr 2fr auto;gap:6px;margin-bottom:12px;align-items:end">
-          <div><label style="font-size:11px;color:var(--text-muted)">Repo</label><select class="search-input" id="repo-rule-repo">${codingRepoOptions || '<option value="">No repos</option>'}</select></div>
-          <div><label style="font-size:11px;color:var(--text-muted)">Title</label><input class="search-input" id="repo-rule-title" placeholder="Use Node 22"></div>
-          <div><label style="font-size:11px;color:var(--text-muted)">Rule</label><input class="search-input" id="repo-rule-content" placeholder="Run checks through npm scripts"></div>
+      <div class="card agent-section-card" id="repo-coding-rules-card">
+        <div class="card-title">Repo Coding Rules <span class="badge badge-muted agent-tool-badge">${codingRepoRules.length}</span></div>
+        <div class="agent-rule-form">
+          <label class="agent-rule-field">Repo<select class="search-input" id="repo-rule-repo">${codingRepoOptions || '<option value="">No repos</option>'}</select></label>
+          <label class="agent-rule-field">Title<input class="search-input" id="repo-rule-title" placeholder="Use Node 22"></label>
+          <label class="agent-rule-field agent-rule-field-wide">Rule<input class="search-input" id="repo-rule-content" placeholder="Run checks through npm scripts"></label>
           <button class="btn btn-sm btn-primary" onclick="saveRepoCodingRule()">Save Rule</button>
         </div>
         ${codingRepoRuleRows}
       </div>
 
-      <div class="card" style="margin-bottom:16px">
+      <div class="card agent-section-card">
         <div class="card-title">Coding Agents</div>
         ${tools
           .filter((t) => t.available)
@@ -466,16 +979,16 @@ async function renderAgents(el) {
             const running = agentTasks.filter(
               (j) => j.tool === t.id && j.isRunning,
             ).length;
-            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
-            <div style="display:flex;align-items:center;gap:10px">
-              <span class="status-dot ${running > 0 ? 'online' : 'idle'}" style="width:8px;height:8px"></span>
+            return `<div class="agent-tool-row">
+            <div class="agent-tool-main">
+              <span class="status-dot ${running > 0 ? 'online' : 'idle'}"></span>
               <div>
                 <strong>${esc(t.name)}</strong>
-                <div style="font-size:11px;color:var(--text-muted)">${t.models.map((m) => m.label).join(', ')}</div>
+                <div class="agent-tool-meta">${t.models.map((m) => m.label).join(', ')}</div>
               </div>
             </div>
-            <div style="display:flex;gap:6px;align-items:center">
-              ${running > 0 ? '<span class="badge badge-success" style="font-size:10px">' + running + ' running</span>' : '<span class="badge badge-muted" style="font-size:10px">Ready</span>'}
+            <div class="agent-tool-actions">
+              ${running > 0 ? '<span class="badge badge-success agent-tool-badge">' + running + ' running</span>' : '<span class="badge badge-muted agent-tool-badge">Ready</span>'}
               <button class="btn btn-sm btn-ghost" onclick="openAssignWorkWizard('freeform');document.getElementById('task-tool').value='${t.id}';updateTaskModels()">Launch</button>
             </div>
           </div>`;
@@ -486,29 +999,29 @@ async function renderAgents(el) {
           .map(
             (
               t,
-            ) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);opacity:0.5">
-          <div style="display:flex;align-items:center;gap:10px">
-            <span class="status-dot offline" style="width:8px;height:8px"></span>
+            ) => `<div class="agent-tool-row is-unavailable">
+          <div class="agent-tool-main">
+            <span class="status-dot offline"></span>
             <div>
               <strong>${esc(t.name)}</strong>
-              <div style="font-size:11px;color:var(--text-muted)">Not installed</div>
+              <div class="agent-tool-meta">Not installed</div>
             </div>
           </div>
-          <span class="badge badge-error" style="font-size:10px">Unavailable</span>
+          <span class="badge badge-error agent-tool-badge">Unavailable</span>
         </div>`,
           )
           .join('')}
       </div>
 
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-title">Bot Agents <span class="badge badge-muted" style="font-size:10px">${groups.length}</span></div>
+      <div class="card agent-section-card">
+        <div class="card-title">Bot Agents <span class="badge badge-muted agent-tool-badge">${groups.length}</span></div>
         ${agentCards}
       </div>
 
       ${
         agentTasks.length > 0
-          ? `<div class="card" style="margin-bottom:16px">
-        <div class="card-title">Coding Tasks <span class="badge badge-muted" style="font-size:10px">${agentTasks.length}</span></div>
+          ? `<div class="card agent-section-card" id="coding-tasks-card">
+        <div class="card-title">Coding Tasks <span class="badge badge-muted agent-tool-badge">${agentTasks.length}</span></div>
         ${taskRows}
       </div>`
           : ''
@@ -516,19 +1029,19 @@ async function renderAgents(el) {
 
       ${
         recent.length > 0
-          ? `<div class="card" style="margin-bottom:16px">
-        <div class="card-title">Recent Sessions <span class="badge badge-muted" style="font-size:10px">${recent.length}</span></div>
+          ? `<div class="card agent-section-card">
+        <div class="card-title">Recent Sessions <span class="badge badge-muted agent-tool-badge">${recent.length}</span></div>
         ${recent
           .map(
             (
               r,
-            ) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:6px">
-              <span class="badge badge-muted" style="font-size:9px">${esc(r.group)}</span>
-              <span style="font-size:12px;font-family:var(--mono);color:var(--text-muted)">${esc(r.filename)}</span>
+            ) => `<div class="agent-session-row">
+          <div class="agent-session-main">
+            <div class="agent-session-head">
+              <span class="badge badge-muted agent-mini-badge">${esc(r.group)}</span>
+              <span class="agent-session-file">${esc(r.filename)}</span>
             </div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${timeAgo(r.timestamp)} \u2022 ${r.size > 1024 ? (r.size / 1024).toFixed(1) + ' KB' : r.size + ' B'}</div>
+            <div class="agent-session-meta">${timeAgo(r.timestamp)} \u2022 ${r.size > 1024 ? (r.size / 1024).toFixed(1) + ' KB' : r.size + ' B'}</div>
           </div>
           <button class="btn btn-sm btn-ghost" onclick="viewContainerLog('${esc(r.group)}','${esc(r.filename)}')">View</button>
         </div>`,
@@ -541,16 +1054,20 @@ async function renderAgents(el) {
 
       ${
         pendingQuestions.length > 0
-          ? `<div class="card" style="margin-bottom:16px;border-left:3px solid var(--warning)">
-        <div class="card-title">Pending Questions <span class="badge badge-warning" style="font-size:10px">${pendingQuestions.length}</span></div>
+          ? `<div class="card agent-question-card" id="pending-questions-card">
+        <div class="card-title agent-question-title">
+          <span>Pending Questions <span class="badge badge-warning agent-tool-badge">${pendingQuestions.length}</span></span>
+          <button class="btn btn-sm btn-ghost" onclick="copyAgentQuestionDecisionBrief()">Copy question brief</button>
+        </div>
+        <div class="agent-question-brief">Answer these before assigning more automation. Questions often encode missing user intent, approval risk, or routing between Copilot, Cowork, and Code.</div>
         ${pendingQuestions
           .map(
             (
               q,
-            ) => `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
-          <div style="font-size:13px;font-weight:500;margin-bottom:6px">${esc(q.question)}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">From: ${esc(q.group_folder)} \u2022 ${timeAgo(q.created_at)}</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ) => `<div class="agent-question-row">
+          <div class="agent-question-text">${esc(q.question)}</div>
+          <div class="agent-question-meta">From: ${esc(q.group_folder)} \u2022 ${timeAgo(q.created_at)}</div>
+          <div class="agent-question-actions">
             ${q.options.map((opt) => `<button class="btn btn-sm btn-primary" onclick="answerQuestion('${esc(q.id)}','${esc(opt)}')">${esc(opt)}</button>`).join('')}
           </div>
         </div>`,
@@ -562,21 +1079,21 @@ async function renderAgents(el) {
 
       ${
         agentProviders.length > 0
-          ? `<div class="card" style="margin-bottom:16px">
+          ? `<div class="card agent-section-card">
         <div class="card-title">Container Providers</div>
         ${agentProviders
           .map(
             (
               p,
-            ) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
-          <div style="display:flex;align-items:center;gap:10px">
-            <span class="status-dot ${p.available ? 'online' : 'offline'}" style="width:8px;height:8px"></span>
+            ) => `<div class="agent-tool-row">
+          <div class="agent-tool-main">
+            <span class="status-dot ${p.available ? 'online' : 'offline'}"></span>
             <div>
               <strong>${esc(p.name)}</strong>
-              <div style="font-size:11px;color:var(--text-muted)">${p.models.map((m) => m.label).join(', ')}</div>
+              <div class="agent-tool-meta">${p.models.map((m) => m.label).join(', ')}</div>
             </div>
           </div>
-          <span class="badge ${p.available ? 'badge-success' : 'badge-error'}" style="font-size:10px">${p.available ? 'Available' : 'Not installed'}</span>
+          <span class="badge ${p.available ? 'badge-success' : 'badge-error'} agent-tool-badge">${p.available ? 'Available' : 'Not installed'}</span>
         </div>`,
           )
           .join('')}
@@ -586,23 +1103,23 @@ async function renderAgents(el) {
 
       ${
         agentMsgs.length > 0
-          ? `<div class="card" style="margin-bottom:16px">
-        <div class="card-title">Agent Messages <span class="badge badge-muted" style="font-size:10px">${agentMsgs.length}</span></div>
+          ? `<div class="card agent-section-card">
+        <div class="card-title">Agent Messages <span class="badge badge-muted agent-tool-badge">${agentMsgs.length}</span></div>
         ${agentMsgs
           .slice(0, 15)
           .map(
             (
               m,
-            ) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:6px">
-              <span class="badge badge-muted" style="font-size:9px">${esc(m.from_group)}</span>
-              <span style="font-size:11px;color:var(--text-muted)">\u2192</span>
-              <span class="badge badge-muted" style="font-size:9px">${esc(m.to_group)}</span>
-              ${m.status === 'unread' ? '<span class="badge badge-warning" style="font-size:8px">new</span>' : ''}
+            ) => `<div class="agent-message-row">
+          <div class="agent-message-main">
+            <div class="agent-message-route">
+              <span class="badge badge-muted agent-mini-badge">${esc(m.from_group)}</span>
+              <span class="agent-message-arrow">\u2192</span>
+              <span class="badge badge-muted agent-mini-badge">${esc(m.to_group)}</span>
+              ${m.status === 'unread' ? '<span class="badge badge-warning agent-new-badge">new</span>' : ''}
             </div>
-            <div style="font-size:12px;margin-top:2px">${esc(m.content.length > 120 ? m.content.slice(0, 120) + '...' : m.content)}</div>
-            <div style="font-size:10px;color:var(--text-muted);margin-top:1px">${timeAgo(m.created_at)}</div>
+            <div class="agent-message-content">${esc(m.content.length > 120 ? m.content.slice(0, 120) + '...' : m.content)}</div>
+            <div class="agent-message-time">${timeAgo(m.created_at)}</div>
           </div>
         </div>`,
           )
@@ -611,35 +1128,35 @@ async function renderAgents(el) {
           : ''
       }
 
-      <div class="card" style="margin-bottom:16px">
+      <div class="card agent-section-card">
         <div class="card-title">Send Agent Message</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-          <select class="search-input" id="msg-from" style="width:100%">
+        <div class="agent-message-compose-grid">
+          <select class="search-input agent-message-select" id="msg-from">
             ${groups.map((g) => `<option value="${esc(g.folder)}">${esc(g.name)}</option>`).join('')}
           </select>
-          <select class="search-input" id="msg-to" style="width:100%">
+          <select class="search-input agent-message-select" id="msg-to">
             ${groups.map((g) => `<option value="${esc(g.folder)}">${esc(g.name)}</option>`).join('')}
           </select>
         </div>
-        <div style="display:flex;gap:8px">
-          <input class="search-input" id="msg-content" placeholder="Message content..." style="flex:1">
+        <div class="agent-message-compose-row">
+          <input class="search-input agent-message-input" id="msg-content" placeholder="Message content...">
           <button class="btn btn-sm btn-primary" onclick="sendAgentMessage()">Send</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">Plugins <span class="badge badge-muted" style="font-size:10px">${enabledPlugins.length} enabled</span></div>
+        <div class="card-title">Plugins <span class="badge badge-muted agent-tool-badge">${enabledPlugins.length} enabled</span></div>
         ${enabledPlugins
           .map(
             (p) => `
-          <div class="channel-card" style="padding:6px 0">
-            <div><span style="font-weight:500">${esc(p.name)}</span> <span style="font-size:11px;color:var(--text-muted)">v${esc(p.version)}</span></div>
-            ${p.sidebar ? `<button class="btn btn-sm btn-ghost" onclick="navigate('${esc(p.sidebar.id)}')" style="font-size:11px">${esc(p.sidebar.icon)} Open</button>` : ''}
+          <div class="channel-card agent-plugin-row">
+            <div><span class="agent-plugin-name">${esc(p.name)}</span> <span class="agent-plugin-version">v${esc(p.version)}</span></div>
+            ${p.sidebar ? `<button class="btn btn-sm btn-ghost agent-plugin-action" onclick="navigate('${esc(p.sidebar.id)}')">${esc(p.sidebar.icon)} Open</button>` : ''}
           </div>
         `,
           )
           .join('')}
-        <div style="margin-top:6px;font-size:11px;color:var(--text-muted)"><a style="color:var(--accent);cursor:pointer" onclick="navigate('settings')">Manage plugins</a></div>
+        <div class="agent-plugin-manage"><a onclick="navigate('settings')">Manage plugins</a></div>
       </div>
     `;
 
@@ -647,20 +1164,82 @@ async function renderAgents(el) {
     window._toolModels = JSON.parse(modelOptionsJson);
     updateTaskModels();
     window._codingModelsByProvider = codingModelsByProvider;
+    window._codingProvidersById = codingProvidersById;
     updateCodingModels();
     updateAssignCodingModels();
     updateAssignAutofixModels();
   } catch (e) {
-    el.innerHTML = `<div class="card empty">Failed to load agents: ${esc(e.message)}</div>`;
+    el.innerHTML = renderAgentRecoveryState('load', e.message);
   }
 }
+
+window.copyAgentDelegationBrief = async function () {
+  const state = window._agentDelegationState;
+  if (!state) {
+    toast('Open Agents first', 'warning');
+    return;
+  }
+  const text = agentDelegationBriefText(state);
+  await copyTextWithFallback(
+    text,
+    'Agent delegation brief copied',
+    'Copy agent delegation brief',
+  );
+};
+
+window.copyAgentQuestionDecisionBrief = async function () {
+  const state = window._agentDelegationState;
+  if (!state) {
+    toast('Open Agents first', 'warning');
+    return;
+  }
+  const text = agentQuestionDecisionBriefText(state);
+  await copyTextWithFallback(
+    text,
+    'Agent question brief copied',
+    'Copy agent question brief',
+  );
+};
 
 window.openAssignWorkWizard = function (mode = 'freeform') {
   const launcher = document.getElementById('task-launcher');
   if (!launcher) return;
-  launcher.style.display = 'block';
+  toggleTaskLauncher(true);
   setAssignMode(mode);
   launcher.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
+window.toggleTaskLauncher = function (forceOpen) {
+  const launcher = document.getElementById('task-launcher');
+  if (!launcher) return;
+  const shouldOpen =
+    typeof forceOpen === 'boolean'
+      ? forceOpen
+      : launcher.classList.contains('is-hidden');
+  launcher.classList.toggle('is-hidden', !shouldOpen);
+};
+
+window.toggleTaskOutputPanel = function (forceOpen) {
+  const panel = document.getElementById('task-output-panel');
+  if (!panel) return;
+  const shouldOpen =
+    typeof forceOpen === 'boolean'
+      ? forceOpen
+      : panel.classList.contains('is-hidden');
+  panel.classList.toggle('is-hidden', !shouldOpen);
+};
+
+function isTaskOutputPanelOpen() {
+  return !document
+    .getElementById('task-output-panel')
+    ?.classList.contains('is-hidden');
+}
+
+window.scrollToAgentSection = function (id) {
+  document.getElementById(id)?.scrollIntoView({
+    behavior: 'smooth',
+    block: 'start',
+  });
 };
 
 window.setAssignMode = function (mode) {
@@ -669,23 +1248,21 @@ window.setAssignMode = function (mode) {
       .getElementById(`assign-mode-${name}`)
       ?.classList.toggle('is-active', name === mode);
     const pane = document.getElementById(`assign-pane-${name}`);
-    if (pane) pane.style.display = name === mode ? 'block' : 'none';
+    if (pane) pane.classList.toggle('is-hidden', name !== mode);
   });
 };
 
 window.applyTaskTemplate = function (kind) {
   const prompt = document.getElementById('task-prompt');
   if (!prompt) return;
-  const templates = {
-    bugfix:
-      'Investigate and fix the bug. Reproduce the issue if possible, make the smallest code change that resolves it, add or update focused tests, and run the relevant checks.',
-    review:
-      'Review the current changes for correctness, regressions, security issues, and missing tests. Summarize findings with file and line references before suggesting fixes.',
-    docs:
-      'Update the documentation for this feature. Keep the README and operator notes consistent with the implementation, and include any setup or verification steps.',
-    test: 'Add focused test coverage for this workflow. Prefer existing test patterns, cover the edge cases that can regress, and run the targeted test command.',
-  };
-  prompt.value = templates[kind] || '';
+  const template = TASK_TEMPLATES[kind];
+  if (!template) return;
+  prompt.classList.remove('input-error');
+  prompt.value = template.prompt;
+  prompt.setSelectionRange(0, 0);
+  prompt.scrollTop = 0;
+  const hint = document.getElementById('task-prompt-hint');
+  if (hint) hint.textContent = template.hint;
   prompt.focus();
 };
 
@@ -727,7 +1304,7 @@ window.launchAgentTask = async function () {
     });
     if (r.ok) {
       toast(`Task launched on ${tool} (${model})`, 'success');
-      document.getElementById('task-launcher').style.display = 'none';
+      toggleTaskLauncher(false);
       document.getElementById('task-prompt').value = '';
       // Auto-show output
       viewAgentTask(r.task.id);
@@ -736,12 +1313,28 @@ window.launchAgentTask = async function () {
         if (currentPage === 'agents') navigate('agents');
       }, 3000);
     } else {
-      toast(r.error || 'Failed to launch', 'error');
+      toast(agentActionErrorMessage('launch', r.error), 'error');
     }
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('launch', e), 'error');
   }
 };
+
+function renderAgentCodeEmptyState(kind) {
+  const isRules = kind === 'rules';
+  return `
+    <section class="agent-code-empty ${isRules ? 'is-rules' : 'is-jobs'}">
+      <div>
+        <span>${isRules ? 'Repo rules' : 'Coding queue'}</span>
+        <strong>${isRules ? 'No repo coding rules saved yet' : 'No dedicated coding jobs yet'}</strong>
+        <p>${isRules ? 'Save project-specific conventions so Code agents know which checks, style rules, review boundaries, and PR expectations to follow.' : 'Register a repository, choose labels, and let a coding agent pick up a focused GitHub issue with a draft PR handoff.'}</p>
+      </div>
+      <div class="agent-code-empty-actions">
+        <button class="btn btn-sm btn-primary" type="button" onclick="${isRules ? "document.getElementById('repo-rule-title')?.focus()" : "document.getElementById('coding-repo-new')?.focus()"}">${isRules ? 'Add rule' : 'Register repo'}</button>
+        <button class="btn btn-sm btn-ghost" type="button" onclick="${isRules ? "document.getElementById('repo-rule-content')?.focus()" : "document.getElementById('coding-labels')?.focus()"}">${isRules ? 'Write guidance' : 'Pick issue'}</button>
+      </div>
+    </section>`;
+}
 
 window.registerCodingRepo = async function () {
   const repo = document.getElementById('coding-repo-new')?.value?.trim();
@@ -758,10 +1351,10 @@ window.registerCodingRepo = async function () {
       toast('Coding repo registered', 'success');
       navigate('agents');
     } else {
-      toast(r.error || 'Failed', 'error');
+      toast(agentActionErrorMessage('repo', r.error), 'error');
     }
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('repo', e), 'error');
   }
 };
 
@@ -792,10 +1385,10 @@ window.saveRepoCodingRule = async function () {
       toast('Repo rule saved', 'success');
       navigate('agents');
     } else {
-      toast(r.error || 'Failed to save rule', 'error');
+      toast(agentActionErrorMessage('rule', r.error), 'error');
     }
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('rule', e), 'error');
   }
 };
 
@@ -804,24 +1397,30 @@ window.updateCodingModels = function () {
   const modelEl = document.getElementById('coding-model-select');
   if (!providerEl || !modelEl) return;
   const modelsByProvider = window._codingModelsByProvider || {};
+  const provider = (window._codingProvidersById || {})[providerEl.value] || {};
   const models = modelsByProvider[providerEl.value] || [];
-  modelEl.innerHTML = `<option value="">Default model</option>${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
+  const defaultAllowed = provider.id !== 'ollama';
+  modelEl.innerHTML = `${defaultAllowed ? '<option value="">Default model</option>' : ''}${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
 };
 
 window.updateAssignCodingModels = function () {
   const providerEl = document.getElementById('assign-coding-provider-select');
   const modelEl = document.getElementById('assign-coding-model-select');
   if (!providerEl || !modelEl) return;
+  const provider = (window._codingProvidersById || {})[providerEl.value] || {};
   const models = (window._codingModelsByProvider || {})[providerEl.value] || [];
-  modelEl.innerHTML = `<option value="">Default model</option>${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
+  const defaultAllowed = provider.id !== 'ollama';
+  modelEl.innerHTML = `${defaultAllowed ? '<option value="">Default model</option>' : ''}${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
 };
 
 window.updateAssignAutofixModels = function () {
   const providerEl = document.getElementById('assign-af-provider');
   const modelEl = document.getElementById('assign-af-model');
   if (!providerEl || !modelEl) return;
+  const provider = (window._codingProvidersById || {})[providerEl.value] || {};
   const models = (window._codingModelsByProvider || {})[providerEl.value] || [];
-  modelEl.innerHTML = `<option value="">Default model</option>${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
+  const defaultAllowed = provider.id !== 'ollama';
+  modelEl.innerHTML = `${defaultAllowed ? '<option value="">Default model</option>' : ''}${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
 };
 
 window.pickCodingIssue = async function () {
@@ -851,7 +1450,7 @@ window.pickCodingIssue = async function () {
       }),
     });
     if (!r.ok) {
-      toast(r.error || 'Failed', 'error');
+      toast(agentActionErrorMessage('issue', r.error), 'error');
       return;
     }
     if (!r.issue) {
@@ -863,7 +1462,7 @@ window.pickCodingIssue = async function () {
       if (currentPage === 'agents') navigate('agents');
     }, 1000);
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('issue', e), 'error');
   }
 };
 
@@ -895,7 +1494,7 @@ window.assignPickCodingIssue = async function () {
       }),
     });
     if (!r.ok) {
-      toast(r.error || 'Failed', 'error');
+      toast(agentActionErrorMessage('issue', r.error), 'error');
       return;
     }
     if (!r.issue) {
@@ -903,12 +1502,12 @@ window.assignPickCodingIssue = async function () {
       return;
     }
     toast(`Started coding job for #${r.issue.number}`, 'success');
-    document.getElementById('task-launcher').style.display = 'none';
+    toggleTaskLauncher(false);
     setTimeout(() => {
       if (currentPage === 'agents') navigate('agents');
     }, 1000);
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('issue', e), 'error');
   }
 };
 
@@ -942,13 +1541,13 @@ window.assignCreateAutofixProject = async function () {
     });
     if (r.ok) {
       toast('Autofix auto-pickup enabled', 'success');
-      document.getElementById('task-launcher').style.display = 'none';
+      toggleTaskLauncher(false);
       navigate('autofix');
     } else {
-      toast(r.error || 'Failed', 'error');
+      toast(agentActionErrorMessage('autofix', r.error), 'error');
     }
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('autofix', e), 'error');
   }
 };
 
@@ -995,13 +1594,15 @@ function renderCodingJobStepper(job) {
 window.viewCodingJob = async function (id) {
   const panel = document.getElementById('task-output-panel');
   if (!panel) return;
-  panel.style.display = 'block';
-  panel.innerHTML =
-    '<div class="card"><div class="loading">Loading coding job...</div></div>';
+  toggleTaskOutputPanel(true);
+  panel.innerHTML = renderAgentLoadingState('coding');
   try {
     const job = await api('/agents/coding/jobs/' + encodeURIComponent(id));
     const statusBadge = codingJobStatusBadge(job.status);
     const actions = [
+      job.status === 'await_approval'
+        ? `<label class="coding-deny-note-field"><span>Deny note</span><input id="${esc(codingDenyNoteId(id))}" placeholder="Reason or follow-up"></label>`
+        : '',
       job.status === 'await_approval'
         ? `<button class="btn btn-sm btn-primary" onclick="controlCodingJob('${esc(id)}','approve')">Approve implementation</button>`
         : '',
@@ -1037,21 +1638,21 @@ window.viewCodingJob = async function (id) {
       .filter(Boolean)
       .join('\n');
     panel.innerHTML = `<div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <div class="task-output-head">
+        <div class="task-output-badges">
           <span class="badge badge-muted">${esc(job.repo)}</span>
           <span class="badge badge-accent">${esc(job.provider)}/${esc(job.model)}</span>
           <span class="badge ${statusBadge}">${esc(job.status)}</span>
           ${job.issueNumber ? `<span class="badge badge-info">#${job.issueNumber}</span>` : ''}
-          ${job.prUrl ? `<a href="${esc(job.prUrl)}" target="_blank" style="color:var(--accent);font-size:12px">Pull request</a>` : ''}
+          ${job.prUrl ? `<a href="${esc(job.prUrl)}" target="_blank" class="task-output-link">Pull request</a>` : ''}
         </div>
-        <div style="display:flex;gap:6px">
+        <div class="task-output-actions">
           ${actions}
           <button class="btn btn-sm btn-ghost" onclick="viewCodingJob('${esc(id)}')">Refresh</button>
-          <button class="btn btn-sm btn-ghost" onclick="document.getElementById('task-output-panel').style.display='none'">Close</button>
+          <button class="btn btn-sm btn-ghost" onclick="toggleTaskOutputPanel(false)">Close</button>
         </div>
       </div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
+      <div class="coding-job-meta">
         <strong>Branch:</strong> ${esc(job.branch)}<br>
         <strong>Workspace:</strong> ${esc(job.workspace)}
       </div>
@@ -1066,13 +1667,17 @@ window.viewCodingJob = async function (id) {
     if (codingJobActive(job.status)) {
       setTimeout(() => {
         if (
-          document.getElementById('task-output-panel')?.style.display !== 'none'
+          !document
+            .getElementById('task-output-panel')
+            ?.classList.contains('is-hidden')
         )
           viewCodingJob(id);
       }, 4000);
     }
   } catch (e) {
-    panel.innerHTML = `<div class="card empty">Failed: ${esc(e.message)}</div>`;
+    panel.innerHTML = renderAgentRecoveryState('coding', e.message, {
+      retryAction: `viewCodingJob('${esc(id)}')`,
+    });
   }
 };
 
@@ -1082,39 +1687,39 @@ window.cancelAgentTask = async function (id) {
     toast('Task cancelled', 'success');
     if (currentPage === 'agents') navigate('agents');
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('cancel-task', e), 'error');
   }
 };
 
 window.viewContainerLog = async function (group, filename) {
   const viewer = document.getElementById('container-log-viewer');
   if (!viewer) return;
-  viewer.innerHTML =
-    '<div style="padding:12px"><div class="loading">Loading session log...</div></div>';
+  viewer.innerHTML = renderAgentLoadingState('log');
   try {
     const res = await api(
       `/logs/${encodeURIComponent(group)}/${encodeURIComponent(filename)}`,
     );
     const lines = res.lines || [];
     viewer.innerHTML = `
-      <div style="margin-top:12px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface2);border-bottom:1px solid var(--border)">
-          <span style="font-size:12px;font-weight:600;color:var(--text)">${esc(group)} / ${esc(filename)}</span>
-          <button class="btn btn-sm btn-ghost" onclick="document.getElementById('container-log-viewer').innerHTML=''" style="font-size:11px">Close</button>
+      <div class="agent-log-viewer">
+        <div class="agent-log-head">
+          <span class="agent-log-title">${esc(group)} / ${esc(filename)}</span>
+          <button class="btn btn-sm btn-ghost agent-log-close" onclick="document.getElementById('container-log-viewer').innerHTML=''">Close</button>
         </div>
-        <pre style="margin:0;padding:12px;max-height:500px;overflow:auto;font-size:11px;line-height:1.6;background:var(--bg);color:var(--text-secondary);white-space:pre-wrap;word-break:break-word"><code>${esc(lines.join('\n'))}</code></pre>
+        <pre class="agent-log-body"><code>${esc(lines.join('\n'))}</code></pre>
       </div>`;
   } catch (e) {
-    viewer.innerHTML = `<div style="margin-top:12px;padding:12px;color:var(--error);font-size:12px">Failed to load log: ${esc(e.message)}</div>`;
+    viewer.innerHTML = renderAgentRecoveryState('log', e.message, {
+      retryAction: `viewContainerLog('${esc(group)}','${esc(filename)}')`,
+    });
   }
 };
 
 window.viewAgentTask = async function (id) {
   const panel = document.getElementById('task-output-panel');
   if (!panel) return;
-  panel.style.display = 'block';
-  panel.innerHTML =
-    '<div class="card"><div class="loading">Loading output...</div></div>';
+  toggleTaskOutputPanel(true);
+  panel.innerHTML = renderAgentLoadingState('task');
   try {
     const task = await api('/agents/tasks/' + id);
     const statusBadge =
@@ -1124,35 +1729,34 @@ window.viewAgentTask = async function (id) {
           ? 'badge-warning'
           : 'badge-error';
     panel.innerHTML = `<div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div>
-          <span class="badge badge-muted" style="font-size:10px">${esc(task.tool)}</span>
-          <span class="badge badge-muted" style="font-size:10px">${esc(task.model)}</span>
-          <span class="badge ${statusBadge}" style="font-size:10px">${task.isRunning ? 'Running' : task.status}</span>
-          ${task.exitCode != null ? `<span style="font-size:11px;color:var(--text-muted)">exit ${task.exitCode}</span>` : ''}
+      <div class="task-output-head">
+        <div class="task-output-badges">
+          <span class="badge badge-muted task-output-badge">${esc(task.tool)}</span>
+          <span class="badge badge-muted task-output-badge">${esc(task.model)}</span>
+          <span class="badge ${statusBadge} task-output-badge">${task.isRunning ? 'Running' : task.status}</span>
+          ${task.exitCode != null ? `<span class="task-output-exit">exit ${task.exitCode}</span>` : ''}
         </div>
-        <div style="display:flex;gap:6px">
+        <div class="task-output-actions">
           ${task.isRunning ? `<button class="btn btn-sm btn-ghost" onclick="viewAgentTask('${id}')">Refresh</button>` : ''}
           <button class="btn btn-sm btn-ghost" onclick="shareAgentTask('${id}')">Share</button>
-          <button class="btn btn-sm btn-ghost" onclick="document.getElementById('task-output-panel').style.display='none'">Close</button>
+          <button class="btn btn-sm btn-ghost" onclick="toggleTaskOutputPanel(false)">Close</button>
         </div>
       </div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
+      <div class="task-output-prompt">
         <strong>Prompt:</strong> ${esc(task.prompt.slice(0, 200))}${task.prompt.length > 200 ? '...' : ''}
       </div>
-      <pre style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;font-size:11px;max-height:400px;overflow:auto;white-space:pre-wrap;word-break:break-word;color:var(--text)">${esc(task.output || '(no output yet)')}</pre>
+      <pre class="task-output-log">${esc(task.output || '(no output yet)')}</pre>
     </div>`;
     // Auto-refresh if running
     if (task.isRunning) {
       setTimeout(() => {
-        if (
-          document.getElementById('task-output-panel')?.style.display !== 'none'
-        )
-          viewAgentTask(id);
+        if (isTaskOutputPanelOpen()) viewAgentTask(id);
       }, 3000);
     }
   } catch (e) {
-    panel.innerHTML = `<div class="card empty">Failed: ${esc(e.message)}</div>`;
+    panel.innerHTML = renderAgentRecoveryState('task', e.message, {
+      retryAction: `viewAgentTask('${esc(id)}')`,
+    });
   }
 };
 
@@ -1166,7 +1770,7 @@ window.shareAgentTask = async function (id) {
     const output = (task.output || '(no output)').slice(0, 500);
     shareContent('Agent Task', `Prompt: ${prompt}\n\nOutput:\n${output}`);
   } catch (e) {
-    toast('Failed to share: ' + e.message, 'error');
+    toast(agentActionErrorMessage('share-task', e), 'error');
   }
 };
 
@@ -1190,10 +1794,10 @@ window.toggleBotAgent = async function (jid, enabled) {
       toast(enabled ? 'Bot agent enabled' : 'Bot agent disabled', 'success');
       navigate('agents');
     } else {
-      toast(r.error || 'Failed to update bot agent', 'error');
+      toast(agentActionErrorMessage('bot-agent', r.error), 'error');
     }
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('bot-agent', e), 'error');
   }
 };
 
@@ -1207,10 +1811,10 @@ window.setPrimaryBotAgent = async function (jid) {
       toast('Primary bot selected', 'success');
       navigate('agents');
     } else {
-      toast(r.error || 'Failed to set primary bot', 'error');
+      toast(agentActionErrorMessage('primary-bot', r.error), 'error');
     }
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('primary-bot', e), 'error');
   }
 };
 
@@ -1222,23 +1826,22 @@ window.controlCodingJob = async function (id, action) {
     });
     if (r.ok) {
       toast('Coding job action queued: ' + action, 'success');
-      if (
-        document.getElementById('task-output-panel')?.style.display !== 'none'
-      ) {
+      if (isTaskOutputPanelOpen()) {
         await viewCodingJob(id);
       }
       if (currentPage === 'agents') navigate('agents');
     } else {
-      toast(r.error || 'Coding job action failed', 'error');
+      toast(agentActionErrorMessage('coding-job', r.error), 'error');
     }
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('coding-job', e), 'error');
   }
 };
 
 window.denyCodingJobImplementation = async function (id) {
+  const noteInput = document.getElementById(codingDenyNoteId(id));
   const note =
-    prompt('Reason for denying implementation?') ||
+    noteInput?.value.trim() ||
     'Denied from Agents dashboard';
   try {
     const r = await api('/agents/coding/jobs/' + id + '/deny-implementation', {
@@ -1247,17 +1850,15 @@ window.denyCodingJobImplementation = async function (id) {
     });
     if (r.ok) {
       toast('Implementation denied', 'success');
-      if (
-        document.getElementById('task-output-panel')?.style.display !== 'none'
-      ) {
+      if (isTaskOutputPanelOpen()) {
         await viewCodingJob(id);
       }
       if (currentPage === 'agents') navigate('agents');
     } else {
-      toast(r.error || 'Coding job action failed', 'error');
+      toast(agentActionErrorMessage('coding-job', r.error), 'error');
     }
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('coding-job', e), 'error');
   }
 };
 
@@ -1273,10 +1874,10 @@ window.answerQuestion = async function (id, answer) {
       toast('Answer sent: ' + answer, 'success');
       if (currentPage === 'agents') navigate('agents');
     } else {
-      toast(r.error || 'Failed to answer', 'error');
+      toast(agentActionErrorMessage('answer', r.error), 'error');
     }
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('answer', e), 'error');
   }
 };
 
@@ -1304,9 +1905,9 @@ window.sendAgentMessage = async function () {
       document.getElementById('msg-content').value = '';
       if (currentPage === 'agents') navigate('agents');
     } else {
-      toast(r.error || 'Failed to send', 'error');
+      toast(agentActionErrorMessage('message', r.error), 'error');
     }
   } catch (e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(agentActionErrorMessage('message', e), 'error');
   }
 };

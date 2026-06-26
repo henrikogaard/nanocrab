@@ -20,7 +20,25 @@ import {
 import { isAgentProvider } from './agent-provider.js';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getCoworkProject,
+  getCoworkProjectBySlug,
+  getCoworkProjects,
+  getTaskById,
+  touchCoworkProject,
+  updateTask,
+} from './db.js';
+import {
+  classifyCoworkProjectFile,
+  COWORK_PROJECT_FILE_PREVIEW_LIMIT,
+  coworkProjectPath,
+  isPreviewableCoworkProjectFile,
+  listCoworkProjectFiles,
+  resolveCoworkProjectFile,
+  writeCoworkProjectFile,
+} from './cowork-projects.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { findJournalEvents, recordJournalEvent } from './journal-store.js';
@@ -74,6 +92,45 @@ export function isSkillVisibleForIpc(
   isMain: boolean,
 ): boolean {
   return isSkillVisibleForGroup(skill, isMain);
+}
+
+function coworkProjectSummary(
+  project: NonNullable<ReturnType<typeof getCoworkProject>>,
+) {
+  const files = listCoworkProjectFiles(project);
+  return {
+    id: project.id,
+    name: project.name,
+    slug: project.slug,
+    description: project.description,
+    instructions: project.instructions,
+    path: coworkProjectPath(project),
+    fileCount: files.length,
+    updatedAt: project.updated_at,
+  };
+}
+
+function resolveCoworkProjectRef(data: {
+  projectId?: string;
+  projectSlug?: string;
+  projectName?: string;
+}): ReturnType<typeof getCoworkProject> {
+  if (typeof data.projectId === 'string' && data.projectId.trim()) {
+    const project = getCoworkProject(data.projectId.trim());
+    if (project) return project;
+  }
+  if (typeof data.projectSlug === 'string' && data.projectSlug.trim()) {
+    const project = getCoworkProjectBySlug(data.projectSlug.trim());
+    if (project) return project;
+  }
+  if (typeof data.projectName === 'string' && data.projectName.trim()) {
+    const requested = data.projectName.trim().toLowerCase();
+    return getCoworkProjects().find(
+      (project) =>
+        project.name.toLowerCase() === requested ||
+        project.slug.toLowerCase() === requested,
+    );
+  }
 }
 
 function writeIpcResponse(
@@ -339,6 +396,13 @@ export async function processTaskIpc(
     outputFormats?: string[];
     sourceScopes?: string[];
     urls?: string[];
+    projectId?: string;
+    projectSlug?: string;
+    projectName?: string;
+    filePath?: string;
+    fileContent?: string;
+    caption?: string;
+    filename?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -849,6 +913,123 @@ export async function processTaskIpc(
         break;
       }
       writeIpcOk(sourceGroup, data.requestId, listResearchJobs());
+      break;
+
+    case 'list_cowork_projects':
+      try {
+        writeIpcOk(
+          sourceGroup,
+          data.requestId,
+          getCoworkProjects().map(coworkProjectSummary),
+        );
+      } catch (err) {
+        writeIpcError(sourceGroup, data.requestId, err);
+      }
+      break;
+
+    case 'get_cowork_project':
+      try {
+        const project = resolveCoworkProjectRef(data);
+        if (!project) throw new Error('Cowork project not found');
+        writeIpcOk(sourceGroup, data.requestId, {
+          ...coworkProjectSummary(project),
+          files: listCoworkProjectFiles(project),
+        });
+      } catch (err) {
+        writeIpcError(sourceGroup, data.requestId, err);
+      }
+      break;
+
+    case 'read_cowork_project_file':
+      try {
+        const project = resolveCoworkProjectRef(data);
+        if (!project) throw new Error('Cowork project not found');
+        if (!data.filePath) throw new Error('filePath is required');
+        const resolved = resolveCoworkProjectFile(project, data.filePath);
+        if ('error' in resolved) throw new Error(resolved.error);
+        const previewable = isPreviewableCoworkProjectFile(resolved.rel);
+        let content: string | null = null;
+        let truncated = false;
+        if (previewable) {
+          const buffer = fs.readFileSync(resolved.target);
+          content = buffer
+            .subarray(0, COWORK_PROJECT_FILE_PREVIEW_LIMIT)
+            .toString('utf-8');
+          truncated = buffer.length > COWORK_PROJECT_FILE_PREVIEW_LIMIT;
+        }
+        writeIpcOk(sourceGroup, data.requestId, {
+          project: coworkProjectSummary(project),
+          file: {
+            path: resolved.rel,
+            kind: classifyCoworkProjectFile(resolved.rel),
+            size: resolved.stat.size,
+            updatedAt: resolved.stat.mtime.toISOString(),
+            previewable,
+            content,
+            truncated,
+          },
+        });
+      } catch (err) {
+        writeIpcError(sourceGroup, data.requestId, err);
+      }
+      break;
+
+    case 'write_cowork_project_file':
+      try {
+        const project = resolveCoworkProjectRef(data);
+        if (!project) throw new Error('Cowork project not found');
+        if (!data.filePath) throw new Error('filePath is required');
+        const file = writeCoworkProjectFile(
+          project,
+          data.filePath,
+          typeof data.fileContent === 'string' ? data.fileContent : '',
+        );
+        const updatedAt = new Date().toISOString();
+        touchCoworkProject(project.id, updatedAt);
+        writeIpcOk(sourceGroup, data.requestId, {
+          project: { ...coworkProjectSummary(project), updatedAt },
+          file,
+        });
+      } catch (err) {
+        writeIpcError(sourceGroup, data.requestId, err);
+      }
+      break;
+
+    case 'send_cowork_project_file':
+      try {
+        if (!deps.sendFile)
+          throw new Error('Current channel cannot send files');
+        const project = resolveCoworkProjectRef(data);
+        if (!project) throw new Error('Cowork project not found');
+        if (!data.filePath) throw new Error('filePath is required');
+        const jid = data.chatJid || data.targetJid;
+        if (!jid) throw new Error('chatJid is required');
+        const targetGroup = registeredGroups[jid];
+        if (!isMain && (!targetGroup || targetGroup.folder !== sourceGroup)) {
+          throw new Error('Not authorized to send files to that chat');
+        }
+        const resolved = resolveCoworkProjectFile(project, data.filePath);
+        if ('error' in resolved) throw new Error(resolved.error);
+        await deps.sendFile(
+          jid,
+          resolved.target,
+          data.filename || path.basename(resolved.rel),
+          data.caption,
+        );
+        writeIpcOk(sourceGroup, data.requestId, {
+          sent: true,
+          chatJid: jid,
+          project: coworkProjectSummary(project),
+          file: {
+            path: resolved.rel,
+            kind: classifyCoworkProjectFile(resolved.rel),
+            size: resolved.stat.size,
+            updatedAt: resolved.stat.mtime.toISOString(),
+          },
+        });
+      } catch (err) {
+        writeIpcError(sourceGroup, data.requestId, err);
+      }
       break;
 
     case 'propose_memory':

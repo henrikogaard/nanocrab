@@ -26,9 +26,11 @@ export function buildThreadGroup(input: BuildThreadInput): RegisteredGroup {
     throw new Error(`buildThreadGroup requires a web: jid, got "${input.jid}"`);
   }
   const id = input.jid.slice(WEB_PREFIX.length);
+  const title =
+    input.title && input.title.trim() ? input.title.trim() : undefined;
   return {
     name: 'Web Conversation',
-    title: input.title && input.title.trim() ? input.title.trim() : 'New conversation',
+    ...(title ? { title } : {}),
     kind: 'web',
     folder: `web-${id}`,
     trigger: '^', // unused: requiresTrigger is false, so every message is processed
