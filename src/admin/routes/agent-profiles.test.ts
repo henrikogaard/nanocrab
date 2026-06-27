@@ -39,6 +39,7 @@ vi.mock('../security.js', () => ({
 
 const { _closeDatabase, _initTestDatabase } = await import('../../db.js');
 const { recordAgentProfileActivity } = await import('../../agent-profiles.js');
+const { auditLog } = await import('../security.js');
 const { default: agentProfilesRouter } = await import('./agent-profiles.js');
 
 function buildApp() {
@@ -126,6 +127,7 @@ describe('/api/agent-profiles', () => {
     } catch {
       /* may not be initialized */
     }
+    vi.clearAllMocks();
     _initTestDatabase();
   });
 
@@ -528,6 +530,157 @@ describe('/api/agent-profiles', () => {
         enabled: false,
         rosterState: 'disabled',
       });
+    });
+  });
+
+  it('POST /api/agent-profiles/:id/invoke records invocation activity', async () => {
+    await withServer(async (base) => {
+      const created = await postJson<{
+        profile: { id: string };
+      }>(base, '/api/agent-profiles', profileRequest());
+      expect(created.res.status).toBe(200);
+
+      const { res, body } = await postJson<{
+        ok: true;
+        activity: {
+          id: string;
+          agentProfileId: string;
+          kind: string;
+          sourceType: string;
+          summary: string;
+          metadata: Record<string, unknown>;
+        };
+      }>(base, `/api/agent-profiles/${created.body.profile.id}/invoke`, {
+        prompt: 'Draft a focused repository status report',
+      });
+
+      expect(res.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.activity.id).toMatch(/^agent_activity_/);
+      expect(body.activity).toMatchObject({
+        agentProfileId: created.body.profile.id,
+        kind: 'invocation',
+        sourceType: 'manual',
+        summary: 'Manual invocation requested',
+        metadata: {
+          prompt: 'Draft a focused repository status report',
+        },
+      });
+      expect(auditLog).toHaveBeenCalledWith(
+        expect.anything(),
+        'agent_profile_invoked',
+        created.body.profile.id,
+      );
+
+      const detailRes = await fetch(
+        `${base}/api/agent-profiles/${created.body.profile.id}`,
+      );
+      expect(detailRes.status).toBe(200);
+      const detail = (await detailRes.json()) as {
+        activity: Array<{ id: string; kind: string }>;
+      };
+      expect(detail.activity[0]).toMatchObject({
+        id: body.activity.id,
+        kind: 'invocation',
+      });
+    });
+  });
+
+  it('POST /api/agent-profiles/:id/invoke rejects disabled profiles', async () => {
+    await withServer(async (base) => {
+      const created = await postJson<{
+        profile: { id: string };
+      }>(base, '/api/agent-profiles', {
+        ...profileRequest(),
+        enabled: false,
+      });
+      expect(created.res.status).toBe(200);
+
+      const { res, body } = await postJson<{ error: string }>(
+        base,
+        `/api/agent-profiles/${created.body.profile.id}/invoke`,
+        { prompt: 'Run anyway' },
+      );
+
+      expect(res.status).toBe(400);
+      expect(body.error).toMatch(/disabled/i);
+    });
+  });
+
+  it('POST /api/agent-profiles/:id/invoke rejects empty prompts', async () => {
+    await withServer(async (base) => {
+      const created = await postJson<{
+        profile: { id: string };
+      }>(base, '/api/agent-profiles', profileRequest());
+      expect(created.res.status).toBe(200);
+
+      const { res, body } = await postJson<{ error: string }>(
+        base,
+        `/api/agent-profiles/${created.body.profile.id}/invoke`,
+        { prompt: '   ' },
+      );
+
+      expect(res.status).toBe(400);
+      expect(body.error).toMatch(/prompt/i);
+    });
+  });
+
+  it('POST /api/agent-profiles/:id/invoke returns 404 for missing profiles', async () => {
+    await withServer(async (base) => {
+      const { res, body } = await postJson<{ error: string }>(
+        base,
+        '/api/agent-profiles/agent_missing/invoke',
+        { prompt: 'Run a missing profile' },
+      );
+
+      expect(res.status).toBe(404);
+      expect(body.error).toMatch(/not found/i);
+    });
+  });
+
+  it.each([
+    ['taskKinds', { taskKinds: 'coding_job' }],
+    ['allowedMcpServers', { allowedMcpServers: 'github' }],
+    ['skills', { skills: 'repo-work' }],
+    ['memoryScopes', { memoryScopes: 'shared' }],
+  ])(
+    'PUT /api/agent-profiles/:id rejects non-array %s',
+    async (field, patch) => {
+      await withServer(async (base) => {
+        const created = await postJson<{
+          profile: { id: string };
+        }>(base, '/api/agent-profiles', profileRequest());
+        expect(created.res.status).toBe(200);
+
+        const { res, body } = await putJson<{ error: string }>(
+          base,
+          `/api/agent-profiles/${created.body.profile.id}`,
+          patch,
+        );
+
+        expect(res.status).toBe(400);
+        expect(body.error).toMatch(new RegExp(field, 'i'));
+      });
+    },
+  );
+
+  it('PUT /api/agent-profiles/:id rejects unsupported task kinds', async () => {
+    await withServer(async (base) => {
+      const created = await postJson<{
+        profile: { id: string };
+      }>(base, '/api/agent-profiles', profileRequest());
+      expect(created.res.status).toBe(200);
+
+      const { res, body } = await putJson<{ error: string }>(
+        base,
+        `/api/agent-profiles/${created.body.profile.id}`,
+        {
+          taskKinds: ['coding_job', 'deploy_now'],
+        },
+      );
+
+      expect(res.status).toBe(400);
+      expect(body.error).toMatch(/taskKind/i);
     });
   });
 

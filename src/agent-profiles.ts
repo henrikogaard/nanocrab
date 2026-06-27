@@ -138,6 +138,38 @@ export function validateAgentProfileInput(input: AgentProfileInput): void {
       `agent profile toolPolicy is not supported: ${input.toolPolicy}`,
     );
   }
+
+  validateOptionalStringList(input, 'allowedMcpServers', true);
+  validateOptionalStringList(input, 'skills');
+  validateOptionalStringList(input, 'memoryScopes');
+  validateOptionalStringList(input, 'taskKinds');
+
+  if (Array.isArray(input.taskKinds)) {
+    const invalidTaskKind = input.taskKinds.find(
+      (taskKind) => !TASK_KINDS.includes(taskKind),
+    );
+    if (invalidTaskKind) {
+      throw new Error(
+        `agent profile taskKind is not supported: ${invalidTaskKind}`,
+      );
+    }
+  }
+}
+
+function validateOptionalStringList(
+  input: AgentProfileInput,
+  field: 'allowedMcpServers' | 'skills' | 'memoryScopes' | 'taskKinds',
+  nullable = false,
+): void {
+  const value = input[field];
+  if (value === undefined || (nullable && value === null)) return;
+  if (!Array.isArray(value)) {
+    throw new Error(`agent profile ${field} must be an array`);
+  }
+  const invalid = value.find((item) => typeof item !== 'string');
+  if (invalid !== undefined) {
+    throw new Error(`agent profile ${field} must contain only strings`);
+  }
 }
 
 export function buildAgentProfile(input: AgentProfileInput): AgentProfile {

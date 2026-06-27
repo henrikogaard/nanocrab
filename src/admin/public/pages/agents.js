@@ -359,6 +359,89 @@ function agentProfileItemLabel(item) {
   );
 }
 
+function agentProfileDomId(id) {
+  return String(id || 'agent-profile').replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function agentProfileAttr(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function agentProfileFormText(value) {
+  if (value === null || value === undefined) return '';
+  return String(value);
+}
+
+function agentProfileFormList(value) {
+  return agentProfileArray(value)
+    .map((item) => agentProfileItemLabel(item))
+    .join('\n');
+}
+
+function agentProfileCsvValue(value) {
+  return String(value || '')
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function agentProfileNullableText(value) {
+  const trimmed = String(value || '').trim();
+  return trimmed ? trimmed : null;
+}
+
+function agentProfileControl(form, name) {
+  return form?.elements?.namedItem(name) || form?.querySelector(`[name="${name}"]`);
+}
+
+function agentProfileFieldValue(form, name) {
+  return agentProfileControl(form, name)?.value || '';
+}
+
+function agentProfileSetStatus(id, message, type = 'info') {
+  const status = document.getElementById(
+    `agent-profile-status-${agentProfileDomId(id)}`,
+  );
+  if (!status) return;
+  status.textContent = message || '';
+  status.classList.toggle('is-error', type === 'error');
+  status.classList.toggle('is-success', type === 'success');
+  status.classList.toggle('is-warning', type === 'warning');
+}
+
+function agentProfileUpdateLocalProfile(id, patch) {
+  const roster = Array.isArray(window._agentProfileRoster)
+    ? window._agentProfileRoster
+    : [];
+  const current =
+    roster.find((profile) => agentProfileId(profile) === id) ||
+    window._agentProfilesById?.[id] ||
+    {};
+  const updated = { ...current, ...patch };
+  window._agentProfileRoster = roster.map((profile) =>
+    agentProfileId(profile) === id ? updated : profile,
+  );
+  window._agentProfilesById = {
+    ...(window._agentProfilesById || {}),
+    [id]: updated,
+  };
+  return updated;
+}
+
+function agentProfileRerender(id) {
+  const shell = document.getElementById('agent-profile-shell');
+  const roster = Array.isArray(window._agentProfileRoster)
+    ? window._agentProfileRoster
+    : [];
+  if (!shell || roster.length === 0) return;
+  shell.innerHTML = renderAgentProfileShellContent(roster, id);
+}
+
 function agentProfileInitial(profile) {
   return agentProfileDisplayName(profile).trim().charAt(0).toUpperCase() || 'A';
 }
@@ -567,9 +650,12 @@ function renderAgentProfileRoster(profiles, selectedId) {
 function renderAgentProfileDetail(profile) {
   if (!profile) return renderAgentProfileEmptyState('detail');
 
+  const id = agentProfileId(profile);
+  const detailId = agentProfileDomId(id);
+
   if (profile.detailUnavailable) {
     return `
-      <section class="agent-profile-detail" aria-label="${esc(agentProfileDisplayName(profile))} profile detail unavailable">
+      <section class="agent-profile-detail" aria-label="${agentProfileAttr(agentProfileDisplayName(profile))} profile detail unavailable">
         <div class="agent-profile-detail-head">
           <div>
             <span>Selected profile</span>
@@ -693,7 +779,7 @@ function renderAgentProfileDetail(profile) {
           .join('');
 
   return `
-    <section class="agent-profile-detail" aria-label="${esc(agentProfileDisplayName(profile))} profile detail">
+    <section class="agent-profile-detail" aria-label="${agentProfileAttr(agentProfileDisplayName(profile))} profile detail">
       <div class="agent-profile-detail-head">
         <div>
           <span>Selected profile</span>
@@ -709,32 +795,85 @@ function renderAgentProfileDetail(profile) {
         <span class="agent-profile-tab" role="tab">Subscriptions</span>
         <span class="agent-profile-tab" role="tab">Activity</span>
       </div>
+      <div class="agent-profile-action-bar">
+        <span class="agent-profile-action-status" id="agent-profile-status-${agentProfileAttr(detailId)}" aria-live="polite"></span>
+        <button type="button" class="btn btn-sm btn-primary" onclick="saveAgentProfile(window._selectedAgentProfileId)">Save profile</button>
+      </div>
       <div class="agent-profile-tab-panel is-identity">
         <div class="agent-profile-panel-head"><span>Identity</span></div>
-        <div class="agent-profile-field-grid">
-          ${renderAgentProfileField('Display name', agentProfileDisplayName(profile))}
-          ${renderAgentProfileField('Handle', agentProfileHandle(profile))}
-          ${renderAgentProfileField('State', status.label)}
-          ${renderAgentProfileField('Description', profile.description || profile.summary)}
-          ${renderAgentProfileField('Personality', profile.personality)}
-        </div>
+        <form class="agent-profile-form" id="agent-profile-form-${agentProfileAttr(detailId)}">
+          <div class="agent-profile-field-grid">
+            <label class="agent-profile-field">
+              <span>Display name</span>
+              <input name="displayName" class="input" value="${agentProfileAttr(agentProfileDisplayName(profile))}" autocomplete="off">
+            </label>
+            <label class="agent-profile-field">
+              <span>Handle</span>
+              <input name="handle" class="input" value="${agentProfileAttr(agentProfileHandle(profile).replace(/^@+/, ''))}" autocomplete="off">
+            </label>
+            <label class="agent-profile-field agent-profile-check-field">
+              <span>State</span>
+              <input name="enabled" type="checkbox" ${status.enabled ? 'checked' : ''}>
+              <strong>${esc(status.label)}</strong>
+            </label>
+            <label class="agent-profile-field agent-profile-field-wide">
+              <span>Description</span>
+              <textarea name="description" class="input" rows="3">${esc(agentProfileFormText(profile.description || profile.summary))}</textarea>
+            </label>
+            <label class="agent-profile-field agent-profile-field-wide">
+              <span>Personality</span>
+              <textarea name="personality" class="input" rows="3">${esc(agentProfileFormText(profile.personality))}</textarea>
+            </label>
+          </div>
+        </form>
       </div>
       <div class="agent-profile-tab-panel is-model">
         <div class="agent-profile-panel-head"><span>Model</span></div>
-        <div class="agent-profile-field-grid">
-          ${renderAgentProfileField('Provider profile', providerProfile)}
-          ${renderAgentProfileField('Provider', provider)}
-          ${renderAgentProfileField('Model', model)}
-          ${renderAgentProfileField('Tool policy', toolPolicy)}
+        <div class="agent-profile-field-grid" form="agent-profile-form-${agentProfileAttr(detailId)}">
+          <label class="agent-profile-field">
+            <span>Provider profile</span>
+            <input name="providerProfileId" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" value="${agentProfileAttr(agentProfileFormText(providerProfile))}" autocomplete="off">
+          </label>
+          <label class="agent-profile-field">
+            <span>Provider</span>
+            <input name="provider" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" value="${agentProfileAttr(agentProfileFormText(provider))}" autocomplete="off">
+          </label>
+          <label class="agent-profile-field">
+            <span>Model</span>
+            <input name="model" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" value="${agentProfileAttr(agentProfileFormText(model))}" autocomplete="off">
+          </label>
+          <label class="agent-profile-field">
+            <span>Tool policy</span>
+            <select name="toolPolicy" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}">
+              ${['read-only', 'approval-required', 'allow']
+                .map(
+                  (policy) =>
+                    `<option value="${policy}" ${policy === toolPolicy ? 'selected' : ''}>${policy}</option>`,
+                )
+                .join('')}
+            </select>
+          </label>
         </div>
       </div>
       <div class="agent-profile-tab-panel is-capabilities">
         <div class="agent-profile-panel-head"><span>Capabilities</span></div>
         <div class="agent-profile-capability-grid">
-          <div><span>Task kinds</span>${renderAgentProfileBadgeList(taskKinds, 'No task kinds')}</div>
-          <div><span>MCP servers</span>${renderAgentProfileBadgeList(mcpServers, 'No MCP servers')}</div>
-          <div><span>Skills</span>${renderAgentProfileBadgeList(skills, 'No skills')}</div>
-          <div><span>Memory scopes</span>${renderAgentProfileBadgeList(memoryScopes, 'No memory scopes')}</div>
+          <label>
+            <span>Task kinds</span>
+            <textarea name="taskKinds" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" rows="4">${esc(agentProfileFormList(taskKinds))}</textarea>
+          </label>
+          <label>
+            <span>MCP servers</span>
+            <textarea name="allowedMcpServers" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" rows="4">${esc(agentProfileFormList(mcpServers))}</textarea>
+          </label>
+          <label>
+            <span>Skills</span>
+            <textarea name="skills" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" rows="4">${esc(agentProfileFormList(skills))}</textarea>
+          </label>
+          <label>
+            <span>Memory scopes</span>
+            <textarea name="memoryScopes" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" rows="4">${esc(agentProfileFormList(memoryScopes))}</textarea>
+          </label>
         </div>
       </div>
       <div class="agent-profile-tab-panel is-subscriptions">
@@ -748,6 +887,13 @@ function renderAgentProfileDetail(profile) {
           ${errors !== undefined ? `<span class="badge ${errors > 0 ? 'badge-error' : 'badge-muted'} agent-tool-badge">${esc(String(errors))} errors</span>` : ''}
         </div>
         ${activityRows}
+      </div>
+      <div class="agent-profile-tab-panel is-invoke">
+        <div class="agent-profile-panel-head"><span>Invoke</span></div>
+        <textarea id="agent-profile-invoke-prompt-${agentProfileAttr(detailId)}" class="input agent-profile-invoke-input" rows="4" placeholder="Describe the one-off work for this profile."></textarea>
+        <div class="agent-profile-action-row">
+          <button type="button" class="btn btn-sm btn-primary" onclick="invokeAgentProfile(window._selectedAgentProfileId)">Invoke profile</button>
+        </div>
       </div>
     </section>`;
 }
@@ -1729,6 +1875,130 @@ window.selectAgentProfileByIndex = function (index) {
   const profile = roster[Number(index)];
   if (!profile) return;
   window.selectAgentProfile(agentProfileId(profile));
+};
+
+window.saveAgentProfile = async function (id) {
+  const form = document.getElementById(
+    `agent-profile-form-${agentProfileDomId(id)}`,
+  );
+  if (!form) {
+    toast('Profile form not found', 'error');
+    return;
+  }
+
+  const displayName = agentProfileFieldValue(form, 'displayName').trim();
+  const handle = agentProfileFieldValue(form, 'handle').trim();
+  if (!displayName || !handle) {
+    agentProfileSetStatus(id, 'Display name and handle are required.', 'error');
+    toast('Display name and handle are required', 'warning');
+    return;
+  }
+
+  const enabledControl = agentProfileControl(form, 'enabled');
+  const allowedMcpServers = agentProfileCsvValue(
+    agentProfileFieldValue(form, 'allowedMcpServers'),
+  );
+  const current =
+    window._agentProfilesById?.[id] ||
+    (Array.isArray(window._agentProfileRoster)
+      ? window._agentProfileRoster.find((profile) => agentProfileId(profile) === id)
+      : {});
+  const currentAllowedMcpServers =
+    current?.allowedMcpServers ?? current?.allowed_mcp_servers;
+  const body = {
+    displayName,
+    handle,
+    description: agentProfileNullableText(
+      agentProfileFieldValue(form, 'description'),
+    ),
+    personality: agentProfileNullableText(
+      agentProfileFieldValue(form, 'personality'),
+    ),
+    enabled: Boolean(enabledControl?.checked),
+    providerProfileId: agentProfileNullableText(
+      agentProfileFieldValue(form, 'providerProfileId'),
+    ),
+    provider: agentProfileNullableText(agentProfileFieldValue(form, 'provider')),
+    model: agentProfileNullableText(agentProfileFieldValue(form, 'model')),
+    toolPolicy: agentProfileFieldValue(form, 'toolPolicy') || 'approval-required',
+    allowedMcpServers: allowedMcpServers.length
+      ? allowedMcpServers
+      : Array.isArray(currentAllowedMcpServers)
+        ? []
+        : null,
+    skills: agentProfileCsvValue(agentProfileFieldValue(form, 'skills')),
+    memoryScopes: agentProfileCsvValue(
+      agentProfileFieldValue(form, 'memoryScopes'),
+    ),
+    taskKinds: agentProfileCsvValue(agentProfileFieldValue(form, 'taskKinds')),
+  };
+
+  agentProfileSetStatus(id, 'Saving profile...', 'info');
+  try {
+    const r = await api('/agent-profiles/' + encodeURIComponent(id), {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    const updatedProfile = {
+      ...(current || {}),
+      ...(r.profile || {}),
+      subscriptions: current?.subscriptions || [],
+      activity: current?.activity || current?.activityItems || [],
+    };
+    agentProfileUpdateLocalProfile(id, updatedProfile);
+    agentProfileRerender(id);
+    agentProfileSetStatus(id, 'Profile saved.', 'success');
+    toast('Agent profile saved', 'success');
+  } catch (e) {
+    const message = e?.message || 'Profile save failed';
+    agentProfileSetStatus(id, message, 'error');
+    toast(message, 'error');
+  }
+};
+
+window.invokeAgentProfile = async function (id) {
+  const promptEl = document.getElementById(
+    `agent-profile-invoke-prompt-${agentProfileDomId(id)}`,
+  );
+  const prompt = promptEl?.value?.trim() || '';
+  if (!prompt) {
+    promptEl?.classList.add('input-error');
+    promptEl?.focus();
+    agentProfileSetStatus(id, 'Enter a prompt before invoking this profile.', 'error');
+    toast('Enter an invocation prompt', 'warning');
+    return;
+  }
+  promptEl.classList.remove('input-error');
+
+  agentProfileSetStatus(id, 'Recording invocation...', 'info');
+  try {
+    const r = await api('/agent-profiles/' + encodeURIComponent(id) + '/invoke', {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    });
+    if (r.activity) {
+      const current = window._agentProfilesById?.[id] || {};
+      const activity = [
+        r.activity,
+        ...agentProfileArray(current.activity || current.activityItems).filter(
+          (item) => item?.id !== r.activity.id,
+        ),
+      ];
+      agentProfileUpdateLocalProfile(id, {
+        ...current,
+        activity,
+        lastActivityAt: r.activity.createdAt || current.lastActivityAt,
+        latestActivity: r.activity.summary || current.latestActivity,
+      });
+      agentProfileRerender(id);
+    }
+    agentProfileSetStatus(id, 'Invocation recorded.', 'success');
+    toast('Agent profile invocation recorded', 'success');
+  } catch (e) {
+    const message = e?.message || 'Profile invocation failed';
+    agentProfileSetStatus(id, message, 'error');
+    toast(message, 'error');
+  }
 };
 
 window.copyAgentDelegationBrief = async function () {

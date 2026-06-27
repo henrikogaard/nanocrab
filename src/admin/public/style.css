@@ -1965,6 +1965,7 @@ body {
 .agent-profile-panel-head span,
 .agent-profile-field span,
 .agent-profile-capability-grid > div > span,
+.agent-profile-capability-grid > label > span,
 .agent-profile-empty-state span,
 .agent-profile-loading-state span,
 .agent-profile-unavailable-state span {
@@ -2184,13 +2185,50 @@ body {
   overflow-wrap: anywhere;
 }
 
+.agent-profile-form {
+  display: contents;
+}
+
+.agent-profile-field .input,
+.agent-profile-capability-grid .input,
+.agent-profile-invoke-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.agent-profile-field textarea.input,
+.agent-profile-capability-grid textarea.input,
+.agent-profile-invoke-input {
+  resize: vertical;
+}
+
+.agent-profile-field-wide {
+  grid-column: 1 / -1;
+}
+
+.agent-profile-check-field {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.agent-profile-check-field span {
+  grid-column: 1 / -1;
+}
+
+.agent-profile-check-field input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
 .agent-profile-capability-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.agent-profile-capability-grid > div {
+.agent-profile-capability-grid > div,
+.agent-profile-capability-grid > label {
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -2198,6 +2236,35 @@ body {
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--bg);
+}
+
+.agent-profile-action-bar,
+.agent-profile-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-profile-action-status {
+  flex: 1 1 220px;
+  min-height: 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.agent-profile-action-status.is-success {
+  color: var(--success);
+}
+
+.agent-profile-action-status.is-warning {
+  color: var(--warning);
+}
+
+.agent-profile-action-status.is-error {
+  color: var(--error);
 }
 
 .agent-profile-chip-list,

@@ -94,6 +94,11 @@ function subscriptionPatch(body: unknown): AgentSubscriptionUpdateInput {
   ) as AgentSubscriptionUpdateInput;
 }
 
+function invocationPrompt(body: unknown): string {
+  if (!isRecord(body)) return '';
+  return typeof body.prompt === 'string' ? body.prompt.trim() : '';
+}
+
 function sendError(res: Response, status: number, err: unknown): void {
   res.status(status).json({ error: errorMessage(err) });
 }
@@ -215,6 +220,42 @@ router.post('/:id/disable', (req: Request, res: Response) => {
     });
     auditLog(req, 'agent_profile_disabled', profile.id);
     res.json({ ok: true, profile });
+  } catch (err) {
+    sendError(res, 400, err);
+  }
+});
+
+router.post('/:id/invoke', (req: Request, res: Response) => {
+  const profile = findProfileOr404(req, res);
+  if (!profile) return;
+
+  const prompt = invocationPrompt(req.body);
+  if (!prompt) {
+    res.status(400).json({ error: 'Invocation prompt is required' });
+    return;
+  }
+
+  if (!profile.enabled) {
+    res.status(400).json({ error: 'Agent profile is disabled' });
+    return;
+  }
+
+  try {
+    const activity = domain.recordAgentProfileActivity({
+      agentProfileId: profile.id,
+      subscriptionId: null,
+      kind: 'invocation',
+      sourceType: 'manual',
+      sourceId: null,
+      summary: 'Manual invocation requested',
+      runId: null,
+      approvalId: null,
+      metadata: {
+        prompt,
+      },
+    });
+    auditLog(req, 'agent_profile_invoked', profile.id);
+    res.json({ ok: true, activity });
   } catch (err) {
     sendError(res, 400, err);
   }

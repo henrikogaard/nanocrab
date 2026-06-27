@@ -760,7 +760,7 @@ describe('Agents launcher UI', () => {
     );
   });
 
-  it('adds a read-only agent profile cockpit with explicit states', () => {
+  it('adds an editable agent profile cockpit with explicit states', () => {
     const source = fs.readFileSync(agentsPagePath, 'utf8');
     const styles = fs.readFileSync(stylePath, 'utf8');
     const mockData = fs.readFileSync(mockDataPath, 'utf8');
@@ -830,6 +830,47 @@ describe('Agents launcher UI', () => {
     expect(mockData).toContain("displayName: 'Researcher'");
     expect(mockData).toContain('subscriptions: [');
     expect(mockData).toContain('activity: [');
+  });
+
+  it('wires agent profile save and invoke actions without prompt dialogs', () => {
+    const source = fs.readFileSync(agentsPagePath, 'utf8');
+    const styles = fs.readFileSync(stylePath, 'utf8');
+
+    expect(source).toContain('saveAgentProfile');
+    expect(source).toContain('invokeAgentProfile');
+    expect(source).toContain("api('/agent-profiles/' + encodeURIComponent");
+    expect(source).toContain("'/invoke'");
+    expect(source).not.toContain("prompt('");
+    expect(source).toContain('name="displayName"');
+    expect(source).toContain('name="handle"');
+    expect(source).toContain('name="description"');
+    expect(source).toContain('name="personality"');
+    expect(source).toContain('name="enabled"');
+    expect(source).toContain('name="providerProfileId"');
+    expect(source).toContain('name="provider"');
+    expect(source).toContain('name="model"');
+    expect(source).toContain('name="toolPolicy"');
+    expect(source).toContain('name="allowedMcpServers"');
+    expect(source).toContain('name="skills"');
+    expect(source).toContain('name="memoryScopes"');
+    expect(source).toContain('name="taskKinds"');
+    expect(source).toContain('agent-profile-action-status');
+    expect(source).toContain('agent-profile-invoke-prompt-');
+    expect(source).toContain('function agentProfileAttr');
+    expect(source).toContain(
+      'value="${agentProfileAttr(agentProfileDisplayName(profile))}"',
+    );
+    expect(source).toContain('agentProfileSetStatus');
+    expect(source).toContain('Display name and handle are required');
+    expect(source).toContain('Enter a prompt before invoking this profile.');
+    expect(source).toContain('JSON.stringify({ prompt })');
+    expect(source).toContain('currentAllowedMcpServers');
+    expect(source).toContain('Array.isArray(currentAllowedMcpServers)');
+    expect(styles).toContain('.agent-profile-action-status');
+    expect(styles).toContain('.agent-profile-action-status.is-error');
+    expect(styles).toContain('.agent-profile-form');
+    expect(styles).toContain('.agent-profile-field-wide');
+    expect(styles).toContain('.agent-profile-invoke-input');
   });
 
   it('uses provider coding capability metadata for coding selectors', () => {

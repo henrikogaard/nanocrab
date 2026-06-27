@@ -67,18 +67,12 @@ describe('agent profile validation', () => {
     });
   });
 
-  it('ignores non-string items when sanitizing JSON-facing lists', () => {
+  it('sanitizes JSON-facing string lists and channel bindings', () => {
     const profile = buildAgentProfile({
       handle: 'ManualHost',
       displayName: 'Manual Host',
-      allowedMcpServers: [
-        'github',
-        null,
-        ' ',
-        42,
-        'filesystem',
-      ] as unknown as string[],
-      skills: ['repo-work', false, ' report-writing '] as unknown as string[],
+      allowedMcpServers: ['github', ' ', 'filesystem'],
+      skills: ['repo-work', ' report-writing '],
       channelBindings: {
         github: ['@ManualHost', 123, ' '] as unknown as string[],
       },
@@ -87,6 +81,24 @@ describe('agent profile validation', () => {
     expect(profile.allowedMcpServers).toEqual(['github', 'filesystem']);
     expect(profile.skills).toEqual(['repo-work', 'report-writing']);
     expect(profile.channelBindings).toEqual({ github: ['@ManualHost'] });
+  });
+
+  it('rejects non-string capability list items', () => {
+    expect(() =>
+      buildAgentProfile({
+        handle: 'ManualHost',
+        displayName: 'Manual Host',
+        allowedMcpServers: ['github', 42] as unknown as string[],
+      }),
+    ).toThrow(/allowedMcpServers/i);
+
+    expect(() =>
+      buildAgentProfile({
+        handle: 'RepoFixer',
+        displayName: 'Repo Fixer',
+        skills: ['repo-work', false] as unknown as string[],
+      }),
+    ).toThrow(/skills/i);
   });
 
   it('builds stable subscription dedupe keys', () => {
@@ -207,16 +219,9 @@ describe('agent profile persistence', () => {
         enabled: false,
         providerProfileId: ' provider-main ',
         model: ' gpt-5 ',
-        allowedMcpServers: [
-          'filesystem',
-          42,
-          ' github ',
-        ] as unknown as string[],
-        skills: [' repo-work ', null] as unknown as string[],
-        taskKinds: [
-          'coding_job',
-          'deploy_now',
-        ] as unknown as AgentProfileTaskKind[],
+        allowedMcpServers: ['filesystem', ' github '],
+        skills: [' repo-work '],
+        taskKinds: ['coding_job'],
         channelBindings: {
           github: ['@ManualHost', 123] as unknown as string[],
         },
@@ -248,6 +253,14 @@ describe('agent profile persistence', () => {
     expect(() =>
       updateAgentProfile(profile.id, { handle: 'OtherAgent' }),
     ).toThrow(/already exists/i);
+    expect(() =>
+      updateAgentProfile(profile.id, {
+        taskKinds: [
+          'coding_job',
+          'deploy_now',
+        ] as unknown as AgentProfileTaskKind[],
+      }),
+    ).toThrow(/taskKind/i);
   });
 
   it('stores subscriptions and activity for a profile', () => {
