@@ -268,6 +268,103 @@ async function sendBotTextReply(
   });
 }
 
+type ResolvedAgentProfileInvocation = NonNullable<
+  ReturnType<typeof resolveAgentProfileInvocation>
+>;
+
+const AGENT_PROFILE_LOOKUP_FAILED_MESSAGE =
+  'Agent profile lookup failed. Check the dashboard and try again.';
+
+function applyAgentProfileInvocation(
+  promptBody: string,
+  invocation: ResolvedAgentProfileInvocation,
+): { promptBody: string; runAgentOptions: RunAgentOptions } {
+  const profilePrompt = [
+    '# Active Virtual Agent',
+    `Handle: @${invocation.profile.handle}`,
+    `Name: ${invocation.profile.displayName}`,
+    invocation.profile.personality
+      ? `Instructions: ${invocation.profile.personality}`
+      : '',
+    '',
+    invocation.taskText || 'Use the conversation context above.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    promptBody: `${promptBody}\n\n${profilePrompt}`,
+    runAgentOptions: {
+      agentProfileId: invocation.profileId,
+      provider: invocation.profile.provider || undefined,
+      model: invocation.profile.model || undefined,
+      allowedMcpServers:
+        invocation.profile.allowedMcpServers === null
+          ? undefined
+          : invocation.profile.allowedMcpServers,
+    },
+  };
+}
+
+async function sendAgentProfileResolutionError(
+  channel: Channel,
+  chatJid: string,
+  consumedMessages: NewMessage[],
+  err: unknown,
+): Promise<void> {
+  const errorMessage =
+    err instanceof AgentProfileResolutionError
+      ? err.message
+      : AGENT_PROFILE_LOOKUP_FAILED_MESSAGE;
+
+  if (!(err instanceof AgentProfileResolutionError)) {
+    logger.error({ chatJid, err }, 'Agent profile lookup failed');
+  }
+
+  lastAgentTimestamp[chatJid] =
+    consumedMessages[consumedMessages.length - 1].timestamp;
+  saveState();
+
+  try {
+    await sendBotTextReply(channel, chatJid, errorMessage);
+  } catch (sendErr) {
+    logger.warn(
+      { chatJid, err: sendErr },
+      'Failed to send direct agent profile resolution error',
+    );
+  }
+}
+
+async function handleActiveContainerProfileInvocation(
+  channel: Channel,
+  chatJid: string,
+  messagesToSend: NewMessage[],
+): Promise<boolean> {
+  try {
+    const invocation = resolveAgentProfileInvocation({
+      text: messagesToSend[messagesToSend.length - 1].content,
+    });
+
+    if (!invocation) return false;
+
+    logger.info(
+      { chatJid, profileId: invocation.profileId, handle: invocation.handle },
+      'Direct agent profile invocation requires fresh container',
+    );
+    queue.closeStdin(chatJid);
+    queue.enqueueMessageCheck(chatJid);
+    return true;
+  } catch (err) {
+    await sendAgentProfileResolutionError(
+      channel,
+      chatJid,
+      messagesToSend,
+      err,
+    );
+    return true;
+  }
+}
+
 async function sendStartupNotice(): Promise<void> {
   if (!STARTUP_NOTICE_ENABLED || startupNoticeSentThisProcess) return;
 
@@ -450,48 +547,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     });
 
     if (invocation) {
-      const profilePrompt = [
-        '# Active Virtual Agent',
-        `Handle: @${invocation.profile.handle}`,
-        `Name: ${invocation.profile.displayName}`,
-        invocation.profile.personality
-          ? `Instructions: ${invocation.profile.personality}`
-          : '',
-        '',
-        invocation.taskText || 'Use the conversation context above.',
-      ]
-        .filter(Boolean)
-        .join('\n');
-      promptBody = `${promptBody}\n\n${profilePrompt}`;
-      runAgentOptions = {
-        agentProfileId: invocation.profileId,
-        provider: invocation.profile.provider || undefined,
-        model: invocation.profile.model || undefined,
-        allowedMcpServers:
-          invocation.profile.allowedMcpServers === null
-            ? undefined
-            : invocation.profile.allowedMcpServers,
-      };
+      const profileRun = applyAgentProfileInvocation(promptBody, invocation);
+      promptBody = profileRun.promptBody;
+      runAgentOptions = profileRun.runAgentOptions;
     }
   } catch (err) {
-    const errorMessage =
-      err instanceof AgentProfileResolutionError
-        ? err.message
-        : 'Agent profile lookup failed. Check the dashboard and try again.';
-    if (!(err instanceof AgentProfileResolutionError)) {
-      logger.error({ chatJid, err }, 'Agent profile lookup failed');
-    }
-    lastAgentTimestamp[chatJid] =
-      missedMessages[missedMessages.length - 1].timestamp;
-    saveState();
-    try {
-      await sendBotTextReply(channel, chatJid, errorMessage);
-    } catch (sendErr) {
-      logger.warn(
-        { chatJid, err: sendErr },
-        'Failed to send direct agent profile resolution error',
-      );
-    }
+    await sendAgentProfileResolutionError(channel, chatJid, missedMessages, err);
     return true;
   }
 
@@ -894,6 +955,26 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
+
+          const hasActiveMessageContainer = queue
+            .getActiveContainers()
+            .some(
+              (container) =>
+                container.groupJid === chatJid &&
+                !container.isTask &&
+                Boolean(container.groupFolder),
+            );
+
+          if (hasActiveMessageContainer) {
+            const handledProfileInvocation =
+              await handleActiveContainerProfileInvocation(
+                channel,
+                chatJid,
+                messagesToSend,
+              );
+            if (handledProfileInvocation) continue;
+          }
+
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
