@@ -13,6 +13,7 @@ import {
   listAgentProfileRows,
   listAgentSubscriptionsForProfile,
   updateAgentProfile as updateAgentProfileRow,
+  updateAgentSubscription as updateAgentSubscriptionRow,
 } from './db.js';
 import type {
   AgentProfile,
@@ -84,6 +85,19 @@ export interface AgentSubscriptionInput {
   lastMatchedAt?: string | null;
   lastRunId?: string | null;
 }
+
+export type AgentSubscriptionUpdateInput = Partial<
+  Pick<
+    AgentSubscription,
+    | 'enabled'
+    | 'filters'
+    | 'taskKind'
+    | 'autonomyMode'
+    | 'lastSeenAt'
+    | 'lastMatchedAt'
+    | 'lastRunId'
+  >
+>;
 
 export type NewAgentSubscriptionEventInput = Omit<
   NewAgentSubscriptionEvent,
@@ -252,6 +266,50 @@ export function listAgentSubscriptions(
   agentProfileId: string,
 ): AgentSubscription[] {
   return listAgentSubscriptionsForProfile(agentProfileId);
+}
+
+export function updateAgentSubscription(
+  agentProfileId: string,
+  subscriptionId: string,
+  patch: AgentSubscriptionUpdateInput,
+): AgentSubscription {
+  const existing = listAgentSubscriptionsForProfile(agentProfileId).find(
+    (subscription) => subscription.id === subscriptionId,
+  );
+  if (!existing) {
+    throw new Error(`Agent subscription not found: ${subscriptionId}`);
+  }
+
+  const merged: AgentSubscription = {
+    ...existing,
+    enabled: patch.enabled === undefined ? existing.enabled : patch.enabled,
+    filters: patch.filters === undefined ? existing.filters : patch.filters,
+    taskKind: patch.taskKind === undefined ? existing.taskKind : patch.taskKind,
+    autonomyMode:
+      patch.autonomyMode === undefined
+        ? existing.autonomyMode
+        : patch.autonomyMode,
+    lastSeenAt:
+      patch.lastSeenAt === undefined ? existing.lastSeenAt : patch.lastSeenAt,
+    lastMatchedAt:
+      patch.lastMatchedAt === undefined
+        ? existing.lastMatchedAt
+        : patch.lastMatchedAt,
+    lastRunId:
+      patch.lastRunId === undefined ? existing.lastRunId : patch.lastRunId,
+    id: existing.id,
+    agentProfileId: existing.agentProfileId,
+    createdAt: existing.createdAt,
+    updatedAt: new Date().toISOString(),
+  };
+
+  validateSubscriptionShape({
+    sourceType: merged.sourceType,
+    taskKind: merged.taskKind,
+    autonomyMode: merged.autonomyMode,
+  });
+
+  return updateAgentSubscriptionRow(merged);
 }
 
 export function recordAgentSubscriptionEvent(

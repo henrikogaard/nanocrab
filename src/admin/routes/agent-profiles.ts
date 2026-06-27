@@ -5,6 +5,7 @@ import type {
   AgentProfileInput,
   AgentProfileUpdateInput,
   AgentSubscriptionInput,
+  AgentSubscriptionUpdateInput,
 } from '../../agent-profiles.js';
 import type { AgentProfile, AgentSubscription } from '../../types.js';
 import { auditLog } from '../security.js';
@@ -19,25 +20,8 @@ interface AgentProfileRosterSummary extends AgentProfile {
   lastActivityAt: string | null;
 }
 
-type AgentSubscriptionUpdateInput = Partial<
-  Pick<
-    AgentSubscription,
-    | 'enabled'
-    | 'filters'
-    | 'taskKind'
-    | 'autonomyMode'
-    | 'lastSeenAt'
-    | 'lastMatchedAt'
-    | 'lastRunId'
-  >
->;
-
 type AgentProfilesDomain = typeof agentProfiles & {
   listAgentProfilesWithSummary?: () => AgentProfileRosterSummary[];
-  updateAgentSubscription?: (
-    id: string,
-    patch: AgentSubscriptionUpdateInput,
-  ) => AgentSubscription;
 };
 
 const domain = agentProfiles as AgentProfilesDomain;
@@ -145,12 +129,6 @@ function findSubscriptionOr404(
     return null;
   }
   return subscription;
-}
-
-function subscriptionUpdateUnavailable(res: Response): void {
-  res.status(501).json({
-    error: 'Agent subscription updates require a domain update helper',
-  });
 }
 
 function buildRosterSummary(profile: AgentProfile): AgentProfileRosterSummary {
@@ -267,21 +245,19 @@ router.post('/:id/subscriptions', (req: Request, res: Response) => {
 router.put(
   '/:id/subscriptions/:subscriptionId',
   (req: Request, res: Response) => {
-    if (!findProfileOr404(req, res)) return;
-    if (!findSubscriptionOr404(req, res)) return;
-
-    if (!domain.updateAgentSubscription) {
-      subscriptionUpdateUnavailable(res);
-      return;
-    }
+    const profile = findProfileOr404(req, res);
+    if (!profile) return;
+    const subscription = findSubscriptionOr404(req, res);
+    if (!subscription) return;
 
     try {
-      const subscription = domain.updateAgentSubscription(
-        routeParam(req, 'subscriptionId'),
+      const updatedSubscription = domain.updateAgentSubscription(
+        profile.id,
+        subscription.id,
         subscriptionPatch(req.body),
       );
-      auditLog(req, 'agent_subscription_updated', subscription.id);
-      res.json({ ok: true, subscription });
+      auditLog(req, 'agent_subscription_updated', updatedSubscription.id);
+      res.json({ ok: true, subscription: updatedSubscription });
     } catch (err) {
       sendError(res, 400, err);
     }
@@ -291,21 +267,19 @@ router.put(
 router.post(
   '/:id/subscriptions/:subscriptionId/enable',
   (req: Request, res: Response) => {
-    if (!findProfileOr404(req, res)) return;
-    if (!findSubscriptionOr404(req, res)) return;
-
-    if (!domain.updateAgentSubscription) {
-      subscriptionUpdateUnavailable(res);
-      return;
-    }
+    const profile = findProfileOr404(req, res);
+    if (!profile) return;
+    const subscription = findSubscriptionOr404(req, res);
+    if (!subscription) return;
 
     try {
-      const subscription = domain.updateAgentSubscription(
-        routeParam(req, 'subscriptionId'),
+      const updatedSubscription = domain.updateAgentSubscription(
+        profile.id,
+        subscription.id,
         { enabled: true },
       );
-      auditLog(req, 'agent_subscription_enabled', subscription.id);
-      res.json({ ok: true, subscription });
+      auditLog(req, 'agent_subscription_enabled', updatedSubscription.id);
+      res.json({ ok: true, subscription: updatedSubscription });
     } catch (err) {
       sendError(res, 400, err);
     }
@@ -315,21 +289,19 @@ router.post(
 router.post(
   '/:id/subscriptions/:subscriptionId/disable',
   (req: Request, res: Response) => {
-    if (!findProfileOr404(req, res)) return;
-    if (!findSubscriptionOr404(req, res)) return;
-
-    if (!domain.updateAgentSubscription) {
-      subscriptionUpdateUnavailable(res);
-      return;
-    }
+    const profile = findProfileOr404(req, res);
+    if (!profile) return;
+    const subscription = findSubscriptionOr404(req, res);
+    if (!subscription) return;
 
     try {
-      const subscription = domain.updateAgentSubscription(
-        routeParam(req, 'subscriptionId'),
+      const updatedSubscription = domain.updateAgentSubscription(
+        profile.id,
+        subscription.id,
         { enabled: false },
       );
-      auditLog(req, 'agent_subscription_disabled', subscription.id);
-      res.json({ ok: true, subscription });
+      auditLog(req, 'agent_subscription_disabled', updatedSubscription.id);
+      res.json({ ok: true, subscription: updatedSubscription });
     } catch (err) {
       sendError(res, 400, err);
     }

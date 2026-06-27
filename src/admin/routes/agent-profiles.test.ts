@@ -291,6 +291,181 @@ describe('/api/agent-profiles', () => {
     });
   });
 
+  it('PUT /api/agent-profiles/:id/subscriptions/:subscriptionId updates filters/task/enabled state', async () => {
+    await withServer(async (base) => {
+      const created = await postJson<{
+        profile: { id: string };
+      }>(base, '/api/agent-profiles', profileRequest());
+      expect(created.res.status).toBe(200);
+
+      const subscription = await postJson<{
+        subscription: { id: string; agentProfileId: string; createdAt: string };
+      }>(
+        base,
+        `/api/agent-profiles/${created.body.profile.id}/subscriptions`,
+        subscriptionRequest(),
+      );
+      expect(subscription.res.status).toBe(200);
+
+      const { res, body } = await putJson<{
+        ok: true;
+        subscription: {
+          id: string;
+          agentProfileId: string;
+          sourceType: string;
+          enabled: boolean;
+          filters: Record<string, unknown>;
+          taskKind: string;
+          autonomyMode: string;
+          createdAt: string;
+          updatedAt: string;
+        };
+      }>(
+        base,
+        `/api/agent-profiles/${created.body.profile.id}/subscriptions/${subscription.body.subscription.id}`,
+        {
+          id: 'sub_malicious',
+          agentProfileId: 'agent_malicious',
+          sourceType: 'channel_mention',
+          createdAt: '2000-01-01T00:00:00.000Z',
+          enabled: false,
+          filters: {
+            repo: 'henrikogaard/nanocrab',
+            labels: ['agent-profiles'],
+          },
+          taskKind: 'report',
+        },
+      );
+
+      expect(res.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.subscription.id).toBe(subscription.body.subscription.id);
+      expect(body.subscription.agentProfileId).toBe(created.body.profile.id);
+      expect(body.subscription.sourceType).toBe('github');
+      expect(body.subscription.createdAt).toBe(
+        subscription.body.subscription.createdAt,
+      );
+      expect(body.subscription.updatedAt).not.toBe('2000-01-01T00:00:00.000Z');
+      expect(body.subscription.enabled).toBe(false);
+      expect(body.subscription.filters).toEqual({
+        repo: 'henrikogaard/nanocrab',
+        labels: ['agent-profiles'],
+      });
+      expect(body.subscription.taskKind).toBe('report');
+      expect(body.subscription.autonomyMode).toBe('investigate_then_pause');
+    });
+  });
+
+  it('POST /api/agent-profiles/:id/subscriptions/:subscriptionId/disable flips enabled false and updates roster count', async () => {
+    await withServer(async (base) => {
+      const created = await postJson<{
+        profile: { id: string };
+      }>(base, '/api/agent-profiles', profileRequest());
+      expect(created.res.status).toBe(200);
+
+      const subscription = await postJson<{
+        subscription: { id: string };
+      }>(
+        base,
+        `/api/agent-profiles/${created.body.profile.id}/subscriptions`,
+        subscriptionRequest(),
+      );
+      expect(subscription.res.status).toBe(200);
+
+      const disabled = await postJson<{
+        ok: true;
+        subscription: { id: string; enabled: boolean };
+      }>(
+        base,
+        `/api/agent-profiles/${created.body.profile.id}/subscriptions/${subscription.body.subscription.id}/disable`,
+        {},
+      );
+
+      expect(disabled.res.status).toBe(200);
+      expect(disabled.body.ok).toBe(true);
+      expect(disabled.body.subscription.enabled).toBe(false);
+
+      const listRes = await fetch(`${base}/api/agent-profiles`);
+      expect(listRes.status).toBe(200);
+      const profiles = (await listRes.json()) as Array<{
+        id: string;
+        subscriptionsCount: number;
+        enabledSubscriptionsCount: number;
+      }>;
+      expect(
+        profiles.find((profile) => profile.id === created.body.profile.id),
+      ).toMatchObject({
+        subscriptionsCount: 1,
+        enabledSubscriptionsCount: 0,
+      });
+    });
+  });
+
+  it('POST /api/agent-profiles/:id/subscriptions/:subscriptionId/enable flips enabled true', async () => {
+    await withServer(async (base) => {
+      const created = await postJson<{
+        profile: { id: string };
+      }>(base, '/api/agent-profiles', profileRequest());
+      expect(created.res.status).toBe(200);
+
+      const subscription = await postJson<{
+        subscription: { id: string };
+      }>(base, `/api/agent-profiles/${created.body.profile.id}/subscriptions`, {
+        ...subscriptionRequest(),
+        enabled: false,
+      });
+      expect(subscription.res.status).toBe(200);
+
+      const enabled = await postJson<{
+        ok: true;
+        subscription: { id: string; enabled: boolean };
+      }>(
+        base,
+        `/api/agent-profiles/${created.body.profile.id}/subscriptions/${subscription.body.subscription.id}/enable`,
+        {},
+      );
+
+      expect(enabled.res.status).toBe(200);
+      expect(enabled.body.ok).toBe(true);
+      expect(enabled.body.subscription.enabled).toBe(true);
+    });
+  });
+
+  it('PUT /api/agent-profiles/:id/subscriptions/:subscriptionId returns 404 for another profile subscription', async () => {
+    await withServer(async (base) => {
+      const first = await postJson<{
+        profile: { id: string };
+      }>(base, '/api/agent-profiles', profileRequest('RepoFixer'));
+      expect(first.res.status).toBe(200);
+
+      const second = await postJson<{
+        profile: { id: string };
+      }>(base, '/api/agent-profiles', {
+        ...profileRequest('ReportHost'),
+        displayName: 'Report Host',
+      });
+      expect(second.res.status).toBe(200);
+
+      const subscription = await postJson<{
+        subscription: { id: string };
+      }>(
+        base,
+        `/api/agent-profiles/${second.body.profile.id}/subscriptions`,
+        subscriptionRequest(),
+      );
+      expect(subscription.res.status).toBe(200);
+
+      const { res, body } = await putJson<{ error: string }>(
+        base,
+        `/api/agent-profiles/${first.body.profile.id}/subscriptions/${subscription.body.subscription.id}`,
+        { enabled: false },
+      );
+
+      expect(res.status).toBe(404);
+      expect(body.error).toBe('Agent subscription not found');
+    });
+  });
+
   it('POST /api/agent-profiles/:id/disable prevents enabled roster state', async () => {
     await withServer(async (base) => {
       const created = await postJson<{
