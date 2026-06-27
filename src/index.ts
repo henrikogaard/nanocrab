@@ -68,7 +68,6 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSessionCleanup } from './session-cleanup.js';
-import { getAgentProviderConfig } from './agent-provider.js';
 import {
   AGENT_INSTRUCTIONS_FILE,
   copyAgentInstructionsTemplate,
@@ -90,6 +89,7 @@ import {
   normalizeGeneratedThreadTitle,
   withThreadTitleRequest,
 } from './web-thread-title.js';
+import { resolveAgentProfileInvocation } from './agent-profile-router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startProbeScheduler } from './probe-scheduler.js';
 import {
@@ -110,6 +110,10 @@ import {
   loadProviderProfiles,
 } from './provider-router.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import {
+  getAgentProviderConfig,
+  type AgentProvider,
+} from './agent-provider.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -234,6 +238,31 @@ function isPrimaryBot(jid: string, group: RegisteredGroup): boolean {
     )
     .sort((a, b) => a[1].added_at.localeCompare(b[1].added_at))[0];
   return fallbackPrimary?.[0] === jid;
+}
+
+async function sendBotTextReply(
+  channel: Channel,
+  chatJid: string,
+  text: string,
+): Promise<void> {
+  const timestamp = new Date().toISOString();
+  await channel.sendMessage(chatJid, text);
+  storeMessageDirect({
+    id: `bot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    chat_jid: chatJid,
+    sender: ASSISTANT_NAME,
+    sender_name: ASSISTANT_NAME,
+    content: text,
+    timestamp,
+    is_from_me: true,
+    is_bot_message: true,
+  });
+  broadcastMessage({
+    sender_name: ASSISTANT_NAME,
+    content: text,
+    chat_jid: chatJid,
+    timestamp,
+  });
 }
 
 async function sendStartupNotice(): Promise<void> {
@@ -408,10 +437,57 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = withThreadTitleRequest(
-    formatMessages(missedMessages, TIMEZONE),
-    group,
-  );
+  const latestMessageText = missedMessages[missedMessages.length - 1].content;
+  let runAgentOptions: RunAgentOptions = {};
+  let promptBody = formatMessages(missedMessages, TIMEZONE);
+
+  try {
+    const invocation = resolveAgentProfileInvocation({
+      text: latestMessageText,
+    });
+
+    if (invocation) {
+      const profilePrompt = [
+        '# Active Virtual Agent',
+        `Handle: @${invocation.profile.handle}`,
+        `Name: ${invocation.profile.displayName}`,
+        invocation.profile.personality
+          ? `Instructions: ${invocation.profile.personality}`
+          : '',
+        '',
+        invocation.taskText || promptBody,
+      ]
+        .filter(Boolean)
+        .join('\n');
+      promptBody = `${promptBody}\n\n${profilePrompt}`;
+      runAgentOptions = {
+        agentProfileId: invocation.profileId,
+        profileInstructions: invocation.profile.personality || undefined,
+        provider: invocation.profile.provider || undefined,
+        model: invocation.profile.model || undefined,
+        allowedMcpServers:
+          invocation.profile.allowedMcpServers === null
+            ? undefined
+            : invocation.profile.allowedMcpServers,
+      };
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    lastAgentTimestamp[chatJid] =
+      missedMessages[missedMessages.length - 1].timestamp;
+    saveState();
+    try {
+      await sendBotTextReply(channel, chatJid, errorMessage);
+    } catch (sendErr) {
+      logger.warn(
+        { chatJid, err: sendErr },
+        'Failed to send direct agent profile resolution error',
+      );
+    }
+    return true;
+  }
+
+  const prompt = withThreadTitleRequest(promptBody, group);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -454,106 +530,95 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const noInternal = raw
-        .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-        .trim();
-      // Extract structured markers
-      const markers = extractStructuredMarkers(noInternal);
-      const text = stripStructuredMarkers(noInternal).trim();
+  const output = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const noInternal = raw
+          .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+          .trim();
+        // Extract structured markers
+        const markers = extractStructuredMarkers(noInternal);
+        const text = stripStructuredMarkers(noInternal).trim();
 
-      // Broadcast markers as typed WS events
-      for (const marker of markers) {
-        const now = new Date().toISOString();
-        if (marker.type === 'tool_call') {
-          broadcastToolCall({
-            id: marker.id,
-            name: marker.name,
-            input: marker.input,
-            groupJid: chatJid,
-            timestamp: now,
-          });
-        } else if (marker.type === 'tool_result') {
-          broadcastToolResult({
-            id: marker.id,
-            output: marker.output,
-            duration: marker.duration,
-            groupJid: chatJid,
-          });
-        } else if (marker.type === 'approval_request') {
-          broadcastApprovalRequest({
-            id: marker.id,
-            tool: marker.tool,
-            reason: marker.reason,
-            input: marker.input,
-            groupJid: chatJid,
-          });
-        } else if (marker.type === 'progress') {
-          broadcastTaskProgress({
-            phase: marker.phase,
-            pct: marker.pct,
-            message: marker.message,
-            groupJid: chatJid,
-          });
-        } else if (marker.type === 'thread_title') {
-          if (needsGeneratedThreadTitle(group)) {
-            const title = normalizeGeneratedThreadTitle(marker.title);
-            if (title) {
-              const updatedGroup = { ...group, title };
-              registeredGroups[chatJid] = updatedGroup;
-              setRegisteredGroup(chatJid, updatedGroup);
-              updateChatName(chatJid, title);
-              broadcastThreadTitle({
-                groupJid: chatJid,
-                title,
-                timestamp: now,
-              });
+        // Broadcast markers as typed WS events
+        for (const marker of markers) {
+          const now = new Date().toISOString();
+          if (marker.type === 'tool_call') {
+            broadcastToolCall({
+              id: marker.id,
+              name: marker.name,
+              input: marker.input,
+              groupJid: chatJid,
+              timestamp: now,
+            });
+          } else if (marker.type === 'tool_result') {
+            broadcastToolResult({
+              id: marker.id,
+              output: marker.output,
+              duration: marker.duration,
+              groupJid: chatJid,
+            });
+          } else if (marker.type === 'approval_request') {
+            broadcastApprovalRequest({
+              id: marker.id,
+              tool: marker.tool,
+              reason: marker.reason,
+              input: marker.input,
+              groupJid: chatJid,
+            });
+          } else if (marker.type === 'progress') {
+            broadcastTaskProgress({
+              phase: marker.phase,
+              pct: marker.pct,
+              message: marker.message,
+              groupJid: chatJid,
+            });
+          } else if (marker.type === 'thread_title') {
+            if (needsGeneratedThreadTitle(group)) {
+              const title = normalizeGeneratedThreadTitle(marker.title);
+              if (title) {
+                const updatedGroup = { ...group, title };
+                registeredGroups[chatJid] = updatedGroup;
+                setRegisteredGroup(chatJid, updatedGroup);
+                updateChatName(chatJid, title);
+                broadcastThreadTitle({
+                  groupJid: chatJid,
+                  title,
+                  timestamp: now,
+                });
+              }
             }
           }
         }
+
+        logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+        if (text) {
+          await sendBotTextReply(channel, chatJid, text);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
 
-      logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
-        // Store bot response in database for dashboard feed
-        storeMessageDirect({
-          id: `bot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          chat_jid: chatJid,
-          sender: ASSISTANT_NAME,
-          sender_name: ASSISTANT_NAME,
-          content: text,
-          timestamp: new Date().toISOString(),
-          is_from_me: true,
-          is_bot_message: true,
-        });
-        broadcastMessage({
-          sender_name: ASSISTANT_NAME,
-          content: text,
-          chat_jid: chatJid,
-          timestamp: new Date().toISOString(),
-        });
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
-
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+    runAgentOptions,
+  );
 
   clearInterval(typingInterval);
   await channel.setTyping?.(chatJid, false);
@@ -599,19 +664,46 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+interface RunAgentOptions {
+  agentProfileId?: string;
+  profileInstructions?: string;
+  provider?: AgentProvider;
+  model?: string;
+  allowedMcpServers?: string[];
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  options: RunAgentOptions = {},
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
   const defaultProvider = getAgentProviderConfig().provider;
-  const effectiveProvider = group.containerConfig?.provider || defaultProvider;
+  const effectiveProvider =
+    options.provider || group.containerConfig?.provider || defaultProvider;
   const effectiveModel =
+    options.model ||
     group.containerConfig?.model ||
     group.containerConfig?.models?.[effectiveProvider];
+  const allowedMcpServers =
+    options.allowedMcpServers ?? group.containerConfig?.allowedMcpServers;
+
+  if (options.agentProfileId) {
+    logger.info(
+      {
+        group: group.name,
+        agentProfileId: options.agentProfileId,
+        hasProfileInstructions: Boolean(options.profileInstructions),
+        provider: effectiveProvider,
+        model: effectiveModel,
+        allowedMcpServers: allowedMcpServers ?? null,
+      },
+      'Running with direct agent profile invocation',
+    );
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -663,9 +755,9 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
-        allowedMcpServers: group.containerConfig?.allowedMcpServers,
+        allowedMcpServers,
         restrictions: group.containerConfig?.restrictions,
-        provider: group.containerConfig?.provider,
+        provider: effectiveProvider,
         model: effectiveModel,
         providerFallbackPurpose: 'default_chat',
         providerFallbackAction: 'external-message',
