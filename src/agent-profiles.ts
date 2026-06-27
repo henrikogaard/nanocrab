@@ -11,6 +11,7 @@ import {
   insertAgentSubscriptionEvent,
   listAgentProfileActivityRows,
   listAgentProfileRows,
+  listEnabledAgentSubscriptions as listEnabledAgentSubscriptionRows,
   listAgentSubscriptionsForProfile,
   updateAgentProfile as updateAgentProfileRow,
   updateAgentSubscription as updateAgentSubscriptionRow,
@@ -266,6 +267,12 @@ export function listAgentSubscriptions(
   agentProfileId: string,
 ): AgentSubscription[] {
   return listAgentSubscriptionsForProfile(agentProfileId);
+}
+
+export function listEnabledAgentSubscriptions(
+  sourceType?: AgentSubscriptionSourceType,
+): AgentSubscription[] {
+  return listEnabledAgentSubscriptionRows(sourceType);
 }
 
 export function updateAgentSubscription(

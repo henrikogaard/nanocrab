@@ -95,6 +95,7 @@ import {
 } from './agent-profile-router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startProbeScheduler } from './probe-scheduler.js';
+import { runAgentSubscriptionScan } from './agent-subscription-runner.js';
 import {
   approveCodingJob,
   cancelCodingJob,
@@ -140,6 +141,7 @@ const STARTUP_NOTICE_MIN_INTERVAL_MS =
     process.env.NANOCRAB_STARTUP_NOTICE_MIN_INTERVAL_MS || '',
     10,
   ) || 5 * 60 * 1000;
+const AGENT_SUBSCRIPTION_SCAN_INTERVAL_MS = 60_000;
 
 let startupNoticeSentThisProcess = false;
 
@@ -1405,6 +1407,11 @@ async function main(): Promise<void> {
   });
   startSessionCleanup();
   startProbeScheduler();
+  setInterval(() => {
+    void runAgentSubscriptionScan().catch((err) => {
+      logger.warn({ err }, 'Agent subscription scan failed');
+    });
+  }, AGENT_SUBSCRIPTION_SCAN_INTERVAL_MS);
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

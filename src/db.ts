@@ -717,6 +717,56 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
+interface RecentUserMessageRow {
+  id: string;
+  chat_jid: string;
+  sender: string;
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_from_me: number;
+  is_bot_message: number;
+  reply_to_message_id: string | null;
+  reply_to_message_content: string | null;
+  reply_to_sender_name: string | null;
+}
+
+export function getRecentUserMessages(
+  chatJid: string,
+  limit: number = 50,
+): NewMessage[] {
+  const safeLimit = Math.min(Math.max(limit || 50, 1), 200);
+  const rows = db
+    .prepare(
+      `
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
+             is_bot_message, reply_to_message_id, reply_to_message_content,
+             reply_to_sender_name
+      FROM messages
+      WHERE chat_jid = ?
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ?
+    `,
+    )
+    .all(chatJid, `${ASSISTANT_NAME}:%`, safeLimit) as RecentUserMessageRow[];
+
+  return rows.reverse().map((row) => ({
+    id: row.id,
+    chat_jid: row.chat_jid,
+    sender: row.sender,
+    sender_name: row.sender_name,
+    content: row.content,
+    timestamp: row.timestamp,
+    is_from_me: row.is_from_me === 1,
+    is_bot_message: row.is_bot_message === 1,
+    reply_to_message_id: row.reply_to_message_id ?? undefined,
+    reply_to_message_content: row.reply_to_message_content ?? undefined,
+    reply_to_sender_name: row.reply_to_sender_name ?? undefined,
+  }));
+}
+
 export function getLastBotMessageTimestamp(
   chatJid: string,
   botPrefix: string,
