@@ -36,6 +36,8 @@ function job(overrides: Partial<CodingJob>): CodingJob {
     approvalHistory: [],
     output: '',
     requestedBy: 'test',
+    agentProfileId: null,
+    sourceSubscriptionId: null,
     createdAt: new Date(0).toISOString(),
     completedAt: null,
     ...overrides,
