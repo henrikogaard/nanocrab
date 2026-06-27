@@ -89,7 +89,10 @@ import {
   normalizeGeneratedThreadTitle,
   withThreadTitleRequest,
 } from './web-thread-title.js';
-import { resolveAgentProfileInvocation } from './agent-profile-router.js';
+import {
+  AgentProfileResolutionError,
+  resolveAgentProfileInvocation,
+} from './agent-profile-router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { startProbeScheduler } from './probe-scheduler.js';
 import {
@@ -455,14 +458,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           ? `Instructions: ${invocation.profile.personality}`
           : '',
         '',
-        invocation.taskText || promptBody,
+        invocation.taskText || 'Use the conversation context above.',
       ]
         .filter(Boolean)
         .join('\n');
       promptBody = `${promptBody}\n\n${profilePrompt}`;
       runAgentOptions = {
         agentProfileId: invocation.profileId,
-        profileInstructions: invocation.profile.personality || undefined,
         provider: invocation.profile.provider || undefined,
         model: invocation.profile.model || undefined,
         allowedMcpServers:
@@ -472,7 +474,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       };
     }
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
+    const errorMessage =
+      err instanceof AgentProfileResolutionError
+        ? err.message
+        : 'Agent profile lookup failed. Check the dashboard and try again.';
+    if (!(err instanceof AgentProfileResolutionError)) {
+      logger.error({ chatJid, err }, 'Agent profile lookup failed');
+    }
     lastAgentTimestamp[chatJid] =
       missedMessages[missedMessages.length - 1].timestamp;
     saveState();
@@ -666,7 +674,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
 interface RunAgentOptions {
   agentProfileId?: string;
-  profileInstructions?: string;
   provider?: AgentProvider;
   model?: string;
   allowedMcpServers?: string[];
@@ -696,7 +703,6 @@ async function runAgent(
       {
         group: group.name,
         agentProfileId: options.agentProfileId,
-        hasProfileInstructions: Boolean(options.profileInstructions),
         provider: effectiveProvider,
         model: effectiveModel,
         allowedMcpServers: allowedMcpServers ?? null,

@@ -22,6 +22,16 @@ describe('agent profile direct invocation router', () => {
     );
   });
 
+  it('does not extract handles from URL paths', () => {
+    expect(
+      extractAgentProfileHandles('See https://host/@RepoFixer for details'),
+    ).toEqual([]);
+  });
+
+  it('does not extract handles from email addresses', () => {
+    expect(extractAgentProfileHandles('Contact name@example.com')).toEqual([]);
+  });
+
   it('resolves enabled profile by normalized handle', () => {
     expect(
       resolveAgentProfileInvocation({
@@ -32,6 +42,32 @@ describe('agent profile direct invocation router', () => {
       profileId: repoFixer.id,
       handle: 'repofixer',
       taskText: 'fix issue 12',
+    });
+  });
+
+  it('allows punctuation after a mention', () => {
+    expect(
+      resolveAgentProfileInvocation({
+        text: '@RepoFixer, fix issue 12',
+        profiles: [repoFixer],
+      }),
+    ).toMatchObject({
+      profileId: repoFixer.id,
+      handle: 'repofixer',
+      taskText: 'fix issue 12',
+    });
+  });
+
+  it('returns empty task text for mention-only messages', () => {
+    expect(
+      resolveAgentProfileInvocation({
+        text: '@RepoFixer',
+        profiles: [repoFixer],
+      }),
+    ).toMatchObject({
+      profileId: repoFixer.id,
+      handle: 'repofixer',
+      taskText: '',
     });
   });
 
