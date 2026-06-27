@@ -801,7 +801,9 @@ describe('Agents launcher UI', () => {
     expect(source).toContain('Task kinds');
     expect(source).toContain('profile.allowedMcpServers');
     expect(source).toContain('detailUnavailable: true');
-    expect(source).toContain("renderAgentProfileEmptyState('detailUnavailable')");
+    expect(source).toContain(
+      "renderAgentProfileEmptyState('detailUnavailable')",
+    );
     expect(source).toContain('esc(String(activeRuns))');
     expect(source).toContain('esc(String(blockedApprovals))');
     expect(source).toContain('esc(String(errors))');

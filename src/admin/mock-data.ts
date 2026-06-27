@@ -5183,7 +5183,8 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         id: 'repo-fixer',
         handle: 'repo-fixer',
         displayName: 'Repo Fixer',
-        description: 'Coding profile for GitHub issue fixes and focused PR handoffs.',
+        description:
+          'Coding profile for GitHub issue fixes and focused PR handoffs.',
         enabled: true,
         providerProfile: 'default_coding',
         provider: 'codex',
@@ -5229,7 +5230,8 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           {
             id: 'repo-fixer-activity-2',
             title: 'Implementation approval waiting',
-            detail: 'Approval gate must clear before repo write handoff continues.',
+            detail:
+              'Approval gate must clear before repo write handoff continues.',
             status: 'await_approval',
             at: iso(20),
           },
@@ -5239,7 +5241,8 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         id: 'researcher',
         handle: 'researcher',
         displayName: 'Researcher',
-        description: 'Read-heavy research profile for sourced briefs and monitoring.',
+        description:
+          'Read-heavy research profile for sourced briefs and monitoring.',
         enabled: true,
         providerProfile: 'default_reports',
         provider: 'openrouter',
