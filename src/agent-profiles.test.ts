@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import type { AgentProfileTaskKind } from './types.js';
 import {
   buildAgentProfile,
   buildSubscriptionDedupeKey,
@@ -9,9 +10,11 @@ import {
   getAgentProfileByHandle,
   listAgentProfileActivity,
   listAgentProfiles,
+  listAgentSubscriptions,
   recordAgentProfileActivity,
   recordAgentSubscriptionEvent,
   normalizeAgentHandle,
+  updateAgentProfile,
   validateAgentProfileInput,
   validateSubscriptionShape,
 } from './agent-profiles.js';
@@ -94,7 +97,30 @@ describe('agent profile validation', () => {
         externalEventId: 'issue-123',
         agentProfileId: 'agent_repo_fixer',
       }),
-    ).toBe('github:henrikogaard/nanocrab:issue-123:agent_repo_fixer');
+    ).toBe('["github","henrikogaard/nanocrab","issue-123","agent_repo_fixer"]');
+  });
+
+  it('builds unambiguous subscription dedupe keys for colon-containing ids', () => {
+    const first = buildSubscriptionDedupeKey({
+      sourceType: 'github',
+      sourceId: 'repo:issue',
+      externalEventId: '123',
+      agentProfileId: 'agent_repo_fixer',
+    });
+    const second = buildSubscriptionDedupeKey({
+      sourceType: 'github',
+      sourceId: 'repo',
+      externalEventId: 'issue:123',
+      agentProfileId: 'agent_repo_fixer',
+    });
+
+    expect(first).not.toBe(second);
+    expect(JSON.parse(first)).toEqual([
+      'github',
+      'repo:issue',
+      '123',
+      'agent_repo_fixer',
+    ]);
   });
 
   it('rejects bad subscription source, task, and autonomy inputs', () => {
@@ -154,6 +180,76 @@ describe('agent profile persistence', () => {
     ).toThrow(/already exists/i);
   });
 
+  it('updates profiles through editable patches while preserving immutable fields', () => {
+    const profile = createAgentProfile({
+      handle: 'RepoFixer',
+      displayName: 'Repo Fixer',
+      description: 'Original description',
+      allowedMcpServers: ['github'],
+      writePolicy: { autonomousSendRequiresApproval: false },
+    });
+    createAgentProfile({
+      handle: 'OtherAgent',
+      displayName: 'Other Agent',
+    });
+
+    const updatedAt = new Date(
+      Date.parse(profile.createdAt) + 1000,
+    ).toISOString();
+    const updated = updateAgentProfile(
+      profile.id,
+      {
+        handle: '@ManualHost',
+        displayName: ' Manual Host ',
+        avatar: ' https://example.test/avatar.png ',
+        description: ' ',
+        personality: ' Precise and terse ',
+        enabled: false,
+        providerProfileId: ' provider-main ',
+        model: ' gpt-5 ',
+        allowedMcpServers: [
+          'filesystem',
+          42,
+          ' github ',
+        ] as unknown as string[],
+        skills: [' repo-work ', null] as unknown as string[],
+        taskKinds: [
+          'coding_job',
+          'deploy_now',
+        ] as unknown as AgentProfileTaskKind[],
+        channelBindings: {
+          github: ['@ManualHost', 123] as unknown as string[],
+        },
+        writePolicy: { directSendRequiresApproval: true },
+      },
+      () => updatedAt,
+    );
+
+    expect(updated.id).toBe(profile.id);
+    expect(updated.createdAt).toBe(profile.createdAt);
+    expect(updated.updatedAt).toBe(updatedAt);
+    expect(updated.updatedAt >= profile.createdAt).toBe(true);
+    expect(updated.handle).toBe('manualhost');
+    expect(updated.displayName).toBe('Manual Host');
+    expect(updated.avatar).toBe('https://example.test/avatar.png');
+    expect(updated.description).toBeNull();
+    expect(updated.personality).toBe('Precise and terse');
+    expect(updated.enabled).toBe(false);
+    expect(updated.providerProfileId).toBe('provider-main');
+    expect(updated.model).toBe('gpt-5');
+    expect(updated.allowedMcpServers).toEqual(['filesystem', 'github']);
+    expect(updated.skills).toEqual(['repo-work']);
+    expect(updated.taskKinds).toEqual(['coding_job']);
+    expect(updated.channelBindings).toEqual({ github: ['@ManualHost'] });
+    expect(updated.writePolicy).toEqual({
+      directSendRequiresApproval: true,
+      autonomousSendRequiresApproval: false,
+    });
+    expect(() =>
+      updateAgentProfile(profile.id, { handle: 'OtherAgent' }),
+    ).toThrow(/already exists/i);
+  });
+
   it('stores subscriptions and activity for a profile', () => {
     const profile = createAgentProfile({
       handle: 'RepoFixer',
@@ -170,7 +266,12 @@ describe('agent profile persistence', () => {
     const event = recordAgentSubscriptionEvent({
       subscriptionId: subscription.id,
       agentProfileId: profile.id,
-      dedupeKey: 'github:henrikogaard/nanocrab:issue-1:' + profile.id,
+      dedupeKey: buildSubscriptionDedupeKey({
+        sourceType: 'github',
+        sourceId: 'henrikogaard/nanocrab',
+        externalEventId: 'issue-1',
+        agentProfileId: profile.id,
+      }),
       sourceType: 'github',
       sourceId: 'henrikogaard/nanocrab',
       externalEventId: 'issue-1',
@@ -191,5 +292,84 @@ describe('agent profile persistence', () => {
     });
 
     expect(listAgentProfileActivity(profile.id)).toHaveLength(1);
+  });
+
+  it('round-trips subscription filter JSON', () => {
+    const profile = createAgentProfile({
+      handle: 'RepoFixer',
+      displayName: 'Repo Fixer',
+    });
+
+    createAgentSubscription({
+      agentProfileId: profile.id,
+      sourceType: 'github',
+      filters: {
+        repo: 'henrikogaard/nanocrab',
+        labels: ['autofix', 'agent-profile'],
+        pullRequests: { includeDrafts: false },
+      },
+      taskKind: 'coding_job',
+    });
+
+    expect(listAgentSubscriptions(profile.id)[0]?.filters).toEqual({
+      repo: 'henrikogaard/nanocrab',
+      labels: ['autofix', 'agent-profile'],
+      pullRequests: { includeDrafts: false },
+    });
+  });
+
+  it('rejects subscriptions for missing parent profiles', () => {
+    expect(() =>
+      createAgentSubscription({
+        agentProfileId: 'agent_missing',
+        sourceType: 'github',
+        filters: { repo: 'henrikogaard/nanocrab' },
+        taskKind: 'coding_job',
+      }),
+    ).toThrow(/agent profile not found/i);
+  });
+
+  it('records subscription events idempotently by dedupe key', () => {
+    const profile = createAgentProfile({
+      handle: 'RepoFixer',
+      displayName: 'Repo Fixer',
+    });
+    const subscription = createAgentSubscription({
+      agentProfileId: profile.id,
+      sourceType: 'github',
+      filters: { repo: 'henrikogaard/nanocrab' },
+      taskKind: 'coding_job',
+    });
+    const dedupeKey = buildSubscriptionDedupeKey({
+      sourceType: 'github',
+      sourceId: 'henrikogaard/nanocrab',
+      externalEventId: 'issue-1',
+      agentProfileId: profile.id,
+    });
+
+    const first = recordAgentSubscriptionEvent({
+      subscriptionId: subscription.id,
+      agentProfileId: profile.id,
+      dedupeKey,
+      sourceType: 'github',
+      sourceId: 'henrikogaard/nanocrab',
+      externalEventId: 'issue-1',
+      runId: 'code-1',
+      status: 'matched',
+      metadata: { issueNumber: 1 },
+    });
+    const second = recordAgentSubscriptionEvent({
+      subscriptionId: subscription.id,
+      agentProfileId: profile.id,
+      dedupeKey,
+      sourceType: 'github',
+      sourceId: 'henrikogaard/nanocrab',
+      externalEventId: 'issue-1',
+      runId: 'code-2',
+      status: 'ignored',
+      metadata: { issueNumber: 2 },
+    });
+
+    expect(second).toEqual(first);
   });
 });

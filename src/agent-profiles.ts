@@ -71,6 +71,8 @@ export interface AgentProfileInput {
   };
 }
 
+export type AgentProfileUpdateInput = Partial<AgentProfileInput>;
+
 export interface AgentSubscriptionInput {
   agentProfileId: string;
   sourceType: AgentSubscriptionSourceType;
@@ -124,36 +126,11 @@ export function validateAgentProfileInput(input: AgentProfileInput): void {
 }
 
 export function buildAgentProfile(input: AgentProfileInput): AgentProfile {
-  validateAgentProfileInput(input);
-
   const now = new Date().toISOString();
 
   return {
     id: `agent_${randomUUID()}`,
-    handle: normalizeAgentHandle(input.handle),
-    displayName: input.displayName.trim(),
-    avatar: nullableString(input.avatar),
-    description: nullableString(input.description),
-    personality: nullableString(input.personality),
-    enabled: input.enabled !== false,
-    providerProfileId: nullableString(input.providerProfileId),
-    provider:
-      input.provider && isAgentProvider(input.provider) ? input.provider : null,
-    model: nullableString(input.model),
-    toolPolicy: input.toolPolicy || 'approval-required',
-    allowedMcpServers: Array.isArray(input.allowedMcpServers)
-      ? sanitizeStringList(input.allowedMcpServers)
-      : null,
-    skills: sanitizeStringList(input.skills),
-    memoryScopes: sanitizeStringList(input.memoryScopes),
-    taskKinds: sanitizeTaskKinds(input.taskKinds),
-    channelBindings: sanitizeChannelBindings(input.channelBindings),
-    writePolicy: {
-      directSendRequiresApproval:
-        input.writePolicy?.directSendRequiresApproval === true,
-      autonomousSendRequiresApproval:
-        input.writePolicy?.autonomousSendRequiresApproval !== false,
-    },
+    ...normalizeAgentProfileFields(input),
     createdAt: now,
     updatedAt: now,
   };
@@ -163,32 +140,67 @@ export function createAgentProfile(input: AgentProfileInput): AgentProfile {
   return insertAgentProfile(buildAgentProfile(input));
 }
 
-export function updateAgentProfile(input: AgentProfile): AgentProfile {
-  validateAgentProfileInput({
-    handle: input.handle,
-    displayName: input.displayName,
-    provider: input.provider,
-    toolPolicy: input.toolPolicy,
-  });
+export function updateAgentProfile(
+  id: string,
+  patch: AgentProfileUpdateInput,
+  now: () => string = () => new Date().toISOString(),
+): AgentProfile {
+  const existing = getAgentProfileRow(id);
+  if (!existing) throw new Error(`Agent profile not found: ${id}`);
 
   return updateAgentProfileRow({
-    ...input,
-    handle: normalizeAgentHandle(input.handle),
-    displayName: input.displayName.trim(),
-    avatar: nullableString(input.avatar),
-    description: nullableString(input.description),
-    personality: nullableString(input.personality),
-    providerProfileId: nullableString(input.providerProfileId),
-    model: nullableString(input.model),
-    allowedMcpServers:
-      input.allowedMcpServers === null
-        ? null
-        : sanitizeStringList(input.allowedMcpServers),
-    skills: sanitizeStringList(input.skills),
-    memoryScopes: sanitizeStringList(input.memoryScopes),
-    taskKinds: sanitizeTaskKinds(input.taskKinds),
-    channelBindings: sanitizeChannelBindings(input.channelBindings),
-    updatedAt: new Date().toISOString(),
+    ...existing,
+    ...normalizeAgentProfileFields({
+      handle: patch.handle === undefined ? existing.handle : patch.handle,
+      displayName:
+        patch.displayName === undefined
+          ? existing.displayName
+          : patch.displayName,
+      avatar: patch.avatar === undefined ? existing.avatar : patch.avatar,
+      description:
+        patch.description === undefined
+          ? existing.description
+          : patch.description,
+      personality:
+        patch.personality === undefined
+          ? existing.personality
+          : patch.personality,
+      enabled: patch.enabled === undefined ? existing.enabled : patch.enabled,
+      providerProfileId:
+        patch.providerProfileId === undefined
+          ? existing.providerProfileId
+          : patch.providerProfileId,
+      provider:
+        patch.provider === undefined ? existing.provider : patch.provider,
+      model: patch.model === undefined ? existing.model : patch.model,
+      toolPolicy:
+        patch.toolPolicy === undefined ? existing.toolPolicy : patch.toolPolicy,
+      allowedMcpServers:
+        patch.allowedMcpServers === undefined
+          ? existing.allowedMcpServers
+          : patch.allowedMcpServers,
+      skills: patch.skills === undefined ? existing.skills : patch.skills,
+      memoryScopes:
+        patch.memoryScopes === undefined
+          ? existing.memoryScopes
+          : patch.memoryScopes,
+      taskKinds:
+        patch.taskKinds === undefined ? existing.taskKinds : patch.taskKinds,
+      channelBindings:
+        patch.channelBindings === undefined
+          ? existing.channelBindings
+          : patch.channelBindings,
+      writePolicy:
+        patch.writePolicy === undefined
+          ? existing.writePolicy
+          : {
+              ...existing.writePolicy,
+              ...patch.writePolicy,
+            },
+    }),
+    id: existing.id,
+    createdAt: existing.createdAt,
+    updatedAt: now(),
   });
 }
 
@@ -295,12 +307,12 @@ export function buildSubscriptionDedupeKey(input: {
   externalEventId: string;
   agentProfileId: string;
 }): string {
-  return [
+  return JSON.stringify([
     input.sourceType,
     input.sourceId,
     input.externalEventId,
     input.agentProfileId,
-  ].join(':');
+  ]);
 }
 
 export function validateSubscriptionShape(input: {
@@ -333,6 +345,39 @@ function nullableString(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed || null;
+}
+
+function normalizeAgentProfileFields(
+  input: AgentProfileInput,
+): Omit<AgentProfile, 'id' | 'createdAt' | 'updatedAt'> {
+  validateAgentProfileInput(input);
+
+  return {
+    handle: normalizeAgentHandle(input.handle),
+    displayName: input.displayName.trim(),
+    avatar: nullableString(input.avatar),
+    description: nullableString(input.description),
+    personality: nullableString(input.personality),
+    enabled: input.enabled !== false,
+    providerProfileId: nullableString(input.providerProfileId),
+    provider:
+      input.provider && isAgentProvider(input.provider) ? input.provider : null,
+    model: nullableString(input.model),
+    toolPolicy: input.toolPolicy || 'approval-required',
+    allowedMcpServers: Array.isArray(input.allowedMcpServers)
+      ? sanitizeStringList(input.allowedMcpServers)
+      : null,
+    skills: sanitizeStringList(input.skills),
+    memoryScopes: sanitizeStringList(input.memoryScopes),
+    taskKinds: sanitizeTaskKinds(input.taskKinds),
+    channelBindings: sanitizeChannelBindings(input.channelBindings),
+    writePolicy: {
+      directSendRequiresApproval:
+        input.writePolicy?.directSendRequiresApproval === true,
+      autonomousSendRequiresApproval:
+        input.writePolicy?.autonomousSendRequiresApproval !== false,
+    },
+  };
 }
 
 function sanitizeStringList(values: string[] | null | undefined): string[] {

@@ -1629,13 +1629,103 @@ interface AgentProfileActivityRow {
   created_at: string;
 }
 
-function parseJsonField<T>(value: string | null, fallback: T): T {
-  if (!value) return fallback;
+const AGENT_PROFILE_TASK_KINDS: AgentProfile['taskKinds'] = [
+  'chat',
+  'cowork_task',
+  'coding_job',
+  'report',
+  'research',
+  'scheduled_check',
+];
+
+const DEFAULT_AGENT_PROFILE_WRITE_POLICY: AgentProfile['writePolicy'] = {
+  directSendRequiresApproval: false,
+  autonomousSendRequiresApproval: true,
+};
+
+function parseJsonValue(value: string | null): unknown {
+  if (!value) return undefined;
   try {
-    return JSON.parse(value) as T;
+    return JSON.parse(value) as unknown;
   } catch {
-    return fallback;
+    return undefined;
   }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype
+  );
+}
+
+function parseJsonObjectField(value: string | null): Record<string, unknown> {
+  const parsed = parseJsonValue(value);
+  return isPlainObject(parsed) ? parsed : {};
+}
+
+function parseStringArrayField(value: string | null): string[] {
+  const parsed = parseJsonValue(value);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((item): item is string => typeof item === 'string');
+}
+
+function parseNullableStringArrayField(value: string | null): string[] | null {
+  if (value === null) return null;
+  const parsed = parseJsonValue(value);
+  if (!Array.isArray(parsed)) return null;
+  return parsed.filter((item): item is string => typeof item === 'string');
+}
+
+function parseTaskKindsField(value: string | null): AgentProfile['taskKinds'] {
+  const parsed = parseJsonValue(value);
+  if (!Array.isArray(parsed)) return ['chat'];
+  const taskKinds = parsed.filter(isAgentProfileTaskKind);
+  return taskKinds.length > 0 ? taskKinds : ['chat'];
+}
+
+function isAgentProfileTaskKind(
+  value: unknown,
+): value is AgentProfile['taskKinds'][number] {
+  return (
+    typeof value === 'string' &&
+    (AGENT_PROFILE_TASK_KINDS as string[]).includes(value)
+  );
+}
+
+function parseChannelBindingsField(
+  value: string | null,
+): AgentProfile['channelBindings'] {
+  const parsed = parseJsonObjectField(value);
+  return Object.entries(parsed).reduce<AgentProfile['channelBindings']>(
+    (bindings, [channel, handles]) => {
+      if (!Array.isArray(handles)) return bindings;
+      const stringHandles = handles.filter(
+        (handle): handle is string => typeof handle === 'string',
+      );
+      if (stringHandles.length > 0) bindings[channel] = stringHandles;
+      return bindings;
+    },
+    {},
+  );
+}
+
+function parseWritePolicyField(
+  value: string | null,
+): AgentProfile['writePolicy'] {
+  const parsed = parseJsonObjectField(value);
+  return {
+    directSendRequiresApproval:
+      typeof parsed.directSendRequiresApproval === 'boolean'
+        ? parsed.directSendRequiresApproval
+        : DEFAULT_AGENT_PROFILE_WRITE_POLICY.directSendRequiresApproval,
+    autonomousSendRequiresApproval:
+      typeof parsed.autonomousSendRequiresApproval === 'boolean'
+        ? parsed.autonomousSendRequiresApproval
+        : DEFAULT_AGENT_PROFILE_WRITE_POLICY.autonomousSendRequiresApproval,
+  };
 }
 
 function agentProfileToRowValues(profile: AgentProfile): unknown[] {
@@ -1677,26 +1767,14 @@ function mapAgentProfileRow(row: AgentProfileRow): AgentProfile {
     provider: row.provider as AgentProfile['provider'],
     model: row.model,
     toolPolicy: row.tool_policy as AgentProfile['toolPolicy'],
-    allowedMcpServers:
-      row.allowed_mcp_servers_json === null
-        ? null
-        : parseJsonField<string[]>(row.allowed_mcp_servers_json, []),
-    skills: parseJsonField<string[]>(row.skills_json, []),
-    memoryScopes: parseJsonField<string[]>(row.memory_scopes_json, []),
-    taskKinds: parseJsonField<AgentProfile['taskKinds']>(row.task_kinds_json, [
-      'chat',
-    ]),
-    channelBindings: parseJsonField<AgentProfile['channelBindings']>(
-      row.channel_bindings_json,
-      {},
+    allowedMcpServers: parseNullableStringArrayField(
+      row.allowed_mcp_servers_json,
     ),
-    writePolicy: parseJsonField<AgentProfile['writePolicy']>(
-      row.write_policy_json,
-      {
-        directSendRequiresApproval: false,
-        autonomousSendRequiresApproval: true,
-      },
-    ),
+    skills: parseStringArrayField(row.skills_json),
+    memoryScopes: parseStringArrayField(row.memory_scopes_json),
+    taskKinds: parseTaskKindsField(row.task_kinds_json),
+    channelBindings: parseChannelBindingsField(row.channel_bindings_json),
+    writePolicy: parseWritePolicyField(row.write_policy_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1708,7 +1786,7 @@ function mapAgentSubscriptionRow(row: AgentSubscriptionRow): AgentSubscription {
     agentProfileId: row.agent_profile_id,
     sourceType: row.source_type as AgentSubscription['sourceType'],
     enabled: row.enabled === 1,
-    filters: parseJsonField<Record<string, unknown>>(row.filters_json, {}),
+    filters: parseJsonObjectField(row.filters_json),
     taskKind: row.task_kind as AgentSubscription['taskKind'],
     autonomyMode: row.autonomy_mode as AgentSubscription['autonomyMode'],
     lastSeenAt: row.last_seen_at,
@@ -1732,7 +1810,7 @@ function mapAgentSubscriptionEventRow(
     externalEventId: row.external_event_id,
     runId: row.run_id,
     status: row.status,
-    metadata: parseJsonField<Record<string, unknown>>(row.metadata_json, {}),
+    metadata: parseJsonObjectField(row.metadata_json),
     createdAt: row.created_at,
   };
 }
@@ -1750,7 +1828,7 @@ function mapAgentProfileActivityRow(
     summary: row.summary,
     runId: row.run_id,
     approvalId: row.approval_id,
-    metadata: parseJsonField<Record<string, unknown>>(row.metadata_json, {}),
+    metadata: parseJsonObjectField(row.metadata_json),
     createdAt: row.created_at,
   };
 }
