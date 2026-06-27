@@ -12,6 +12,7 @@ import {
   buildSubscriptionDedupeKey,
   getAgentProfile,
   listEnabledAgentSubscriptions,
+  normalizeAgentHandle,
   recordAgentProfileActivity,
   recordAgentSubscriptionEvent,
   updateAgentSubscription,
@@ -247,7 +248,7 @@ async function scanChannelMentionSubscription(
 
   let sawDedupedMatch = false;
   for (const message of getRecentUserMessages(chatJid, 50)) {
-    if (!messageMatchesProfile(message.content, profile)) continue;
+    if (!messageMatchesProfile(message.content, profile, chatJid)) continue;
 
     const dedupeKey = buildSubscriptionDedupeKey({
       sourceType: 'channel_mention',
@@ -299,16 +300,54 @@ async function scanChannelMentionSubscription(
 function messageMatchesProfile(
   content: string,
   profile: AgentProfile,
+  chatJid: string,
 ): boolean {
   try {
     return (
-      resolveAgentProfileInvocation({ text: content, profiles: [profile] })
-        ?.profileId === profile.id
+      resolveAgentProfileInvocation({
+        text: content,
+        profiles: buildChannelMentionProfiles(profile, chatJid),
+      })?.profileId === profile.id
     );
   } catch (err) {
     if (err instanceof AgentProfileResolutionError) return false;
     throw err;
   }
+}
+
+function buildChannelMentionProfiles(
+  profile: AgentProfile,
+  chatJid: string,
+): AgentProfile[] {
+  const handles = channelMentionHandles(profile, chatJid);
+  return handles.map((handle, index) =>
+    index === 0 ? profile : { ...profile, handle },
+  );
+}
+
+function channelMentionHandles(
+  profile: AgentProfile,
+  chatJid: string,
+): string[] {
+  const seen = new Set<string>();
+  const handles: string[] = [];
+
+  const addHandle = (value: string): void => {
+    const handle = normalizeAgentHandle(value);
+    if (!handle || seen.has(handle)) return;
+    seen.add(handle);
+    handles.push(handle);
+  };
+
+  addHandle(profile.handle);
+
+  for (const bindingKey of [chatJid, 'channel_mention', 'channel']) {
+    for (const alias of profile.channelBindings[bindingKey] ?? []) {
+      addHandle(alias);
+    }
+  }
+
+  return handles;
 }
 
 function stringFilter(

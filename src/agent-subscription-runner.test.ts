@@ -583,6 +583,94 @@ describe('agent subscription runner', () => {
     expect(listAgentProfileActivity(profile.id, 10)).toHaveLength(1);
   });
 
+  it('matches and dedupes channel mention aliases scoped to the chat', async () => {
+    const profile = createAgentProfile({
+      handle: 'RepoFixer',
+      displayName: 'Repo Fixer',
+      channelBindings: {
+        'group@g.us': ['@ManualHost'],
+      },
+    });
+    const subscription = createAgentSubscription({
+      agentProfileId: profile.id,
+      sourceType: 'channel_mention',
+      filters: { chatJid: 'group@g.us' },
+      taskKind: 'chat',
+    });
+    storeChatMetadata('group@g.us', '2026-06-27T09:00:00.000Z');
+    storeMessage({
+      id: 'msg-alias-1',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'Henrik',
+      content: '@ManualHost please look at this issue',
+      timestamp: '2026-06-27T09:01:00.000Z',
+      is_bot_message: false,
+    });
+
+    const first = await runAgentSubscriptionScan({ now: () => NOW });
+    const second = await runAgentSubscriptionScan({ now: () => NOW });
+
+    expect(first).toEqual({ scanned: 1, matched: 1, skipped: 0 });
+    expect(second).toEqual({ scanned: 1, matched: 0, skipped: 1 });
+
+    const dedupeKey = buildSubscriptionDedupeKey({
+      sourceType: 'channel_mention',
+      sourceId: 'group@g.us',
+      externalEventId: 'msg-alias-1',
+      agentProfileId: profile.id,
+    });
+    expect(getAgentSubscriptionEventByDedupeKey(dedupeKey)).toMatchObject({
+      subscriptionId: subscription.id,
+      sourceType: 'channel_mention',
+      sourceId: 'group@g.us',
+      externalEventId: 'msg-alias-1',
+      status: 'matched',
+    });
+    expect(listAgentProfileActivity(profile.id, 10)).toHaveLength(1);
+  });
+
+  it('does not match channel mention aliases inside URLs', async () => {
+    const profile = createAgentProfile({
+      handle: 'RepoFixer',
+      displayName: 'Repo Fixer',
+      channelBindings: {
+        'group@g.us': ['@ManualHost'],
+      },
+    });
+    createAgentSubscription({
+      agentProfileId: profile.id,
+      sourceType: 'channel_mention',
+      filters: { chatJid: 'group@g.us' },
+      taskKind: 'chat',
+    });
+    storeChatMetadata('group@g.us', '2026-06-27T09:00:00.000Z');
+    storeMessage({
+      id: 'msg-url-alias-1',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'Henrik',
+      content: 'See https://x.com/@ManualHost for details',
+      timestamp: '2026-06-27T09:01:00.000Z',
+      is_bot_message: false,
+    });
+
+    const result = await runAgentSubscriptionScan({ now: () => NOW });
+
+    expect(result).toEqual({ scanned: 1, matched: 0, skipped: 1 });
+    expect(
+      getAgentSubscriptionEventByDedupeKey(
+        buildSubscriptionDedupeKey({
+          sourceType: 'channel_mention',
+          sourceId: 'group@g.us',
+          externalEventId: 'msg-url-alias-1',
+          agentProfileId: profile.id,
+        }),
+      ),
+    ).toBeUndefined();
+    expect(listAgentProfileActivity(profile.id, 10)).toHaveLength(0);
+  });
+
   it('records blocked activity when a connector or run prerequisite is missing', async () => {
     const profile = createAgentProfile({
       handle: 'RepoFixer',
