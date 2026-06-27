@@ -181,8 +181,8 @@ describe('agent subscription runner', () => {
       sourceType: 'github',
       sourceId: 'henrik/nanocrab',
       externalEventId: 'issue-123',
-      runId: null,
-      status: 'reserved',
+      runId: 'job-123',
+      status: 'matched',
     });
     expect(listAgentProfileActivity(profile.id, 10)[0]).toMatchObject({
       kind: 'run_started',
@@ -309,8 +309,8 @@ describe('agent subscription runner', () => {
       ),
     ).toMatchObject({
       subscriptionId: subscription.id,
-      runId: null,
-      status: 'reserved',
+      runId: 'job-124',
+      status: 'matched',
     });
   });
 
@@ -410,15 +410,73 @@ describe('agent subscription runner', () => {
           agentProfileId: profile.id,
         }),
       ),
-    ).toMatchObject({
-      subscriptionId: failingSubscription.id,
-      runId: null,
-      status: 'reserved',
-    });
+    ).toBeUndefined();
     expect(
       listAgentProfileActivity(profile.id, 10).some(
         (activity) =>
           activity.subscriptionId === failingSubscription.id &&
+          activity.kind === 'error' &&
+          activity.summary.includes('job backend unavailable'),
+      ),
+    ).toBe(true);
+  });
+
+  it('retries GitHub issue reservations after a job start failure', async () => {
+    const profile = createAgentProfile({
+      handle: 'RepoFixer',
+      displayName: 'Repo Fixer',
+      provider: 'codex',
+      model: 'gpt-5',
+      taskKinds: ['coding_job'],
+    });
+    const subscription = createAgentSubscription({
+      agentProfileId: profile.id,
+      sourceType: 'github',
+      filters: { repo: 'henrik/nanocrab', issueNumber: 123 },
+      taskKind: 'coding_job',
+    });
+    const listGitHubIssues = vi.fn().mockResolvedValue([issue()]);
+    const startCodingJob = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('job backend unavailable'))
+      .mockResolvedValueOnce(codingJob('job-123'));
+
+    const first = await runAgentSubscriptionScan({
+      now: () => NOW,
+      listGitHubIssues,
+      startCodingJob,
+    });
+    const second = await runAgentSubscriptionScan({
+      now: () => NOW,
+      listGitHubIssues,
+      startCodingJob,
+    });
+
+    expect(first).toEqual({ scanned: 1, matched: 0, skipped: 1 });
+    expect(second).toEqual({ scanned: 1, matched: 1, skipped: 0 });
+    expect(startCodingJob).toHaveBeenCalledTimes(2);
+    expect(startCodingJob).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ issueNumber: 123 }),
+    );
+    expect(
+      getAgentSubscriptionEventByDedupeKey(
+        buildSubscriptionDedupeKey({
+          sourceType: 'github',
+          sourceId: 'henrik/nanocrab',
+          externalEventId: 'issue-123',
+          agentProfileId: profile.id,
+        }),
+      ),
+    ).toMatchObject({
+      subscriptionId: subscription.id,
+      runId: 'job-123',
+      status: 'matched',
+    });
+    expect(
+      listAgentProfileActivity(profile.id, 10).some(
+        (activity) =>
+          activity.subscriptionId === subscription.id &&
           activity.kind === 'error' &&
           activity.summary.includes('job backend unavailable'),
       ),

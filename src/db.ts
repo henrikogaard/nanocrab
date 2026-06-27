@@ -2125,6 +2125,54 @@ export function getAgentSubscriptionEventByDedupeKey(
   return row ? mapAgentSubscriptionEventRow(row) : undefined;
 }
 
+export function markReservedAgentSubscriptionEventMatched(input: {
+  dedupeKey: string;
+  subscriptionId: string;
+  agentProfileId: string;
+  runId: string | null;
+}): AgentSubscriptionEvent | undefined {
+  db.prepare(
+    `
+    UPDATE agent_subscription_events
+    SET status = 'matched',
+        run_id = ?
+    WHERE dedupe_key = ?
+      AND subscription_id = ?
+      AND agent_profile_id = ?
+      AND status = 'reserved'
+      AND run_id IS NULL
+  `,
+  ).run(
+    input.runId,
+    input.dedupeKey,
+    input.subscriptionId,
+    input.agentProfileId,
+  );
+
+  return getAgentSubscriptionEventByDedupeKey(input.dedupeKey);
+}
+
+export function deleteReservedAgentSubscriptionEvent(input: {
+  dedupeKey: string;
+  subscriptionId: string;
+  agentProfileId: string;
+}): boolean {
+  const result = db
+    .prepare(
+      `
+      DELETE FROM agent_subscription_events
+      WHERE dedupe_key = ?
+        AND subscription_id = ?
+        AND agent_profile_id = ?
+        AND status = 'reserved'
+        AND run_id IS NULL
+    `,
+    )
+    .run(input.dedupeKey, input.subscriptionId, input.agentProfileId);
+
+  return result.changes > 0;
+}
+
 export function insertAgentProfileActivity(
   input: NewAgentProfileActivity,
 ): AgentProfileActivity {

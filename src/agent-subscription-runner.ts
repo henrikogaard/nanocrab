@@ -17,8 +17,10 @@ import {
   updateAgentSubscription,
 } from './agent-profiles.js';
 import {
+  deleteReservedAgentSubscriptionEvent,
   getAgentSubscriptionEventByDedupeKey,
   getRecentUserMessages,
+  markReservedAgentSubscriptionEventMatched,
 } from './db.js';
 import type {
   AgentProfile,
@@ -181,6 +183,11 @@ async function scanGitHubSubscription(
         });
         runId = job.id;
       } catch (err) {
+        deleteReservedAgentSubscriptionEvent({
+          dedupeKey,
+          subscriptionId: subscription.id,
+          agentProfileId: profile.id,
+        });
         recordActivity(profile, subscription, {
           kind: 'error',
           sourceType: 'github',
@@ -192,6 +199,12 @@ async function scanGitHubSubscription(
       }
     }
 
+    markReservedAgentSubscriptionEventMatched({
+      dedupeKey,
+      subscriptionId: subscription.id,
+      agentProfileId: profile.id,
+      runId,
+    });
     recordActivity(profile, subscription, {
       kind: runId ? 'run_started' : 'subscription_match',
       sourceType: 'github',
