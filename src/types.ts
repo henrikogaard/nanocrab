@@ -191,6 +191,34 @@ export interface AgentSubscription {
   updatedAt: string;
 }
 
+export interface AgentSubscriptionEvent {
+  id: string;
+  subscriptionId: string;
+  agentProfileId: string;
+  dedupeKey: string;
+  sourceType: AgentSubscriptionSourceType;
+  sourceId: string;
+  externalEventId: string;
+  runId: string | null;
+  status: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface NewAgentSubscriptionEvent {
+  id: string;
+  subscriptionId: string;
+  agentProfileId: string;
+  dedupeKey: string;
+  sourceType: AgentSubscriptionSourceType;
+  sourceId: string;
+  externalEventId: string;
+  runId: string | null;
+  status: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface AgentProfileActivity {
   id: string;
   agentProfileId: string;
@@ -201,6 +229,20 @@ export interface AgentProfileActivity {
     | 'run_started'
     | 'approval_blocked'
     | 'error';
+  sourceType: string;
+  sourceId: string | null;
+  summary: string;
+  runId: string | null;
+  approvalId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface NewAgentProfileActivity {
+  id: string;
+  agentProfileId: string;
+  subscriptionId: string | null;
+  kind: AgentProfileActivity['kind'];
   sourceType: string;
   sourceId: string | null;
   summary: string;

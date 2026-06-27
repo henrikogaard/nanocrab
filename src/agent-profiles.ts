@@ -1,12 +1,30 @@
 import { randomUUID } from 'crypto';
 
 import { isAgentProvider } from './agent-provider.js';
+import {
+  getAgentProfileRow,
+  getAgentProfileRowByHandle,
+  getAgentSubscriptionEventByDedupeKey,
+  insertAgentProfile,
+  insertAgentProfileActivity,
+  insertAgentSubscription,
+  insertAgentSubscriptionEvent,
+  listAgentProfileActivityRows,
+  listAgentProfileRows,
+  listAgentSubscriptionsForProfile,
+  updateAgentProfile as updateAgentProfileRow,
+} from './db.js';
 import type {
   AgentProfile,
+  AgentProfileActivity,
   AgentProfileTaskKind,
   AgentProfileToolPolicy,
+  AgentSubscription,
   AgentSubscriptionAutonomyMode,
+  AgentSubscriptionEvent,
   AgentSubscriptionSourceType,
+  NewAgentProfileActivity,
+  NewAgentSubscriptionEvent,
 } from './types.js';
 
 const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{1,31}$/;
@@ -52,6 +70,28 @@ export interface AgentProfileInput {
     autonomousSendRequiresApproval?: boolean;
   };
 }
+
+export interface AgentSubscriptionInput {
+  agentProfileId: string;
+  sourceType: AgentSubscriptionSourceType;
+  enabled?: boolean;
+  filters?: Record<string, unknown>;
+  taskKind: AgentProfileTaskKind;
+  autonomyMode?: AgentSubscriptionAutonomyMode;
+  lastSeenAt?: string | null;
+  lastMatchedAt?: string | null;
+  lastRunId?: string | null;
+}
+
+export type NewAgentSubscriptionEventInput = Omit<
+  NewAgentSubscriptionEvent,
+  'id' | 'createdAt'
+>;
+
+export type NewAgentProfileActivityInput = Omit<
+  NewAgentProfileActivity,
+  'id' | 'createdAt'
+>;
 
 export function normalizeAgentHandle(value: string): string {
   return value.trim().replace(/^@+/, '').toLowerCase();
@@ -119,6 +159,136 @@ export function buildAgentProfile(input: AgentProfileInput): AgentProfile {
   };
 }
 
+export function createAgentProfile(input: AgentProfileInput): AgentProfile {
+  return insertAgentProfile(buildAgentProfile(input));
+}
+
+export function updateAgentProfile(input: AgentProfile): AgentProfile {
+  validateAgentProfileInput({
+    handle: input.handle,
+    displayName: input.displayName,
+    provider: input.provider,
+    toolPolicy: input.toolPolicy,
+  });
+
+  return updateAgentProfileRow({
+    ...input,
+    handle: normalizeAgentHandle(input.handle),
+    displayName: input.displayName.trim(),
+    avatar: nullableString(input.avatar),
+    description: nullableString(input.description),
+    personality: nullableString(input.personality),
+    providerProfileId: nullableString(input.providerProfileId),
+    model: nullableString(input.model),
+    allowedMcpServers:
+      input.allowedMcpServers === null
+        ? null
+        : sanitizeStringList(input.allowedMcpServers),
+    skills: sanitizeStringList(input.skills),
+    memoryScopes: sanitizeStringList(input.memoryScopes),
+    taskKinds: sanitizeTaskKinds(input.taskKinds),
+    channelBindings: sanitizeChannelBindings(input.channelBindings),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function getAgentProfile(id: string): AgentProfile | undefined {
+  return getAgentProfileRow(id);
+}
+
+export function getAgentProfileByHandle(
+  handle: string,
+): AgentProfile | undefined {
+  return getAgentProfileRowByHandle(normalizeAgentHandle(handle));
+}
+
+export function listAgentProfiles(): AgentProfile[] {
+  return listAgentProfileRows();
+}
+
+export function createAgentSubscription(
+  input: AgentSubscriptionInput,
+): AgentSubscription {
+  validateSubscriptionShape({
+    sourceType: input.sourceType,
+    taskKind: input.taskKind,
+    autonomyMode: input.autonomyMode,
+  });
+
+  if (!getAgentProfileRow(input.agentProfileId)) {
+    throw new Error(`agent profile not found: ${input.agentProfileId}`);
+  }
+
+  const now = new Date().toISOString();
+  return insertAgentSubscription({
+    id: `sub_${randomUUID()}`,
+    agentProfileId: input.agentProfileId,
+    sourceType: input.sourceType,
+    enabled: input.enabled !== false,
+    filters: input.filters || {},
+    taskKind: input.taskKind,
+    autonomyMode: input.autonomyMode || 'investigate_then_pause',
+    lastSeenAt: input.lastSeenAt ?? null,
+    lastMatchedAt: input.lastMatchedAt ?? null,
+    lastRunId: input.lastRunId ?? null,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+export function listAgentSubscriptions(
+  agentProfileId: string,
+): AgentSubscription[] {
+  return listAgentSubscriptionsForProfile(agentProfileId);
+}
+
+export function recordAgentSubscriptionEvent(
+  input: NewAgentSubscriptionEventInput,
+): AgentSubscriptionEvent {
+  const existing = getAgentSubscriptionEventByDedupeKey(input.dedupeKey);
+  if (existing) return existing;
+
+  validateSubscriptionSourceType(input.sourceType);
+
+  const event: NewAgentSubscriptionEvent = {
+    ...input,
+    id: `sub_event_${randomUUID()}`,
+    runId: input.runId ?? null,
+    metadata: input.metadata || {},
+    createdAt: new Date().toISOString(),
+  };
+
+  try {
+    return insertAgentSubscriptionEvent(event);
+  } catch (err) {
+    const deduped = getAgentSubscriptionEventByDedupeKey(input.dedupeKey);
+    if (deduped) return deduped;
+    throw err;
+  }
+}
+
+export function recordAgentProfileActivity(
+  input: NewAgentProfileActivityInput,
+): AgentProfileActivity {
+  return insertAgentProfileActivity({
+    ...input,
+    id: `agent_activity_${randomUUID()}`,
+    subscriptionId: input.subscriptionId ?? null,
+    sourceId: input.sourceId ?? null,
+    runId: input.runId ?? null,
+    approvalId: input.approvalId ?? null,
+    metadata: input.metadata || {},
+    createdAt: new Date().toISOString(),
+  });
+}
+
+export function listAgentProfileActivity(
+  agentProfileId: string,
+  limit?: number,
+): AgentProfileActivity[] {
+  return listAgentProfileActivityRows(agentProfileId, limit);
+}
+
 export function buildSubscriptionDedupeKey(input: {
   sourceType: AgentSubscriptionSourceType;
   sourceId: string;
@@ -138,9 +308,7 @@ export function validateSubscriptionShape(input: {
   taskKind: AgentProfileTaskKind;
   autonomyMode?: AgentSubscriptionAutonomyMode;
 }): void {
-  if (!SUBSCRIPTION_SOURCE_TYPES.includes(input.sourceType)) {
-    throw new Error(`unsupported subscription sourceType: ${input.sourceType}`);
-  }
+  validateSubscriptionSourceType(input.sourceType);
 
   if (!TASK_KINDS.includes(input.taskKind)) {
     throw new Error(`unsupported subscription taskKind: ${input.taskKind}`);
@@ -150,6 +318,14 @@ export function validateSubscriptionShape(input: {
     throw new Error(
       `unsupported subscription autonomyMode: ${input.autonomyMode}`,
     );
+  }
+}
+
+function validateSubscriptionSourceType(
+  sourceType: AgentSubscriptionSourceType,
+): void {
+  if (!SUBSCRIPTION_SOURCE_TYPES.includes(sourceType)) {
+    throw new Error(`unsupported subscription sourceType: ${sourceType}`);
   }
 }
 
@@ -163,6 +339,7 @@ function sanitizeStringList(values: string[] | null | undefined): string[] {
   if (!Array.isArray(values)) return [];
 
   return values
+    .filter((value): value is string => typeof value === 'string')
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
 }
