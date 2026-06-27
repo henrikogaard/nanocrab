@@ -162,7 +162,11 @@ describe('/api/agent-profiles', () => {
 
   it('POST /api/agent-profiles rejects duplicate handles', async () => {
     await withServer(async (base) => {
-      const first = await postJson(base, '/api/agent-profiles', profileRequest());
+      const first = await postJson(
+        base,
+        '/api/agent-profiles',
+        profileRequest(),
+      );
       expect(first.res.status).toBe(200);
 
       const { res, body } = await postJson<{ error: string }>(
@@ -234,7 +238,9 @@ describe('/api/agent-profiles', () => {
       });
       expect(repoFixer?.lastActivityAt).toEqual(expect.any(String));
 
-      const manualHost = body.find((profile) => profile.handle === 'manualhost');
+      const manualHost = body.find(
+        (profile) => profile.handle === 'manualhost',
+      );
       expect(manualHost).toMatchObject({
         enabled: false,
         rosterState: 'disabled',
