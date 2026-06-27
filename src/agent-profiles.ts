@@ -280,23 +280,38 @@ export function updateAgentSubscription(
     throw new Error(`Agent subscription not found: ${subscriptionId}`);
   }
 
+  const sanitizedPatch = sanitizeSubscriptionPatch(patch);
+
   const merged: AgentSubscription = {
     ...existing,
-    enabled: patch.enabled === undefined ? existing.enabled : patch.enabled,
-    filters: patch.filters === undefined ? existing.filters : patch.filters,
-    taskKind: patch.taskKind === undefined ? existing.taskKind : patch.taskKind,
+    enabled:
+      sanitizedPatch.enabled === undefined
+        ? existing.enabled
+        : sanitizedPatch.enabled,
+    filters:
+      sanitizedPatch.filters === undefined
+        ? existing.filters
+        : sanitizedPatch.filters,
+    taskKind:
+      sanitizedPatch.taskKind === undefined
+        ? existing.taskKind
+        : sanitizedPatch.taskKind,
     autonomyMode:
-      patch.autonomyMode === undefined
+      sanitizedPatch.autonomyMode === undefined
         ? existing.autonomyMode
-        : patch.autonomyMode,
+        : sanitizedPatch.autonomyMode,
     lastSeenAt:
-      patch.lastSeenAt === undefined ? existing.lastSeenAt : patch.lastSeenAt,
+      sanitizedPatch.lastSeenAt === undefined
+        ? existing.lastSeenAt
+        : sanitizedPatch.lastSeenAt,
     lastMatchedAt:
-      patch.lastMatchedAt === undefined
+      sanitizedPatch.lastMatchedAt === undefined
         ? existing.lastMatchedAt
-        : patch.lastMatchedAt,
+        : sanitizedPatch.lastMatchedAt,
     lastRunId:
-      patch.lastRunId === undefined ? existing.lastRunId : patch.lastRunId,
+      sanitizedPatch.lastRunId === undefined
+        ? existing.lastRunId
+        : sanitizedPatch.lastRunId,
     id: existing.id,
     agentProfileId: existing.agentProfileId,
     createdAt: existing.createdAt,
@@ -310,6 +325,66 @@ export function updateAgentSubscription(
   });
 
   return updateAgentSubscriptionRow(merged);
+}
+
+function sanitizeSubscriptionPatch(
+  patch: AgentSubscriptionUpdateInput,
+): AgentSubscriptionUpdateInput {
+  const rawPatch = patch as Record<string, unknown>;
+  const sanitized: AgentSubscriptionUpdateInput = {};
+
+  if (rawPatch.enabled !== undefined) {
+    if (typeof rawPatch.enabled !== 'boolean') {
+      throw new Error('agent subscription enabled must be a boolean');
+    }
+    sanitized.enabled = rawPatch.enabled;
+  }
+
+  if (rawPatch.filters !== undefined) {
+    if (!isPlainRecord(rawPatch.filters)) {
+      throw new Error('agent subscription filters must be a plain object');
+    }
+    sanitized.filters = { ...rawPatch.filters };
+  }
+
+  if (rawPatch.taskKind !== undefined) {
+    sanitized.taskKind = rawPatch.taskKind as AgentProfileTaskKind;
+  }
+
+  if (rawPatch.autonomyMode !== undefined) {
+    sanitized.autonomyMode =
+      rawPatch.autonomyMode as AgentSubscriptionAutonomyMode;
+  }
+
+  sanitizeNullableStringPatchField(rawPatch, sanitized, 'lastSeenAt');
+  sanitizeNullableStringPatchField(rawPatch, sanitized, 'lastMatchedAt');
+  sanitizeNullableStringPatchField(rawPatch, sanitized, 'lastRunId');
+
+  return sanitized;
+}
+
+function sanitizeNullableStringPatchField(
+  rawPatch: Record<string, unknown>,
+  sanitized: AgentSubscriptionUpdateInput,
+  field: 'lastSeenAt' | 'lastMatchedAt' | 'lastRunId',
+): void {
+  const value = rawPatch[field];
+  if (value === undefined) return;
+
+  if (value !== null && typeof value !== 'string') {
+    throw new Error(`agent subscription ${field} must be a string or null`);
+  }
+
+  sanitized[field] = value;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 export function recordAgentSubscriptionEvent(

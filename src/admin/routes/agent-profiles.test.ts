@@ -356,6 +356,39 @@ describe('/api/agent-profiles', () => {
     });
   });
 
+  it.each([
+    ['enabled', { enabled: 'yes' }],
+    ['filters', { filters: [] }],
+  ])(
+    'PUT /api/agent-profiles/:id/subscriptions/:subscriptionId rejects invalid %s patches',
+    async (field, patch) => {
+      await withServer(async (base) => {
+        const created = await postJson<{
+          profile: { id: string };
+        }>(base, '/api/agent-profiles', profileRequest());
+        expect(created.res.status).toBe(200);
+
+        const subscription = await postJson<{
+          subscription: { id: string };
+        }>(
+          base,
+          `/api/agent-profiles/${created.body.profile.id}/subscriptions`,
+          subscriptionRequest(),
+        );
+        expect(subscription.res.status).toBe(200);
+
+        const { res, body } = await putJson<{ error: string }>(
+          base,
+          `/api/agent-profiles/${created.body.profile.id}/subscriptions/${subscription.body.subscription.id}`,
+          patch,
+        );
+
+        expect(res.status).toBe(400);
+        expect(body.error).toMatch(new RegExp(field, 'i'));
+      });
+    },
+  );
+
   it('POST /api/agent-profiles/:id/subscriptions/:subscriptionId/disable flips enabled false and updates roster count', async () => {
     await withServer(async (base) => {
       const created = await postJson<{
