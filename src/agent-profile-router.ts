@@ -50,26 +50,38 @@ export function resolveAgentProfileInvocation(
   if (!firstMention) return null;
 
   const profiles = input.profiles ?? listAgentProfiles();
-  const profile = profiles.find(
-    (candidate) =>
-      normalizeAgentHandle(candidate.handle) === firstMention.handle,
-  );
+  let firstDisabledMention: MentionMatch | null = null;
 
-  if (!profile || !profile.enabled) {
-    const disabledProfile = profile && !profile.enabled;
+  for (const mention of mentions) {
+    const matchingProfiles = profiles.filter(
+      (candidate) => normalizeAgentHandle(candidate.handle) === mention.handle,
+    );
+    if (matchingProfiles.length === 0) continue;
+
+    const enabledProfile = matchingProfiles.find(
+      (candidate) => candidate.enabled,
+    );
+    if (enabledProfile) {
+      return {
+        profile: enabledProfile,
+        profileId: enabledProfile.id,
+        handle: mention.handle,
+        taskText: stripMention(input.text, mention),
+      };
+    }
+
+    firstDisabledMention ??= mention;
+  }
+
+  if (firstDisabledMention) {
     throw new AgentProfileResolutionError(
-      disabledProfile
-        ? `Agent profile @${firstMention.handle} is disabled`
-        : `No enabled agent profile matched @${firstMention.handle}`,
+      `Agent profile @${firstDisabledMention.handle} is disabled`,
     );
   }
 
-  return {
-    profile,
-    profileId: profile.id,
-    handle: firstMention.handle,
-    taskText: stripMention(input.text, firstMention),
-  };
+  throw new AgentProfileResolutionError(
+    `No enabled agent profile matched @${firstMention.handle}`,
+  );
 }
 
 function findMentionMatches(text: string): MentionMatch[] {
@@ -109,10 +121,9 @@ function isUrlLikeMentionToken(text: string, mentionStart: number): boolean {
 
 function stripMention(text: string, mention: MentionMatch): string {
   const beforeMention = text.slice(0, mention.start);
-  const afterMention =
-    beforeMention.trim().length === 0
-      ? text.slice(mention.end).replace(/^[,;:.!?]+\s*/, '')
-      : text.slice(mention.end);
+  const afterMention = text
+    .slice(mention.end)
+    .replace(/^\s*[,;:.!?]+\s*/, ' ');
 
   return `${beforeMention}${afterMention}`
     .replace(/[ \t]{2,}/g, ' ')

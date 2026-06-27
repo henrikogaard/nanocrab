@@ -58,6 +58,32 @@ describe('agent profile direct invocation router', () => {
     });
   });
 
+  it('removes mid-sentence punctuation with the addressed mention', () => {
+    expect(
+      resolveAgentProfileInvocation({
+        text: 'Could @RepoFixer, fix issue 12',
+        profiles: [repoFixer],
+      }),
+    ).toMatchObject({
+      profileId: repoFixer.id,
+      handle: 'repofixer',
+      taskText: 'Could fix issue 12',
+    });
+  });
+
+  it('resolves the first valid profile mention after an unknown human mention', () => {
+    expect(
+      resolveAgentProfileInvocation({
+        text: '@Human please ask @RepoFixer to fix issue 12',
+        profiles: [repoFixer],
+      }),
+    ).toMatchObject({
+      profileId: repoFixer.id,
+      handle: 'repofixer',
+      taskText: '@Human please ask to fix issue 12',
+    });
+  });
+
   it('returns empty task text for mention-only messages', () => {
     expect(
       resolveAgentProfileInvocation({
@@ -81,6 +107,21 @@ describe('agent profile direct invocation router', () => {
     expect(() =>
       resolveAgentProfileInvocation({
         text: '@manual_host check this',
+        profiles: [disabled],
+      }),
+    ).toThrow('Agent profile @manual_host is disabled');
+  });
+
+  it('rejects a later disabled profile when earlier mentions are unknown', () => {
+    const disabled = buildAgentProfile({
+      handle: 'Manual_Host',
+      displayName: 'Manual Host',
+      enabled: false,
+    });
+
+    expect(() =>
+      resolveAgentProfileInvocation({
+        text: '@Human please ask @manual_host to check this',
         profiles: [disabled],
       }),
     ).toThrow('Agent profile @manual_host is disabled');
@@ -119,5 +160,14 @@ describe('agent profile direct invocation router', () => {
         profiles: [repoFixer],
       }),
     ).toThrow('No enabled agent profile matched @unknownagent');
+  });
+
+  it('reports the first mention when no mentioned handle matches a profile', () => {
+    expect(() =>
+      resolveAgentProfileInvocation({
+        text: '@Human please ask @UnknownAgent to fix issue 12',
+        profiles: [repoFixer],
+      }),
+    ).toThrow('No enabled agent profile matched @human');
   });
 });
