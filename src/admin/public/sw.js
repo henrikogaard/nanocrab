@@ -1,5 +1,5 @@
 // NanoCrab PWA Service Worker — network-first with offline fallback
-const CACHE_NAME = 'nanocrab-v8-rc5';
+const CACHE_NAME = 'nanocrab-v8-rc6';
 const OFFLINE_PAGE = '/offline.html';
 const NOTIFICATION_TARGETS = new Set([
   'dashboard',

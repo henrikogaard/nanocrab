@@ -3,12 +3,19 @@ import fs from 'fs';
 import path from 'path';
 
 const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
+const recoveryPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/recovery.js',
+);
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
 
 describe('Route recovery UI', () => {
   it('renders page errors as a workspace recovery surface', () => {
-    const source = fs.readFileSync(appPath, 'utf8');
+    const appSource = fs.readFileSync(appPath, 'utf8');
+    const source = fs.readFileSync(recoveryPath, 'utf8');
 
+    expect(appSource).toContain('function renderPageError');
+    expect(appSource).toContain('window.NanoRecovery.renderPageError');
     expect(source).toContain('function renderPageError');
     expect(source).toContain('function routeRecoveryBriefText');
     expect(source).toContain('function renderRouteRecoveryActions');
@@ -36,16 +43,19 @@ describe('Route recovery UI', () => {
   });
 
   it('uses a custom not-found route instead of a plain dead-end card', () => {
-    const source = fs.readFileSync(appPath, 'utf8');
+    const appSource = fs.readFileSync(appPath, 'utf8');
+    const source = fs.readFileSync(recoveryPath, 'utf8');
 
+    expect(appSource).toContain('function renderNotFoundPage');
+    expect(appSource).toContain('window.NanoRecovery.renderNotFoundPage');
     expect(source).toContain('function renderNotFoundPage');
     expect(source).toContain('Route not found');
     expect(source).toContain('This workspace route is not available');
     expect(source).toContain('Copilot for plain chat');
     expect(source).toContain('Cowork for projects and agents');
     expect(source).toContain('Code for repositories');
-    expect(source).toContain('else renderNotFoundPage(el, page);');
-    expect(source).not.toContain(
+    expect(appSource).toContain('else renderNotFoundPage(el, page);');
+    expect(appSource).not.toContain(
       'else el.innerHTML = \'<div class="card empty">Page not found</div>\'',
     );
   });

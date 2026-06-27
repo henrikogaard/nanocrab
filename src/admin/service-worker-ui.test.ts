@@ -27,7 +27,7 @@ describe('Service worker offline fallback UI', () => {
   it('routes notification clicks only to known workspace resume targets', () => {
     const source = fs.readFileSync(swPath, 'utf8');
 
-    expect(source).toContain("const CACHE_NAME = 'nanocrab-v8-rc5'");
+    expect(source).toContain("const CACHE_NAME = 'nanocrab-v8-rc6'");
     expect(source).toContain('const NOTIFICATION_TARGETS = new Set([');
     expect(source).toContain("'chat'");
     expect(source).toContain("'projects'");

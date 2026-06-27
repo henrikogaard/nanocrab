@@ -4,10 +4,24 @@ import path from 'path';
 
 const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
+const sharedUiPath = path.join(process.cwd(), 'src/admin/public/ui/shared.js');
+const feedbackUiPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/feedback.js',
+);
+const shellUiPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/shell-states.js',
+);
+const recoveryUiPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/recovery.js',
+);
 
 describe('App shell accessibility UI', () => {
   it('adds a keyboard skip link and main content landmark to the dashboard shell', () => {
     const source = fs.readFileSync(appPath, 'utf8');
+    const shellSource = fs.readFileSync(shellUiPath, 'utf8');
 
     expect(source).toContain(
       '<a class="skip-link" href="#page-content">Skip to content</a>',
@@ -17,18 +31,21 @@ describe('App shell accessibility UI', () => {
     );
     expect(source).not.toContain('Mock dashboard mode: sample data only.');
     expect(source).toContain('window.NanoDataHealth.renderAlerts(alerts');
-    expect(source).toContain('function renderShellLoadingState');
+    expect(source).toContain(
+      'const renderShellLoadingState = window.NanoShell.renderShellLoadingState;',
+    );
+    expect(shellSource).toContain('function renderShellLoadingState');
     expect(source).toContain(
       '<div id="page-content" tabindex="-1">${renderShellLoadingState()}</div>',
     );
-    expect(source).toContain('Loading workspace');
-    expect(source).toContain(
+    expect(shellSource).toContain('Loading workspace');
+    expect(shellSource).toContain(
       'Preparing navigation, live status, and page tools.',
     );
     expect(source).toContain('Loading chats');
     expect(source).toContain('Loading workspace tool');
-    expect(source).toContain('Loading tab');
-    expect(source).toContain('shell-loading-state-compact');
+    expect(shellSource).toContain('Loading tab');
+    expect(shellSource).toContain('shell-loading-state-compact');
     expect(source).not.toContain(
       '<div id="page-content" tabindex="-1"><div class="loading">Loading</div></div>',
     );
@@ -74,6 +91,10 @@ describe('App shell accessibility UI', () => {
   it('loads shared data-health helpers before the shell and surfaces plugin registry issues', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
+    const sharedSource = fs.readFileSync(sharedUiPath, 'utf8');
+    const feedbackSource = fs.readFileSync(feedbackUiPath, 'utf8');
+    const shellSource = fs.readFileSync(shellUiPath, 'utf8');
+    const recoverySource = fs.readFileSync(recoveryUiPath, 'utf8');
     const indexSource = fs.readFileSync(
       path.join(process.cwd(), 'src/admin/public/index.html'),
       'utf8',
@@ -83,15 +104,39 @@ describe('App shell accessibility UI', () => {
       'utf8',
     );
 
+    expect(indexSource).toContain('/ui/shared.js');
     expect(indexSource).toContain('/ui/data-health.js');
+    expect(indexSource).toContain('/ui/feedback.js');
+    expect(indexSource).toContain('/ui/shell-states.js');
+    expect(indexSource).toContain('/ui/recovery.js');
+    expect(indexSource.indexOf('/ui/shared.js')).toBeLessThan(
+      indexSource.indexOf('/ui/data-health.js'),
+    );
     expect(indexSource.indexOf('/ui/data-health.js')).toBeLessThan(
+      indexSource.indexOf('/ui/feedback.js'),
+    );
+    expect(indexSource.indexOf('/ui/feedback.js')).toBeLessThan(
+      indexSource.indexOf('/ui/shell-states.js'),
+    );
+    expect(indexSource.indexOf('/ui/shell-states.js')).toBeLessThan(
+      indexSource.indexOf('/ui/recovery.js'),
+    );
+    expect(indexSource.indexOf('/ui/recovery.js')).toBeLessThan(
       indexSource.indexOf('/app.js'),
     );
+    expect(sharedSource).toContain('window.NanoShared');
+    expect(sharedSource).toContain('window.esc = esc');
     expect(helperSource).toContain('window.NanoDataHealth');
+    expect(feedbackSource).toContain('window.NanoFeedback');
+    expect(shellSource).toContain('window.NanoShell');
+    expect(recoverySource).toContain('window.NanoRecovery');
     expect(helperSource).toContain('loadPluginsList');
     expect(helperSource).toContain('renderAlerts');
     expect(helperSource).toContain('if (!/^[a-z0-9_-]+$/i.test(type)) type =');
     expect(helperSource).toContain('Plugin registry unavailable');
+    expect(appSource).toContain(
+      "const loadShellPluginsList = (context = 'workspace shell')",
+    );
     expect(appSource).toContain(
       'window.NanoDataHealth.loadPluginsList(api, context)',
     );
@@ -114,31 +159,30 @@ describe('App shell accessibility UI', () => {
   });
 
   it('makes consolidated workspace tabs keyboard-accessible and recoverable', () => {
-    const appSource = fs.readFileSync(appPath, 'utf8');
+    const shellSource = fs.readFileSync(shellUiPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
-    const tabBlock = appSource.slice(
-      appSource.indexOf('function renderTabLoadErrorState'),
-      appSource.indexOf('// --- Consolidated render functions ---'),
-    );
+    const appSource = fs.readFileSync(appPath, 'utf8');
 
-    expect(tabBlock).toContain('function renderTabLoadErrorState');
-    expect(tabBlock).toContain('role="tablist"');
-    expect(tabBlock).toContain('role="tab"');
-    expect(tabBlock).toContain('role="tabpanel"');
-    expect(tabBlock).toContain('aria-selected');
-    expect(tabBlock).toContain('aria-controls');
-    expect(tabBlock).toContain('handleTabKeydown');
-    expect(tabBlock).toContain('ArrowLeft');
-    expect(tabBlock).toContain('ArrowRight');
-    expect(tabBlock).toContain('Home');
-    expect(tabBlock).toContain('End');
-    expect(tabBlock).toContain('Tab unavailable');
-    expect(tabBlock).toContain('Retry tab');
-    expect(tabBlock).toContain('loadedTabs.delete(tabId)');
-    expect(tabBlock).toContain(
+    expect(appSource).not.toContain('function renderTabLoadErrorState');
+    expect(shellSource).toContain('function renderTabLoadErrorState');
+    expect(shellSource).toContain('function renderTabs');
+    expect(shellSource).toContain('role="tablist"');
+    expect(shellSource).toContain('role="tab"');
+    expect(shellSource).toContain('role="tabpanel"');
+    expect(shellSource).toContain('aria-selected');
+    expect(shellSource).toContain('aria-controls');
+    expect(shellSource).toContain('handleTabKeydown');
+    expect(shellSource).toContain('ArrowLeft');
+    expect(shellSource).toContain('ArrowRight');
+    expect(shellSource).toContain('Home');
+    expect(shellSource).toContain('End');
+    expect(shellSource).toContain('Tab unavailable');
+    expect(shellSource).toContain('Retry tab');
+    expect(shellSource).toContain('loaded.delete(tabId)');
+    expect(shellSource).toContain(
       'renderTabLoadErrorState(containerId, tabId, err)',
     );
-    expect(tabBlock).not.toContain(
+    expect(shellSource).not.toContain(
       "<div class=\"tab ${t.id === defaultTab ? 'active' : ''}\"",
     );
     expect(styleSource).toContain('.tab:focus-visible');
@@ -247,18 +291,15 @@ describe('App shell accessibility UI', () => {
   });
 
   it('uses class-based toast layout, tones, and dismissal state', () => {
-    const appSource = fs.readFileSync(appPath, 'utf8');
+    const feedbackSource = fs.readFileSync(feedbackUiPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
-    const toastBlock = appSource.slice(
-      appSource.indexOf('function toast(msg'),
-      appSource.indexOf('function inlineConfirm'),
-    );
 
-    expect(toastBlock).toContain("container.className = 'toast-container'");
-    expect(toastBlock).toContain('el.className = `toast toast-${tone}`');
-    expect(toastBlock).toContain("el.classList.add('is-leaving')");
-    expect(toastBlock).not.toContain('style.cssText');
-    expect(toastBlock).not.toContain('style.opacity');
+    expect(feedbackSource).toContain("container.className = 'toast-container'");
+    expect(feedbackSource).toContain("el.className = 'toast toast-' + tone");
+    expect(feedbackSource).toContain("el.classList.add('is-leaving')");
+    expect(feedbackSource).toContain('window.toast = toast');
+    expect(feedbackSource).not.toContain('style.cssText');
+    expect(feedbackSource).not.toContain('style.opacity');
     expect(styleSource).toContain('.toast-container');
     expect(styleSource).toContain('.toast-success');
     expect(styleSource).toContain('.toast-error');
@@ -268,19 +309,25 @@ describe('App shell accessibility UI', () => {
 
   it('uses an in-app manual copy panel when clipboard access is blocked', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
+    const feedbackSource = fs.readFileSync(feedbackUiPath, 'utf8');
+    const recoverySource = fs.readFileSync(recoveryUiPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
 
-    expect(appSource).toContain('window.copyTextWithFallback');
-    expect(appSource).toContain('function showCopyFallback(title, text)');
+    expect(appSource).toContain(
+      'const copyTextWithFallback = window.NanoFeedback.copyTextWithFallback;',
+    );
+    expect(feedbackSource).toContain('window.copyTextWithFallback');
+    expect(feedbackSource).toContain('function showCopyFallback(title, text)');
     expect(appSource).toContain('window.shareContent = async function');
     expect(appSource).toContain(
       "copyTextWithFallback(text, 'Shared text copied', title || 'Copy shared text')",
     );
-    expect(appSource).toContain('copy-fallback-overlay');
-    expect(appSource).toContain('copy-fallback-text');
-    expect(appSource).toContain(
+    expect(feedbackSource).toContain('copy-fallback-overlay');
+    expect(feedbackSource).toContain('copy-fallback-text');
+    expect(feedbackSource).toContain(
       'Clipboard access blocked. Copy from the panel.',
     );
+    expect(recoverySource).toContain('window.copyRouteRecoveryBrief');
     expect(appSource).not.toContain(
       'navigator.clipboard.writeText(text).catch(() => {})',
     );

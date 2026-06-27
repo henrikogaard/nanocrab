@@ -2,6 +2,11 @@
 
 const app = document.getElementById('app');
 let currentPage = '';
+const esc = window.NanoShared.esc;
+const toast = window.NanoFeedback.toast;
+const copyTextWithFallback = window.NanoFeedback.copyTextWithFallback;
+const renderShellLoadingState = window.NanoShell.renderShellLoadingState;
+const renderTabs = window.NanoShell.renderTabs;
 // Seed from the persisted last-used mode so deep-links to admin/More pages
 // (which don't resolve to a mode) still show the correct mode in the switcher.
 let activeMode =
@@ -162,7 +167,7 @@ function loadSidebarWidth() {
   applySidebarWidth(saved || SIDEBAR_WIDTH_DEFAULT);
 }
 
-const loadPluginsList = (context = 'workspace shell') =>
+const loadShellPluginsList = (context = 'workspace shell') =>
   window.NanoDataHealth.loadPluginsList(api, context);
 
 function initSidebarResize() {
@@ -245,86 +250,13 @@ async function api(path, opts = {}) {
 }
 
 function renderPageError(el, err, title = 'Could not load this page') {
-  window._routeRecoveryState = {
-    page: currentPage || 'dashboard',
-    title,
-    message: err?.message || 'Unknown dashboard error',
-    retryAfter: err?.retryAfter || '',
-    path: err?.path || '',
-    status: err?.status || '',
-  };
-  const retry = err?.retryAfter
-    ? `<p class="route-recovery-retry">Retry after ${esc(err.retryAfter)} seconds.</p>`
-    : '';
-  el.innerHTML = `
-    <section class="route-recovery-card is-error">
-      <span class="route-recovery-kicker">Page recovery</span>
-      <h2>${esc(title)}</h2>
-      <p>Try again or move to another workspace lane.</p>
-      <div class="route-recovery-facts">
-        <span>${esc(err?.message || 'Unknown dashboard error')}</span>
-        ${retry}
-      </div>
-      ${renderRouteRecoveryActions(currentPage || 'dashboard', true)}
-    </section>`;
-}
-
-function routeRecoveryBriefText(state = {}) {
-  return [
-    'NanoCrab route recovery brief',
-    '',
-    `Page: ${state.page || 'unknown'}`,
-    `Title: ${state.title || 'Route recovery'}`,
-    `Error: ${state.message || 'unknown'}`,
-    `Request path: ${state.path || 'unknown'}`,
-    `HTTP status: ${state.status || 'unknown'}`,
-    `Retry after: ${state.retryAfter || 'not provided'}`,
-    '',
-    'Recovery routes:',
-    '- Copilot: switch to plain conversation or draft the next request.',
-    '- Cowork: preserve project work, files, artifacts, and MCP context.',
-    '- Code: inspect repository or implementation issues.',
-    '- Help: confirm the correct surface and route.',
-    '',
-    'Operator guidance:',
-    '- Try the failed page again after checking any retry-after hint.',
-    '- Open Logs or Monitoring if the same page fails repeatedly.',
-    '- Keep any external MCP/document/email/calendar writes approval-gated while recovering.',
-  ].join('\n');
-}
-
-function renderRouteRecoveryActions(retryPage, includeCopy = false) {
-  return `<div class="route-recovery-actions">
-    <button class="btn btn-sm btn-primary" onclick="navigate('${esc(retryPage)}')">Try again</button>
-    ${includeCopy ? '<button class="btn btn-sm btn-ghost" onclick="copyRouteRecoveryBrief()">Copy recovery brief</button>' : ''}
-    <button class="btn btn-sm btn-ghost" onclick="navigate('chat')">Copilot</button>
-    <button class="btn btn-sm btn-ghost" onclick="navigate('projects')">Cowork</button>
-    <button class="btn btn-sm btn-ghost" onclick="navigate('gitcode')">Code</button>
-    <button class="btn btn-sm btn-ghost" onclick="navigate('help')">Help</button>
-  </div>`;
+  window.NanoRecovery.renderPageError(el, err, title, {
+    currentPage: currentPage || 'dashboard',
+  });
 }
 
 function renderNotFoundPage(el, page) {
-  window._routeRecoveryState = {
-    page,
-    title: 'Route not found',
-    message: 'This workspace route is not available',
-    retryAfter: '',
-    path: '',
-    status: '404',
-  };
-  el.innerHTML = `
-    <section class="route-recovery-card is-missing">
-      <span class="route-recovery-kicker">Route not found</span>
-      <h2>This workspace route is not available</h2>
-      <p>The requested page "${esc(page)}" is not registered in this dashboard.</p>
-      <div class="route-recovery-facts">
-        <span>Copilot for plain chat</span>
-        <span>Cowork for projects and agents</span>
-        <span>Code for repositories</span>
-      </div>
-      ${renderRouteRecoveryActions('dashboard', true)}
-    </section>`;
+  window.NanoRecovery.renderNotFoundPage(el, page);
 }
 
 function renderRoute(el, renderFn, afterRender) {
@@ -356,76 +288,6 @@ function poll(fn, ms) {
   fn();
   pollTimers.push(setInterval(fn, ms));
 }
-
-function closeCopyFallback() {
-  document.getElementById('copy-fallback-overlay')?.remove();
-}
-
-function showCopyFallback(title, text) {
-  closeCopyFallback();
-  const overlay = document.createElement('div');
-  overlay.id = 'copy-fallback-overlay';
-  overlay.className = 'copy-fallback-overlay';
-  overlay.innerHTML = `
-    <section class="copy-fallback-panel" role="dialog" aria-modal="true" aria-labelledby="copy-fallback-title">
-      <div class="copy-fallback-head">
-        <div>
-          <span>Manual copy</span>
-          <h3 id="copy-fallback-title">${esc(title || 'Copy text')}</h3>
-          <p>Clipboard access was blocked. Select the text below and copy it manually.</p>
-        </div>
-        <button class="btn btn-sm btn-ghost" type="button" onclick="closeCopyFallback()" aria-label="Close copy panel">Close</button>
-      </div>
-      <textarea class="copy-fallback-text" readonly></textarea>
-      <div class="copy-fallback-actions">
-        <button class="btn btn-sm btn-primary" type="button" onclick="selectCopyFallbackText()">Select text</button>
-        <button class="btn btn-sm btn-ghost" type="button" onclick="closeCopyFallback()">Done</button>
-      </div>
-    </section>`;
-  overlay.addEventListener('click', (event) => {
-    if (event.target === overlay) closeCopyFallback();
-  });
-  document.body.appendChild(overlay);
-  const textarea = overlay.querySelector('.copy-fallback-text');
-  textarea.value = text || '';
-  setTimeout(() => {
-    textarea.focus();
-    textarea.select();
-  }, 0);
-}
-
-window.closeCopyFallback = closeCopyFallback;
-window.showCopyFallback = showCopyFallback;
-window.selectCopyFallbackText = function () {
-  const textarea = document.querySelector('.copy-fallback-text');
-  textarea?.focus();
-  textarea?.select();
-};
-
-window.copyTextWithFallback = async function (
-  text,
-  successMessage = 'Copied',
-  fallbackTitle = 'Copy text',
-) {
-  try {
-    await navigator.clipboard.writeText(text);
-    toast(successMessage, 'success');
-    return true;
-  } catch {
-    showCopyFallback(fallbackTitle, text);
-    toast('Clipboard access blocked. Copy from the panel.', 'warning');
-    return false;
-  }
-};
-
-window.copyRouteRecoveryBrief = async function () {
-  const text = routeRecoveryBriefText(window._routeRecoveryState || {});
-  await copyTextWithFallback(
-    text,
-    'Route recovery brief copied',
-    'Copy route recovery brief',
-  );
-};
 
 // --- WebSocket ---
 function connectWs() {
@@ -800,7 +662,7 @@ function showLogin() {
       });
       if (res.ok) {
         await loadBotName();
-        await loadPluginsList('login');
+        await loadShellPluginsList('login');
         connectWs();
         navigate('dashboard');
       } else if (res.requires2fa) {
@@ -913,23 +775,6 @@ function brandLogo(extraClass = '', variant = 'mark') {
   const alt = isLockup ? 'NanoCrab' : '';
   const hidden = isLockup ? '' : ' aria-hidden="true"';
   return `<img class="${className}" src="${src}" alt="${alt}"${hidden}>`;
-}
-
-function renderShellLoadingState(
-  title = 'Loading workspace',
-  detail = 'Preparing navigation, live status, and page tools.',
-  compact = false,
-) {
-  return `<section class="shell-loading-state ${compact ? 'shell-loading-state-compact' : ''}" aria-busy="true" aria-label="${esc(title)}">
-    <div class="shell-loading-copy">
-      <span>Workspace loading</span>
-      <strong>${esc(title)}</strong>
-      <p>${esc(detail)}</p>
-    </div>
-    <div class="shell-loading-steps" aria-hidden="true">
-      <i></i><i></i><i></i>
-    </div>
-  </section>`;
 }
 
 function shellModeCue(mode) {
@@ -1352,99 +1197,6 @@ const pages = new Proxy(_pageMap, {
     return plugins.some((p) => p.pageId === prop || p.sidebar?.id === prop);
   },
 });
-
-// --- Tab helper for consolidated pages ---
-function renderTabLoadErrorState(containerId, tabId, err) {
-  return `<section class="tab-load-error-state" role="status">
-    <div>
-      <span>Tab unavailable</span>
-      <strong>Could not load this workspace section</strong>
-      <p>Keep the current page open, then retry the tab or route the work through Monitoring, Help, or the active Copilot, Cowork, or Code focus.</p>
-      ${err?.message ? `<code>${esc(err.message)}</code>` : ''}
-    </div>
-    <div class="tab-load-error-actions">
-      <button type="button" class="btn btn-sm btn-primary" onclick="window._tabLoaderRegistry?.['${esc(containerId)}']?.('${esc(tabId)}')">Retry tab</button>
-      <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('monitoring')">Monitoring</button>
-      <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('help')">Help</button>
-    </div>
-  </section>`;
-}
-
-function renderTabs(containerId, tabs, defaultTab) {
-  const tabBar = tabs
-    .map(
-      (t) =>
-        `<button type="button" role="tab" id="${containerId}-tab-${t.id}" aria-selected="${t.id === defaultTab ? 'true' : 'false'}" aria-controls="${containerId}-${t.id}" tabindex="${t.id === defaultTab ? '0' : '-1'}" class="tab ${t.id === defaultTab ? 'active' : ''}" data-tab-id="${t.id}" onclick="switchTab('${containerId}','${t.id}')" onkeydown="handleTabKeydown(event,'${containerId}','${t.id}')">${t.label}</button>`,
-    )
-    .join('');
-  const tabContents = tabs
-    .map(
-      (t) =>
-        `<div role="tabpanel" aria-labelledby="${containerId}-tab-${t.id}" class="tab-content ${t.id === defaultTab ? 'active' : ''}" id="${containerId}-${t.id}"></div>`,
-    )
-    .join('');
-  return `<div class="tab-bar" role="tablist">${tabBar}</div>${tabContents}`;
-}
-
-window.switchTab = (containerId, tabId) => {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  container
-    .querySelectorAll('.tab')
-    .forEach((t) => {
-      const isActive = t.dataset.tabId === tabId;
-      t.classList.toggle('active', isActive);
-      t.setAttribute('aria-selected', isActive ? 'true' : 'false');
-      t.tabIndex = isActive ? 0 : -1;
-      if (isActive) t.focus({ preventScroll: true });
-    });
-  container
-    .querySelectorAll('.tab-content')
-    .forEach((t) => t.classList.remove('active'));
-  const activeContent = document.getElementById(`${containerId}-${tabId}`);
-  if (activeContent) activeContent.classList.add('active');
-  window._tabLoaderRegistry?.[containerId]?.(tabId);
-};
-
-window.handleTabKeydown = (event, containerId, tabId) => {
-  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter', ' '].includes(event.key)) {
-    return;
-  }
-  event.preventDefault();
-  const container = document.getElementById(containerId);
-  const tabs = Array.from(container?.querySelectorAll('.tab') || []);
-  const index = tabs.findIndex((tab) => tab.dataset.tabId === tabId);
-  if (!tabs.length || index < 0) return;
-  let nextIndex = index;
-  if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
-  if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
-  if (event.key === 'Home') nextIndex = 0;
-  if (event.key === 'End') nextIndex = tabs.length - 1;
-  const nextTab = ['Enter', ' '].includes(event.key) ? tabs[index] : tabs[nextIndex];
-  if (nextTab?.dataset.tabId) window.switchTab(containerId, nextTab.dataset.tabId);
-};
-
-window._tabLoaderRegistry = window._tabLoaderRegistry || {};
-window.registerTabLoaders = (containerId, loaders, loadedTabs = new Set()) => {
-  window._tabLoaderRegistry[containerId] = async (tabId) => {
-    if (loadedTabs.has(tabId)) return;
-    const loader = loaders?.[tabId];
-    const target = document.getElementById(`${containerId}-${tabId}`);
-    if (!loader || !target) return;
-    target.innerHTML = renderShellLoadingState(
-      'Loading tab',
-      'Preparing this section without leaving the current page.',
-      true,
-    );
-    try {
-      await loader(target);
-      loadedTabs.add(tabId);
-    } catch (err) {
-      loadedTabs.delete(tabId);
-      target.innerHTML = renderTabLoadErrorState(containerId, tabId, err);
-    }
-  };
-};
 
 // --- Consolidated render functions ---
 
@@ -17901,28 +17653,6 @@ window.shareContent = async function (title, text) {
   }
 };
 
-// --- Toast & Modal system ---
-function toast(msg, type = 'info') {
-  let container = document.getElementById('toast-container');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'toast-container';
-    container.className = 'toast-container';
-    document.body.appendChild(container);
-  }
-  const el = document.createElement('div');
-  const tone = ['success', 'error', 'info', 'warning'].includes(type)
-    ? type
-    : 'info';
-  el.className = `toast toast-${tone}`;
-  el.textContent = msg;
-  container.appendChild(el);
-  setTimeout(() => {
-    el.classList.add('is-leaving');
-    setTimeout(() => el.remove(), 300);
-  }, 4000);
-}
-
 function inlineConfirm(btnEl, message, onConfirm) {
   const parent = btnEl.parentElement;
   const original = parent.innerHTML;
@@ -18389,12 +18119,6 @@ function prettyPrint(jsonStr) {
   } catch {
     return jsonStr || '';
   }
-}
-function esc(s) {
-  if (!s) return '';
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
 }
 function truncate(s, n) {
   return s && s.length > n ? s.slice(0, n) + '...' : s || '';
@@ -23946,7 +23670,7 @@ window.addEventListener('hashchange', () => {
 (async () => {
   if (await checkAuth()) {
     await loadBotName();
-    await loadPluginsList('startup');
+    await loadShellPluginsList('startup');
     connectWs();
     const hash = window.location.hash;
     const chatRoute = parseChatHash(hash);

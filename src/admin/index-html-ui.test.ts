@@ -30,7 +30,7 @@ describe('Admin HTML entry metadata', () => {
     const source = fs.readFileSync(htmlPath, 'utf8');
 
     expect(source).toContain(
-      '<link rel="manifest" href="/manifest.json?v=2.0.0-rc.4">',
+      '<link rel="manifest" href="/manifest.json?v=2.0.0-rc.5">',
     );
     expect(source).toContain(
       '<link rel="icon" type="image/png" href="/static/nanocrab-mark.png">',
