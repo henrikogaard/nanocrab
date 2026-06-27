@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+
 import {
   listGitHubIssues as defaultListGitHubIssues,
   startCodingJob as defaultStartCodingJob,
@@ -22,6 +24,7 @@ import type {
   AgentProfile,
   AgentProfileActivity,
   AgentSubscription,
+  AgentSubscriptionEvent,
 } from './types.js';
 
 export interface SubscriptionRunnerDeps {
@@ -38,35 +41,50 @@ interface ScanCounts {
 
 type SubscriptionScanResult = 'matched' | 'skipped';
 
+let scanInFlight = false;
+
 export async function runAgentSubscriptionScan(
   deps: SubscriptionRunnerDeps = {},
 ): Promise<ScanCounts> {
-  const counts: ScanCounts = { scanned: 0, matched: 0, skipped: 0 };
-  const scanDeps = {
-    now: deps.now ?? (() => new Date().toISOString()),
-    listGitHubIssues: deps.listGitHubIssues ?? defaultListGitHubIssues,
-    startCodingJob: deps.startCodingJob ?? defaultStartCodingJob,
-  };
+  if (scanInFlight) return { scanned: 0, matched: 0, skipped: 0 };
 
-  for (const subscription of listEnabledAgentSubscriptions()) {
-    counts.scanned += 1;
+  scanInFlight = true;
+  try {
+    const counts: ScanCounts = { scanned: 0, matched: 0, skipped: 0 };
+    const scanDeps = {
+      now: deps.now ?? (() => new Date().toISOString()),
+      listGitHubIssues: deps.listGitHubIssues ?? defaultListGitHubIssues,
+      startCodingJob: deps.startCodingJob ?? defaultStartCodingJob,
+    };
 
-    const profile = getAgentProfile(subscription.agentProfileId);
-    if (!profile?.enabled || !subscription.enabled) {
-      counts.skipped += 1;
-      continue;
+    for (const subscription of listEnabledAgentSubscriptions()) {
+      counts.scanned += 1;
+
+      const profile = getAgentProfile(subscription.agentProfileId);
+      if (!profile?.enabled || !subscription.enabled) {
+        counts.skipped += 1;
+        continue;
+      }
+
+      try {
+        if (!profile.taskKinds.includes(subscription.taskKind)) {
+          recordTaskKindBlocked(profile, subscription);
+          counts.skipped += 1;
+          continue;
+        }
+
+        const result = await scanSubscription(subscription, profile, scanDeps);
+        counts[result === 'matched' ? 'matched' : 'skipped'] += 1;
+      } catch (err) {
+        recordScanError(profile, subscription, err);
+        counts.skipped += 1;
+      }
     }
 
-    try {
-      const result = await scanSubscription(subscription, profile, scanDeps);
-      counts[result === 'matched' ? 'matched' : 'skipped'] += 1;
-    } catch (err) {
-      recordScanError(profile, subscription, err);
-      counts.skipped += 1;
-    }
+    return counts;
+  } finally {
+    scanInFlight = false;
   }
-
-  return counts;
 }
 
 async function scanSubscription(
@@ -119,21 +137,39 @@ async function scanGitHubSubscription(
   });
   safeUpdateSubscription(subscription, { lastSeenAt: deps.now() });
 
-  const issue = issues[0];
-  if (!issue) return 'skipped';
+  for (const issue of issues) {
+    const externalEventId = `issue-${issue.number}`;
+    const dedupeKey = buildSubscriptionDedupeKey({
+      sourceType: 'github',
+      sourceId: repo,
+      externalEventId,
+      agentProfileId: profile.id,
+    });
+    if (getAgentSubscriptionEventByDedupeKey(dedupeKey)) continue;
 
-  const externalEventId = `issue-${issue.number}`;
-  const dedupeKey = buildSubscriptionDedupeKey({
-    sourceType: 'github',
-    sourceId: repo,
-    externalEventId,
-    agentProfileId: profile.id,
-  });
-  if (getAgentSubscriptionEventByDedupeKey(dedupeKey)) return 'skipped';
+    const reservationId = randomUUID();
+    const metadata = {
+      issueNumber: issue.number,
+      issueTitle: issue.title,
+      issueUrl: issue.htmlUrl,
+    };
+    const reservation = recordAgentSubscriptionEvent({
+      subscriptionId: subscription.id,
+      agentProfileId: profile.id,
+      dedupeKey,
+      sourceType: 'github',
+      sourceId: repo,
+      externalEventId,
+      runId: null,
+      status: 'reserved',
+      metadata: { ...metadata, reservationId },
+    });
+    if (!ownsReservation(reservation, reservationId)) continue;
 
-  const job =
-    subscription.taskKind === 'coding_job'
-      ? await deps.startCodingJob({
+    let runId: string | null = null;
+    if (subscription.taskKind === 'coding_job') {
+      try {
+        const job = await deps.startCodingJob({
           repo,
           issueNumber: issue.number,
           provider: profile.provider ?? undefined,
@@ -142,43 +178,40 @@ async function scanGitHubSubscription(
           requestedBy: `agent:${profile.handle}`,
           agentProfileId: profile.id,
           sourceSubscriptionId: subscription.id,
-        })
-      : null;
-  const runId = job?.id ?? null;
-  const metadata = {
-    issueNumber: issue.number,
-    issueTitle: issue.title,
-    issueUrl: issue.htmlUrl,
-  };
+        });
+        runId = job.id;
+      } catch (err) {
+        recordActivity(profile, subscription, {
+          kind: 'error',
+          sourceType: 'github',
+          sourceId: repo,
+          summary: `Failed to start coding job for ${repo}#${issue.number}: ${errorMessage(err)}`,
+          metadata: { ...metadata, error: errorMessage(err) },
+        });
+        return 'skipped';
+      }
+    }
 
-  recordAgentSubscriptionEvent({
-    subscriptionId: subscription.id,
-    agentProfileId: profile.id,
-    dedupeKey,
-    sourceType: 'github',
-    sourceId: repo,
-    externalEventId,
-    runId,
-    status: 'matched',
-    metadata,
-  });
-  recordActivity(profile, subscription, {
-    kind: runId ? 'run_started' : 'subscription_match',
-    sourceType: 'github',
-    sourceId: repo,
-    summary: runId
-      ? `Started coding job ${runId} for ${repo}#${issue.number}: ${issue.title}`
-      : `Matched GitHub issue ${repo}#${issue.number}: ${issue.title}`,
-    runId,
-    metadata,
-  });
-  safeUpdateSubscription(subscription, {
-    lastSeenAt: deps.now(),
-    lastMatchedAt: deps.now(),
-    lastRunId: runId,
-  });
+    recordActivity(profile, subscription, {
+      kind: runId ? 'run_started' : 'subscription_match',
+      sourceType: 'github',
+      sourceId: repo,
+      summary: runId
+        ? `Started coding job ${runId} for ${repo}#${issue.number}: ${issue.title}`
+        : `Matched GitHub issue ${repo}#${issue.number}: ${issue.title}`,
+      runId,
+      metadata,
+    });
+    safeUpdateSubscription(subscription, {
+      lastSeenAt: deps.now(),
+      lastMatchedAt: deps.now(),
+      lastRunId: runId,
+    });
 
-  return 'matched';
+    return 'matched';
+  }
+
+  return 'skipped';
 }
 
 async function scanChannelMentionSubscription(
@@ -192,7 +225,8 @@ async function scanChannelMentionSubscription(
       kind: 'error',
       sourceType: 'channel_mention',
       sourceId: null,
-      summary: 'Channel mention subscription is missing required filters.chatJid',
+      summary:
+        'Channel mention subscription is missing required filters.chatJid',
       metadata: { filters: subscription.filters },
     });
     return 'skipped';
@@ -249,7 +283,10 @@ async function scanChannelMentionSubscription(
   return 'skipped';
 }
 
-function messageMatchesProfile(content: string, profile: AgentProfile): boolean {
+function messageMatchesProfile(
+  content: string,
+  profile: AgentProfile,
+): boolean {
   try {
     return (
       resolveAgentProfileInvocation({ text: content, profiles: [profile] })
@@ -289,7 +326,9 @@ function numberFilter(
   key: string,
 ): number | undefined {
   const value = filters[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function safeUpdateSubscription(
@@ -297,10 +336,41 @@ function safeUpdateSubscription(
   patch: Parameters<typeof updateAgentSubscription>[2],
 ): void {
   try {
-    updateAgentSubscription(subscription.agentProfileId, subscription.id, patch);
+    updateAgentSubscription(
+      subscription.agentProfileId,
+      subscription.id,
+      patch,
+    );
   } catch {
     /* subscription metadata is best-effort for scanner progress */
   }
+}
+
+function ownsReservation(
+  event: AgentSubscriptionEvent,
+  reservationId: string,
+): boolean {
+  return (
+    event.status === 'reserved' &&
+    event.runId === null &&
+    event.metadata.reservationId === reservationId
+  );
+}
+
+function recordTaskKindBlocked(
+  profile: AgentProfile,
+  subscription: AgentSubscription,
+): void {
+  recordActivity(profile, subscription, {
+    kind: 'error',
+    sourceType: subscription.sourceType,
+    sourceId: subscriptionSourceId(subscription),
+    summary: `Agent profile @${profile.handle} does not allow subscription task kind ${subscription.taskKind}`,
+    metadata: {
+      taskKind: subscription.taskKind,
+      profileTaskKinds: profile.taskKinds,
+    },
+  });
 }
 
 function recordScanError(
@@ -311,12 +381,18 @@ function recordScanError(
   recordActivity(profile, subscription, {
     kind: 'error',
     sourceType: subscription.sourceType,
-    sourceId: stringFilter(subscription.filters, 'repo')
-      ?? stringFilter(subscription.filters, 'chatJid')
-      ?? null,
+    sourceId: subscriptionSourceId(subscription),
     summary: `Agent subscription scan failed: ${errorMessage(err)}`,
     metadata: {},
   });
+}
+
+function subscriptionSourceId(subscription: AgentSubscription): string | null {
+  return (
+    stringFilter(subscription.filters, 'repo') ??
+    stringFilter(subscription.filters, 'chatJid') ??
+    null
+  );
 }
 
 function recordActivity(
