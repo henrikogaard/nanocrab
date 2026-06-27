@@ -113,19 +113,13 @@ function isUrlLikeMentionToken(text: string, mentionStart: number): boolean {
   return (
     /[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(prefix) ||
     /^\W*www\./i.test(prefix) ||
-    /^\W*[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?::\d+)?[/#?][^\s@]*$/i.test(
-      prefix,
-    )
+    /^\W*[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?::\d+)?[/#?][^\s@]*$/i.test(prefix)
   );
 }
 
 function stripMention(text: string, mention: MentionMatch): string {
   const beforeMention = text.slice(0, mention.start);
-  const afterMention = text
-    .slice(mention.end)
-    .replace(/^\s*[,;:.!?]+\s*/, ' ');
+  const afterMention = text.slice(mention.end).replace(/^\s*[,;:.!?]+\s*/, ' ');
 
-  return `${beforeMention}${afterMention}`
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim();
+  return `${beforeMention}${afterMention}`.replace(/[ \t]{2,}/g, ' ').trim();
 }

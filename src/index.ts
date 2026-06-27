@@ -552,7 +552,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       runAgentOptions = profileRun.runAgentOptions;
     }
   } catch (err) {
-    await sendAgentProfileResolutionError(channel, chatJid, missedMessages, err);
+    await sendAgentProfileResolutionError(
+      channel,
+      chatJid,
+      missedMessages,
+      err,
+    );
     return true;
   }
 
