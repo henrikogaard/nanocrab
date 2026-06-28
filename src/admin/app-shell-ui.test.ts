@@ -17,6 +17,18 @@ const recoveryUiPath = path.join(
   process.cwd(),
   'src/admin/public/ui/recovery.js',
 );
+const providerParityUiPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/provider-parity.js',
+);
+const routineStatesUiPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/routine-states.js',
+);
+const fileVaultStatesUiPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/file-vault-states.js',
+);
 
 describe('App shell accessibility UI', () => {
   it('adds a keyboard skip link and main content landmark to the dashboard shell', () => {
@@ -95,6 +107,9 @@ describe('App shell accessibility UI', () => {
     const feedbackSource = fs.readFileSync(feedbackUiPath, 'utf8');
     const shellSource = fs.readFileSync(shellUiPath, 'utf8');
     const recoverySource = fs.readFileSync(recoveryUiPath, 'utf8');
+    const providerParitySource = fs.readFileSync(providerParityUiPath, 'utf8');
+    const routineStatesSource = fs.readFileSync(routineStatesUiPath, 'utf8');
+    const fileVaultStatesSource = fs.readFileSync(fileVaultStatesUiPath, 'utf8');
     const indexSource = fs.readFileSync(
       path.join(process.cwd(), 'src/admin/public/index.html'),
       'utf8',
@@ -109,6 +124,18 @@ describe('App shell accessibility UI', () => {
     expect(indexSource).toContain('/ui/feedback.js');
     expect(indexSource).toContain('/ui/shell-states.js');
     expect(indexSource).toContain('/ui/recovery.js');
+    expect(indexSource).toContain('/ui/provider-parity.js');
+    expect(indexSource).toContain('/ui/routine-states.js');
+    expect(indexSource).toContain('/ui/file-vault-states.js');
+    expect(indexSource.indexOf('/ui/shared.js')).toBeLessThan(
+      indexSource.indexOf('/ui/routine-states.js'),
+    );
+    expect(indexSource.indexOf('/ui/routine-states.js')).toBeLessThan(
+      indexSource.indexOf('/ui/file-vault-states.js'),
+    );
+    expect(indexSource.indexOf('/ui/file-vault-states.js')).toBeLessThan(
+      indexSource.indexOf('/ui/data-health.js'),
+    );
     expect(indexSource.indexOf('/ui/shared.js')).toBeLessThan(
       indexSource.indexOf('/ui/data-health.js'),
     );
@@ -122,6 +149,9 @@ describe('App shell accessibility UI', () => {
       indexSource.indexOf('/ui/recovery.js'),
     );
     expect(indexSource.indexOf('/ui/recovery.js')).toBeLessThan(
+      indexSource.indexOf('/ui/provider-parity.js'),
+    );
+    expect(indexSource.indexOf('/ui/provider-parity.js')).toBeLessThan(
       indexSource.indexOf('/app.js'),
     );
     expect(sharedSource).toContain('window.NanoShared');
@@ -130,6 +160,9 @@ describe('App shell accessibility UI', () => {
     expect(feedbackSource).toContain('window.NanoFeedback');
     expect(shellSource).toContain('window.NanoShell');
     expect(recoverySource).toContain('window.NanoRecovery');
+    expect(providerParitySource).toContain('window.NanoProviderParity');
+    expect(routineStatesSource).toContain('window.NanoRoutineStates');
+    expect(fileVaultStatesSource).toContain('window.NanoFileVaultStates');
     expect(helperSource).toContain('loadPluginsList');
     expect(helperSource).toContain('renderAlerts');
     expect(helperSource).toContain('if (!/^[a-z0-9_-]+$/i.test(type)) type =');
@@ -268,18 +301,18 @@ describe('App shell accessibility UI', () => {
       source.indexOf('};', source.indexOf('const PAGE_TAB_ALIASES = {')),
     );
     const pageMetaIds = new Set(
-      [...pageMetaBlock.matchAll(/^  ['"]?([a-zA-Z0-9_-]+)['"]?:/gm)].map(
+      [...pageMetaBlock.matchAll(/^ {2}['"]?([a-zA-Z0-9_-]+)['"]?:/gm)].map(
         (match) => match[1],
       ),
     );
     const aliasIds = new Set(
       [
-        ...aliasBlock.matchAll(/^  ['"]?([a-zA-Z0-9_-]+)['"]?:/gm),
-        ...tabAliasBlock.matchAll(/^  ['"]?([a-zA-Z0-9_-]+)['"]?:/gm),
+        ...aliasBlock.matchAll(/^ {2}['"]?([a-zA-Z0-9_-]+)['"]?:/gm),
+        ...tabAliasBlock.matchAll(/^ {2}['"]?([a-zA-Z0-9_-]+)['"]?:/gm),
       ].map((match) => match[1]),
     );
     const missing = [
-      ...pageMapBlock.matchAll(/^  ['"]?([a-zA-Z0-9_-]+)['"]?:/gm),
+      ...pageMapBlock.matchAll(/^ {2}['"]?([a-zA-Z0-9_-]+)['"]?:/gm),
     ]
       .map((match) => match[1])
       .filter(

@@ -574,6 +574,12 @@ describe('Agents launcher UI', () => {
     expect(source).toContain('.coding-deny-note-field');
     expect(source).toContain('.coding-deny-note-field input');
     expect(source).toContain('.coding-job-meta');
+    expect(source).toContain('.coding-row-signals');
+    expect(source).toContain('.coding-stage-lane');
+    expect(source).toContain('.coding-provider-fit');
+    expect(source).toContain('.coding-lane-summary');
+    expect(source).toContain('.coding-lane-summary-head');
+    expect(source).toContain('.coding-lane-guidance');
     expect(source).toContain('.task-output-log');
     expect(source).toContain('.agent-tool-row');
     expect(source).toContain('.agent-tool-main');
@@ -747,6 +753,9 @@ describe('Agents launcher UI', () => {
     expect(source).toContain('agent-coding-panel');
     expect(source).toContain('agent-coding-pick-grid');
     expect(source).toContain('Coding jobs');
+    expect(source).toContain('coding-row-signals');
+    expect(source).toContain('coding-stage-lane');
+    expect(source).toContain('coding-provider-fit');
     expect(source).toContain("renderAgentCodeEmptyState('jobs')");
     expect(source).toContain(
       'Register a repository, choose labels, and let a coding agent pick up',
@@ -765,10 +774,33 @@ describe('Agents launcher UI', () => {
     expect(source).toContain('.filter((p) => p.codingCapable)');
     expect(source).toContain('codingProvidersById');
     expect(source).toContain('model.codingCapable !== false');
+    expect(source).toContain('deriveCodingStageLaneDetails');
+    expect(source).toContain('deriveCodingProviderFit');
+    expect(source).toContain("label: 'Lane: investigate'");
+    expect(source).toContain("label: 'Lane: implement'");
+    expect(source).toContain("label: 'Lane: approval'");
+    expect(source).toContain("label: 'Lane: delivery'");
+    expect(source).toContain("label: 'Provider fit: strong'");
+    expect(source).toContain("label: 'Provider fit: review'");
     expect(source).toContain("provider.id !== 'ollama'");
     expect(source).not.toContain(
       "['claude', 'codex', 'opencode'].includes(p.id)",
     );
+  });
+
+  it('shows coding lane summary guidance in job details', () => {
+    const source = fs.readFileSync(agentsPagePath, 'utf8');
+    const start = source.indexOf('window.viewCodingJob = async function');
+    const end = source.indexOf('window.cancelAgentTask = async function', start);
+    const detailMarkup = source.slice(start, end);
+
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(detailMarkup).toContain('deriveCodingStageLaneDetails(job.status)');
+    expect(detailMarkup).toContain('deriveCodingProviderFit(job');
+    expect(detailMarkup).toContain('coding-lane-summary');
+    expect(detailMarkup).toContain('coding-lane-summary-head');
+    expect(detailMarkup).toContain('coding-lane-guidance');
   });
 
   it('styles the delegation cockpit for desktop and narrow screens', () => {

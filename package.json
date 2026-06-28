@@ -1,6 +1,6 @@
 {
   "name": "nanocrab",
-  "version": "2.0.0-rc.3",
+  "version": "2.0.0-rc.6",
   "description": "NanoCrab — standalone personal AI assistant platform",
   "type": "module",
   "main": "dist/index.js",
@@ -25,6 +25,7 @@
     "setup:full": "bash scripts/setup-nanocrab.sh --all",
     "setup:resume": "bash scripts/setup-nanocrab.sh --resume",
     "setup:step": "bash scripts/setup-nanocrab.sh --step",
+    "verify:signal:runtime": "bash scripts/verify-signal-runtime.sh",
     "auth": "tsx src/whatsapp-auth.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",

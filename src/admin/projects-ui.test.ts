@@ -166,6 +166,9 @@ describe('Cowork Projects UI wiring', () => {
     expect(source).toContain('id="project-chat-model"');
     expect(source).toContain('id="project-chat-title"');
     expect(source).toContain('renderProjectChatComposer');
+    expect(source).toContain('Export citation ledger');
+    expect(source).toContain('window.exportProjectRunCitationLedger');
+    expect(source).toContain('/research/export-ledger');
     expect(source).toContain('project-chat-entry');
     expect(source).toContain('Ask in this project');
     expect(source).toContain(

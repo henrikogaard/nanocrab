@@ -59,21 +59,21 @@ describe('WebChat new conversation modal', () => {
     expect(source).toContain('webchat-plain-brief');
     expect(source).toContain('Plain chat');
     expect(source).toContain(
-      'Plain chat has no project files, artifacts, or agent template.',
+      'Mode: Plain chat. Conversation-only thread with no project workspace attached.',
     );
-    expect(source).toContain('No project context');
-    expect(source).toContain('External writes ask first');
+    expect(source).toContain('Conversation only');
+    expect(source).toContain('External actions ask first');
     expect(source).toContain('useStarterPrompt');
     expect(source).toContain('webchat-thread-card');
     expect(source).toContain('webchat-thread-empty-state');
     expect(source).toContain('Loading chat context');
     expect(source).toContain(
-      'Checking whether this is plain Copilot chat or a Cowork project thread',
+      'Loading conversation metadata, message history, and available actions.',
     );
     expect(source).toContain('renderWebchatLoadingState()');
     expect(source).toContain('Start with a plain chat prompt.');
     expect(source).toContain(
-      'Move to Cowork when you need durable project context or MCP-backed documents.',
+      'This conversation is ready for quick thinking, writing, planning, and questions.',
     );
     expect(source).toContain("navigate('projects')");
     expect(source).toContain('webchat-thread-title');
@@ -87,7 +87,7 @@ describe('WebChat new conversation modal', () => {
     expect(source).toContain('Copilot queue');
     expect(source).toContain('Start a plain chat for quick thinking');
     expect(source).toContain(
-      'Use Cowork when the request needs project files, MCP tools, or durable artifacts.',
+      'Start a plain chat for quick thinking, writing, planning, or drafting.',
     );
     expect(source).toContain('phase-entry-marker');
     expect(source).toContain('id="progress-spinner"');

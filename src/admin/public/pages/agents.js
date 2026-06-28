@@ -40,6 +40,72 @@ function codingJobActive(status) {
   ].includes(status);
 }
 
+function deriveCodingStageLaneDetails(status) {
+  const visualStatus = status === 'running' ? 'implement' : status;
+  if (['queued', 'investigate', 'plan'].includes(visualStatus)) {
+    return {
+      key: 'investigate',
+      label: 'Lane: investigate',
+      guidance:
+        'Clarify root cause and plan before implementation approval to avoid churn.',
+    };
+  }
+  if (['implement', 'test', 'failed', 'cancelled'].includes(visualStatus)) {
+    return {
+      key: 'implement',
+      label: 'Lane: implement',
+      guidance:
+        'Focus on minimal code changes, run targeted tests, and capture evidence.',
+    };
+  }
+  if (['await_approval', 'await_pr_approval'].includes(visualStatus)) {
+    return {
+      key: 'approval',
+      label: 'Lane: approval',
+      guidance:
+        'A gate is waiting on you; approve or deny with a concrete note to unblock delivery.',
+    };
+  }
+  return {
+    key: 'delivery',
+    label: 'Lane: delivery',
+    guidance:
+      'Verify PR and CI signals, then close out the handoff with delivery notes.',
+  };
+}
+
+function deriveCodingProviderFit(job, codingProvidersById = {}) {
+  const provider = codingProvidersById[job?.provider];
+  const model = (provider?.models || []).find(
+    (candidate) =>
+      candidate?.id === job?.model ||
+      candidate?.name === job?.model ||
+      candidate?.model === job?.model,
+  );
+  if (!provider || provider.codingCapable === false || model?.codingCapable === false) {
+    return {
+      key: 'review',
+      label: 'Provider fit: review',
+      guidance:
+        'Provider/model metadata is not coding-ready. Confirm the assignment target before retrying.',
+    };
+  }
+  if (!model) {
+    return {
+      key: 'review',
+      label: 'Provider fit: review',
+      guidance:
+        'Model metadata is missing from this provider profile. Verify model capability before broad rollout.',
+    };
+  }
+  return {
+    key: 'strong',
+    label: 'Provider fit: strong',
+    guidance:
+      'Provider and model both advertise coding capability for implementation and testing stages.',
+  };
+}
+
 const TASK_TEMPLATES = {
   bugfix: {
     label: 'Fix regression',
@@ -570,6 +636,8 @@ async function renderAgents(el) {
     const codingJobRows = codingJobs
       .map((job) => {
         const statusBadge = codingJobStatusBadge(job.status);
+        const lane = deriveCodingStageLaneDetails(job.status);
+        const providerFit = deriveCodingProviderFit(job, codingProvidersById);
         const actions = [
           job.status === 'await_approval'
             ? `<button class="btn btn-sm btn-primary" onclick="controlCodingJob('${esc(job.id)}','approve')">Approve</button>`
@@ -601,6 +669,10 @@ async function renderAgents(el) {
             <span class="agent-task-prompt">${esc((job.issueTitle || job.prompt || job.id).slice(0, 100))}</span>
           </div>
           <div class="agent-task-meta">${esc(job.branch)} \u2022 ${timeAgo(job.createdAt)}${job.prUrl ? ` \u2022 <a class="agent-task-link" href="${esc(job.prUrl)}" target="_blank">PR</a>` : ''}</div>
+          <div class="agent-task-meta coding-row-signals">
+            <span class="coding-stage-lane is-${esc(lane.key)}">${esc(lane.label)}</span>
+            <span class="coding-provider-fit is-${esc(providerFit.key)}">${esc(providerFit.label)}</span>
+          </div>
         </div>
         <div class="agent-task-actions">
           <span class="badge ${statusBadge} agent-tool-badge">${esc(job.status)}</span>
@@ -1599,6 +1671,8 @@ window.viewCodingJob = async function (id) {
   try {
     const job = await api('/agents/coding/jobs/' + encodeURIComponent(id));
     const statusBadge = codingJobStatusBadge(job.status);
+    const lane = deriveCodingStageLaneDetails(job.status);
+    const providerFit = deriveCodingProviderFit(job, window._codingProvidersById || {});
     const actions = [
       job.status === 'await_approval'
         ? `<label class="coding-deny-note-field"><span>Deny note</span><input id="${esc(codingDenyNoteId(id))}" placeholder="Reason or follow-up"></label>`
@@ -1655,6 +1729,14 @@ window.viewCodingJob = async function (id) {
       <div class="coding-job-meta">
         <strong>Branch:</strong> ${esc(job.branch)}<br>
         <strong>Workspace:</strong> ${esc(job.workspace)}
+      </div>
+      <div class="coding-lane-summary">
+        <div class="coding-lane-summary-head">
+          <span class="coding-stage-lane is-${esc(lane.key)}">${esc(lane.label)}</span>
+          <span class="coding-provider-fit is-${esc(providerFit.key)}">${esc(providerFit.label)}</span>
+        </div>
+        <p class="coding-lane-guidance">${esc(lane.guidance)}</p>
+        <p class="coding-lane-guidance">${esc(providerFit.guidance)}</p>
       </div>
       ${renderCodingJobStepper(job)}
       <div class="autofix-review-grid">

@@ -438,6 +438,280 @@ describe('/api/projects', () => {
     );
   });
 
+  it('previews connector actions with approval-aware policy gates', async () => {
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'mcp-servers.json'),
+      JSON.stringify([{ name: 'gmail', command: 'npx', args: ['-y', 'gmail'] }]),
+    );
+
+    const result = await withServer(async (base) => {
+      const createRes = await fetch(`${base}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Action Preview Project' }),
+      });
+      const { project } = (await createRes.json()) as { project: { id: string } };
+
+      const threadRes = await fetch(`${base}/api/projects/${project.id}/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Seed connector permissions' }),
+      });
+      expect(threadRes.status).toBe(200);
+
+      const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Email synthesis',
+          prompt: 'Research the latest customer emails and summarize findings.',
+        }),
+      });
+      expect(runRes.status).toBe(200);
+      const runPayload = (await runRes.json()) as { run: { id: string } };
+
+      const contextRes = await fetch(`${base}/api/projects/${project.id}/context`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Sensitive inbox extract',
+          sensitivity: 'sensitive',
+          source: 'gmail',
+        }),
+      });
+      expect(contextRes.status).toBe(200);
+
+      const readPreviewRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${runPayload.run.id}/actions/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            connectorId: 'gmail',
+            action: 'gmail.read',
+          }),
+        },
+      );
+      expect(readPreviewRes.status).toBe(200);
+      const readPreview = (await readPreviewRes.json()) as {
+        preview: { allowed: boolean; requiresApproval: boolean; reason: string };
+      };
+
+      const writePreviewRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${runPayload.run.id}/actions/preview`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            connectorId: 'gmail',
+            action: 'gmail.write',
+          }),
+        },
+      );
+      expect(writePreviewRes.status).toBe(200);
+      const writePreview = (await writePreviewRes.json()) as {
+        preview: { allowed: boolean; requiresApproval: boolean; reason: string };
+      };
+
+      return { readPreview, writePreview };
+    });
+
+    expect(result.readPreview.preview).toEqual(
+      expect.objectContaining({
+        allowed: true,
+        requiresApproval: true,
+      }),
+    );
+    expect(result.readPreview.preview.reason).toContain('approval');
+    expect(result.writePreview.preview).toEqual(
+      expect.objectContaining({
+        allowed: false,
+        requiresApproval: true,
+      }),
+    );
+    expect(result.writePreview.preview.reason).toContain('not allowed');
+  });
+
+  it('returns 403 for disallowed connector action requests without mutating the run', async () => {
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'mcp-servers.json'),
+      JSON.stringify([{ name: 'gmail', command: 'npx', args: ['-y', 'gmail'] }]),
+    );
+
+    const result = await withServer(async (base) => {
+      const createRes = await fetch(`${base}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Disallowed Action Request Project' }),
+      });
+      const { project } = (await createRes.json()) as { project: { id: string } };
+
+      const threadRes = await fetch(`${base}/api/projects/${project.id}/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Seed connector permissions' }),
+      });
+      expect(threadRes.status).toBe(200);
+
+      const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Read inbox',
+          prompt: 'Read project inbox updates and summarize findings.',
+        }),
+      });
+      expect(runRes.status).toBe(200);
+      const runPayload = (await runRes.json()) as { run: { id: string } };
+
+      const requestRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${runPayload.run.id}/actions/request`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            connectorId: 'gmail',
+            action: 'gmail.write',
+            note: 'Attempt to send update',
+          }),
+        },
+      );
+      expect(requestRes.status).toBe(403);
+      const requestPayload = (await requestRes.json()) as {
+        error: string;
+        preview: { allowed: boolean; reason: string };
+      };
+
+      const runDetailRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${runPayload.run.id}`,
+      );
+      expect(runDetailRes.status).toBe(200);
+      const runDetail = (await runDetailRes.json()) as {
+        run: { status: string; approvals: unknown[]; events: unknown[] };
+      };
+
+      return { requestPayload, runDetail };
+    });
+
+    expect(result.requestPayload.error).toContain('not allowed');
+    expect(result.requestPayload.preview).toEqual(
+      expect.objectContaining({
+        allowed: false,
+      }),
+    );
+    expect(result.runDetail.run.status).toBe('planning');
+    expect(result.runDetail.run.approvals).toEqual([]);
+    expect(result.runDetail.run.events).toHaveLength(1);
+  });
+
+  it('creates approval-gated connector action requests and moves run to waiting_for_approval', async () => {
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'mcp-servers.json'),
+      JSON.stringify([{ name: 'gmail', command: 'npx', args: ['-y', 'gmail'] }]),
+    );
+
+    const result = await withServer(async (base) => {
+      const createRes = await fetch(`${base}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Approval Action Request Project' }),
+      });
+      const { project } = (await createRes.json()) as { project: { id: string } };
+
+      const threadRes = await fetch(`${base}/api/projects/${project.id}/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Seed connector permissions' }),
+      });
+      expect(threadRes.status).toBe(200);
+
+      const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Inbox summary',
+          prompt: 'Summarize recent inbox messages.',
+        }),
+      });
+      expect(runRes.status).toBe(200);
+      const runPayload = (await runRes.json()) as { run: { id: string } };
+
+      const requestRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${runPayload.run.id}/actions/request`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            connectorId: 'gmail',
+            action: 'gmail.read',
+            note: 'Need explicit approval before reading inbox',
+          }),
+        },
+      );
+      expect(requestRes.status).toBe(202);
+      return requestRes.json() as Promise<{
+        requested: boolean;
+        approvalRequired: boolean;
+        preview: { allowed: boolean; requiresApproval: boolean };
+        run: {
+          status: string;
+          approvals: Array<{
+            kind: string;
+            status: string;
+            connectorId: string;
+            action: string;
+            note: string;
+            requestedAt: string;
+            sensitivitySignals: { includedSensitiveItems: number };
+          }>;
+          events: Array<{ kind: string; message: string }>;
+        };
+      }>;
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        requested: true,
+        approvalRequired: true,
+      }),
+    );
+    expect(result.preview).toEqual(
+      expect.objectContaining({
+        allowed: true,
+        requiresApproval: true,
+      }),
+    );
+    expect(result.run.status).toBe('waiting_for_approval');
+    expect(result.run.approvals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'connector-action',
+          status: 'pending',
+          connectorId: 'gmail',
+          action: 'gmail.read',
+          note: 'Need explicit approval before reading inbox',
+          sensitivitySignals: expect.objectContaining({
+            includedSensitiveItems: 0,
+          }),
+        }),
+      ]),
+    );
+    expect(result.run.approvals[0]?.requestedAt).toEqual(expect.any(String));
+    expect(result.run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'action-requested',
+        }),
+      ]),
+    );
+    expect(result.run.events[result.run.events.length - 1]?.message).toContain(
+      'gmail.read',
+    );
+  });
+
   it('reads project text files without allowing path traversal', async () => {
     const result = await withServer(async (base) => {
       const createRes = await fetch(`${base}/api/projects`, {
@@ -558,5 +832,311 @@ describe('/api/projects', () => {
     });
 
     expect(getRegisteredGroup(result.id)?.title).toBeUndefined();
+  });
+
+  it('tracks cowork runs and project context notebook items', async () => {
+    const result = await withServer(async (base) => {
+      const createRes = await fetch(`${base}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Run Notebook Project' }),
+      });
+      const { project } = (await createRes.json()) as { project: { id: string } };
+
+      const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Draft launch brief',
+          prompt: 'Review context and prepare launch brief with risks.',
+        }),
+      });
+      expect(runRes.status).toBe(200);
+      const runPayload = (await runRes.json()) as {
+        run: {
+          id: string;
+          status: string;
+          intent: { mode: string; requiresCitations: boolean };
+        };
+      };
+      expect(runPayload.run.status).toBe('planning');
+      expect(runPayload.run.intent).toEqual(
+        expect.objectContaining({
+          mode: 'execution',
+          requiresCitations: false,
+        }),
+      );
+
+      const patchRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${runPayload.run.id}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            action: 'checkpoint',
+            message: 'Waiting for approval before external send',
+          }),
+        },
+      );
+      expect(patchRes.status).toBe(200);
+      const patched = (await patchRes.json()) as { run: { status: string } };
+      expect(patched.run.status).toBe('waiting_for_approval');
+
+      const contextCreateRes = await fetch(
+        `${base}/api/projects/${project.id}/context`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            title: 'Q2 launch source links',
+            source: 'mail + docs',
+            kind: 'note',
+          }),
+        },
+      );
+      expect(contextCreateRes.status).toBe(200);
+      const contextCreate = (await contextCreateRes.json()) as {
+        item: { id: string; included: number };
+      };
+      expect(contextCreate.item.included).toBe(1);
+
+      const contextPatchRes = await fetch(
+        `${base}/api/projects/${project.id}/context/${contextCreate.item.id}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ pinned: true, included: false }),
+        },
+      );
+      expect(contextPatchRes.status).toBe(200);
+      const contextPatched = (await contextPatchRes.json()) as {
+        item: { pinned: number; included: number };
+      };
+      expect(contextPatched.item.pinned).toBe(1);
+      expect(contextPatched.item.included).toBe(0);
+
+      const detailRes = await fetch(`${base}/api/projects/${project.id}`);
+      expect(detailRes.status).toBe(200);
+      const detail = (await detailRes.json()) as {
+        project: {
+          capabilities: {
+            skills: { total: number };
+            plugins: { total: number };
+            connectors: { total: number };
+          };
+        };
+        runs: Array<{
+          id: string;
+          status: string;
+          intent: { mode: string; requiresCitations: boolean };
+        }>;
+        contextItems: Array<{ id: string; autoGenerated: number }>;
+      };
+
+      return {
+        detail,
+        runId: runPayload.run.id,
+        contextId: contextCreate.item.id,
+        projectId: project.id,
+      };
+    });
+
+    expect(result.detail.runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: result.runId,
+          status: 'waiting_for_approval',
+          intent: expect.objectContaining({
+            mode: 'execution',
+            requiresCitations: false,
+          }),
+        }),
+      ]),
+    );
+    expect(result.detail.contextItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: result.contextId,
+          autoGenerated: 0,
+        }),
+      ]),
+    );
+    expect(result.detail.project.capabilities).toEqual(
+      expect.objectContaining({
+        skills: expect.objectContaining({ total: expect.any(Number) }),
+        plugins: expect.objectContaining({ total: expect.any(Number) }),
+        connectors: expect.objectContaining({ total: expect.any(Number) }),
+      }),
+    );
+  });
+
+  it('tracks research citation coverage and allows adding citations', async () => {
+    const result = await withServer(async (base) => {
+      const createRes = await fetch(`${base}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Research Coverage Project' }),
+      });
+      const { project } = (await createRes.json()) as { project: { id: string } };
+
+      const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Research references',
+          prompt:
+            'Research market updates, gather sources, and include citations with evidence.',
+        }),
+      });
+      expect(runRes.status).toBe(200);
+      const runPayload = (await runRes.json()) as {
+        run: {
+          id: string;
+          intent: { mode: string };
+          researchCoverage: {
+            citationCount: number;
+            status: string;
+            guidance: string;
+          };
+        };
+      };
+      expect(runPayload.run.intent.mode).toBe('research');
+      expect(runPayload.run.researchCoverage).toEqual(
+        expect.objectContaining({
+          citationCount: 0,
+          status: 'missing',
+          guidance: expect.stringContaining('Add at least 3 citations'),
+        }),
+      );
+
+      const citationRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${runPayload.run.id}/research/citations`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            title: 'Q2 market outlook',
+            sourceUrl: 'https://example.com/research/q2-market-outlook',
+            note: 'Primary baseline source',
+          }),
+        },
+      );
+      expect(citationRes.status).toBe(200);
+      const citationPayload = (await citationRes.json()) as {
+        run: {
+          outputs: Array<{ kind?: string; title?: string; sourceUrl?: string }>;
+          researchCoverage: {
+            citationCount: number;
+            status: string;
+          };
+        };
+      };
+      expect(citationPayload.run.outputs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'citation',
+            title: 'Q2 market outlook',
+            sourceUrl: 'https://example.com/research/q2-market-outlook',
+          }),
+        ]),
+      );
+      expect(citationPayload.run.researchCoverage).toEqual(
+        expect.objectContaining({
+          citationCount: 1,
+          status: 'partial',
+        }),
+      );
+
+      const groupedCitationRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${runPayload.run.id}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            outputs: JSON.stringify([
+              {
+                kind: 'research-bundle',
+                title: 'Topline report',
+                sourceUrl: 'https://example.com/topline',
+                citations: [
+                  { title: 'Source 1', sourceUrl: 'https://example.com/source-1' },
+                  { title: 'Source 2', sourceUrl: 'https://example.com/source-2' },
+                  { title: 'Source 3', sourceUrl: 'https://example.com/source-3' },
+                ],
+              },
+            ]),
+          }),
+        },
+      );
+      expect(groupedCitationRes.status).toBe(200);
+      const groupedCitationPayload = (await groupedCitationRes.json()) as {
+        run: { researchCoverage: { citationCount: number; status: string } };
+      };
+      expect(groupedCitationPayload.run.researchCoverage).toEqual(
+        expect.objectContaining({
+          citationCount: 4,
+          status: 'sufficient',
+        }),
+      );
+
+      const exportLedgerRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${runPayload.run.id}/research/export-ledger`,
+        {
+          method: 'POST',
+        },
+      );
+      expect(exportLedgerRes.status).toBe(200);
+      const exportLedgerPayload = (await exportLedgerRes.json()) as {
+        file: { path: string };
+        contextItem: { path: string };
+      };
+      expect(exportLedgerPayload.file.path).toBe(
+        `research/run-${runPayload.run.id}-citations.md`,
+      );
+      expect(exportLedgerPayload.contextItem.path).toBe(
+        `research/run-${runPayload.run.id}-citations.md`,
+      );
+
+      const detailRes = await fetch(`${base}/api/projects/${project.id}`);
+      expect(detailRes.status).toBe(200);
+      const detail = (await detailRes.json()) as {
+        files: Array<{ path: string; kind: string }>;
+        contextItems: Array<{ path: string | null; source: string; autoGenerated: number }>;
+      };
+      expect(detail.files).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: `research/run-${runPayload.run.id}-citations.md`,
+          }),
+        ]),
+      );
+      expect(detail.contextItems).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: `research/run-${runPayload.run.id}-citations.md`,
+            source: 'run-citations',
+            autoGenerated: 0,
+          }),
+        ]),
+      );
+
+      const contextRes = await fetch(`${base}/api/projects/${project.id}/context`);
+      expect(contextRes.status).toBe(200);
+      const contextPayload = (await contextRes.json()) as {
+        contextItems: Array<{ path: string | null; source: string; autoGenerated: number }>;
+      };
+      expect(contextPayload.contextItems).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: `research/run-${runPayload.run.id}-citations.md`,
+            source: 'run-citations',
+            autoGenerated: 0,
+          }),
+        ]),
+      );
+      return groupedCitationPayload;
+    });
+
+    expect(result.run.researchCoverage.status).not.toBe('missing');
   });
 });

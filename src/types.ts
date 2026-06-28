@@ -79,6 +79,56 @@ export interface CoworkProject {
   updated_at: string;
 }
 
+export type CoworkRunStatus =
+  | 'draft'
+  | 'planning'
+  | 'waiting_for_approval'
+  | 'running'
+  | 'blocked'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface CoworkRun {
+  id: string;
+  project_id: string;
+  title: string;
+  prompt: string;
+  status: CoworkRunStatus;
+  provider: string | null;
+  model: string | null;
+  complexity_level: string;
+  estimated_steps: number;
+  budget_tier: string;
+  plan_steps_json: string;
+  events_json: string;
+  approvals_json: string;
+  outputs_json: string;
+  summary: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  last_activity_at: string;
+}
+
+export interface CoworkProjectContextItem {
+  id: string;
+  project_id: string;
+  kind: string;
+  title: string;
+  path: string | null;
+  source: string | null;
+  provenance: string | null;
+  sensitivity: string;
+  included: number;
+  pinned: number;
+  stale_state: string;
+  content: string | null;
+  auto_generated: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface NewMessage {
   id: string;
   chat_jid: string;

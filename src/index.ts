@@ -57,6 +57,10 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
+  classifyWorkspaceIntent,
+  workspaceIntentContext,
+} from './workspace-intent-router.js';
+import {
   restoreRemoteControl,
   startRemoteControl,
   stopRemoteControl,
@@ -408,8 +412,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
+  const workspaceIntent = classifyWorkspaceIntent(missedMessages);
   const prompt = withThreadTitleRequest(
-    formatMessages(missedMessages, TIMEZONE),
+    `${workspaceIntentContext(workspaceIntent)}\n\n${formatMessages(missedMessages, TIMEZONE)}`,
     group,
   );
 

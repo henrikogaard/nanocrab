@@ -16,6 +16,8 @@ import {
   NewMemoryRecord,
   RegisteredGroup,
   CoworkProject,
+  CoworkProjectContextItem,
+  CoworkRun,
   ScheduledTask,
   TaskRunLog,
 } from './types.js';
@@ -126,6 +128,48 @@ function createSchema(database: Database.Database): void {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS cowork_runs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      status TEXT NOT NULL,
+      provider TEXT,
+      model TEXT,
+      complexity_level TEXT NOT NULL DEFAULT 'moderate',
+      estimated_steps INTEGER NOT NULL DEFAULT 3,
+      budget_tier TEXT NOT NULL DEFAULT 'medium',
+      plan_steps_json TEXT NOT NULL DEFAULT '[]',
+      events_json TEXT NOT NULL DEFAULT '[]',
+      approvals_json TEXT NOT NULL DEFAULT '[]',
+      outputs_json TEXT NOT NULL DEFAULT '[]',
+      summary TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_activity_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES cowork_projects(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_cowork_runs_project ON cowork_runs(project_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS cowork_project_context_items (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      path TEXT,
+      source TEXT,
+      provenance TEXT,
+      sensitivity TEXT NOT NULL DEFAULT 'normal',
+      included INTEGER NOT NULL DEFAULT 1,
+      pinned INTEGER NOT NULL DEFAULT 0,
+      stale_state TEXT NOT NULL DEFAULT 'fresh',
+      content TEXT,
+      auto_generated INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES cowork_projects(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_cowork_context_project ON cowork_project_context_items(project_id, pinned DESC, updated_at DESC);
     CREATE TABLE IF NOT EXISTS admin_sessions (
       token TEXT PRIMARY KEY,
       created_at TEXT NOT NULL,
@@ -269,6 +313,18 @@ function createSchema(database: Database.Database): void {
       );
     } catch {
       /* column already exists */
+    }
+
+    for (const [column, definition] of [
+      ['complexity_level', `TEXT NOT NULL DEFAULT 'moderate'`],
+      ['estimated_steps', 'INTEGER NOT NULL DEFAULT 3'],
+      ['budget_tier', `TEXT NOT NULL DEFAULT 'medium'`],
+    ]) {
+      try {
+        database.exec(`ALTER TABLE cowork_runs ADD COLUMN ${column} ${definition}`);
+      } catch {
+        /* column already exists */
+      }
     }
   }
 
@@ -1544,6 +1600,233 @@ export function getCoworkProjects(): CoworkProject[] {
       'SELECT * FROM cowork_projects ORDER BY updated_at DESC, created_at DESC',
     )
     .all() as CoworkProject[];
+}
+
+export function createCoworkRun(run: CoworkRun): CoworkRun {
+  db.prepare(
+    `INSERT INTO cowork_runs (
+      id, project_id, title, prompt, status, provider, model,
+      complexity_level, estimated_steps, budget_tier,
+      plan_steps_json, events_json, approvals_json, outputs_json,
+      summary, error, created_at, updated_at, last_activity_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    run.id,
+    run.project_id,
+    run.title,
+    run.prompt,
+    run.status,
+    run.provider,
+    run.model,
+    run.complexity_level,
+    run.estimated_steps,
+    run.budget_tier,
+    run.plan_steps_json,
+    run.events_json,
+    run.approvals_json,
+    run.outputs_json,
+    run.summary,
+    run.error,
+    run.created_at,
+    run.updated_at,
+    run.last_activity_at,
+  );
+  return run;
+}
+
+export function listCoworkRuns(projectId: string): CoworkRun[] {
+  return db
+    .prepare(
+      `SELECT * FROM cowork_runs
+       WHERE project_id = ?
+       ORDER BY updated_at DESC, created_at DESC`,
+    )
+    .all(projectId) as CoworkRun[];
+}
+
+export function getCoworkRun(
+  projectId: string,
+  runId: string,
+): CoworkRun | undefined {
+  return db
+    .prepare('SELECT * FROM cowork_runs WHERE project_id = ? AND id = ?')
+    .get(projectId, runId) as CoworkRun | undefined;
+}
+
+export function updateCoworkRun(
+  projectId: string,
+  runId: string,
+  patch: Partial<
+    Pick<
+      CoworkRun,
+      | 'title'
+      | 'prompt'
+      | 'status'
+      | 'provider'
+      | 'model'
+      | 'complexity_level'
+      | 'estimated_steps'
+      | 'budget_tier'
+      | 'plan_steps_json'
+      | 'events_json'
+      | 'approvals_json'
+      | 'outputs_json'
+      | 'summary'
+      | 'error'
+      | 'updated_at'
+      | 'last_activity_at'
+    >
+  >,
+): CoworkRun | undefined {
+  const existing = getCoworkRun(projectId, runId);
+  if (!existing) return undefined;
+  const cleanPatch = Object.fromEntries(
+    Object.entries(patch).filter(([, value]) => value !== undefined),
+  ) as Partial<CoworkRun>;
+  const merged: CoworkRun = {
+    ...existing,
+    ...cleanPatch,
+  };
+  db.prepare(
+    `UPDATE cowork_runs
+     SET title = ?, prompt = ?, status = ?, provider = ?, model = ?,
+         complexity_level = ?, estimated_steps = ?, budget_tier = ?,
+         plan_steps_json = ?, events_json = ?, approvals_json = ?, outputs_json = ?,
+         summary = ?, error = ?, updated_at = ?, last_activity_at = ?
+     WHERE id = ? AND project_id = ?`,
+  ).run(
+    merged.title,
+    merged.prompt,
+    merged.status,
+    merged.provider,
+    merged.model,
+    merged.complexity_level,
+    merged.estimated_steps,
+    merged.budget_tier,
+    merged.plan_steps_json,
+    merged.events_json,
+    merged.approvals_json,
+    merged.outputs_json,
+    merged.summary,
+    merged.error,
+    merged.updated_at,
+    merged.last_activity_at,
+    runId,
+    projectId,
+  );
+  return getCoworkRun(projectId, runId);
+}
+
+export function createCoworkProjectContextItem(
+  item: CoworkProjectContextItem,
+): CoworkProjectContextItem {
+  db.prepare(
+    `INSERT INTO cowork_project_context_items (
+      id, project_id, kind, title, path, source, provenance, sensitivity,
+      included, pinned, stale_state, content, auto_generated, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    item.id,
+    item.project_id,
+    item.kind,
+    item.title,
+    item.path,
+    item.source,
+    item.provenance,
+    item.sensitivity,
+    item.included,
+    item.pinned,
+    item.stale_state,
+    item.content,
+    item.auto_generated,
+    item.created_at,
+    item.updated_at,
+  );
+  return item;
+}
+
+export function listCoworkProjectContextItems(
+  projectId: string,
+): CoworkProjectContextItem[] {
+  return db
+    .prepare(
+      `SELECT * FROM cowork_project_context_items
+       WHERE project_id = ?
+       ORDER BY pinned DESC, updated_at DESC, created_at DESC`,
+    )
+    .all(projectId) as CoworkProjectContextItem[];
+}
+
+export function getCoworkProjectContextItem(
+  projectId: string,
+  itemId: string,
+): CoworkProjectContextItem | undefined {
+  return db
+    .prepare(
+      'SELECT * FROM cowork_project_context_items WHERE project_id = ? AND id = ?',
+    )
+    .get(projectId, itemId) as CoworkProjectContextItem | undefined;
+}
+
+export function updateCoworkProjectContextItem(
+  projectId: string,
+  itemId: string,
+  patch: Partial<
+    Pick<
+      CoworkProjectContextItem,
+      | 'title'
+      | 'kind'
+      | 'path'
+      | 'source'
+      | 'provenance'
+      | 'sensitivity'
+      | 'included'
+      | 'pinned'
+      | 'stale_state'
+      | 'content'
+      | 'updated_at'
+    >
+  >,
+): CoworkProjectContextItem | undefined {
+  const existing = getCoworkProjectContextItem(projectId, itemId);
+  if (!existing) return undefined;
+  const cleanPatch = Object.fromEntries(
+    Object.entries(patch).filter(([, value]) => value !== undefined),
+  ) as Partial<CoworkProjectContextItem>;
+  const merged: CoworkProjectContextItem = {
+    ...existing,
+    ...cleanPatch,
+  };
+  db.prepare(
+    `UPDATE cowork_project_context_items
+     SET title = ?, kind = ?, path = ?, source = ?, provenance = ?, sensitivity = ?,
+         included = ?, pinned = ?, stale_state = ?, content = ?, updated_at = ?
+     WHERE project_id = ? AND id = ?`,
+  ).run(
+    merged.title,
+    merged.kind,
+    merged.path,
+    merged.source,
+    merged.provenance,
+    merged.sensitivity,
+    merged.included,
+    merged.pinned,
+    merged.stale_state,
+    merged.content,
+    merged.updated_at,
+    projectId,
+    itemId,
+  );
+  return getCoworkProjectContextItem(projectId, itemId);
+}
+
+export function deleteCoworkProjectContextItem(
+  projectId: string,
+  itemId: string,
+): void {
+  db.prepare(
+    'DELETE FROM cowork_project_context_items WHERE project_id = ? AND id = ?',
+  ).run(projectId, itemId);
 }
 
 // --- JSON migration ---

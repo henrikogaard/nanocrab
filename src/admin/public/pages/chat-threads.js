@@ -262,7 +262,7 @@
       '<div>' +
       '<span>Conversation loading</span>' +
       '<strong>Loading chat context</strong>' +
-      '<p>Checking whether this is plain Copilot chat or a Cowork project thread, then loading messages, context, MCP access, and starter actions.</p>' +
+      '<p>Loading conversation metadata, message history, and available actions.</p>' +
       '</div>' +
       '<div class="webchat-loading-flow">' +
       '<span>Thread</span>' +
@@ -280,11 +280,11 @@
       '<div class="webchat-thread-empty-copy">' +
       '<span>First message</span>' +
       '<strong>Start with a plain chat prompt.</strong>' +
-      '<p>This thread has no project files, artifacts, or agent template. Use it for quick thinking, writing, planning, and questions. Move to Cowork when you need durable project context or MCP-backed documents.</p>' +
+      '<p>This conversation is ready for quick thinking, writing, planning, and questions. Start with a prompt below.</p>' +
       '</div>' +
       '<div class="webchat-thread-empty-actions">' +
       '<button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById(\'chat-msg-input\')?.focus()">Write message</button>' +
-      '<button type="button" class="btn btn-sm btn-ghost" onclick="navigate(\'projects\')">Open Cowork projects</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="WebChat.openNewConversationModal()">New conversation</button>' +
       '</div>' +
       '<div class="webchat-thread-empty-starters">' +
       CHAT_STARTERS.slice(0, 3)
@@ -388,7 +388,7 @@
       '<div>' +
       '<span>Context unavailable</span>' +
       '<strong>Thread metadata could not be loaded.</strong>' +
-      '<p>This chat may be plain Copilot or a Cowork project thread. Project files, MCP scope, and artifact context are hidden until the thread detail request recovers.</p>' +
+      '<p>Thread metadata is temporarily unavailable. Retry to reload this conversation context.</p>' +
       '</div>' +
       '<button type="button" class="btn btn-sm btn-ghost" onclick="WebChat.renderConversation(document.getElementById(\'main\'), ' +
       jsStringAttr(threadId) +
@@ -584,11 +584,11 @@
       '<strong>' +
       esc(title) +
       '</strong>' +
-      '<p>Quick AI conversation without project files or agent templates. Use it for thinking, writing, planning, and lightweight questions.</p>' +
+      '<p>Quick AI conversation for thinking, writing, planning, and lightweight questions.</p>' +
       '</div>' +
       '<div class="webchat-plain-meta">' +
-      '<span>No project context</span>' +
-      '<span>External writes ask first</span>' +
+      '<span>Conversation only</span>' +
+      '<span>External actions ask first</span>' +
       '</div>' +
       '<div class="webchat-plain-starters">' +
       CHAT_STARTERS.map(function (starter, index) {
@@ -642,13 +642,13 @@
       '',
       isProjectChat
         ? 'Mode: Cowork project chat. Project chat can use Cowork context, approved MCP tools, and project artifacts.'
-        : 'Mode: Plain chat. Plain chat has no project files, artifacts, or agent template.',
+        : 'Mode: Plain chat. Conversation-only thread with no project workspace attached.',
       isProjectChat
         ? 'Project: ' + (threadMeta.projectName || threadMeta.projectId || 'Project')
         : 'Scope: Quick AI conversation for thinking, writing, planning, and lightweight questions.',
       isProjectChat
         ? 'MCP access: ' + (mcpEnabled ? mcpScope : 'not enabled for this project chat')
-        : 'MCP access: no project connector context by default.',
+        : 'MCP access: no connector context attached by default.',
       'Approval boundary: External writes, sent messages, published documents, and calendar changes stay approval-gated.',
       'Data health: ' +
         (loadIssues.length
@@ -770,7 +770,7 @@
       '<p>' +
       (isError
         ? esc(issue) + '. Retry the list, or start a new chat if thread storage is healthy.'
-        : 'Start a plain chat for quick thinking. Use Cowork when the request needs project files, MCP tools, or durable artifacts.') +
+        : 'Start a plain chat for quick thinking, writing, planning, or drafting.') +
       '</p>' +
       '<button type="button" onclick="' +
       (isError

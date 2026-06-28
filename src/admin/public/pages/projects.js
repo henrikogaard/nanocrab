@@ -2,7 +2,10 @@
   var activeProjectId = null;
   var activeProjectFilePath = null;
   var activeProjectDetail = null;
+  var activeProjectRunId = null;
   var projectProviderState = null;
+  var projectRunActionFeedback = {};
+  var projectRunCitationFeedback = {};
   var PROJECT_ACTIONS = [
     {
       label: 'Email summary',
@@ -484,6 +487,410 @@
         '</div>'
       );
     }
+
+    function runStatusLabel(status) {
+      var map = {
+        draft: 'Draft',
+        planning: 'Planning',
+        waiting_for_approval: 'Waiting for approval',
+        running: 'Running',
+        blocked: 'Blocked',
+        completed: 'Completed',
+        failed: 'Failed',
+        cancelled: 'Cancelled',
+      };
+      return map[status] || 'Unknown';
+    }
+
+    function runStatusClass(status) {
+      if (status === 'completed') return 'is-ready';
+      if (status === 'running') return 'is-active';
+      if (status === 'waiting_for_approval' || status === 'blocked') return 'is-attention';
+      if (status === 'failed' || status === 'cancelled') return 'is-stale';
+      return 'is-idle';
+    }
+
+    function researchCoverageClass(status) {
+      if (status === 'sufficient') return 'is-ready';
+      if (status === 'partial') return 'is-idle';
+      if (status === 'missing') return 'is-attention';
+      return 'is-neutral';
+    }
+
+    function renderRuns(runs) {
+      if (!runs.length) {
+        return (
+          '<div class="project-panel-empty project-runs-empty">' +
+          '<span>Run workspace</span>' +
+          '<strong>No tracked runs yet.</strong>' +
+          '<p>Create a run from the project prompt to track plan, progress, approvals, and outputs.</p>' +
+          '<div class="project-panel-empty-actions">' +
+          '<button type="button" class="btn btn-sm btn-primary" onclick="createProjectRunFromPrompt()">Track run</button>' +
+          '</div>' +
+          '</div>'
+        );
+      }
+      var activeRun =
+        runs.find(function (run) {
+          return run.id === activeProjectRunId;
+        }) || runs[0];
+      if (!activeProjectRunId) activeProjectRunId = activeRun.id;
+      return (
+        '<div class="project-runs-layout">' +
+        '<div class="project-run-list">' +
+        runs
+          .map(function (run) {
+            return (
+              '<button type="button" class="project-run-row ' +
+              (run.id === activeRun.id ? 'active' : '') +
+              '" onclick="selectProjectRun(' +
+              jsStringAttr(run.id) +
+              ')">' +
+              '<span class="project-run-title">' +
+              esc(run.title || 'Cowork run') +
+              '</span>' +
+              '<span class="project-run-meta">' +
+              esc(
+                runStatusLabel(run.status) +
+                  ' · ' +
+                  ((run.intent && run.intent.mode) || 'execution') +
+                  ' · ' +
+                  ((run.complexity && run.complexity.level) || 'moderate') +
+                  ' complexity',
+              ) +
+              '</span>' +
+              '</button>'
+            );
+          })
+          .join('') +
+        '</div>' +
+        renderRunDetail(activeRun) +
+        '</div>'
+      );
+    }
+
+    function renderRunDetail(run) {
+      var planSteps = Array.isArray(run.planSteps) ? run.planSteps : [];
+      var events = Array.isArray(run.events) ? run.events : [];
+      var actionFeedback = projectRunActionFeedback[run.id] || null;
+      var citationFeedback = projectRunCitationFeedback[run.id] || null;
+      var coverage = run.researchCoverage || {
+        citationCount: 0,
+        status: 'not_applicable',
+        guidance: 'Research coverage applies only to research-mode runs.',
+      };
+      return (
+        '<div class="project-run-detail">' +
+        '<div class="project-run-header">' +
+        '<strong>' +
+        esc(run.title || 'Cowork run') +
+        '</strong>' +
+        '<span class="project-context-chip ' +
+        runStatusClass(run.status) +
+        '">' +
+        esc(runStatusLabel(run.status)) +
+        '</span>' +
+        '</div>' +
+        '<p>' +
+        esc(run.summary || run.prompt || 'No run summary yet.') +
+        '</p>' +
+        '<div class="project-run-section"><span>Estimate</span>' +
+        '<p>' +
+        esc(
+          ((run.complexity && run.complexity.level) || 'moderate') +
+            ' complexity · ~' +
+            ((run.complexity && run.complexity.estimatedSteps) || 3) +
+            ' steps · ' +
+            (((run.complexity && run.complexity.budgetTier) || 'medium') + ' budget'),
+        ) +
+        '</p>' +
+        '</div>' +
+        '<div class="project-run-section"><span>Mode</span>' +
+        '<p>' +
+        esc(
+          ((run.intent && run.intent.mode) || 'execution') +
+            ' · ' +
+            ((run.intent && run.intent.requiresCitations
+              ? 'citations required'
+              : 'citations optional')),
+        ) +
+        '</p>' +
+        '<small>' +
+        esc(
+          (run.intent && run.intent.sourceExpectation) ||
+            'Use project context and files as your source baseline.',
+        ) +
+        '</small>' +
+        '</div>' +
+        '<div class="project-run-section"><span>Approval</span>' +
+        '<p>' +
+        esc(
+          (run.approvalPreview && run.approvalPreview.required ? 'Required' : 'Not required') +
+            ' · ' +
+            ((run.approvalPreview && run.approvalPreview.risk) || 'low') +
+            ' risk',
+        ) +
+        '</p>' +
+        '<small>' +
+        esc(
+          (run.approvalPreview && run.approvalPreview.reason) ||
+            'No approval signals recorded.',
+        ) +
+        '</small>' +
+        '</div>' +
+        '<div class="project-run-section"><span>Research coverage</span>' +
+        '<p>' +
+        '<span class="project-context-chip ' +
+        researchCoverageClass(coverage.status) +
+        '">' +
+        esc(coverage.status || 'not_applicable') +
+        '</span> ' +
+        esc(String(coverage.citationCount || 0) + ' citations') +
+        '</p>' +
+        '<small>' +
+        esc(coverage.guidance || 'No guidance available.') +
+        '</small>' +
+        '<div class="project-context-new">' +
+        '<button type="button" class="btn btn-sm btn-primary" onclick="exportProjectRunCitationLedger(' +
+        jsStringAttr(run.id) +
+        ')">Export citation ledger</button>' +
+        '</div>' +
+        '</div>' +
+        '<div class="project-run-section"><span>Add citation</span>' +
+        '<div class="project-context-new">' +
+        '<input id="project-run-citation-title-' +
+        esc(run.id) +
+        '" class="search-input" placeholder="Citation title">' +
+        '<input id="project-run-citation-url-' +
+        esc(run.id) +
+        '" class="search-input" placeholder="Source URL">' +
+        '<button type="button" class="btn btn-sm btn-primary" onclick="addProjectRunCitation(' +
+        jsStringAttr(run.id) +
+        ')">Add citation</button>' +
+        '</div>' +
+        '<input id="project-run-citation-note-' +
+        esc(run.id) +
+        '" class="search-input" placeholder="Optional note">' +
+        '<div class="project-settings-msg" id="project-run-citation-msg-' +
+        esc(run.id) +
+        '">' +
+        esc(citationFeedback ? citationFeedback.message : '') +
+        '</div>' +
+        '</div>' +
+        '<div class="project-run-section"><span>Connector action request</span>' +
+        '<div class="project-context-new">' +
+        '<input id="project-run-connector-' +
+        esc(run.id) +
+        '" class="search-input" placeholder="connector id (e.g. gmail)">' +
+        '<input id="project-run-action-' +
+        esc(run.id) +
+        '" class="search-input" placeholder="action (e.g. gmail.read)">' +
+        '<input id="project-run-note-' +
+        esc(run.id) +
+        '" class="search-input" placeholder="Optional note">' +
+        '<button type="button" class="btn btn-sm btn-primary" onclick="requestProjectRunAction(' +
+        jsStringAttr(run.id) +
+        ')">Request action</button>' +
+        '</div>' +
+        '<div class="project-settings-msg" id="project-run-action-msg-' +
+        esc(run.id) +
+        '">' +
+        esc(actionFeedback ? actionFeedback.message : '') +
+        '</div>' +
+        '</div>' +
+        '<div class="project-run-section"><span>Plan</span>' +
+        (planSteps.length
+          ? '<ul>' +
+            planSteps
+              .map(function (step) {
+                return (
+                  '<li><strong>' +
+                  esc(step.title || step.id || 'Step') +
+                  '</strong> — ' +
+                  esc(runStatusLabel(step.status || 'draft')) +
+                  '</li>'
+                );
+              })
+              .join('') +
+            '</ul>'
+          : '<p>No plan steps recorded.</p>') +
+        '</div>' +
+        '<div class="project-run-section"><span>Recent events</span>' +
+        (events.length
+          ? '<ul>' +
+            events
+              .slice(-6)
+              .reverse()
+              .map(function (event) {
+                return (
+                  '<li><strong>' +
+                  esc(event.kind || 'event') +
+                  '</strong> — ' +
+                  esc(event.message || 'Updated') +
+                  '</li>'
+                );
+              })
+              .join('') +
+            '</ul>'
+          : '<p>No events yet.</p>') +
+        '</div>' +
+        '<div class="project-run-actions">' +
+        '<button type="button" class="btn btn-sm btn-ghost" onclick="setProjectRunAction(' +
+        jsStringAttr(run.id) +
+        ', \'start\')">Start</button>' +
+        '<button type="button" class="btn btn-sm btn-ghost" onclick="setProjectRunAction(' +
+        jsStringAttr(run.id) +
+        ', \'checkpoint\')">Need approval</button>' +
+        '<button type="button" class="btn btn-sm btn-ghost" onclick="setProjectRunAction(' +
+        jsStringAttr(run.id) +
+        ', \'resume\')">Resume</button>' +
+        '<button type="button" class="btn btn-sm btn-ghost" onclick="setProjectRunAction(' +
+        jsStringAttr(run.id) +
+        ', \'complete\')">Complete</button>' +
+        '<button type="button" class="btn btn-sm btn-ghost" onclick="setProjectRunAction(' +
+        jsStringAttr(run.id) +
+        ', \'retry\')">Retry</button>' +
+        '<button type="button" class="btn btn-sm btn-ghost" onclick="setProjectRunAction(' +
+        jsStringAttr(run.id) +
+        ', \'cancel\')">Cancel</button>' +
+        '</div>' +
+        '</div>'
+      );
+    }
+
+    function renderContextNotebook(items) {
+      return (
+        '<section class="project-context-notebook">' +
+        '<div class="project-context-notebook-head">' +
+        '<div><span>Context notebook</span><small>Files, chats, runs, sources, notes, and inclusion state.</small></div>' +
+        '</div>' +
+        '<div class="project-context-new">' +
+        '<input id="project-context-title" class="search-input" placeholder="Add context note or source title">' +
+        '<input id="project-context-source" class="search-input" placeholder="Source (optional)">' +
+        '<button type="button" class="btn btn-sm btn-primary" onclick="addProjectContextItem()">Add note</button>' +
+        '</div>' +
+        '<div class="project-context-list">' +
+        (items.length
+          ? items
+              .map(function (item) {
+                return (
+                  '<div class="project-context-item">' +
+                  '<div class="project-context-item-main">' +
+                  '<strong>' +
+                  esc(item.title || item.path || item.kind || 'Context item') +
+                  '</strong>' +
+                  '<div class="project-context-item-badges">' +
+                  '<span class="project-context-chip ' +
+                  (item.sensitivity === 'sensitive'
+                    ? 'is-attention'
+                    : item.sensitivity === 'review-required'
+                      ? 'is-idle'
+                      : 'is-ready') +
+                  '">' +
+                  esc(item.sensitivity || 'normal') +
+                  '</span>' +
+                  (item.provenance
+                    ? '<span class="project-context-chip is-neutral">' +
+                      esc(item.provenance) +
+                      '</span>'
+                    : '') +
+                  '</div>' +
+                  '<small>' +
+                  esc(
+                    [item.kind || 'item', item.provenance || item.source || 'local', item.sensitivity || 'normal']
+                      .filter(Boolean)
+                      .join(' · '),
+                  ) +
+                  '</small>' +
+                  '</div>' +
+                  '<div class="project-context-item-actions">' +
+                  '<button type="button" class="btn btn-sm btn-ghost" onclick="toggleProjectContextInclude(' +
+                  jsStringAttr(item.id) +
+                  ', ' +
+                  (item.included ? 'false' : 'true') +
+                  ')">' +
+                  (item.included ? 'Exclude' : 'Include') +
+                  '</button>' +
+                  '<button type="button" class="btn btn-sm btn-ghost" onclick="toggleProjectContextPin(' +
+                  jsStringAttr(item.id) +
+                  ', ' +
+                  (item.pinned ? 'false' : 'true') +
+                  ')">' +
+                  (item.pinned ? 'Unpin' : 'Pin') +
+                  '</button>' +
+                  (item.autoGenerated
+                    ? ''
+                    : '<button type="button" class="btn btn-sm btn-ghost" onclick="removeProjectContextItem(' +
+                      jsStringAttr(item.id) +
+                      ')">Remove</button>') +
+                  '</div>' +
+                  '</div>'
+                );
+              })
+              .join('')
+          : '<div class="project-panel-empty project-context-empty"><strong>No context items yet.</strong><p>Add a note, source link, or promote files and chats.</p></div>') +
+        '</div>' +
+        '</section>'
+      );
+    }
+
+    function renderProjectCapabilities(project) {
+      var capabilities = (project && project.capabilities) || {};
+      var skills = capabilities.skills?.enabled || [];
+      var plugins = capabilities.plugins?.enabled || [];
+      var connectors = capabilities.connectors?.configured || [];
+      return (
+        '<div class="project-capabilities">' +
+        '<div class="project-rail-title">Active capabilities</div>' +
+        '<p>' +
+        esc(
+          String(skills.length) +
+            ' skills · ' +
+            String(plugins.length) +
+            ' plugins · ' +
+            String(connectors.length) +
+            ' connectors',
+        ) +
+        '</p>' +
+        (skills.length
+          ? '<div class="project-capability-group"><span>Skills</span><small>' +
+            esc(
+              skills
+                .slice(0, 8)
+                .map(function (item) {
+                  return item.name;
+                })
+                .join(', '),
+            ) +
+            '</small></div>'
+          : '') +
+        (plugins.length
+          ? '<div class="project-capability-group"><span>Plugins</span><small>' +
+            esc(
+              plugins
+                .slice(0, 8)
+                .map(function (item) {
+                  return item.name;
+                })
+                .join(', '),
+            ) +
+            '</small></div>'
+          : '') +
+        (connectors.length
+          ? '<div class="project-capability-group"><span>Connector scope</span><small>' +
+            esc(
+              connectors
+                .slice(0, 8)
+                .map(function (item) {
+                  return item.id + (item.requiresApproval ? ' (approval)' : '');
+                })
+                .join(', '),
+            ) +
+            '</small></div>'
+          : '<div class="project-capability-group"><span>Connector scope</span><small>No external connectors configured for this project.</small></div>') +
+        '</div>'
+      );
+    }
     return (
       '<div class="project-thread-list">' +
       threads
@@ -632,6 +1039,7 @@
   function renderProjectBrief(project, detail, providerState) {
     var files = detail.files || [];
     var threads = detail.threads || [];
+    var runs = detail.runs || [];
     var hasInstructions = Boolean(project.instructions && project.instructions.trim());
     var providerLoadIssue = providerState?.loadIssue || '';
     var tone = !files.length
@@ -684,7 +1092,9 @@
       esc(String(files.length)) +
       ' files &middot; ' +
       esc(String(threads.length)) +
-      ' threads</small>' +
+      ' threads &middot; ' +
+      esc(String(runs.length)) +
+      ' runs</small>' +
       '</div>' +
       (providerLoadIssue
         ? '<p class="project-provider-health">' +
@@ -724,6 +1134,7 @@
       '<textarea id="project-prompt" placeholder="Summarize files, draft a document, check emails from a sender, or plan the next step."></textarea>' +
       '<div class="project-composer-actions">' +
       '<button class="btn btn-sm btn-ghost" onclick="toggleProjectFileForm()">New file</button>' +
+      '<button class="btn btn-sm btn-ghost" onclick="createProjectRunFromPrompt()">Track run</button>' +
       '<button class="btn btn-primary" id="project-chat-start-btn" onclick="startProjectChat()">Start project chat</button>' +
       '</div>' +
       '</div>'
@@ -806,6 +1217,7 @@
   function renderProjectRail(project, detail) {
     var fileCount = (detail.files || []).length;
     var threadCount = (detail.threads || []).length;
+    var runCount = (detail.runs || []).length;
     var description = project.description || '';
     var instructions = project.instructions || '';
     return (
@@ -819,6 +1231,9 @@
       '<span><strong>' +
       esc(String(threadCount)) +
       '</strong><small>threads</small></span>' +
+      '<span><strong>' +
+      esc(String(runCount)) +
+      '</strong><small>runs</small></span>' +
       '</div>' +
       '<p>Chats use this workspace, project files, and prior threads.</p>' +
       '<code>/workspace/extra/project-' +
@@ -856,6 +1271,7 @@
       '</div>' +
       '<div class="project-rail-card">' +
       '<div class="project-rail-title">Connectors</div>' +
+      renderProjectCapabilities(project) +
       renderProjectMcpAccess(project) +
       renderToolLanes() +
       '</div>' +
@@ -936,6 +1352,7 @@
 
   function renderProjectDetail(detail, providerState) {
     var project = detail.project;
+    var contextItems = detail.contextItems || [];
     return (
       '<section class="project-workbench">' +
       '<div class="project-main">' +
@@ -975,7 +1392,12 @@
       '<div class="project-section-title">Chat history</div>' +
       renderThreads(project.id, detail.threads || []) +
       '</div>' +
+      '<div class="project-section">' +
+      '<div class="project-section-title">Run workspace</div>' +
+      renderRuns(detail.runs || []) +
       '</div>' +
+      '</div>' +
+      renderContextNotebook(contextItems) +
       renderFilePreview() +
       '</div>' +
       renderProjectRail(project, detail) +
@@ -1429,6 +1851,276 @@
       return;
     }
     await copyTextWithFallback(text, 'Project handoff copied', 'Copy project handoff');
+  };
+
+  window.selectProjectRun = function (runId) {
+    activeProjectRunId = runId;
+    refreshProjects();
+  };
+
+  window.createProjectRunFromPrompt = async function () {
+    if (!activeProjectId) return;
+    var prompt = document.getElementById('project-prompt')?.value || '';
+    var title =
+      document.getElementById('project-chat-title')?.value ||
+      'Project run ' + new Date().toLocaleString();
+    var provider = document.getElementById('project-chat-provider')?.value || '';
+    var model = document.getElementById('project-chat-model')?.value || '';
+    if (!prompt.trim()) {
+      toast('Add a run prompt first', 'warning');
+      document.getElementById('project-prompt')?.focus();
+      return;
+    }
+    try {
+      var result = await api('/projects/' + encodeURIComponent(activeProjectId) + '/runs', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: title,
+          prompt: prompt,
+          provider: provider || undefined,
+          model: model || undefined,
+        }),
+      });
+      if (result.error || !result.run?.id) {
+        throw new Error(result.error || 'Could not create run');
+      }
+      activeProjectRunId = result.run.id;
+      toast('Run created', 'success');
+      refreshProjects();
+    } catch (err) {
+      toast('Run was not created. ' + (err.message || ''), 'error');
+    }
+  };
+
+  window.setProjectRunAction = async function (runId, action) {
+    if (!activeProjectId || !runId || !action) return;
+    try {
+      var body = { action: action };
+      if (action === 'checkpoint') body.message = 'Waiting for operator approval';
+      if (action === 'complete') body.summary = 'Run completed from project workspace';
+      await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/runs/' +
+          encodeURIComponent(runId),
+        {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+        },
+      );
+      activeProjectRunId = runId;
+      toast('Run updated', 'success');
+      refreshProjects();
+    } catch (err) {
+      toast('Run update failed: ' + (err.message || ''), 'error');
+    }
+  };
+
+  window.addProjectRunCitation = async function (runId) {
+    if (!activeProjectId || !runId) return;
+    var title =
+      document.getElementById('project-run-citation-title-' + runId)?.value.trim() || '';
+    var sourceUrl =
+      document.getElementById('project-run-citation-url-' + runId)?.value.trim() || '';
+    var note =
+      document.getElementById('project-run-citation-note-' + runId)?.value.trim() || '';
+    var msg = document.getElementById('project-run-citation-msg-' + runId);
+    if (msg) msg.textContent = '';
+    if (!title || !sourceUrl) {
+      var inputError = 'Citation title and source URL are required';
+      projectRunCitationFeedback[runId] = { tone: 'error', message: inputError };
+      if (msg) msg.textContent = inputError;
+      toast(inputError, 'warning');
+      return;
+    }
+    try {
+      var body = { title: title, sourceUrl: sourceUrl };
+      if (note) body.note = note;
+      await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/runs/' +
+          encodeURIComponent(runId) +
+          '/research/citations',
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        },
+      );
+      activeProjectRunId = runId;
+      var successMessage = 'Citation added';
+      projectRunCitationFeedback[runId] = { tone: 'success', message: successMessage };
+      if (msg) msg.textContent = successMessage;
+      toast(successMessage, 'success');
+      refreshProjects();
+    } catch (err) {
+      var failureMessage = 'Could not add citation: ' + (err.message || '');
+      projectRunCitationFeedback[runId] = { tone: 'error', message: failureMessage };
+      if (msg) msg.textContent = failureMessage;
+      toast(failureMessage, 'error');
+      refreshProjects();
+    }
+  };
+
+  window.exportProjectRunCitationLedger = async function (runId) {
+    if (!activeProjectId || !runId) return;
+    var msg = document.getElementById('project-run-citation-msg-' + runId);
+    if (msg) msg.textContent = '';
+    try {
+      var payload = await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/runs/' +
+          encodeURIComponent(runId) +
+          '/research/export-ledger',
+        {
+          method: 'POST',
+        },
+      );
+      activeProjectRunId = runId;
+      var successMessage =
+        'Citation ledger exported to ' + ((payload.file && payload.file.path) || 'project file');
+      projectRunCitationFeedback[runId] = { tone: 'success', message: successMessage };
+      if (msg) msg.textContent = successMessage;
+      toast(successMessage, 'success');
+      refreshProjects();
+    } catch (err) {
+      var failureMessage = 'Could not export citation ledger: ' + (err.message || '');
+      projectRunCitationFeedback[runId] = { tone: 'error', message: failureMessage };
+      if (msg) msg.textContent = failureMessage;
+      toast(failureMessage, 'error');
+      refreshProjects();
+    }
+  };
+
+  window.requestProjectRunAction = async function (runId) {
+    if (!activeProjectId || !runId) return;
+    var connectorId =
+      document.getElementById('project-run-connector-' + runId)?.value.trim() || '';
+    var action =
+      document.getElementById('project-run-action-' + runId)?.value.trim() || '';
+    var note = document.getElementById('project-run-note-' + runId)?.value.trim() || '';
+    var msg = document.getElementById('project-run-action-msg-' + runId);
+    if (msg) msg.textContent = '';
+    if (!connectorId || !action) {
+      var inputError = 'Connector id and action are required';
+      projectRunActionFeedback[runId] = { tone: 'error', message: inputError };
+      if (msg) msg.textContent = inputError;
+      toast(inputError, 'warning');
+      return;
+    }
+    try {
+      var requestBody = {
+        connectorId: connectorId,
+        action: action,
+      };
+      if (note) requestBody.note = note;
+      var response = await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/runs/' +
+          encodeURIComponent(runId) +
+          '/actions/request',
+        {
+          method: 'POST',
+          body: JSON.stringify(requestBody),
+        },
+      );
+      activeProjectRunId = runId;
+      var successMessage = response.approvalRequired
+        ? 'Action request submitted and waiting for approval.'
+        : 'Action request authorized.';
+      projectRunActionFeedback[runId] = { tone: 'success', message: successMessage };
+      if (msg) msg.textContent = successMessage;
+      toast(successMessage, 'success');
+      refreshProjects();
+    } catch (err) {
+      var failureMessage = 'Action request failed: ' + (err.message || '');
+      projectRunActionFeedback[runId] = { tone: 'error', message: failureMessage };
+      if (msg) msg.textContent = failureMessage;
+      toast(failureMessage, 'error');
+      refreshProjects();
+    }
+  };
+
+  window.addProjectContextItem = async function () {
+    if (!activeProjectId) return;
+    var title = document.getElementById('project-context-title')?.value || '';
+    var source = document.getElementById('project-context-source')?.value || '';
+    if (!title.trim()) {
+      toast('Context title is required', 'warning');
+      return;
+    }
+    try {
+      await api('/projects/' + encodeURIComponent(activeProjectId) + '/context', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: title.trim(),
+          source: source.trim() || 'manual',
+          kind: 'note',
+          included: true,
+        }),
+      });
+      toast('Context note added', 'success');
+      refreshProjects();
+    } catch (err) {
+      toast('Could not add context item: ' + (err.message || ''), 'error');
+    }
+  };
+
+  window.toggleProjectContextInclude = async function (itemId, included) {
+    if (!activeProjectId || !itemId || String(itemId).startsWith('auto:')) return;
+    try {
+      await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/context/' +
+          encodeURIComponent(itemId),
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ included: Boolean(included) }),
+        },
+      );
+      refreshProjects();
+    } catch (err) {
+      toast('Could not update context inclusion', 'error');
+    }
+  };
+
+  window.toggleProjectContextPin = async function (itemId, pinned) {
+    if (!activeProjectId || !itemId || String(itemId).startsWith('auto:')) return;
+    try {
+      await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/context/' +
+          encodeURIComponent(itemId),
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ pinned: Boolean(pinned) }),
+        },
+      );
+      refreshProjects();
+    } catch (err) {
+      toast('Could not update context pin state', 'error');
+    }
+  };
+
+  window.removeProjectContextItem = async function (itemId) {
+    if (!activeProjectId || !itemId || String(itemId).startsWith('auto:')) return;
+    try {
+      await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/context/' +
+          encodeURIComponent(itemId),
+        { method: 'DELETE' },
+      );
+      toast('Context item removed', 'success');
+      refreshProjects();
+    } catch (err) {
+      toast('Could not remove context item', 'error');
+    }
   };
 
   window.startProjectChat = async function () {
