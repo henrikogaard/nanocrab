@@ -14,6 +14,10 @@ import {
   NewJournalEntryRecord,
   NewJournalEventRecord,
   NewMemoryRecord,
+  AgentProfile,
+  AgentProfileActivity,
+  AgentSubscription,
+  AgentSubscriptionEvent,
   RegisteredGroup,
   CoworkProject,
   CoworkContextItem,
@@ -22,6 +26,8 @@ import {
   CoworkRunStep,
   ScheduledTask,
   TaskRunLog,
+  NewAgentProfileActivity,
+  NewAgentSubscriptionEvent,
 } from './types.js';
 
 let db: Database.Database;
@@ -121,6 +127,77 @@ function createSchema(database: Database.Database): void {
       project_id TEXT,
       project_slug TEXT
     );
+    CREATE TABLE IF NOT EXISTS agent_profiles (
+      id TEXT PRIMARY KEY,
+      handle TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      avatar TEXT,
+      description TEXT,
+      personality TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      provider_profile_id TEXT,
+      provider TEXT,
+      model TEXT,
+      tool_policy TEXT NOT NULL,
+      allowed_mcp_servers_json TEXT,
+      skills_json TEXT NOT NULL,
+      memory_scopes_json TEXT NOT NULL,
+      task_kinds_json TEXT NOT NULL,
+      channel_bindings_json TEXT NOT NULL,
+      write_policy_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_profiles_enabled ON agent_profiles(enabled);
+
+    CREATE TABLE IF NOT EXISTS agent_subscriptions (
+      id TEXT PRIMARY KEY,
+      agent_profile_id TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      filters_json TEXT NOT NULL,
+      task_kind TEXT NOT NULL,
+      autonomy_mode TEXT NOT NULL,
+      last_seen_at TEXT,
+      last_matched_at TEXT,
+      last_run_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (agent_profile_id) REFERENCES agent_profiles(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_subscriptions_profile ON agent_subscriptions(agent_profile_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_subscriptions_enabled ON agent_subscriptions(enabled, source_type);
+
+    CREATE TABLE IF NOT EXISTS agent_subscription_events (
+      id TEXT PRIMARY KEY,
+      subscription_id TEXT NOT NULL,
+      agent_profile_id TEXT NOT NULL,
+      dedupe_key TEXT NOT NULL UNIQUE,
+      source_type TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      external_event_id TEXT NOT NULL,
+      run_id TEXT,
+      status TEXT NOT NULL,
+      metadata_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_subscription_events_profile ON agent_subscription_events(agent_profile_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS agent_profile_activity (
+      id TEXT PRIMARY KEY,
+      agent_profile_id TEXT NOT NULL,
+      subscription_id TEXT,
+      kind TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      source_id TEXT,
+      summary TEXT NOT NULL,
+      run_id TEXT,
+      approval_id TEXT,
+      metadata_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_profile_activity_profile ON agent_profile_activity(agent_profile_id, created_at);
+
     CREATE TABLE IF NOT EXISTS cowork_projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -696,6 +773,56 @@ export function getMessagesSince(
   return db
     .prepare(sql)
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+}
+
+interface RecentUserMessageRow {
+  id: string;
+  chat_jid: string;
+  sender: string;
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_from_me: number;
+  is_bot_message: number;
+  reply_to_message_id: string | null;
+  reply_to_message_content: string | null;
+  reply_to_sender_name: string | null;
+}
+
+export function getRecentUserMessages(
+  chatJid: string,
+  limit: number = 50,
+): NewMessage[] {
+  const safeLimit = Math.min(Math.max(limit || 50, 1), 200);
+  const rows = db
+    .prepare(
+      `
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
+             is_bot_message, reply_to_message_id, reply_to_message_content,
+             reply_to_sender_name
+      FROM messages
+      WHERE chat_jid = ?
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ?
+    `,
+    )
+    .all(chatJid, `${ASSISTANT_NAME}:%`, safeLimit) as RecentUserMessageRow[];
+
+  return rows.reverse().map((row) => ({
+    id: row.id,
+    chat_jid: row.chat_jid,
+    sender: row.sender,
+    sender_name: row.sender_name,
+    content: row.content,
+    timestamp: row.timestamp,
+    is_from_me: row.is_from_me === 1,
+    is_bot_message: row.is_bot_message === 1,
+    reply_to_message_id: row.reply_to_message_id ?? undefined,
+    reply_to_message_content: row.reply_to_message_content ?? undefined,
+    reply_to_sender_name: row.reply_to_sender_name ?? undefined,
+  }));
 }
 
 export function getLastBotMessageTimestamp(
@@ -1541,6 +1668,615 @@ export function getWebThreads(): Record<string, RegisteredGroup> {
     if (g.kind === 'web') out[jid] = g;
   }
   return out;
+}
+
+// --- Agent profile accessors ---
+
+interface AgentProfileRow {
+  id: string;
+  handle: string;
+  display_name: string;
+  avatar: string | null;
+  description: string | null;
+  personality: string | null;
+  enabled: number;
+  provider_profile_id: string | null;
+  provider: string | null;
+  model: string | null;
+  tool_policy: string;
+  allowed_mcp_servers_json: string | null;
+  skills_json: string;
+  memory_scopes_json: string;
+  task_kinds_json: string;
+  channel_bindings_json: string;
+  write_policy_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface AgentSubscriptionRow {
+  id: string;
+  agent_profile_id: string;
+  source_type: string;
+  enabled: number;
+  filters_json: string;
+  task_kind: string;
+  autonomy_mode: string;
+  last_seen_at: string | null;
+  last_matched_at: string | null;
+  last_run_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface AgentSubscriptionEventRow {
+  id: string;
+  subscription_id: string;
+  agent_profile_id: string;
+  dedupe_key: string;
+  source_type: string;
+  source_id: string;
+  external_event_id: string;
+  run_id: string | null;
+  status: string;
+  metadata_json: string;
+  created_at: string;
+}
+
+interface AgentProfileActivityRow {
+  id: string;
+  agent_profile_id: string;
+  subscription_id: string | null;
+  kind: AgentProfileActivity['kind'];
+  source_type: string;
+  source_id: string | null;
+  summary: string;
+  run_id: string | null;
+  approval_id: string | null;
+  metadata_json: string;
+  created_at: string;
+}
+
+const AGENT_PROFILE_TASK_KINDS: AgentProfile['taskKinds'] = [
+  'chat',
+  'cowork_task',
+  'coding_job',
+  'report',
+  'research',
+  'scheduled_check',
+];
+
+const DEFAULT_AGENT_PROFILE_WRITE_POLICY: AgentProfile['writePolicy'] = {
+  directSendRequiresApproval: false,
+  autonomousSendRequiresApproval: true,
+};
+
+function parseJsonValue(value: string | null): unknown {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype
+  );
+}
+
+function parseJsonObjectField(value: string | null): Record<string, unknown> {
+  const parsed = parseJsonValue(value);
+  return isPlainObject(parsed) ? parsed : {};
+}
+
+function parseStringArrayField(value: string | null): string[] {
+  const parsed = parseJsonValue(value);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((item): item is string => typeof item === 'string');
+}
+
+function parseNullableStringArrayField(value: string | null): string[] | null {
+  if (value === null) return null;
+  const parsed = parseJsonValue(value);
+  if (!Array.isArray(parsed)) return null;
+  return parsed.filter((item): item is string => typeof item === 'string');
+}
+
+function parseTaskKindsField(value: string | null): AgentProfile['taskKinds'] {
+  const parsed = parseJsonValue(value);
+  if (!Array.isArray(parsed)) return ['chat'];
+  const taskKinds = parsed.filter(isAgentProfileTaskKind);
+  return taskKinds.length > 0 ? taskKinds : ['chat'];
+}
+
+function isAgentProfileTaskKind(
+  value: unknown,
+): value is AgentProfile['taskKinds'][number] {
+  return (
+    typeof value === 'string' &&
+    (AGENT_PROFILE_TASK_KINDS as string[]).includes(value)
+  );
+}
+
+function parseChannelBindingsField(
+  value: string | null,
+): AgentProfile['channelBindings'] {
+  const parsed = parseJsonObjectField(value);
+  return Object.entries(parsed).reduce<AgentProfile['channelBindings']>(
+    (bindings, [channel, handles]) => {
+      if (!Array.isArray(handles)) return bindings;
+      const stringHandles = handles.filter(
+        (handle): handle is string => typeof handle === 'string',
+      );
+      if (stringHandles.length > 0) bindings[channel] = stringHandles;
+      return bindings;
+    },
+    {},
+  );
+}
+
+function parseWritePolicyField(
+  value: string | null,
+): AgentProfile['writePolicy'] {
+  const parsed = parseJsonObjectField(value);
+  return {
+    directSendRequiresApproval:
+      typeof parsed.directSendRequiresApproval === 'boolean'
+        ? parsed.directSendRequiresApproval
+        : DEFAULT_AGENT_PROFILE_WRITE_POLICY.directSendRequiresApproval,
+    autonomousSendRequiresApproval:
+      typeof parsed.autonomousSendRequiresApproval === 'boolean'
+        ? parsed.autonomousSendRequiresApproval
+        : DEFAULT_AGENT_PROFILE_WRITE_POLICY.autonomousSendRequiresApproval,
+  };
+}
+
+function agentProfileToRowValues(profile: AgentProfile): unknown[] {
+  return [
+    profile.id,
+    profile.handle,
+    profile.displayName,
+    profile.avatar,
+    profile.description,
+    profile.personality,
+    profile.enabled ? 1 : 0,
+    profile.providerProfileId,
+    profile.provider,
+    profile.model,
+    profile.toolPolicy,
+    profile.allowedMcpServers === null
+      ? null
+      : JSON.stringify(profile.allowedMcpServers),
+    JSON.stringify(profile.skills),
+    JSON.stringify(profile.memoryScopes),
+    JSON.stringify(profile.taskKinds),
+    JSON.stringify(profile.channelBindings),
+    JSON.stringify(profile.writePolicy),
+    profile.createdAt,
+    profile.updatedAt,
+  ];
+}
+
+function mapAgentProfileRow(row: AgentProfileRow): AgentProfile {
+  return {
+    id: row.id,
+    handle: row.handle,
+    displayName: row.display_name,
+    avatar: row.avatar,
+    description: row.description,
+    personality: row.personality,
+    enabled: row.enabled === 1,
+    providerProfileId: row.provider_profile_id,
+    provider: row.provider as AgentProfile['provider'],
+    model: row.model,
+    toolPolicy: row.tool_policy as AgentProfile['toolPolicy'],
+    allowedMcpServers: parseNullableStringArrayField(
+      row.allowed_mcp_servers_json,
+    ),
+    skills: parseStringArrayField(row.skills_json),
+    memoryScopes: parseStringArrayField(row.memory_scopes_json),
+    taskKinds: parseTaskKindsField(row.task_kinds_json),
+    channelBindings: parseChannelBindingsField(row.channel_bindings_json),
+    writePolicy: parseWritePolicyField(row.write_policy_json),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapAgentSubscriptionRow(row: AgentSubscriptionRow): AgentSubscription {
+  return {
+    id: row.id,
+    agentProfileId: row.agent_profile_id,
+    sourceType: row.source_type as AgentSubscription['sourceType'],
+    enabled: row.enabled === 1,
+    filters: parseJsonObjectField(row.filters_json),
+    taskKind: row.task_kind as AgentSubscription['taskKind'],
+    autonomyMode: row.autonomy_mode as AgentSubscription['autonomyMode'],
+    lastSeenAt: row.last_seen_at,
+    lastMatchedAt: row.last_matched_at,
+    lastRunId: row.last_run_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapAgentSubscriptionEventRow(
+  row: AgentSubscriptionEventRow,
+): AgentSubscriptionEvent {
+  return {
+    id: row.id,
+    subscriptionId: row.subscription_id,
+    agentProfileId: row.agent_profile_id,
+    dedupeKey: row.dedupe_key,
+    sourceType: row.source_type as AgentSubscriptionEvent['sourceType'],
+    sourceId: row.source_id,
+    externalEventId: row.external_event_id,
+    runId: row.run_id,
+    status: row.status,
+    metadata: parseJsonObjectField(row.metadata_json),
+    createdAt: row.created_at,
+  };
+}
+
+function mapAgentProfileActivityRow(
+  row: AgentProfileActivityRow,
+): AgentProfileActivity {
+  return {
+    id: row.id,
+    agentProfileId: row.agent_profile_id,
+    subscriptionId: row.subscription_id,
+    kind: row.kind,
+    sourceType: row.source_type,
+    sourceId: row.source_id,
+    summary: row.summary,
+    runId: row.run_id,
+    approvalId: row.approval_id,
+    metadata: parseJsonObjectField(row.metadata_json),
+    createdAt: row.created_at,
+  };
+}
+
+function isAgentProfileHandleConstraintError(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    err.message.includes('UNIQUE constraint failed: agent_profiles.handle')
+  );
+}
+
+function rethrowAgentProfileHandleError(err: unknown, handle: string): never {
+  if (isAgentProfileHandleConstraintError(err)) {
+    throw new Error(`Agent profile handle already exists: ${handle}`);
+  }
+  throw err;
+}
+
+export function insertAgentProfile(profile: AgentProfile): AgentProfile {
+  try {
+    db.prepare(
+      `
+      INSERT INTO agent_profiles (
+        id, handle, display_name, avatar, description, personality, enabled,
+        provider_profile_id, provider, model, tool_policy,
+        allowed_mcp_servers_json, skills_json, memory_scopes_json,
+        task_kinds_json, channel_bindings_json, write_policy_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    ).run(...agentProfileToRowValues(profile));
+  } catch (err) {
+    rethrowAgentProfileHandleError(err, profile.handle);
+  }
+  return getAgentProfileRow(profile.id)!;
+}
+
+export function updateAgentProfile(profile: AgentProfile): AgentProfile {
+  try {
+    db.prepare(
+      `
+      UPDATE agent_profiles
+      SET handle = ?,
+          display_name = ?,
+          avatar = ?,
+          description = ?,
+          personality = ?,
+          enabled = ?,
+          provider_profile_id = ?,
+          provider = ?,
+          model = ?,
+          tool_policy = ?,
+          allowed_mcp_servers_json = ?,
+          skills_json = ?,
+          memory_scopes_json = ?,
+          task_kinds_json = ?,
+          channel_bindings_json = ?,
+          write_policy_json = ?,
+          created_at = ?,
+          updated_at = ?
+      WHERE id = ?
+    `,
+    ).run(...agentProfileToRowValues(profile).slice(1), profile.id);
+  } catch (err) {
+    rethrowAgentProfileHandleError(err, profile.handle);
+  }
+
+  const updated = getAgentProfileRow(profile.id);
+  if (!updated) throw new Error(`Agent profile not found: ${profile.id}`);
+  return updated;
+}
+
+export function getAgentProfileRow(id: string): AgentProfile | undefined {
+  const row = db
+    .prepare('SELECT * FROM agent_profiles WHERE id = ?')
+    .get(id) as AgentProfileRow | undefined;
+  return row ? mapAgentProfileRow(row) : undefined;
+}
+
+export function getAgentProfileRowByHandle(
+  handle: string,
+): AgentProfile | undefined {
+  const row = db
+    .prepare('SELECT * FROM agent_profiles WHERE handle = ?')
+    .get(handle) as AgentProfileRow | undefined;
+  return row ? mapAgentProfileRow(row) : undefined;
+}
+
+export function listAgentProfileRows(): AgentProfile[] {
+  const rows = db
+    .prepare('SELECT * FROM agent_profiles ORDER BY created_at ASC, handle ASC')
+    .all() as AgentProfileRow[];
+  return rows.map(mapAgentProfileRow);
+}
+
+export function insertAgentSubscription(
+  subscription: AgentSubscription,
+): AgentSubscription {
+  db.prepare(
+    `
+    INSERT INTO agent_subscriptions (
+      id, agent_profile_id, source_type, enabled, filters_json, task_kind,
+      autonomy_mode, last_seen_at, last_matched_at, last_run_id,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `,
+  ).run(
+    subscription.id,
+    subscription.agentProfileId,
+    subscription.sourceType,
+    subscription.enabled ? 1 : 0,
+    JSON.stringify(subscription.filters),
+    subscription.taskKind,
+    subscription.autonomyMode,
+    subscription.lastSeenAt,
+    subscription.lastMatchedAt,
+    subscription.lastRunId,
+    subscription.createdAt,
+    subscription.updatedAt,
+  );
+
+  const row = db
+    .prepare('SELECT * FROM agent_subscriptions WHERE id = ?')
+    .get(subscription.id) as AgentSubscriptionRow | undefined;
+  return row ? mapAgentSubscriptionRow(row) : subscription;
+}
+
+export function listAgentSubscriptionsForProfile(
+  agentProfileId: string,
+): AgentSubscription[] {
+  const rows = db
+    .prepare(
+      `
+      SELECT * FROM agent_subscriptions
+      WHERE agent_profile_id = ?
+      ORDER BY created_at ASC
+    `,
+    )
+    .all(agentProfileId) as AgentSubscriptionRow[];
+  return rows.map(mapAgentSubscriptionRow);
+}
+
+export function listEnabledAgentSubscriptions(
+  sourceType?: string,
+): AgentSubscription[] {
+  const rows = sourceType
+    ? (db
+        .prepare(
+          `
+          SELECT * FROM agent_subscriptions
+          WHERE enabled = 1 AND source_type = ?
+          ORDER BY created_at ASC
+        `,
+        )
+        .all(sourceType) as AgentSubscriptionRow[])
+    : (db
+        .prepare(
+          `
+          SELECT * FROM agent_subscriptions
+          WHERE enabled = 1
+          ORDER BY created_at ASC
+        `,
+        )
+        .all() as AgentSubscriptionRow[]);
+  return rows.map(mapAgentSubscriptionRow);
+}
+
+export function updateAgentSubscription(
+  subscription: AgentSubscription,
+): AgentSubscription {
+  db.prepare(
+    `
+    UPDATE agent_subscriptions
+    SET agent_profile_id = ?,
+        source_type = ?,
+        enabled = ?,
+        filters_json = ?,
+        task_kind = ?,
+        autonomy_mode = ?,
+        last_seen_at = ?,
+        last_matched_at = ?,
+        last_run_id = ?,
+        created_at = ?,
+        updated_at = ?
+    WHERE id = ?
+  `,
+  ).run(
+    subscription.agentProfileId,
+    subscription.sourceType,
+    subscription.enabled ? 1 : 0,
+    JSON.stringify(subscription.filters),
+    subscription.taskKind,
+    subscription.autonomyMode,
+    subscription.lastSeenAt,
+    subscription.lastMatchedAt,
+    subscription.lastRunId,
+    subscription.createdAt,
+    subscription.updatedAt,
+    subscription.id,
+  );
+
+  const updated = db
+    .prepare('SELECT * FROM agent_subscriptions WHERE id = ?')
+    .get(subscription.id) as AgentSubscriptionRow | undefined;
+  if (!updated) {
+    throw new Error(`Agent subscription not found: ${subscription.id}`);
+  }
+  return mapAgentSubscriptionRow(updated);
+}
+
+export function insertAgentSubscriptionEvent(
+  input: NewAgentSubscriptionEvent,
+): AgentSubscriptionEvent {
+  db.prepare(
+    `
+    INSERT INTO agent_subscription_events (
+      id, subscription_id, agent_profile_id, dedupe_key, source_type,
+      source_id, external_event_id, run_id, status, metadata_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `,
+  ).run(
+    input.id,
+    input.subscriptionId,
+    input.agentProfileId,
+    input.dedupeKey,
+    input.sourceType,
+    input.sourceId,
+    input.externalEventId,
+    input.runId,
+    input.status,
+    JSON.stringify(input.metadata),
+    input.createdAt,
+  );
+
+  return getAgentSubscriptionEventByDedupeKey(input.dedupeKey)!;
+}
+
+export function getAgentSubscriptionEventByDedupeKey(
+  dedupeKey: string,
+): AgentSubscriptionEvent | undefined {
+  const row = db
+    .prepare('SELECT * FROM agent_subscription_events WHERE dedupe_key = ?')
+    .get(dedupeKey) as AgentSubscriptionEventRow | undefined;
+  return row ? mapAgentSubscriptionEventRow(row) : undefined;
+}
+
+export function markReservedAgentSubscriptionEventMatched(input: {
+  dedupeKey: string;
+  subscriptionId: string;
+  agentProfileId: string;
+  runId: string | null;
+}): AgentSubscriptionEvent | undefined {
+  db.prepare(
+    `
+    UPDATE agent_subscription_events
+    SET status = 'matched',
+        run_id = ?
+    WHERE dedupe_key = ?
+      AND subscription_id = ?
+      AND agent_profile_id = ?
+      AND status = 'reserved'
+      AND run_id IS NULL
+  `,
+  ).run(
+    input.runId,
+    input.dedupeKey,
+    input.subscriptionId,
+    input.agentProfileId,
+  );
+
+  return getAgentSubscriptionEventByDedupeKey(input.dedupeKey);
+}
+
+export function deleteReservedAgentSubscriptionEvent(input: {
+  dedupeKey: string;
+  subscriptionId: string;
+  agentProfileId: string;
+}): boolean {
+  const result = db
+    .prepare(
+      `
+      DELETE FROM agent_subscription_events
+      WHERE dedupe_key = ?
+        AND subscription_id = ?
+        AND agent_profile_id = ?
+        AND status = 'reserved'
+        AND run_id IS NULL
+    `,
+    )
+    .run(input.dedupeKey, input.subscriptionId, input.agentProfileId);
+
+  return result.changes > 0;
+}
+
+export function insertAgentProfileActivity(
+  input: NewAgentProfileActivity,
+): AgentProfileActivity {
+  db.prepare(
+    `
+    INSERT INTO agent_profile_activity (
+      id, agent_profile_id, subscription_id, kind, source_type, source_id,
+      summary, run_id, approval_id, metadata_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `,
+  ).run(
+    input.id,
+    input.agentProfileId,
+    input.subscriptionId,
+    input.kind,
+    input.sourceType,
+    input.sourceId,
+    input.summary,
+    input.runId,
+    input.approvalId,
+    JSON.stringify(input.metadata),
+    input.createdAt,
+  );
+
+  const row = db
+    .prepare('SELECT * FROM agent_profile_activity WHERE id = ?')
+    .get(input.id) as AgentProfileActivityRow;
+  return mapAgentProfileActivityRow(row);
+}
+
+export function listAgentProfileActivityRows(
+  agentProfileId: string,
+  limit: number = 50,
+): AgentProfileActivity[] {
+  const safeLimit = Math.min(Math.max(limit || 50, 1), 200);
+  const rows = db
+    .prepare(
+      `
+      SELECT * FROM agent_profile_activity
+      WHERE agent_profile_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `,
+    )
+    .all(agentProfileId, safeLimit) as AgentProfileActivityRow[];
+  return rows.map(mapAgentProfileActivityRow);
 }
 
 export function createCoworkProject(project: CoworkProject): CoworkProject {

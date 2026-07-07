@@ -130,6 +130,8 @@ export interface CodingJob {
   }>;
   output: string;
   requestedBy: string;
+  agentProfileId: string | null;
+  sourceSubscriptionId: string | null;
   createdAt: string;
   completedAt: string | null;
 }
@@ -144,6 +146,8 @@ export interface StartCodingJobInput {
   dryRun?: boolean;
   branchName?: string;
   requestedBy: string;
+  agentProfileId?: string | null;
+  sourceSubscriptionId?: string | null;
 }
 
 function readJsonFile<T>(filePath: string, fallback: T): T {
@@ -252,6 +256,8 @@ function ensureJobDefaults(job: CodingJob): CodingJob {
     failureReason: null,
     approvalHistory: [],
     dryRun: false,
+    agentProfileId: null,
+    sourceSubscriptionId: null,
   };
   const normalized = { ...defaults, ...job };
   if (!normalized.transitionedAt[normalized.status]) {
@@ -1309,6 +1315,8 @@ export async function startCodingJob(
     approvalHistory: [],
     output: '',
     requestedBy: input.requestedBy,
+    agentProfileId: input.agentProfileId || null,
+    sourceSubscriptionId: input.sourceSubscriptionId || null,
     createdAt: nowIso(),
     completedAt: null,
   };

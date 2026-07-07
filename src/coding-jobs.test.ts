@@ -391,6 +391,63 @@ describe('coding jobs', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it('stores agent profile attribution on coding jobs', async () => {
+    mockGitHubFetch((url) => {
+      if (url.includes('/repos/owner/repo')) return { default_branch: 'main' };
+      return {};
+    });
+    await registerCodingRepo({ repo: 'owner/repo', labels: ['autofix'] });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Fix profile attribution',
+      requestedBy: 'agent:repofixer',
+      agentProfileId: 'agent_repo_fixer',
+      sourceSubscriptionId: 'sub_1',
+    });
+
+    expect(job.agentProfileId).toBe('agent_repo_fixer');
+    expect(job.sourceSubscriptionId).toBe('sub_1');
+    expect(loadCodingJobs()[0].agentProfileId).toBe('agent_repo_fixer');
+  });
+
+  it('normalizes missing agent profile attribution fields to null', () => {
+    fs.mkdirSync(`${TEST_ROOT}/store`, { recursive: true });
+    fs.writeFileSync(
+      `${TEST_ROOT}/store/coding-jobs.json`,
+      JSON.stringify(
+        [
+          {
+            id: 'code-legacy',
+            repo: 'owner/repo',
+            type: 'prompt',
+            prompt: 'Legacy job',
+            issueNumber: null,
+            issueTitle: null,
+            provider: 'claude',
+            model: 'claude-sonnet-4-6',
+            status: 'queued',
+            branch: 'nanocrab/legacy',
+            workspace: '/tmp/workspace',
+            createPr: false,
+            prUrl: null,
+            output: '',
+            requestedBy: 'dashboard',
+            createdAt: new Date(0).toISOString(),
+            completedAt: null,
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const job = loadCodingJobs()[0];
+
+    expect(job.agentProfileId).toBeNull();
+    expect(job.sourceSubscriptionId).toBeNull();
+  });
+
   it('includes approved repo preference rules in coding prompts', async () => {
     mockGitHubFetch(() => ({ default_branch: 'main' }));
     await registerCodingRepo({ repo: 'owner/repo' });

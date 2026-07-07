@@ -213,6 +213,121 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+export type AgentProfileToolPolicy =
+  | 'read-only'
+  | 'approval-required'
+  | 'allow';
+export type AgentProfileTaskKind =
+  | 'chat'
+  | 'cowork_task'
+  | 'coding_job'
+  | 'report'
+  | 'research'
+  | 'scheduled_check';
+export type AgentSubscriptionSourceType = 'github' | 'channel_mention';
+export type AgentSubscriptionAutonomyMode = 'investigate_then_pause';
+
+export interface AgentProfile {
+  id: string;
+  handle: string;
+  displayName: string;
+  avatar: string | null;
+  description: string | null;
+  personality: string | null;
+  enabled: boolean;
+  providerProfileId: string | null;
+  provider: AgentProvider | null;
+  model: string | null;
+  toolPolicy: AgentProfileToolPolicy;
+  allowedMcpServers: string[] | null;
+  skills: string[];
+  memoryScopes: string[];
+  taskKinds: AgentProfileTaskKind[];
+  channelBindings: Record<string, string[]>;
+  writePolicy: {
+    directSendRequiresApproval: boolean;
+    autonomousSendRequiresApproval: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentSubscription {
+  id: string;
+  agentProfileId: string;
+  sourceType: AgentSubscriptionSourceType;
+  enabled: boolean;
+  filters: Record<string, unknown>;
+  taskKind: AgentProfileTaskKind;
+  autonomyMode: AgentSubscriptionAutonomyMode;
+  lastSeenAt: string | null;
+  lastMatchedAt: string | null;
+  lastRunId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentSubscriptionEvent {
+  id: string;
+  subscriptionId: string;
+  agentProfileId: string;
+  dedupeKey: string;
+  sourceType: AgentSubscriptionSourceType;
+  sourceId: string;
+  externalEventId: string;
+  runId: string | null;
+  status: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface NewAgentSubscriptionEvent {
+  id: string;
+  subscriptionId: string;
+  agentProfileId: string;
+  dedupeKey: string;
+  sourceType: AgentSubscriptionSourceType;
+  sourceId: string;
+  externalEventId: string;
+  runId: string | null;
+  status: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AgentProfileActivity {
+  id: string;
+  agentProfileId: string;
+  subscriptionId: string | null;
+  kind:
+    | 'invocation'
+    | 'subscription_match'
+    | 'run_started'
+    | 'approval_blocked'
+    | 'error';
+  sourceType: string;
+  sourceId: string | null;
+  summary: string;
+  runId: string | null;
+  approvalId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface NewAgentProfileActivity {
+  id: string;
+  agentProfileId: string;
+  subscriptionId: string | null;
+  kind: AgentProfileActivity['kind'];
+  sourceType: string;
+  sourceId: string | null;
+  summary: string;
+  runId: string | null;
+  approvalId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
 export type MemoryScope = 'global' | 'group' | 'user' | 'project' | 'repo';
 export type MemoryType =
   | 'preference'

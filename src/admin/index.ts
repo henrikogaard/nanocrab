@@ -66,6 +66,7 @@ import backupRoutes from './routes/backup.js';
 import customContainersRoutes from './routes/custom-containers.js';
 import tokensRoutes from './routes/tokens.js';
 import agentsRoutes from './routes/agents.js';
+import agentProfilesRoutes from './routes/agent-profiles.js';
 import marketplaceRoutes from './routes/marketplace.js';
 import pushRoutes from './routes/push.js';
 import { loadExternalPlugins } from './plugins/loader.js';
@@ -245,6 +246,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/mounts', requireAuth, mountsRoutes);
   app.use('/api/webhooks', requireAuth, webhooksRoutes);
   app.use('/api/agents', requireAuth, agentsRoutes);
+  app.use('/api/agent-profiles', requireAuth, agentProfilesRoutes);
   app.use('/api/push', requireAuth, pushRoutes);
   app.use('/api/agents', requireAuth, agentMessagesRoutes);
   app.use('/api/questions', requireAuth, questionsRoutes);

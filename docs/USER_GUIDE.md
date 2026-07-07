@@ -1,6 +1,6 @@
 # NanoCrab User Guide
 
-Last updated: 2026-06-15
+Last updated: 2026-06-27
 
 Applies to: NanoCrab 2.0-RC3
 
@@ -29,7 +29,7 @@ maintenance tasks.
 | Page | Use It For |
 | ---- | ---------- |
 | Dashboard | Live service overview, recent messages, weather, and channel health. |
-| Agents | Assign one-off coding work, pick GitHub issues, configure Autofix pickup, and inspect agent runs. |
+| Agents | Assign one-off coding work, pick GitHub issues, configure Autofix pickup, manage Agent Profiles, and inspect agent runs. |
 | Tasks | Create routines, scheduled tasks, webhook deliveries, heartbeat checks, and run-now jobs. |
 | Approvals | Review, approve, deny, filter, or audit risky actions. |
 | Messages | Search, filter, and export conversation history. |
@@ -103,6 +103,16 @@ The main group can do more:
 Hard-coded slash commands are reserved for host-level actions and mobile coding
 control. See [COMMANDS.md](COMMANDS.md) for the full command reference.
 
+Agent Profile mentions are natural-language routing hints after the normal group
+trigger:
+
+```text
+@NanoCrab @RepoFixer investigate this GitHub issue and draft a plan.
+@NanoCrab @ManualHost summarize this conversation and keep the answer read-only.
+```
+
+The profile mention does not bypass group permissions or approvals.
+
 ## Assigning Coding Work
 
 Use **Agents -> Assign Work** when you want NanoCrab to work on code.
@@ -157,6 +167,85 @@ From the main group:
 Dashboard and chat commands drive the same host-managed coding-job lifecycle.
 The agent container works in an isolated job workspace under
 `data/coding-workspaces/jobs/`.
+
+## Agent Profiles
+
+Use **Agents** when you want named profiles such as `RepoFixer`, `ManualHost`,
+or `Researcher` with different identity, model, skills, connectors, memory
+scope, and write policy.
+
+### Create Or Edit A Profile
+
+1. Create the profile through the Agent Profiles API or an admin seed/import
+   workflow, then open **Agents** and select the Agent Profiles area.
+2. Choose an existing profile.
+3. Set the handle and display name. The handle is the mention name, such as
+   `@RepoFixer`.
+4. Add a short personality or operating policy.
+5. Choose provider/model preferences only when this profile should not inherit
+   the default for execution paths that consume profile preferences.
+6. Configure allowed MCP servers and task kinds for the profile. Skills, memory
+   scopes, tool policy, channel bindings, and write policy are stored profile
+   intent in this MVP; existing boundary, connector, memory, and approval
+   systems remain the enforced controls unless a run path explicitly consumes
+   those fields.
+7. Keep write-capable and autonomous behavior approval-gated through the host
+   policy and Approvals surfaces unless the deployment is intentionally trusted.
+
+### Invoke A Profile
+
+From the dashboard, select the profile in **Agents** and enter a prompt. In this
+MVP slice, the `/invoke` endpoint records manual invocation activity for the
+profile. Direct execution is hooked up through mention routing and existing
+NanoCrab run/job paths.
+
+From a web or channel chat, use the group trigger first and then the profile
+handle:
+
+```text
+@NanoCrab @RepoFixer investigate the failing workflow and propose next steps.
+@NanoCrab @ManualHost check pending approvals and explain the risk.
+```
+
+Direct read-only replies can return to the invoking channel when the group
+allows normal replies. Writes, sends, uploads, PR creation, connector writes,
+and other risky actions still pause for approval.
+
+### Configure Subscriptions
+
+Use profile subscriptions for background detection, not unattended writes.
+
+1. Open the profile in **Agents**.
+2. Add a GitHub subscription for issue filters such as repo, label, assignee,
+   milestone, or issue number, or add a channel mention subscription for a
+   registered chat.
+3. Confirm the task kind is allowed by the profile.
+4. Leave autonomy mode as investigate-and-pause.
+5. Check recent activity for matched, deduped, disabled, blocked, or failed
+   events.
+
+Subscriptions dedupe external events and ignore bot-generated channel messages
+to avoid loops. Disabled profiles and disabled subscriptions do not start new
+matches.
+
+### When A Profile Does Not Run
+
+Check these in order:
+
+- The profile is enabled.
+- The subscription is enabled, if this was subscription-triggered.
+- The message used the group trigger before the profile mention.
+- The handle or channel alias matches the profile.
+- The requested work type is listed in the profile's task kinds.
+- The source group boundary allows the needed provider profile, skills,
+  connector, memory scope, and channel behavior.
+- **Approvals** does not have a pending gate for implementation, send, upload,
+  PR creation, connector write, webhook, or provider fallback.
+- Recent profile activity does not show a duplicate event, disabled profile,
+  disabled subscription, or policy block.
+
+See [AGENT_PROFILES.md](AGENT_PROFILES.md) for the full model, safety notes,
+disable behavior, and MVP follow-ons.
 
 ## Routines And Scheduled Tasks
 

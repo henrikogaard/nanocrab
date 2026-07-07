@@ -7,6 +7,7 @@ const agentsPagePath = path.join(
   'src/admin/public/pages/agents.js',
 );
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
+const mockDataPath = path.join(process.cwd(), 'src/admin/mock-data.ts');
 
 describe('Agents launcher UI', () => {
   it('offers outcome-based task templates', () => {
@@ -757,6 +758,119 @@ describe('Agents launcher UI', () => {
     expect(source).not.toContain(
       '<div class="agent-coding-empty">No dedicated coding jobs yet. Register a repo and pick an issue when you want a coding agent to work.</div>',
     );
+  });
+
+  it('adds an editable agent profile cockpit with explicit states', () => {
+    const source = fs.readFileSync(agentsPagePath, 'utf8');
+    const styles = fs.readFileSync(stylePath, 'utf8');
+    const mockData = fs.readFileSync(mockDataPath, 'utf8');
+    const tabStart = source.indexOf('class="agent-profile-tabs"');
+    const tabEnd = source.indexOf('</div>', tabStart);
+    const tabMarkup = source.slice(tabStart, tabEnd);
+
+    expect(source).toContain("api('/agent-profiles')");
+    expect(source).toContain(
+      "'/agent-profiles/' + encodeURIComponent(agentProfileId(profile))",
+    );
+    expect(source).toContain(
+      "loadIssues.push('Agent profile roster unavailable')",
+    );
+    expect(source).toContain(
+      "loadIssues.push('Agent profile detail unavailable')",
+    );
+    expect(source).toContain('function renderAgentProfileRoster');
+    expect(source).toContain('function renderAgentProfileDetail');
+    expect(source).toContain('function renderAgentProfileEmptyState');
+    expect(source).toContain('window.selectAgentProfileByIndex');
+    expect(source).toContain('onclick="selectAgentProfileByIndex(${index})"');
+    expect(source).toContain('renderAgentProfileShell(agentProfiles)');
+    expect(source).toContain('agent-profile-roster');
+    expect(source).toContain('agent-profile-tabs');
+    expect(tabMarkup).toContain('>Identity<');
+    expect(tabMarkup).toContain('>Model<');
+    expect(tabMarkup).toContain('>Capabilities<');
+    expect(tabMarkup).toContain('>Subscriptions<');
+    expect(tabMarkup).toContain('>Activity<');
+    expect(source).toContain('agent-profile-empty-state');
+    expect(source).toContain('agent-profile-loading-state');
+    expect(source).toContain('agent-profile-unavailable-state');
+    expect(source).toContain('agent-profile-subscription-row');
+    expect(source).toContain('agent-profile-activity-row');
+    expect(source).toContain('Provider profile');
+    expect(source).toContain('Tool policy');
+    expect(source).toContain('Task kinds');
+    expect(source).toContain('profile.allowedMcpServers');
+    expect(source).toContain('detailUnavailable: true');
+    expect(source).toContain(
+      "renderAgentProfileEmptyState('detailUnavailable')",
+    );
+    expect(source).toContain('esc(String(activeRuns))');
+    expect(source).toContain('esc(String(blockedApprovals))');
+    expect(source).toContain('esc(String(errors))');
+    expect(source).toContain("'approval_blocked', 'blocked', 'await_approval'");
+    expect(source).toContain("'error', 'failed', 'failure'");
+    expect(source).not.toContain('style="display:flex;gap:12px"');
+
+    expect(styles).toContain('.agent-profile-shell');
+    expect(styles).toContain('.agent-profile-roster');
+    expect(styles).toContain('.agent-profile-row');
+    expect(styles).toContain('.agent-profile-row.is-active');
+    expect(styles).toContain('.agent-profile-detail');
+    expect(styles).toContain('.agent-profile-tabs');
+    expect(styles).toContain('.agent-profile-tab-panel');
+    expect(styles).toContain('.agent-profile-empty-state');
+    expect(styles).toContain('.agent-profile-loading-state');
+    expect(styles).toContain('.agent-profile-unavailable-state');
+    expect(styles).toContain('.agent-profile-subscription-row');
+    expect(styles).toContain('.agent-profile-activity-row');
+
+    expect(mockData).toContain("pathname === '/agent-profiles'");
+    expect(mockData).toContain("displayName: 'Manual Host'");
+    expect(mockData).toContain("displayName: 'Repo Fixer'");
+    expect(mockData).toContain("displayName: 'Researcher'");
+    expect(mockData).toContain('subscriptions: [');
+    expect(mockData).toContain('activity: [');
+  });
+
+  it('wires agent profile save and invoke actions without prompt dialogs', () => {
+    const source = fs.readFileSync(agentsPagePath, 'utf8');
+    const styles = fs.readFileSync(stylePath, 'utf8');
+
+    expect(source).toContain('saveAgentProfile');
+    expect(source).toContain('invokeAgentProfile');
+    expect(source).toContain("api('/agent-profiles/' + encodeURIComponent");
+    expect(source).toContain("'/invoke'");
+    expect(source).not.toContain("prompt('");
+    expect(source).toContain('name="displayName"');
+    expect(source).toContain('name="handle"');
+    expect(source).toContain('name="description"');
+    expect(source).toContain('name="personality"');
+    expect(source).toContain('name="enabled"');
+    expect(source).toContain('name="providerProfileId"');
+    expect(source).toContain('name="provider"');
+    expect(source).toContain('name="model"');
+    expect(source).toContain('name="toolPolicy"');
+    expect(source).toContain('name="allowedMcpServers"');
+    expect(source).toContain('name="skills"');
+    expect(source).toContain('name="memoryScopes"');
+    expect(source).toContain('name="taskKinds"');
+    expect(source).toContain('agent-profile-action-status');
+    expect(source).toContain('agent-profile-invoke-prompt-');
+    expect(source).toContain('function agentProfileAttr');
+    expect(source).toContain(
+      'value="${agentProfileAttr(agentProfileDisplayName(profile))}"',
+    );
+    expect(source).toContain('agentProfileSetStatus');
+    expect(source).toContain('Display name and handle are required');
+    expect(source).toContain('Enter a prompt before invoking this profile.');
+    expect(source).toContain('JSON.stringify({ prompt })');
+    expect(source).toContain('currentAllowedMcpServers');
+    expect(source).toContain('Array.isArray(currentAllowedMcpServers)');
+    expect(styles).toContain('.agent-profile-action-status');
+    expect(styles).toContain('.agent-profile-action-status.is-error');
+    expect(styles).toContain('.agent-profile-form');
+    expect(styles).toContain('.agent-profile-field-wide');
+    expect(styles).toContain('.agent-profile-invoke-input');
   });
 
   it('uses provider coding capability metadata for coding selectors', () => {

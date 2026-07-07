@@ -59,6 +59,7 @@ Channel agents use the same workspace map. From WhatsApp, Signal, Telegram, or a
 - **Copilot chat** — pure web conversations with thread history, provider/model selection, optional title, generated title fallback, inline progress/tool visibility, and no agent templates
 - **Cowork Projects** — virtual project folders with files, artifacts, documents, project chats, previous thread history, instructions, MCP source workflows, and local draft-first output
 - **Agents** — assignment flows for delegated tasks, GitHub issue pickup, Autofix auto-pickup setup, coding-job output, and bot agents
+- **Agent Profiles** — named identities such as `@RepoFixer` or `@ManualHost` with provider/model choices, skills, memory scopes, connector limits, subscriptions, and approval-aware write policies managed from the Agents cockpit
 - **Tasks & Workflows** — routine blueprints, schedule builder, missions, runbooks, delivery modes, run history, heartbeat checks, and run-now controls
 - **Reports & Artifacts** — source-backed deliverables, briefing schedules, generated files, vault search, retention, and Cowork handoff prompts
 - **Messages & Channels** — search, filter, export, channel intake, registration, and routing into Copilot or Cowork when needed
@@ -142,6 +143,27 @@ workspace. Ollama's default chat models remain chat/local-task oriented; choose
 an explicit code model such as `codestral` before assigning local coding work.
 Google and other OpenAI-compatible chat providers stay in the normal agent path
 unless a dedicated coding runtime is added.
+
+### Agent Profiles
+
+Agent Profiles let you create durable named agent identities without creating
+long-running containers. A profile combines a handle, display name, personality,
+provider/profile/model preference, MCP connector allowlist, task kinds, channel
+bindings, and stored policy fields for skills, memory, tools, and writes over
+NanoCrab's existing execution paths.
+
+Profiles are managed from the **Agents** cockpit and can be mentioned as
+`@handle` in current web and channel surfaces after the normal group trigger,
+for example `@NanoCrab @RepoFixer investigate this issue`. Profiles may also
+have GitHub or channel mention subscriptions for investigate-and-plan workflows.
+The source group boundary, connector permissions, host policy, and approval
+system remain the enforcement layer. Profile settings add identity,
+attribution, provider/model preferences, MCP narrowing where wired, and
+operator intent; they do not grant permissions the source boundary lacks.
+
+See [docs/AGENT_PROFILES.md](docs/AGENT_PROFILES.md) for field definitions,
+invocation behavior, subscriptions, disable behavior, safety boundaries, and
+MVP follow-ons such as visual office, Slack, and Discord support.
 
 ### Browser Automation
 

@@ -301,8 +301,660 @@ function agentQuestionDecisionBriefText(state) {
   ].join('\n');
 }
 
+function normalizeAgentProfiles(profiles) {
+  if (Array.isArray(profiles)) return profiles;
+  if (Array.isArray(profiles?.profiles)) return profiles.profiles;
+  if (Array.isArray(profiles?.items)) return profiles.items;
+  return [];
+}
+
+function agentProfileId(profile) {
+  return String(
+    profile?.id ||
+      profile?.handle ||
+      profile?.slug ||
+      profile?.name ||
+      profile?.displayName ||
+      'agent-profile',
+  );
+}
+
+function agentProfileDisplayName(profile) {
+  return (
+    profile?.displayName ||
+    profile?.name ||
+    profile?.title ||
+    profile?.handle ||
+    agentProfileId(profile)
+  );
+}
+
+function agentProfileHandle(profile) {
+  const raw = String(profile?.handle || profile?.slug || agentProfileId(profile));
+  return raw.startsWith('@') ? raw : `@${raw}`;
+}
+
+function agentProfileArray(value) {
+  if (Array.isArray(value)) return value.filter((item) => item !== null && item !== undefined);
+  if (typeof value === 'string' && value.trim()) {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function agentProfileItemLabel(item) {
+  if (typeof item === 'string') return item;
+  if (typeof item === 'number') return String(item);
+  return (
+    item?.label ||
+    item?.name ||
+    item?.id ||
+    item?.server ||
+    item?.scope ||
+    item?.kind ||
+    'Configured'
+  );
+}
+
+function agentProfileDomId(id) {
+  return String(id || 'agent-profile').replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+function agentProfileAttr(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function agentProfileFormText(value) {
+  if (value === null || value === undefined) return '';
+  return String(value);
+}
+
+function agentProfileFormList(value) {
+  return agentProfileArray(value)
+    .map((item) => agentProfileItemLabel(item))
+    .join('\n');
+}
+
+function agentProfileCsvValue(value) {
+  return String(value || '')
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function agentProfileNullableText(value) {
+  const trimmed = String(value || '').trim();
+  return trimmed ? trimmed : null;
+}
+
+function agentProfileControl(form, name) {
+  return form?.elements?.namedItem(name) || form?.querySelector(`[name="${name}"]`);
+}
+
+function agentProfileFieldValue(form, name) {
+  return agentProfileControl(form, name)?.value || '';
+}
+
+function agentProfileSetStatus(id, message, type = 'info') {
+  const status = document.getElementById(
+    `agent-profile-status-${agentProfileDomId(id)}`,
+  );
+  if (!status) return;
+  status.textContent = message || '';
+  status.classList.toggle('is-error', type === 'error');
+  status.classList.toggle('is-success', type === 'success');
+  status.classList.toggle('is-warning', type === 'warning');
+}
+
+function agentProfileUpdateLocalProfile(id, patch) {
+  const roster = Array.isArray(window._agentProfileRoster)
+    ? window._agentProfileRoster
+    : [];
+  const current =
+    roster.find((profile) => agentProfileId(profile) === id) ||
+    window._agentProfilesById?.[id] ||
+    {};
+  const updated = { ...current, ...patch };
+  window._agentProfileRoster = roster.map((profile) =>
+    agentProfileId(profile) === id ? updated : profile,
+  );
+  window._agentProfilesById = {
+    ...(window._agentProfilesById || {}),
+    [id]: updated,
+  };
+  return updated;
+}
+
+function agentProfileRerender(id) {
+  const shell = document.getElementById('agent-profile-shell');
+  const roster = Array.isArray(window._agentProfileRoster)
+    ? window._agentProfileRoster
+    : [];
+  if (!shell || roster.length === 0) return;
+  shell.innerHTML = renderAgentProfileShellContent(roster, id);
+}
+
+function agentProfileInitial(profile) {
+  return agentProfileDisplayName(profile).trim().charAt(0).toUpperCase() || 'A';
+}
+
+function agentProfileActiveRunCount(profile) {
+  return (
+    profile?.activeRunCount ??
+    profile?.activeRuns ??
+    profile?.active_runs ??
+    profile?.runCounts?.active ??
+    profile?.activitySummary?.activeRuns
+  );
+}
+
+function agentProfileBlockedApprovalCount(profile) {
+  const explicit =
+    profile?.blockedApprovalCount ??
+    profile?.blockedApprovals ??
+    profile?.blocked_approvals ??
+    profile?.approvals?.blocked ??
+    profile?.activitySummary?.blockedApprovals;
+  if (explicit !== undefined) return explicit;
+
+  const activity = agentProfileArray(profile?.activity || profile?.activityItems);
+  if (activity.length === 0) return undefined;
+  return (
+    activity.filter((item) =>
+      ['approval_blocked', 'blocked', 'await_approval'].includes(
+        item?.kind || item?.status || item?.state || '',
+      ),
+    ).length
+  );
+}
+
+function agentProfileErrorCount(profile) {
+  const explicit =
+    profile?.errorCount ??
+    profile?.errors ??
+    profile?.error_count ??
+    profile?.activitySummary?.errors;
+  if (explicit !== undefined) return explicit;
+
+  const activity = agentProfileArray(profile?.activity || profile?.activityItems);
+  if (activity.length === 0) return undefined;
+  return activity.filter((item) =>
+    ['error', 'failed', 'failure'].includes(
+      item?.kind || item?.status || item?.state || '',
+    ),
+  ).length;
+}
+
+function agentProfileLatestAt(profile) {
+  return (
+    profile?.lastActivityAt ||
+    profile?.latestActivityAt ||
+    profile?.last_activity_at ||
+    profile?.latestActivity?.at ||
+    profile?.activity?.[0]?.at ||
+    profile?.activity?.[0]?.createdAt
+  );
+}
+
+function agentProfileTimestamp(...values) {
+  return values.find((value) => typeof value === 'string' && value.trim()) || '';
+}
+
+function agentProfileLatestLabel(profile) {
+  const latest = profile?.latestActivity;
+  return (
+    (typeof latest === 'string' ? latest : latest?.title || latest?.summary) ||
+    profile?.latestActivityLabel ||
+    profile?.lastActivity ||
+    ''
+  );
+}
+
+function agentProfileStatus(profile) {
+  const enabled = profile?.enabled !== false;
+  return {
+    enabled,
+    label: enabled ? 'Enabled' : 'Disabled',
+    badge: enabled ? 'badge-success' : 'badge-muted',
+  };
+}
+
+function renderAgentProfileBadgeList(items, emptyLabel = 'None configured') {
+  const normalized = agentProfileArray(items);
+  if (normalized.length === 0) {
+    return `<span class="agent-profile-muted">${esc(emptyLabel)}</span>`;
+  }
+  return `
+    <div class="agent-profile-chip-list">
+      ${normalized
+        .map(
+          (item) =>
+            `<span class="badge badge-muted agent-profile-chip">${esc(agentProfileItemLabel(item))}</span>`,
+        )
+        .join('')}
+    </div>`;
+}
+
+function renderAgentProfileField(label, value) {
+  return `
+    <div class="agent-profile-field">
+      <span>${esc(label)}</span>
+      <strong>${value ? esc(value) : 'Not set'}</strong>
+    </div>`;
+}
+
+function renderAgentProfileEmptyState(kind) {
+  const states = {
+    loading: {
+      className: 'agent-profile-loading-state',
+      label: 'Profiles loading',
+      title: 'Loading agent profiles',
+      detail: 'Reading the profile roster, model policies, capabilities, subscriptions, and recent activity.',
+    },
+    unavailable: {
+      className: 'agent-profile-unavailable-state',
+      label: 'Profiles unavailable',
+      title: 'Agent profile roster unavailable',
+      detail: 'The Agents cockpit is still usable, but the profile feed did not load. Refresh after checking the profile route.',
+    },
+    empty: {
+      className: 'agent-profile-empty-state',
+      label: 'No profiles',
+      title: 'No agent profiles configured yet',
+      detail: 'Task 7 only displays saved profiles. Create and edit profile definitions in the next profile workflow.',
+    },
+    detail: {
+      className: 'agent-profile-empty-state is-detail',
+      label: 'No selection',
+      title: 'Select a profile',
+      detail: 'Pick a profile from the roster to inspect its model, capabilities, subscriptions, and activity.',
+    },
+    detailUnavailable: {
+      className: 'agent-profile-unavailable-state is-detail',
+      label: 'Profile detail unavailable',
+      title: 'Profile detail could not load',
+      detail: 'The roster loaded, but subscriptions and activity did not. Refresh after checking the profile detail route.',
+    },
+    subscriptions: {
+      className: 'agent-profile-empty-state is-subscriptions',
+      label: 'Subscriptions',
+      title: 'No subscriptions configured',
+      detail: 'This profile is not watching any trigger, inbox, issue, or workflow subscription.',
+    },
+    activity: {
+      className: 'agent-profile-empty-state is-activity',
+      label: 'Activity',
+      title: 'No activity recorded',
+      detail: 'No runs, blocked approvals, or errors have been recorded for this profile yet.',
+    },
+  };
+  const state = states[kind] || states.empty;
+  return `
+    <section class="${state.className}">
+      <span>${esc(state.label)}</span>
+      <strong>${esc(state.title)}</strong>
+      <p>${esc(state.detail)}</p>
+    </section>`;
+}
+
+function renderAgentProfileRoster(profiles, selectedId) {
+  const roster = normalizeAgentProfiles(profiles);
+  if (roster.length === 0) return renderAgentProfileEmptyState('empty');
+
+  return `
+    <div class="agent-profile-roster" aria-label="Agent profile roster">
+      ${roster
+        .map((profile, index) => {
+          const id = agentProfileId(profile);
+          const isActive = id === selectedId;
+          const status = agentProfileStatus(profile);
+          const activeRuns = agentProfileActiveRunCount(profile);
+          const blockedApprovals = agentProfileBlockedApprovalCount(profile);
+          const latestAt = agentProfileLatestAt(profile);
+          const latestLabel = agentProfileLatestLabel(profile);
+          const latestText =
+            latestAt && latestLabel
+              ? `${latestLabel} - ${timeAgo(latestAt)}`
+              : latestAt
+                ? `Active ${timeAgo(latestAt)}`
+                : latestLabel || 'No recent activity';
+          return `
+            <button class="agent-profile-row ${isActive ? 'is-active' : ''}" type="button" onclick="selectAgentProfileByIndex(${index})">
+              <span class="agent-profile-avatar">${esc(agentProfileInitial(profile))}</span>
+              <span class="agent-profile-row-main">
+                <span class="agent-profile-row-title">
+                  <strong>${esc(agentProfileDisplayName(profile))}</strong>
+                  <em>${esc(agentProfileHandle(profile))}</em>
+                </span>
+                <span class="agent-profile-row-meta">${esc(latestText)}</span>
+              </span>
+              <span class="agent-profile-row-state">
+                <span class="badge ${status.badge} agent-tool-badge">${status.label}</span>
+                ${activeRuns !== undefined ? `<span class="badge badge-info agent-tool-badge">${esc(String(activeRuns))} active</span>` : ''}
+                ${blockedApprovals !== undefined && blockedApprovals > 0 ? `<span class="badge badge-warning agent-tool-badge">${esc(String(blockedApprovals))} blocked</span>` : ''}
+              </span>
+            </button>`;
+        })
+        .join('')}
+    </div>`;
+}
+
+function renderAgentProfileDetail(profile) {
+  if (!profile) return renderAgentProfileEmptyState('detail');
+
+  const id = agentProfileId(profile);
+  const detailId = agentProfileDomId(id);
+
+  if (profile.detailUnavailable) {
+    return `
+      <section class="agent-profile-detail" aria-label="${agentProfileAttr(agentProfileDisplayName(profile))} profile detail unavailable">
+        <div class="agent-profile-detail-head">
+          <div>
+            <span>Selected profile</span>
+            <strong>${esc(agentProfileDisplayName(profile))}</strong>
+            <small>${esc(agentProfileHandle(profile))}</small>
+          </div>
+          <span class="badge badge-warning agent-tool-badge">Detail unavailable</span>
+        </div>
+        ${renderAgentProfileEmptyState('detailUnavailable')}
+      </section>`;
+  }
+
+  const status = agentProfileStatus(profile);
+  const providerProfile =
+    profile.providerProfileId ||
+    profile.provider_profile_id ||
+    profile.providerProfile ||
+    profile.provider_profile ||
+    profile.model?.profile ||
+    profile.runtime?.providerProfile;
+  const provider = profile.provider || profile.model?.provider || profile.runtime?.provider;
+  const model =
+    (typeof profile.model === 'string' ? profile.model : '') ||
+    profile.modelId ||
+    profile.modelName ||
+    profile.model?.id ||
+    profile.model?.name ||
+    profile.runtime?.model;
+  const toolPolicy =
+    profile.toolPolicy ||
+    profile.tool_policy ||
+    profile.policy?.toolPolicy ||
+    profile.policy?.tools ||
+    profile.runtime?.toolPolicy;
+  const capabilities = profile.capabilities || {};
+  const taskKinds =
+    profile.taskKinds ||
+    profile.task_kinds ||
+    capabilities.taskKinds ||
+    capabilities.tasks;
+  const mcpServers =
+    profile.allowedMcpServers ||
+    profile.allowed_mcp_servers ||
+    profile.mcpServers ||
+    profile.mcp_servers ||
+    capabilities.mcpServers;
+  const skills = profile.skills || capabilities.skills;
+  const memoryScopes =
+    profile.memoryScopes ||
+    profile.memory_scopes ||
+    capabilities.memoryScopes ||
+    capabilities.memory;
+  const subscriptions = agentProfileArray(profile.subscriptions);
+  const activity = agentProfileArray(profile.activity || profile.activityItems);
+  const blockedApprovals = agentProfileBlockedApprovalCount(profile);
+  const errors = agentProfileErrorCount(profile);
+
+  const subscriptionRows =
+    subscriptions.length === 0
+      ? renderAgentProfileEmptyState('subscriptions')
+      : subscriptions
+          .map((subscription) => {
+            const enabled = subscription?.enabled !== false && subscription?.status !== 'disabled';
+            const state =
+              subscription?.lastRunState ||
+              subscription?.runState ||
+              subscription?.state ||
+              subscription?.status ||
+              (enabled ? 'watching' : 'disabled');
+            const lastMatchAt = agentProfileTimestamp(
+              subscription?.lastMatchAt,
+              subscription?.lastMatchedAt,
+              subscription?.last_matched_at,
+            );
+            const lastRunAt = agentProfileTimestamp(
+              subscription?.lastRunAt,
+              subscription?.last_run_at,
+            );
+            const lastRunId = subscription?.lastRunId || subscription?.last_run_id;
+            const lastMatch = lastMatchAt
+              ? `Matched ${timeAgo(lastMatchAt)}`
+              : 'No matches yet';
+            const lastRun = lastRunAt
+              ? `Run ${timeAgo(lastRunAt)}`
+              : lastRunId
+                ? `Run ${lastRunId}`
+              : 'No runs yet';
+            return `
+              <div class="agent-profile-subscription-row ${enabled ? '' : 'is-disabled'}">
+                <div>
+                  <strong>${esc(subscription?.name || subscription?.title || subscription?.id || 'Subscription')}</strong>
+                  <span>${esc(subscription?.kind || subscription?.trigger || subscription?.source || subscription?.sourceType || 'subscription')}</span>
+                  <small>${esc(lastMatch)} - ${esc(lastRun)}</small>
+                </div>
+                <span class="badge ${enabled ? 'badge-info' : 'badge-muted'} agent-tool-badge">${esc(state)}</span>
+              </div>`;
+          })
+          .join('');
+
+  const activityRows =
+    activity.length === 0
+      ? renderAgentProfileEmptyState('activity')
+      : activity
+          .map((item) => {
+            const state = item?.status || item?.state || item?.kind || item?.type || 'activity';
+            const stateClass = ['blocked', 'approval_blocked', 'await_approval'].includes(state)
+              ? 'is-blocked'
+              : ['error', 'failed', 'failure'].includes(state)
+                ? 'is-error'
+                : '';
+            const at = item?.at || item?.createdAt || item?.updatedAt;
+            return `
+              <div class="agent-profile-activity-row ${stateClass}">
+                <div>
+                  <strong>${esc(item?.title || item?.summary || item?.id || 'Activity')}</strong>
+                  <span>${esc(item?.detail || item?.message || state)}</span>
+                </div>
+                <small>${at ? timeAgo(at) : esc(state)}</small>
+              </div>`;
+          })
+          .join('');
+
+  return `
+    <section class="agent-profile-detail" aria-label="${agentProfileAttr(agentProfileDisplayName(profile))} profile detail">
+      <div class="agent-profile-detail-head">
+        <div>
+          <span>Selected profile</span>
+          <strong>${esc(agentProfileDisplayName(profile))}</strong>
+          <small>${esc(agentProfileHandle(profile))}</small>
+        </div>
+        <span class="badge ${status.badge} agent-tool-badge">${status.label}</span>
+      </div>
+      <div class="agent-profile-tabs" role="tablist" aria-label="Profile detail sections">
+        <span class="agent-profile-tab is-active" role="tab" aria-selected="true">Identity</span>
+        <span class="agent-profile-tab" role="tab">Model</span>
+        <span class="agent-profile-tab" role="tab">Capabilities</span>
+        <span class="agent-profile-tab" role="tab">Subscriptions</span>
+        <span class="agent-profile-tab" role="tab">Activity</span>
+      </div>
+      <div class="agent-profile-action-bar">
+        <span class="agent-profile-action-status" id="agent-profile-status-${agentProfileAttr(detailId)}" aria-live="polite"></span>
+        <button type="button" class="btn btn-sm btn-primary" onclick="saveAgentProfile(window._selectedAgentProfileId)">Save profile</button>
+      </div>
+      <div class="agent-profile-tab-panel is-identity">
+        <div class="agent-profile-panel-head"><span>Identity</span></div>
+        <form class="agent-profile-form" id="agent-profile-form-${agentProfileAttr(detailId)}">
+          <div class="agent-profile-field-grid">
+            <label class="agent-profile-field">
+              <span>Display name</span>
+              <input name="displayName" class="input" value="${agentProfileAttr(agentProfileDisplayName(profile))}" autocomplete="off">
+            </label>
+            <label class="agent-profile-field">
+              <span>Handle</span>
+              <input name="handle" class="input" value="${agentProfileAttr(agentProfileHandle(profile).replace(/^@+/, ''))}" autocomplete="off">
+            </label>
+            <label class="agent-profile-field agent-profile-check-field">
+              <span>State</span>
+              <input name="enabled" type="checkbox" ${status.enabled ? 'checked' : ''}>
+              <strong>${esc(status.label)}</strong>
+            </label>
+            <label class="agent-profile-field agent-profile-field-wide">
+              <span>Description</span>
+              <textarea name="description" class="input" rows="3">${esc(agentProfileFormText(profile.description || profile.summary))}</textarea>
+            </label>
+            <label class="agent-profile-field agent-profile-field-wide">
+              <span>Personality</span>
+              <textarea name="personality" class="input" rows="3">${esc(agentProfileFormText(profile.personality))}</textarea>
+            </label>
+          </div>
+        </form>
+      </div>
+      <div class="agent-profile-tab-panel is-model">
+        <div class="agent-profile-panel-head"><span>Model</span></div>
+        <div class="agent-profile-field-grid" form="agent-profile-form-${agentProfileAttr(detailId)}">
+          <label class="agent-profile-field">
+            <span>Provider profile</span>
+            <input name="providerProfileId" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" value="${agentProfileAttr(agentProfileFormText(providerProfile))}" autocomplete="off">
+          </label>
+          <label class="agent-profile-field">
+            <span>Provider</span>
+            <input name="provider" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" value="${agentProfileAttr(agentProfileFormText(provider))}" autocomplete="off">
+          </label>
+          <label class="agent-profile-field">
+            <span>Model</span>
+            <input name="model" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" value="${agentProfileAttr(agentProfileFormText(model))}" autocomplete="off">
+          </label>
+          <label class="agent-profile-field">
+            <span>Tool policy</span>
+            <select name="toolPolicy" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}">
+              ${['read-only', 'approval-required', 'allow']
+                .map(
+                  (policy) =>
+                    `<option value="${policy}" ${policy === toolPolicy ? 'selected' : ''}>${policy}</option>`,
+                )
+                .join('')}
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="agent-profile-tab-panel is-capabilities">
+        <div class="agent-profile-panel-head"><span>Capabilities</span></div>
+        <div class="agent-profile-capability-grid">
+          <label>
+            <span>Task kinds</span>
+            <textarea name="taskKinds" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" rows="4">${esc(agentProfileFormList(taskKinds))}</textarea>
+          </label>
+          <label>
+            <span>MCP servers</span>
+            <textarea name="allowedMcpServers" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" rows="4">${esc(agentProfileFormList(mcpServers))}</textarea>
+          </label>
+          <label>
+            <span>Skills</span>
+            <textarea name="skills" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" rows="4">${esc(agentProfileFormList(skills))}</textarea>
+          </label>
+          <label>
+            <span>Memory scopes</span>
+            <textarea name="memoryScopes" class="input" form="agent-profile-form-${agentProfileAttr(detailId)}" rows="4">${esc(agentProfileFormList(memoryScopes))}</textarea>
+          </label>
+        </div>
+      </div>
+      <div class="agent-profile-tab-panel is-subscriptions">
+        <div class="agent-profile-panel-head"><span>Subscriptions</span></div>
+        ${subscriptionRows}
+      </div>
+      <div class="agent-profile-tab-panel is-activity">
+        <div class="agent-profile-panel-head"><span>Activity</span></div>
+        <div class="agent-profile-state-strip">
+          ${blockedApprovals !== undefined ? `<span class="badge ${blockedApprovals > 0 ? 'badge-warning' : 'badge-muted'} agent-tool-badge">${esc(String(blockedApprovals))} approval blocked</span>` : ''}
+          ${errors !== undefined ? `<span class="badge ${errors > 0 ? 'badge-error' : 'badge-muted'} agent-tool-badge">${esc(String(errors))} errors</span>` : ''}
+        </div>
+        ${activityRows}
+      </div>
+      <div class="agent-profile-tab-panel is-invoke">
+        <div class="agent-profile-panel-head"><span>Invoke</span></div>
+        <textarea id="agent-profile-invoke-prompt-${agentProfileAttr(detailId)}" class="input agent-profile-invoke-input" rows="4" placeholder="Describe the one-off work for this profile."></textarea>
+        <div class="agent-profile-action-row">
+          <button type="button" class="btn btn-sm btn-primary" onclick="invokeAgentProfile(window._selectedAgentProfileId)">Invoke profile</button>
+        </div>
+      </div>
+    </section>`;
+}
+
+function renderAgentProfileShellContent(profiles, selectedId) {
+  const roster = normalizeAgentProfiles(profiles);
+  const fallbackId = roster.length > 0 ? agentProfileId(roster[0]) : '';
+  const activeId = roster.some((profile) => agentProfileId(profile) === selectedId)
+    ? selectedId
+    : fallbackId;
+  const selectedProfile = roster.find((profile) => agentProfileId(profile) === activeId);
+  window._selectedAgentProfileId = activeId;
+  return `
+    <div class="agent-profile-shell-head">
+      <div>
+        <span>Agent profiles</span>
+        <strong>Profile cockpit</strong>
+        <small>Read-only roster, model policy, subscriptions, and activity for configured agent personas.</small>
+      </div>
+      <span class="badge badge-muted agent-tool-badge">${roster.length} profile${roster.length === 1 ? '' : 's'}</span>
+    </div>
+    <div class="agent-profile-layout">
+      ${renderAgentProfileRoster(roster, activeId)}
+      ${renderAgentProfileDetail(selectedProfile)}
+    </div>`;
+}
+
+function renderAgentProfileShell(profiles) {
+  if (profiles === null || profiles?.available === false) {
+    return `
+      <section class="agent-profile-shell" id="agent-profile-shell">
+        ${renderAgentProfileEmptyState('unavailable')}
+      </section>`;
+  }
+
+  const roster = normalizeAgentProfiles(profiles);
+  if (roster.length === 0) {
+    return `
+      <section class="agent-profile-shell" id="agent-profile-shell">
+        ${renderAgentProfileEmptyState('empty')}
+      </section>`;
+  }
+
+  window._agentProfileRoster = roster;
+  window._agentProfilesById = roster.reduce((acc, profile) => {
+    acc[agentProfileId(profile)] = profile;
+    return acc;
+  }, {});
+
+  return `
+    <section class="agent-profile-shell" id="agent-profile-shell">
+      ${renderAgentProfileShellContent(roster, window._selectedAgentProfileId)}
+    </section>`;
+}
+
 async function renderAgents(el) {
-  el.innerHTML = renderAgentLoadingState('cockpit');
+  el.innerHTML = `
+    ${renderAgentLoadingState('cockpit')}
+    <section class="agent-profile-shell" id="agent-profile-shell">
+      ${renderAgentProfileEmptyState('loading')}
+    </section>`;
   try {
     const loadIssues = [];
     const [
@@ -324,6 +976,7 @@ async function renderAgents(el) {
       terminals,
       boundaries,
       channelInfo,
+      agentProfilesRaw,
     ] = await Promise.all([
       api('/groups').catch(() => {
         loadIssues.push('Bot agent roster unavailable');
@@ -397,8 +1050,36 @@ async function renderAgents(el) {
         loadIssues.push('Channel status unavailable');
         return { active: [] };
       }),
+      api('/agent-profiles').catch(() => {
+        loadIssues.push('Agent profile roster unavailable');
+        return null;
+      }),
     ]);
     const groups = Array.isArray(groupsRaw) ? groupsRaw : [];
+    let agentProfiles =
+      agentProfilesRaw === null ? null : normalizeAgentProfiles(agentProfilesRaw);
+    if (Array.isArray(agentProfiles) && agentProfiles.length > 0) {
+      let profileDetailLoadFailed = false;
+      agentProfiles = await Promise.all(
+        agentProfiles.map(async (profile) => {
+          if (Array.isArray(profile?.subscriptions) && Array.isArray(profile?.activity)) {
+            return profile;
+          }
+          try {
+            const detail = await api(
+              '/agent-profiles/' + encodeURIComponent(agentProfileId(profile)),
+            );
+            return { ...profile, ...detail };
+          } catch {
+            profileDetailLoadFailed = true;
+            return { ...profile, detailUnavailable: true };
+          }
+        }),
+      );
+      if (profileDetailLoadFailed) {
+        loadIssues.push('Agent profile detail unavailable');
+      }
+    }
     const channels = Array.isArray(channelInfo?.active)
       ? channelInfo.active
       : [];
@@ -759,6 +1440,7 @@ async function renderAgents(el) {
       questions: pendingQuestions,
       channels,
       loadIssues,
+      profiles: agentProfiles || [],
     };
 
     el.innerHTML = `
@@ -819,6 +1501,8 @@ async function renderAgents(el) {
             : '<div class="agent-attention-empty">Ready for the next useful delegation.</div>'
         }
       </section>
+
+      ${renderAgentProfileShell(agentProfiles)}
 
       <div id="task-launcher" class="card assign-wizard is-hidden">
         <div class="assign-wizard-head">
@@ -1172,6 +1856,150 @@ async function renderAgents(el) {
     el.innerHTML = renderAgentRecoveryState('load', e.message);
   }
 }
+
+window.selectAgentProfile = function (id) {
+  const roster = Array.isArray(window._agentProfileRoster)
+    ? window._agentProfileRoster
+    : [];
+  if (roster.length === 0) return;
+  window._selectedAgentProfileId = id;
+  const shell = document.getElementById('agent-profile-shell');
+  if (!shell) return;
+  shell.innerHTML = renderAgentProfileShellContent(roster, id);
+};
+
+window.selectAgentProfileByIndex = function (index) {
+  const roster = Array.isArray(window._agentProfileRoster)
+    ? window._agentProfileRoster
+    : [];
+  const profile = roster[Number(index)];
+  if (!profile) return;
+  window.selectAgentProfile(agentProfileId(profile));
+};
+
+window.saveAgentProfile = async function (id) {
+  const form = document.getElementById(
+    `agent-profile-form-${agentProfileDomId(id)}`,
+  );
+  if (!form) {
+    toast('Profile form not found', 'error');
+    return;
+  }
+
+  const displayName = agentProfileFieldValue(form, 'displayName').trim();
+  const handle = agentProfileFieldValue(form, 'handle').trim();
+  if (!displayName || !handle) {
+    agentProfileSetStatus(id, 'Display name and handle are required.', 'error');
+    toast('Display name and handle are required', 'warning');
+    return;
+  }
+
+  const enabledControl = agentProfileControl(form, 'enabled');
+  const allowedMcpServers = agentProfileCsvValue(
+    agentProfileFieldValue(form, 'allowedMcpServers'),
+  );
+  const current =
+    window._agentProfilesById?.[id] ||
+    (Array.isArray(window._agentProfileRoster)
+      ? window._agentProfileRoster.find((profile) => agentProfileId(profile) === id)
+      : {});
+  const currentAllowedMcpServers =
+    current?.allowedMcpServers ?? current?.allowed_mcp_servers;
+  const body = {
+    displayName,
+    handle,
+    description: agentProfileNullableText(
+      agentProfileFieldValue(form, 'description'),
+    ),
+    personality: agentProfileNullableText(
+      agentProfileFieldValue(form, 'personality'),
+    ),
+    enabled: Boolean(enabledControl?.checked),
+    providerProfileId: agentProfileNullableText(
+      agentProfileFieldValue(form, 'providerProfileId'),
+    ),
+    provider: agentProfileNullableText(agentProfileFieldValue(form, 'provider')),
+    model: agentProfileNullableText(agentProfileFieldValue(form, 'model')),
+    toolPolicy: agentProfileFieldValue(form, 'toolPolicy') || 'approval-required',
+    allowedMcpServers: allowedMcpServers.length
+      ? allowedMcpServers
+      : Array.isArray(currentAllowedMcpServers)
+        ? []
+        : null,
+    skills: agentProfileCsvValue(agentProfileFieldValue(form, 'skills')),
+    memoryScopes: agentProfileCsvValue(
+      agentProfileFieldValue(form, 'memoryScopes'),
+    ),
+    taskKinds: agentProfileCsvValue(agentProfileFieldValue(form, 'taskKinds')),
+  };
+
+  agentProfileSetStatus(id, 'Saving profile...', 'info');
+  try {
+    const r = await api('/agent-profiles/' + encodeURIComponent(id), {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    const updatedProfile = {
+      ...(current || {}),
+      ...(r.profile || {}),
+      subscriptions: current?.subscriptions || [],
+      activity: current?.activity || current?.activityItems || [],
+    };
+    agentProfileUpdateLocalProfile(id, updatedProfile);
+    agentProfileRerender(id);
+    agentProfileSetStatus(id, 'Profile saved.', 'success');
+    toast('Agent profile saved', 'success');
+  } catch (e) {
+    const message = e?.message || 'Profile save failed';
+    agentProfileSetStatus(id, message, 'error');
+    toast(message, 'error');
+  }
+};
+
+window.invokeAgentProfile = async function (id) {
+  const promptEl = document.getElementById(
+    `agent-profile-invoke-prompt-${agentProfileDomId(id)}`,
+  );
+  const prompt = promptEl?.value?.trim() || '';
+  if (!prompt) {
+    promptEl?.classList.add('input-error');
+    promptEl?.focus();
+    agentProfileSetStatus(id, 'Enter a prompt before invoking this profile.', 'error');
+    toast('Enter an invocation prompt', 'warning');
+    return;
+  }
+  promptEl.classList.remove('input-error');
+
+  agentProfileSetStatus(id, 'Recording invocation...', 'info');
+  try {
+    const r = await api('/agent-profiles/' + encodeURIComponent(id) + '/invoke', {
+      method: 'POST',
+      body: JSON.stringify({ prompt }),
+    });
+    if (r.activity) {
+      const current = window._agentProfilesById?.[id] || {};
+      const activity = [
+        r.activity,
+        ...agentProfileArray(current.activity || current.activityItems).filter(
+          (item) => item?.id !== r.activity.id,
+        ),
+      ];
+      agentProfileUpdateLocalProfile(id, {
+        ...current,
+        activity,
+        lastActivityAt: r.activity.createdAt || current.lastActivityAt,
+        latestActivity: r.activity.summary || current.latestActivity,
+      });
+      agentProfileRerender(id);
+    }
+    agentProfileSetStatus(id, 'Invocation recorded.', 'success');
+    toast('Agent profile invocation recorded', 'success');
+  } catch (e) {
+    const message = e?.message || 'Profile invocation failed';
+    agentProfileSetStatus(id, message, 'error');
+    toast(message, 'error');
+  }
+};
 
 window.copyAgentDelegationBrief = async function () {
   const state = window._agentDelegationState;

@@ -5546,6 +5546,193 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       },
     ];
   }
+  if (pathname === '/agent-profiles') {
+    return [
+      {
+        id: 'manual-host',
+        handle: 'manual-host',
+        displayName: 'Manual Host',
+        description: 'Primary human-guided agent for direct operator requests.',
+        enabled: true,
+        providerProfile: 'default_chat',
+        provider: 'codex',
+        modelId: 'gpt-5.4',
+        toolPolicy: 'approval-gated',
+        taskKinds: ['chat', 'triage', 'approval review'],
+        capabilities: {
+          mcpServers: ['nanocrab', 'github', 'kdrive'],
+          skills: ['memory', 'task planning', 'status reporting'],
+          memoryScopes: ['main', 'shared'],
+        },
+        activeRunCount: 1,
+        blockedApprovalCount: 0,
+        errorCount: 0,
+        lastActivityAt: iso(9),
+        latestActivity: { title: 'Answered operator request', at: iso(9) },
+        subscriptions: [
+          {
+            id: 'manual-host-inbox',
+            name: 'Operator inbox',
+            kind: 'manual mention',
+            status: 'watching',
+            lastMatchAt: iso(9),
+            lastRunAt: iso(9),
+          },
+          {
+            id: 'manual-host-approvals',
+            name: 'Approval decisions',
+            kind: 'approval queue',
+            status: 'watching',
+            lastMatchAt: iso(34),
+            lastRunAt: iso(32),
+          },
+        ],
+        activity: [
+          {
+            id: 'manual-host-activity-1',
+            title: 'Answered operator request',
+            detail: 'Prepared a short delegation brief for current blockers.',
+            status: 'completed',
+            at: iso(9),
+          },
+          {
+            id: 'manual-host-activity-2',
+            title: 'Checked approval queue',
+            detail: 'No approval blockers for manual chat lane.',
+            status: 'completed',
+            at: iso(32),
+          },
+        ],
+      },
+      {
+        id: 'repo-fixer',
+        handle: 'repo-fixer',
+        displayName: 'Repo Fixer',
+        description:
+          'Coding profile for GitHub issue fixes and focused PR handoffs.',
+        enabled: true,
+        providerProfile: 'default_coding',
+        provider: 'codex',
+        modelId: 'gpt-5.4',
+        toolPolicy: 'repo-write gated',
+        taskKinds: ['bugfix', 'code review', 'tests'],
+        capabilities: {
+          mcpServers: ['github', 'nanocrab'],
+          skills: ['github issue work', 'code review', 'release management'],
+          memoryScopes: ['repo', 'shared'],
+        },
+        activeRunCount: 1,
+        blockedApprovalCount: 1,
+        errorCount: 0,
+        lastActivityAt: iso(18),
+        latestActivity: { title: 'Working issue #42', at: iso(18) },
+        subscriptions: [
+          {
+            id: 'repo-fixer-agent-ready',
+            name: 'Agent-ready GitHub issues',
+            kind: 'github label',
+            status: 'watching',
+            lastMatchAt: iso(18),
+            lastRunAt: iso(18),
+          },
+          {
+            id: 'repo-fixer-pr-gates',
+            name: 'PR approval gates',
+            kind: 'approval queue',
+            status: 'waiting',
+            lastMatchAt: iso(22),
+            lastRunAt: iso(20),
+          },
+        ],
+        activity: [
+          {
+            id: 'repo-fixer-activity-1',
+            title: 'Working issue #42',
+            detail: 'Applying focused dashboard changes in a coding worktree.',
+            status: 'running',
+            at: iso(18),
+          },
+          {
+            id: 'repo-fixer-activity-2',
+            title: 'Implementation approval waiting',
+            detail:
+              'Approval gate must clear before repo write handoff continues.',
+            status: 'await_approval',
+            at: iso(20),
+          },
+        ],
+      },
+      {
+        id: 'researcher',
+        handle: 'researcher',
+        displayName: 'Researcher',
+        description:
+          'Read-heavy research profile for sourced briefs and monitoring.',
+        enabled: true,
+        providerProfile: 'default_reports',
+        provider: 'openrouter',
+        modelId: 'openrouter/auto',
+        toolPolicy: 'read-only external',
+        taskKinds: ['research', 'summaries', 'reports'],
+        capabilities: {
+          mcpServers: ['nanocrab', 'kdrive'],
+          skills: ['web research', 'report writing', 'inbox triage'],
+          memoryScopes: ['shared'],
+        },
+        activeRunCount: 0,
+        blockedApprovalCount: 0,
+        errorCount: 1,
+        lastActivityAt: iso(46),
+        latestActivity: { title: 'Drafted research queue', at: iso(46) },
+        subscriptions: [
+          {
+            id: 'researcher-report-queue',
+            name: 'Report job queue',
+            kind: 'scheduled report',
+            status: 'watching',
+            lastMatchAt: iso(46),
+            lastRunAt: iso(45),
+          },
+          {
+            id: 'researcher-incident-watch',
+            name: 'Incident watch',
+            kind: 'monitor alert',
+            status: 'disabled',
+            enabled: false,
+            lastMatchAt: iso(360),
+            lastRunAt: iso(340),
+          },
+        ],
+        activity: [
+          {
+            id: 'researcher-activity-1',
+            title: 'Drafted research queue',
+            detail: 'Queued source review for the next operator report.',
+            status: 'completed',
+            at: iso(46),
+          },
+          {
+            id: 'researcher-activity-2',
+            title: 'Source fetch failed',
+            detail: 'One external source timed out and needs retry.',
+            status: 'error',
+            at: iso(58),
+          },
+        ],
+      },
+    ];
+  }
+  if (pathname.startsWith('/agent-profiles/')) {
+    const profileId = decodeURIComponent(pathname.split('/')[2] || '');
+    const profiles = routeJson('/agent-profiles', req);
+    return Array.isArray(profiles)
+      ? profiles.find((profile) => {
+          if (!profile || typeof profile !== 'object') return false;
+          const item = profile as Record<string, JsonValue>;
+          return item.id === profileId || item.handle === profileId;
+        })
+      : undefined;
+  }
   if (pathname === '/agents/tasks') {
     return [
       {
