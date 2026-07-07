@@ -15,7 +15,7 @@ describe('MODES config', () => {
   });
 
   it('labels the top-level focus modes', () => {
-    expect(M().MODES.chat.label).toBe('Copilot');
+    expect(M().MODES.chat.label).toBe('Chat');
     expect(M().MODES.cowork.label).toBe('Cowork');
     expect(M().MODES.code.label).toBe('Code');
   });

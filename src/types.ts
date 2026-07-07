@@ -79,6 +79,78 @@ export interface CoworkProject {
   updated_at: string;
 }
 
+export type CoworkRunStatus =
+  | 'draft'
+  | 'planning'
+  | 'waiting_for_approval'
+  | 'running'
+  | 'blocked'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export type CoworkComplexity =
+  | 'quick'
+  | 'standard'
+  | 'long'
+  | 'connector-heavy';
+
+export type CoworkApprovalRisk = 'low' | 'medium' | 'high';
+
+export interface CoworkRun {
+  id: string;
+  project_id: string;
+  title: string;
+  status: CoworkRunStatus;
+  provider: string | null;
+  model: string | null;
+  complexity: CoworkComplexity;
+  approval_risk: CoworkApprovalRisk;
+  prompt: string | null;
+  summary: string | null;
+  stats_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CoworkRunStep {
+  id: string;
+  run_id: string;
+  step_order: number;
+  title: string;
+  status: 'pending' | 'running' | 'completed' | 'blocked' | 'failed';
+  detail: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CoworkRunEvent {
+  id: string;
+  run_id: string;
+  event_order: number;
+  kind: string;
+  message: string;
+  metadata_json: string;
+  created_at: string;
+}
+
+export interface CoworkContextItem {
+  id: string;
+  project_id: string;
+  type: string;
+  title: string;
+  path: string | null;
+  url: string | null;
+  thread_id: string | null;
+  artifact_id: string | null;
+  included: number;
+  pinned: number;
+  provenance: string;
+  sensitivity: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface NewMessage {
   id: string;
   chat_jid: string;

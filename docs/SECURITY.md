@@ -84,7 +84,11 @@ Dry-run mode records `decision: simulated` audit events and avoids external writ
 
 MCP connectors have explicit permission records in `store/connector-permissions.json`: `connectorId`, `scope`, `allowedActions`, `requiresApproval`, `groups`, `agents`, `createdAt`, and `updatedAt`. Before connector tools are exposed to a container or connector actions are authorized, NanoCrab checks the active group/agent scope and then evaluates host policy for the connector action. Write-capable connector actions should either require approval on the connector permission or be allowed by an explicit policy rule.
 
+When an agent runtime requires a whole MCP server to be configured, NanoCrab does not treat that as permission to expose every tool. Scoped external connectors are started behind a container-local stdio MCP proxy that filters `tools/list` to the allowed tool patterns and rejects `tools/call` outside those patterns. This lets read-scoped connectors remain usable in Codex/OpenCode without granting wildcard write access.
+
 Every container invocation also resolves an agent boundary from the group identity before runtime assembly. The boundary declares channel scopes, filesystem scopes, skill scopes, provider profile permissions, allowed connector ids, and external write permissions. Container mounts, runtime skill snapshots, provider fallback profile selection, channel capability metadata, connector tool exposure, and MCP credential forwarding are derived from that boundary. Unauthorized channel agents therefore cannot receive private skills, out-of-scope connector credentials, coding-only provider profiles, broad channel scopes, or write-capable external tools.
+
+Cowork project runs follow the same default: source-backed reads and local project artifacts can be recorded in the project workspace, but external writes such as document publishing, channel sends, uploads, repo writes, calendar edits, webhooks, or connector mutations create or reuse a run-scoped approval record before execution.
 
 ### 3d. Scheduled Task And Webhook Delivery Controls
 
@@ -134,7 +138,7 @@ Claude, OpenRouter, and Google Gemini API traffic can be proxied this way. OpenR
 
 - OpenCode coding jobs may receive `OPENCODE_API_KEY` because the OpenCode CLI reads its own credential environment.
 - GitHub coding jobs may receive `GITHUB_TOKEN` through an env file plus `GIT_ASKPASS` so clone/fetch/PR flows can run without interactive prompts.
-- Custom MCP servers receive only the env vars listed on that server and only when the connector is inside the agent boundary.
+- Custom MCP servers receive only the env vars listed on that server and only when the connector is inside the agent boundary; scoped connectors are additionally filtered through the MCP tool proxy.
 - Google Workspace OAuth vars are forwarded only when a mail, calendar, docs, or drive connector is inside the active boundary.
 - Image-generation helpers may receive provider keys such as `FAL_KEY`, `LEONARDO_API_KEY`, or `OPENAI_API_KEY` when those helpers are enabled.
 - `NANOCRAB_API_TOKEN` is passed to containers so bundled skills can call the local NanoCrab API; keep it scoped to local runtime use and out of logs, handoff briefs, issue comments, and commits.

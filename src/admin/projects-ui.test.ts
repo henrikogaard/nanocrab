@@ -184,6 +184,30 @@ describe('Cowork Projects UI wiring', () => {
     expect(source).not.toContain('form.style.display');
   });
 
+  it('renders Cowork runs, context notebook, capabilities, and complexity states', () => {
+    const source = fs.readFileSync(pagePath, 'utf8');
+
+    expect(source).toContain('renderProjectRuns');
+    expect(source).toContain('renderProjectContextNotebook');
+    expect(source).toContain('renderProjectCapabilities');
+    expect(source).toContain('renderProjectComplexity');
+    expect(source).toContain('project-run-list');
+    expect(source).toContain('project-context-notebook');
+    expect(source).toContain('project-capability-panel');
+    expect(source).toContain('project-complexity-panel');
+    expect(source).toContain('Runs');
+    expect(source).toContain('Context notebook');
+    expect(source).toContain('Capabilities');
+    expect(source).toContain('Complexity');
+    expect(source).toContain('Approval risk');
+    expect(source).toContain('Sensitivity');
+    expect(source).toContain('Provenance');
+    expect(source).toContain('approval-blocked');
+    expect(source).toContain('External writes require approval');
+    expect(source).toContain('No Cowork runs yet');
+    expect(source).toContain('No context notebook items yet');
+  });
+
   it('offers productivity quick starts for project chats', () => {
     const source = fs.readFileSync(pagePath, 'utf8');
 

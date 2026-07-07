@@ -6,9 +6,14 @@
   var _activeThreadId = null;
   var _activeThreadTitle = null;
   var _modalEl = null;
+  var _threadListHandlersInstalled = false;
+  var _webChatActionHandlersInstalled = false;
   function setProgressFill(el, pct) {
     if (!el) return;
     el.style.setProperty('--progress-pct', Math.min(Number(pct) || 0, 100) + '%');
+  }
+  function conversationRoot() {
+    return document.getElementById('page-content');
   }
   var CHAT_STARTERS = [
     {
@@ -239,12 +244,73 @@
     return PROJECT_TOOL_STARTERS[numeric] || null;
   }
 
+  function toggleToolCall(target) {
+    var header =
+      target && target.closest ? target.closest('.chat-tool-call-header') : null;
+    var body = header && header.nextElementSibling;
+    if (body) body.classList.toggle('expanded');
+  }
+
+  function refreshThreadList() {
+    var nav = document.getElementById('chat-thread-nav');
+    if (!nav) return;
+    loadThreads().then(function (threads) {
+      nav.innerHTML = renderThreadList(threads, _activeThreadId);
+    });
+  }
+
+  function installWebChatActionHandlers() {
+    if (_webChatActionHandlersInstalled) return;
+    _webChatActionHandlersInstalled = true;
+    document.addEventListener('click', function (event) {
+      var target =
+        event.target && event.target.closest
+          ? event.target.closest('[data-webchat-action]')
+          : null;
+      if (!target) return;
+      var action = target.dataset.webchatAction;
+      if (!action) return;
+      event.preventDefault();
+      if (action === 'open-new-conversation') {
+        openNewConversationModal();
+      } else if (action === 'start-from-prompt') {
+        startFromPrompt(target.dataset.starterIndex);
+      } else if (action === 'use-starter') {
+        useStarterPrompt(target.dataset.starterIndex);
+      } else if (action === 'focus-chat-input') {
+        var input = document.getElementById('chat-msg-input');
+        if (input) input.focus();
+      } else if (action === 'open-projects') {
+        navigate('projects');
+      } else if (action === 'retry-thread') {
+        var el = conversationRoot();
+        if (el) renderConversation(el, target.dataset.threadId || _activeThreadId);
+      } else if (action === 'open-project-context') {
+        openProjectContext(target.dataset.projectId);
+      } else if (action === 'use-project-runbook') {
+        useProjectMcpRunbook();
+      } else if (action === 'use-project-tool') {
+        useProjectToolPrompt(target.dataset.starterIndex);
+      } else if (action === 'use-project-mcp-command') {
+        useProjectMcpCommand(target.dataset.commandIndex);
+      } else if (action === 'retry-thread-list') {
+        refreshThreadList();
+      } else if (action === 'toggle-progress-history') {
+        if (typeof window.toggleProgressHistory === 'function') {
+          window.toggleProgressHistory();
+        }
+      } else if (action === 'toggle-tool-call') {
+        toggleToolCall(target);
+      }
+    });
+  }
+
   function renderStarterCards() {
     return CHAT_STARTERS.map(function (starter, index) {
       return (
-        '<button type="button" class="webchat-starter-card" onclick="WebChat.startFromPrompt(' +
+        '<button type="button" class="webchat-starter-card" data-webchat-action="start-from-prompt" data-starter-index="' +
         index +
-        ')">' +
+        '">' +
         '<span class="webchat-starter-title">' +
         esc(starter.title) +
         '</span>' +
@@ -262,7 +328,7 @@
       '<div>' +
       '<span>Conversation loading</span>' +
       '<strong>Loading chat context</strong>' +
-      '<p>Checking whether this is plain Copilot chat or a Cowork project thread, then loading messages, context, MCP access, and starter actions.</p>' +
+      '<p>Checking whether this is a plain Chat thread or a Cowork project thread, then loading messages, context, MCP access, and starter actions.</p>' +
       '</div>' +
       '<div class="webchat-loading-flow">' +
       '<span>Thread</span>' +
@@ -283,16 +349,16 @@
       '<p>This thread has no project files, artifacts, or agent template. Use it for quick thinking, writing, planning, and questions. Move to Cowork when you need durable project context or MCP-backed documents.</p>' +
       '</div>' +
       '<div class="webchat-thread-empty-actions">' +
-      '<button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById(\'chat-msg-input\')?.focus()">Write message</button>' +
-      '<button type="button" class="btn btn-sm btn-ghost" onclick="navigate(\'projects\')">Open Cowork projects</button>' +
+      '<button type="button" class="btn btn-sm btn-primary" data-webchat-action="focus-chat-input">Write message</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-webchat-action="open-projects">Open Cowork projects</button>' +
       '</div>' +
       '<div class="webchat-thread-empty-starters">' +
       CHAT_STARTERS.slice(0, 3)
         .map(function (starter, index) {
           return (
-            '<button type="button" onclick="WebChat.useStarterPrompt(' +
+            '<button type="button" data-webchat-action="use-starter" data-starter-index="' +
             index +
-            ')">' +
+            '">' +
             '<strong>' +
             esc(starter.title) +
             '</strong>' +
@@ -316,7 +382,7 @@
       '<p>' +
       esc(message || 'The composer still works, but previous messages are not visible right now. Retry the thread before relying on this conversation context.') +
       '</p>' +
-      '<button type="button" class="btn btn-sm btn-ghost" onclick="WebChat.renderConversation(document.getElementById(\'main\'), WebChat.activeThreadId)">Retry thread</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-webchat-action="retry-thread">Retry thread</button>' +
       '</section>'
     );
   }
@@ -329,24 +395,64 @@
     );
   }
 
-  function jsStringAttr(value) {
-    return JSON.stringify(String(value || '')).replace(/"/g, '&quot;');
+  function formatMcpAccessSummary(threadMeta) {
+    var mcpAccess = (threadMeta && threadMeta.mcpAccess) || {};
+    var servers = Array.isArray(mcpAccess.servers) ? mcpAccess.servers.filter(Boolean) : [];
+    var enabled = mcpAccess.enabled !== false;
+    var configured = mcpAccess.scope === 'configured';
+    var restricted = mcpAccess.scope === 'restricted';
+    var serverList = servers.join(', ');
+    var internalOnly = 'Internal NanoCrab tools only';
+    var configuredCopy = 'All configured MCP servers allowed by connector permissions';
+    var restrictedCopy = 'Restricted MCP servers: ' + serverList;
+    var projectScope = !enabled
+      ? internalOnly
+      : configured
+        ? configuredCopy
+        : restricted && servers.length
+          ? restrictedCopy
+          : internalOnly;
+    var plainScope = !enabled
+      ? internalOnly
+      : servers.length
+        ? 'Plain chat can use MCP scope: ' + serverList
+        : configured
+          ? 'Plain chat can use MCP scope: configured connectors'
+          : internalOnly;
+    var promptScope = configured
+      ? 'all configured MCP servers allowed by connector permissions'
+      : servers.length
+        ? serverList
+        : 'approved MCP servers exposed to this project chat';
+    var writeGuard = mcpAccess.requiresApprovalForWrites
+      ? 'External writes and document publishing request approval first.'
+      : enabled && mcpAccess.writesEnabled
+        ? 'External MCP writes are available without an approval gate.'
+        : 'External writes are not enabled for this chat.';
+    var briefScope = configured
+      ? 'all configured MCP servers allowed by connector permissions'
+      : restricted && servers.length
+        ? 'restricted MCP servers: ' + serverList
+        : 'internal NanoCrab tools only';
+    return {
+      enabled: enabled,
+      plainScope: plainScope,
+      projectScope: projectScope,
+      promptScope: promptScope,
+      writeGuard: writeGuard,
+      briefScope: briefScope,
+    };
+  }
+
+  function plainChatMcpAccessText(threadMeta) {
+    return formatMcpAccessSummary(threadMeta).plainScope;
   }
 
   function renderThreadContextBanner(threadMeta) {
     if (!threadMeta || !threadMeta.projectId) return '';
     var projectName = threadMeta.projectName || 'Project';
-    var mcpAccess = threadMeta.mcpAccess || {};
-    var toolsAvailable = mcpAccess.enabled !== false;
-    var mcpScope =
-      mcpAccess.scope === 'configured'
-        ? 'All configured MCP servers allowed by connector permissions'
-        : mcpAccess.scope === 'restricted'
-          ? 'Restricted MCP servers: ' + (mcpAccess.servers || []).join(', ')
-          : 'Internal NanoCrab tools only';
-    var writeGuard = mcpAccess.requiresApprovalForWrites
-      ? 'External writes and document publishing request approval first.'
-      : 'External writes are not enabled for this chat.';
+    var mcpSummary = formatMcpAccessSummary(threadMeta);
+    var toolsAvailable = mcpSummary.enabled;
     return (
       '<div class="webchat-context-banner" data-project-id="' +
       esc(threadMeta.projectId) +
@@ -367,16 +473,16 @@
       '</small>' +
       '<div class="webchat-mcp-status">' +
       '<span>' +
-      esc(mcpScope) +
+      esc(mcpSummary.projectScope) +
       '</span>' +
       '<span>' +
-      esc(writeGuard) +
+      esc(mcpSummary.writeGuard) +
       '</span>' +
       '</div>' +
       '</div>' +
-      '<button type="button" class="btn btn-sm btn-ghost" onclick="WebChat.openProjectContext(' +
-      jsStringAttr(threadMeta.projectId) +
-      ')">Back to project</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-project-id="' +
+      esc(threadMeta.projectId) +
+      '" data-webchat-action="open-project-context">Back to project</button>' +
       '</div>' +
       (toolsAvailable ? renderProjectToolStarters(threadMeta) : '')
     );
@@ -388,11 +494,11 @@
       '<div>' +
       '<span>Context unavailable</span>' +
       '<strong>Thread metadata could not be loaded.</strong>' +
-      '<p>This chat may be plain Copilot or a Cowork project thread. Project files, MCP scope, and artifact context are hidden until the thread detail request recovers.</p>' +
+      '<p>This chat may be a plain Chat thread or a Cowork project thread. Project files, MCP scope, and artifact context are hidden until the thread detail request recovers.</p>' +
       '</div>' +
-      '<button type="button" class="btn btn-sm btn-ghost" onclick="WebChat.renderConversation(document.getElementById(\'main\'), ' +
-      jsStringAttr(threadId) +
-      ')">Retry context</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-thread-id="' +
+      esc(threadId) +
+      '" data-webchat-action="retry-thread">Retry context</button>' +
       '</section>'
     );
   }
@@ -444,15 +550,15 @@
       '<div class="webchat-project-tools-head">' +
       '<span>MCP actions</span>' +
       '<small>Ask for email summaries, sender checks, project documents, calendar follow-ups, or any approved connector workflow. Writes stay behind approvals.</small>' +
-      '<button type="button" class="btn btn-sm btn-ghost" onclick="WebChat.useProjectMcpRunbook()">Use MCP runbook</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-webchat-action="use-project-runbook">Use MCP runbook</button>' +
       '</div>' +
       renderProjectMcpServerRibbon(threadMeta) +
       '<div class="webchat-project-tool-grid">' +
       PROJECT_TOOL_STARTERS.map(function (starter, index) {
         return (
-          '<button type="button" class="webchat-project-tool" onclick="WebChat.useProjectToolPrompt(' +
+          '<button type="button" class="webchat-project-tool" data-webchat-action="use-project-tool" data-starter-index="' +
           index +
-          ')">' +
+          '">' +
           '<span>' +
           esc(starter.title) +
           '</span>' +
@@ -466,9 +572,9 @@
       '<div class="webchat-mcp-command-strip">' +
       PROJECT_MCP_COMMANDS.map(function (command, index) {
         return (
-          '<button type="button" onclick="WebChat.useProjectMcpCommand(' +
+          '<button type="button" data-webchat-action="use-project-mcp-command" data-command-index="' +
           index +
-          ')">' +
+          '">' +
           '<span>' +
           esc(command.title) +
           '</span>' +
@@ -510,14 +616,7 @@
     state = state || window._webchatThreadBriefState || {};
     var threadMeta = state.threadMeta || {};
     var projectName = threadMeta.projectName || threadMeta.projectId || 'this Cowork project';
-    var mcpAccess = threadMeta.mcpAccess || {};
-    var servers = Array.isArray(mcpAccess.servers) ? mcpAccess.servers.filter(Boolean) : [];
-    var scope =
-      mcpAccess.scope === 'configured'
-        ? 'all configured MCP servers allowed by connector permissions'
-        : servers.length
-          ? servers.join(', ')
-          : 'approved MCP servers exposed to this project chat';
+    var scope = formatMcpAccessSummary(threadMeta).promptScope;
     return [
       'Use MCP tools from this Cowork project chat.',
       '',
@@ -546,14 +645,7 @@
     state = state || window._webchatThreadBriefState || {};
     var threadMeta = state.threadMeta || {};
     var projectName = threadMeta.projectName || threadMeta.projectId || 'this Cowork project';
-    var mcpAccess = threadMeta.mcpAccess || {};
-    var servers = Array.isArray(mcpAccess.servers) ? mcpAccess.servers.filter(Boolean) : [];
-    var scope =
-      mcpAccess.scope === 'configured'
-        ? 'all configured MCP servers allowed by connector permissions'
-        : servers.length
-          ? servers.join(', ')
-          : 'approved MCP servers exposed to this project chat';
+    var scope = formatMcpAccessSummary(threadMeta).promptScope;
     return [
       'Cowork MCP context:',
       '- Project: ' + projectName,
@@ -577,6 +669,7 @@
 
   function renderPlainThreadBrief(threadMeta) {
     var title = threadMeta?.title || _activeThreadTitle || 'New conversation';
+    var mcpText = plainChatMcpAccessText(threadMeta);
     return (
       '<section class="webchat-plain-brief" aria-label="Plain chat context">' +
       '<div class="webchat-plain-main">' +
@@ -588,14 +681,16 @@
       '</div>' +
       '<div class="webchat-plain-meta">' +
       '<span>No project context</span>' +
-      '<span>External writes ask first</span>' +
+      '<span>' +
+      esc(mcpText) +
+      '</span>' +
       '</div>' +
       '<div class="webchat-plain-starters">' +
       CHAT_STARTERS.map(function (starter, index) {
         return (
-          '<button type="button" onclick="WebChat.useStarterPrompt(' +
+          '<button type="button" data-webchat-action="use-starter" data-starter-index="' +
           index +
-          ')">' +
+          '">' +
           esc(starter.title) +
           '</button>'
         );
@@ -628,13 +723,8 @@
       ? state.loadIssues.filter(Boolean)
       : [];
     var mcpAccess = threadMeta.mcpAccess || {};
-    var mcpScope =
-      mcpAccess.scope === 'configured'
-        ? 'all configured MCP servers allowed by connector permissions'
-        : mcpAccess.scope === 'restricted'
-          ? 'restricted MCP servers: ' + (mcpAccess.servers || []).join(', ')
-          : 'internal NanoCrab tools only';
-    var mcpEnabled = isProjectChat && mcpAccess.enabled !== false;
+    var mcpSummary = formatMcpAccessSummary(threadMeta);
+    var mcpEnabled = isProjectChat && mcpSummary.enabled;
     var lines = [
       'Web chat thread brief',
       'Title: ' + title,
@@ -647,8 +737,8 @@
         ? 'Project: ' + (threadMeta.projectName || threadMeta.projectId || 'Project')
         : 'Scope: Quick AI conversation for thinking, writing, planning, and lightweight questions.',
       isProjectChat
-        ? 'MCP access: ' + (mcpEnabled ? mcpScope : 'not enabled for this project chat')
-        : 'MCP access: no project connector context by default.',
+        ? 'MCP access: ' + (mcpEnabled ? mcpSummary.briefScope : 'not enabled for this project chat')
+        : 'MCP access: ' + plainChatMcpAccessText(threadMeta),
       'Approval boundary: External writes, sent messages, published documents, and calendar changes stay approval-gated.',
       'Data health: ' +
         (loadIssues.length
@@ -694,7 +784,9 @@
     if (projectId) {
       try {
         sessionStorage.setItem('project_focus_id', String(projectId));
-      } catch (_) {}
+      } catch (_) {
+        // Ignore private-mode/sessionStorage failures; navigation still works.
+      }
     }
     navigate('projects');
   }
@@ -702,6 +794,7 @@
   // ── public API ─────────────────────────────────────────────────────────────
 
   async function loadThreads() {
+    installWebChatActionHandlers();
     try {
       var t = await api('/threads');
       window._webchatThreadListLoadIssue = '';
@@ -714,9 +807,11 @@
   }
 
   function renderThreadList(threads, currentId) {
+    installWebChatActionHandlers();
+    installThreadListHandlers();
     if (!Array.isArray(threads)) threads = [];
     var newBtn =
-      '<a class="nav-link" onclick="WebChat.openNewConversationModal()">' +
+      '<a class="nav-link" data-webchat-action="open-new-conversation">' +
       navIcon('chat') +
       '<span class="nav-label">&#xFE0E;＋ New conversation</span></a>';
 
@@ -732,13 +827,13 @@
           .map(function (t) {
             var isActive = t.id === currentId;
             return (
-              '<a class="nav-link' +
+              '<a class="nav-link webchat-thread-link' +
               (isActive ? ' active' : '') +
-              '" onclick="WebChat.openThread(' +
-              JSON.stringify(t.id) +
-              ', ' +
-              JSON.stringify(t.title || t.id) +
-              ')">' +
+              '" data-thread-id="' +
+              esc(t.id) +
+              '" data-thread-title="' +
+              esc(t.title || t.id) +
+              '">' +
               navIcon('messages') +
               '<span class="nav-label">' +
               esc(t.title || t.id) +
@@ -752,6 +847,20 @@
     return newBtn + threadItems;
   }
 
+  function installThreadListHandlers() {
+    if (_threadListHandlersInstalled) return;
+    _threadListHandlersInstalled = true;
+    document.addEventListener('click', function (event) {
+      var target =
+        event.target && event.target.closest
+          ? event.target.closest('.webchat-thread-link')
+          : null;
+      if (!target) return;
+      event.preventDefault();
+      openThread(target.dataset.threadId, target.dataset.threadTitle);
+    });
+  }
+
   function renderThreadSidebarEmptyState(kind) {
     var isError = kind === 'error';
     var issue = window._webchatThreadListLoadIssue || 'Thread list unavailable';
@@ -759,10 +868,10 @@
       '<section class="thread-sidebar-empty' +
       (isError ? ' is-error' : '') +
       '" aria-label="' +
-      (isError ? 'Copilot conversation list unavailable' : 'No Copilot conversations yet') +
+      (isError ? 'Chat conversation list unavailable' : 'No Chat conversations yet') +
       '">' +
       '<span>' +
-      (isError ? 'Data health' : 'Copilot queue') +
+      (isError ? 'Data health' : 'Chat queue') +
       '</span>' +
       '<strong>' +
       (isError ? 'Chat list unavailable' : 'No chats yet') +
@@ -772,10 +881,8 @@
         ? esc(issue) + '. Retry the list, or start a new chat if thread storage is healthy.'
         : 'Start a plain chat for quick thinking. Use Cowork when the request needs project files, MCP tools, or durable artifacts.') +
       '</p>' +
-      '<button type="button" onclick="' +
-      (isError
-        ? 'WebChat.loadThreads().then(function(ts){var nav=document.getElementById(\'chat-thread-nav\'); if(nav) nav.innerHTML=WebChat.renderThreadList(ts, WebChat.activeThreadId);})'
-        : 'WebChat.openNewConversationModal()') +
+      '<button type="button" data-webchat-action="' +
+      (isError ? 'retry-thread-list' : 'open-new-conversation') +
       '">' +
       (isError ? 'Retry list' : 'New chat') +
       '</button>' +
@@ -790,13 +897,20 @@
   function openThread(id, title) {
     _activeThreadId = id;
     if (typeof title === 'string') _activeThreadTitle = title;
-    location.hash = '#/chat/' + encodeURIComponent(id.replace(/^web:/, ''));
+    var nextHash = '#/chat/' + encodeURIComponent(String(id).replace(/^web:/, ''));
+    if (location.hash === nextHash) {
+      var el = conversationRoot();
+      if (el) renderConversation(el, _activeThreadId, _activeThreadTitle);
+      return;
+    }
+    location.hash = nextHash;
   }
 
   // Render thread conversation into el, or an empty state if threadId is null.
   // When `title` is provided (sidebar nav), use it directly instead of fetching
   // the full thread list. Deep-link/reload paths pass no title → fallback fetch.
   async function renderConversation(el, threadId, title) {
+    installWebChatActionHandlers();
     // Clean up any leftover progress timer from a previous page
     if (window._progressTimeout) {
       clearTimeout(window._progressTimeout);
@@ -806,11 +920,11 @@
     if (!threadId) {
       el.innerHTML =
         '<section class="webchat-empty">' +
-        '<div class="webchat-empty-kicker">Copilot chat</div>' +
+        '<div class="webchat-empty-kicker">Chat</div>' +
         '<h2>What can I help with?</h2>' +
         '<p>Start a plain AI conversation for questions, writing, planning, and quick thinking.</p>' +
         '<div class="webchat-empty-actions">' +
-        '<button class="btn btn-primary" onclick="WebChat.openNewConversationModal()">＋ New conversation</button>' +
+        '<button class="btn btn-primary" data-webchat-action="open-new-conversation">＋ New conversation</button>' +
         '</div>' +
         '<div class="webchat-starter-grid">' +
         renderStarterCards() +
@@ -825,29 +939,35 @@
 
     // Render shell immediately so the user sees the layout fast
     el.innerHTML =
-      '<div class="page-header webchat-thread-head"><h2 class="webchat-thread-title" id="thread-title">Loading…</h2></div>' +
-      '<div id="thread-context-banner"></div>' +
-      '<div class="card webchat-thread-card">' +
+      '<section class="webchat-chatgpt-shell">' +
+      '<div class="webchat-chatgpt-topbar">' +
+      '<h2 class="webchat-thread-title" id="thread-title">Loading…</h2>' +
+      '<div class="webchat-thread-actions">' +
+      '<button class="btn btn-sm btn-ghost webchat-thread-action" id="thread-copy-brief-btn">Copy chat brief</button>' +
+      '<button class="btn btn-sm btn-ghost webchat-thread-action" id="thread-rename-btn">Rename</button>' +
+      '<button class="btn btn-sm btn-danger webchat-thread-action" id="thread-delete-btn">Delete</button>' +
+      '</div>' +
+      '</div>' +
+      '<div class="webchat-chatgpt-context" id="thread-context-banner"></div>' +
+      '<div class="webchat-thread-card">' +
       '<div class="chat-messages" id="chat-messages-area">' +
       renderWebchatLoadingState() +
       '</div>' +
-      '<div class="chat-progress-bar" id="chat-progress-bar" onclick="toggleProgressHistory()">' +
+      '<div class="chat-progress-bar" id="chat-progress-bar" data-webchat-action="toggle-progress-history">' +
       '<span class="progress-spinner" id="progress-spinner"></span>' +
       '<span class="progress-phase" id="progress-phase">Thinking…</span>' +
       '<div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>' +
       '<span class="progress-pct" id="progress-pct">0%</span>' +
       '</div>' +
       '<div class="chat-progress-history" id="chat-progress-history"></div>' +
+      '<div class="webchat-chatgpt-composer">' +
       '<div class="chat-input">' +
-      '<textarea id="chat-msg-input" rows="1" placeholder="Type a message…" autocomplete="off"></textarea>' +
-      '<button class="btn btn-sm btn-primary" id="chat-send-btn">Send</button>' +
+      '<textarea id="chat-msg-input" rows="1" placeholder="Message Taskekrabben" autocomplete="off"></textarea>' +
+      '<button class="btn btn-sm btn-primary" id="chat-send-btn" aria-label="Send message" title="Send message">Send</button>' +
       '</div>' +
       '</div>' +
-      '<div class="webchat-thread-actions">' +
-      '<button class="btn btn-sm btn-ghost webchat-thread-action" id="thread-copy-brief-btn">Copy chat brief</button>' +
-      '<button class="btn btn-sm btn-ghost webchat-thread-action" id="thread-rename-btn">Rename</button>' +
-      '<button class="btn btn-sm btn-danger webchat-thread-action" id="thread-delete-btn">Delete</button>' +
-      '</div>';
+      '</div>' +
+      '</section>';
 
     var chatMessages = [];
     var messagesArea = document.getElementById('chat-messages-area');
@@ -1186,7 +1306,7 @@
         card.id = 'tool-card-' + msg.data.id;
         card.className = 'chat-tool-call';
         card.innerHTML =
-          '<div class="chat-tool-call-header" onclick="this.nextElementSibling.classList.toggle(\'expanded\')">' +
+          '<div class="chat-tool-call-header" data-webchat-action="toggle-tool-call">' +
           '<span class="tool-icon">&#x1F527;</span>' +
           '<span class="tool-name">' + esc(msg.data.name) + '</span>' +
           '<span class="tool-status running">&#x25CF; Running…</span>' +
@@ -1208,7 +1328,7 @@
           card2.id = 'tool-card-' + msg.data.id;
           card2.className = 'chat-tool-call';
           card2.innerHTML =
-            '<div class="chat-tool-call-header" onclick="this.nextElementSibling.classList.toggle(\'expanded\')">' +
+            '<div class="chat-tool-call-header" data-webchat-action="toggle-tool-call">' +
             '<span class="tool-icon">&#x1F527;</span>' +
             '<span class="tool-name">tool</span>' +
             '<span class="tool-status done">&#x2713; ' + esc(msg.data.duration) + 's</span>' +

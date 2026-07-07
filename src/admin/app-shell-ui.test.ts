@@ -52,7 +52,7 @@ describe('App shell accessibility UI', () => {
     expect(source).toContain('</main>');
   });
 
-  it('shows active focus guidance for Copilot, Cowork, and Code modes', () => {
+  it('shows active focus guidance for Chat, Cowork, and Code modes', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
 
@@ -86,6 +86,16 @@ describe('App shell accessibility UI', () => {
     );
     expect(styleSource).toContain('.mode-tab span:not(.nav-icon)');
     expect(styleSource).toContain('.alert-compact');
+  });
+
+  it('restores chat thread deep links without double-prefixing legacy web ids', () => {
+    const appSource = fs.readFileSync(appPath, 'utf8');
+
+    expect(appSource).toContain("chat: { label: 'Chat', icon: 'chat' }");
+    expect(appSource).toContain('function parseChatHash(hash)');
+    expect(appSource).toContain("decoded.startsWith('web:') ? decoded : 'web:' + decoded");
+    expect(appSource).toContain('function parseProjectChatHash(hash)');
+    expect(appSource).toContain("decodedThreadId.startsWith('web:')");
   });
 
   it('loads shared data-health helpers before the shell and surfaces plugin registry issues', () => {

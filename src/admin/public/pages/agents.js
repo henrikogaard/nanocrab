@@ -1399,9 +1399,15 @@ window.updateCodingModels = function () {
   const modelsByProvider = window._codingModelsByProvider || {};
   const provider = (window._codingProvidersById || {})[providerEl.value] || {};
   const models = modelsByProvider[providerEl.value] || [];
-  const defaultAllowed = provider.id !== 'ollama';
+  const defaultAllowed = codingProviderAllowsDefaultModel(provider, models);
   modelEl.innerHTML = `${defaultAllowed ? '<option value="">Default model</option>' : ''}${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
 };
+
+function codingProviderAllowsDefaultModel(provider, models) {
+  if (!provider || !provider.defaultModel) return true;
+  const defaultModel = (models || []).find((model) => model.id === provider.defaultModel);
+  return defaultModel ? defaultModel.codingCapable !== false : provider.codingCapable === true;
+}
 
 window.updateAssignCodingModels = function () {
   const providerEl = document.getElementById('assign-coding-provider-select');
@@ -1409,7 +1415,7 @@ window.updateAssignCodingModels = function () {
   if (!providerEl || !modelEl) return;
   const provider = (window._codingProvidersById || {})[providerEl.value] || {};
   const models = (window._codingModelsByProvider || {})[providerEl.value] || [];
-  const defaultAllowed = provider.id !== 'ollama';
+  const defaultAllowed = codingProviderAllowsDefaultModel(provider, models);
   modelEl.innerHTML = `${defaultAllowed ? '<option value="">Default model</option>' : ''}${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
 };
 
@@ -1419,7 +1425,7 @@ window.updateAssignAutofixModels = function () {
   if (!providerEl || !modelEl) return;
   const provider = (window._codingProvidersById || {})[providerEl.value] || {};
   const models = (window._codingModelsByProvider || {})[providerEl.value] || [];
-  const defaultAllowed = provider.id !== 'ollama';
+  const defaultAllowed = codingProviderAllowsDefaultModel(provider, models);
   modelEl.innerHTML = `${defaultAllowed ? '<option value="">Default model</option>' : ''}${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
 };
 

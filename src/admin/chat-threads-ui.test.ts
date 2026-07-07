@@ -62,13 +62,17 @@ describe('WebChat new conversation modal', () => {
       'Plain chat has no project files, artifacts, or agent template.',
     );
     expect(source).toContain('No project context');
-    expect(source).toContain('External writes ask first');
+    expect(source).toContain('plainChatMcpAccessText(threadMeta)');
     expect(source).toContain('useStarterPrompt');
+    expect(source).toContain('webchat-chatgpt-shell');
+    expect(source).toContain('webchat-chatgpt-topbar');
+    expect(source).toContain('webchat-chatgpt-context');
+    expect(source).toContain('webchat-chatgpt-composer');
     expect(source).toContain('webchat-thread-card');
     expect(source).toContain('webchat-thread-empty-state');
     expect(source).toContain('Loading chat context');
     expect(source).toContain(
-      'Checking whether this is plain Copilot chat or a Cowork project thread',
+      'Checking whether this is a plain Chat thread or a Cowork project thread',
     );
     expect(source).toContain('renderWebchatLoadingState()');
     expect(source).toContain('Start with a plain chat prompt.');
@@ -84,7 +88,7 @@ describe('WebChat new conversation modal', () => {
     expect(source).toContain('window._webchatThreadListLoadIssue');
     expect(source).toContain('Chat list unavailable');
     expect(source).toContain('Retry list');
-    expect(source).toContain('Copilot queue');
+    expect(source).toContain('Chat queue');
     expect(source).toContain('Start a plain chat for quick thinking');
     expect(source).toContain(
       'Use Cowork when the request needs project files, MCP tools, or durable artifacts.',
@@ -125,7 +129,7 @@ describe('WebChat new conversation modal', () => {
     expect(source).not.toContain(
       '<div class="chat-messages" id="chat-messages-area"><div class="loading">Loading</div></div>',
     );
-    expect(source).not.toContain('class="card webchat-thread-card" style=');
+    expect(source).not.toContain('class="card webchat-thread-card"');
     expect(source).not.toContain('id="progress-fill" style="width:0%"');
     expect(source).not.toContain('id="thread-copy-brief-btn" style=');
     expect(source).not.toContain('id="thread-rename-btn" style=');
@@ -143,10 +147,29 @@ describe('WebChat new conversation modal', () => {
     expect(source).not.toContain('fill.style.width');
     expect(source).not.toContain("window.prompt('Rename conversation:'");
     expect(source).not.toContain("window.confirm('Delete this conversation?')");
+    expect(source).toContain('function conversationRoot()');
+    expect(source).toContain("document.getElementById('page-content')");
+    expect(source).toContain("if (location.hash === nextHash)");
+    expect(source).toContain('data-thread-id="');
+    expect(source).toContain('data-thread-title="');
+    expect(source).toContain('installThreadListHandlers');
+    expect(source).not.toContain('onclick="WebChat.openThread(');
+    expect(source).not.toContain('jsStringAttr(t.id)');
+    expect(source).not.toContain('jsStringAttr(t.title || t.id)');
+    expect(source).not.toContain('JSON.stringify(t.id)');
+    expect(source).not.toContain('JSON.stringify(t.title || t.id)');
+    expect(source).not.toContain("document.getElementById('main')");
     expect(style).toContain('width: var(--progress-pct, 0%);');
     expect(style).toContain('height: var(--chat-input-height, 40px);');
     expect(style).toContain('.webchat-plain-brief');
     expect(style).toContain('.webchat-plain-starters');
+    expect(style).toContain('.webchat-chatgpt-shell');
+    expect(style).toContain('.webchat-chatgpt-composer');
+    expect(style).toContain('.webchat-chatgpt-shell .chat-msg-bot::before');
+    expect(style).toContain('.webchat-chatgpt-shell #chat-send-btn::before');
+    expect(style).not.toContain(
+      '.webchat-chatgpt-context .webchat-plain-brief {\n  display: none;',
+    );
     expect(style).toContain('.webchat-thread-card');
     expect(style).toContain('.webchat-loading-state');
     expect(style).toContain('.webchat-loading-state::after');
@@ -315,8 +338,9 @@ describe('WebChat new conversation modal', () => {
     expect(source).toContain('resizeChatInput');
     expect(source).toContain('Back to project');
     expect(source).toContain('openProjectContext');
-    expect(source).toContain('jsStringAttr');
-    expect(source).toContain(".replace(/\"/g, '&quot;')");
+    expect(source).toContain('data-project-id="');
+    expect(source).not.toContain('function jsStringAttr');
+    expect(source).not.toContain(".replace(/\"/g, '&quot;')");
     expect(source).toContain("sessionStorage.setItem('project_focus_id'");
   });
 
@@ -334,5 +358,27 @@ describe('WebChat new conversation modal', () => {
     expect(style).toContain(
       '.webchat-mcp-source-flow {\n    grid-template-columns: 1fr;',
     );
+  });
+
+  it('surfaces MCP access in plain chat briefs when regular web chats have connectors', () => {
+    const source = fs.readFileSync(scriptPath, 'utf8');
+
+    expect(source).toContain('function formatMcpAccessSummary');
+    expect(source).toContain('plainChatMcpAccessText');
+    expect(source).toContain('Plain chat can use MCP scope');
+    expect(source).toContain('MCP access: ' + "' + plainChatMcpAccessText(threadMeta)");
+    expect(source).not.toContain('MCP access: no project connector context by default.');
+  });
+
+  it('uses delegated web chat actions instead of inline onclick attributes', () => {
+    const source = fs.readFileSync(scriptPath, 'utf8');
+
+    expect(source).toContain('installWebChatActionHandlers');
+    expect(source).toContain('data-webchat-action="open-new-conversation"');
+    expect(source).toContain('data-webchat-action="use-starter"');
+    expect(source).toContain('data-webchat-action="use-project-tool"');
+    expect(source).toContain('data-webchat-action="use-project-mcp-command"');
+    expect(source).toContain('data-webchat-action="toggle-tool-call"');
+    expect(source).not.toContain(' onclick=');
   });
 });

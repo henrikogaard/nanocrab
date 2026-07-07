@@ -115,6 +115,41 @@ describe('connector permissions', () => {
     expect(patterns).not.toContain('mcp__github__delete_*');
   });
 
+  it('matches read-only permissions against resource-prefixed MCP tools', () => {
+    const patterns = getAllowedConnectorToolPatterns({
+      permissions: [
+        {
+          ...basePermission,
+          connectorId: 'infomaniak',
+          scope: 'all',
+          allowedActions: ['*.read', 'tools.expose'],
+          requiresApproval: true,
+          groups: [],
+        },
+      ],
+      connectorIds: ['infomaniak'],
+      groupFolder: 'web-thread',
+      agentId: 'web-thread',
+      isMain: false,
+    });
+
+    expect(patterns).toEqual(
+      expect.arrayContaining([
+        'mcp__infomaniak__list_*',
+        'mcp__infomaniak__get_*',
+        'mcp__infomaniak__download_*',
+      ]),
+    );
+    expect(patterns).not.toContain('mcp__infomaniak__*');
+    expect(patterns).not.toContain('mcp__infomaniak__mail_send*');
+    expect(patterns).not.toContain('mcp__infomaniak__*_help*');
+    expect(patterns).not.toContain('mcp__infomaniak__*_download*');
+    expect(patterns).not.toContain('mcp__infomaniak__create_help_ticket*');
+    expect(patterns).not.toContain(
+      'mcp__infomaniak__mail_download_and_delete*',
+    );
+  });
+
   it('exposes read MCP tools for approval-required connectors', () => {
     const patterns = getAllowedConnectorToolPatterns({
       permissions: [

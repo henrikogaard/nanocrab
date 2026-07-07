@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 
+import type { ApprovalRequest } from '../approvals.js';
 import { listRoutineBlueprints } from '../routine-blueprints.js';
 
 type JsonValue = unknown;
@@ -199,6 +200,155 @@ const mockProjectThreads: Record<
     },
   ],
 };
+
+const mockProjectRuns: Record<string, Array<Record<string, JsonValue>>> = {
+  'project-auroradocs': [
+    {
+      id: 'run-auroradocs-email-brief',
+      projectId: 'project-auroradocs',
+      title: 'Latest email summary document',
+      status: 'waiting_for_approval',
+      provider: 'codex',
+      model: 'gpt-5.4',
+      complexity: 'connector-heavy',
+      approvalRisk: 'high',
+      summary:
+        'Draft created locally. Publishing the external document is approval-blocked.',
+      stats: {
+        toolCalls: 4,
+        artifactsCreated: 1,
+        approvalsRequested: 1,
+      },
+      createdAt: '2026-06-15T08:50:00Z',
+      updatedAt: '2026-06-15T10:01:00Z',
+      steps: [
+        { title: 'Plan source-backed work', status: 'completed' },
+        { title: 'Gather approved context', status: 'completed' },
+        { title: 'Create local project artifact', status: 'completed' },
+        { title: 'Request approval for external writes', status: 'blocked' },
+      ],
+      events: [
+        { kind: 'created', message: 'Cowork run created.' },
+        {
+          kind: 'approval_required',
+          message: 'External document publish requires approval.',
+        },
+      ],
+    },
+  ],
+  'project-ops-briefs': [
+    {
+      id: 'run-ops-browser-research',
+      projectId: 'project-ops-briefs',
+      title: 'Browser research brief',
+      status: 'completed',
+      provider: 'codex',
+      model: 'gpt-5.4',
+      complexity: 'standard',
+      approvalRisk: 'medium',
+      summary: 'Research brief saved in the project workspace.',
+      stats: {
+        toolCalls: 3,
+        artifactsCreated: 1,
+        approvalsRequested: 0,
+      },
+      createdAt: '2026-06-14T17:10:00Z',
+      updatedAt: '2026-06-14T18:15:00Z',
+      steps: [
+        { title: 'Plan source-backed work', status: 'completed' },
+        { title: 'Gather approved context', status: 'completed' },
+        { title: 'Create local project artifact', status: 'completed' },
+      ],
+      events: [{ kind: 'completed', message: 'Run completed.' }],
+    },
+  ],
+};
+
+const mockProjectContextItems: Record<string, Array<Record<string, JsonValue>>> =
+  {
+    'project-auroradocs': [
+      {
+        id: 'context-auroradocs-source-ledger',
+        projectId: 'project-auroradocs',
+        type: 'file',
+        title: 'Email source ledger',
+        path: 'docs/brief.md',
+        included: true,
+        pinned: true,
+        provenance: 'gmail-mcp',
+        sensitivity: 'confidential',
+        createdAt: '2026-06-15T09:55:00Z',
+        updatedAt: '2026-06-15T10:02:00Z',
+      },
+      {
+        id: 'context-auroradocs-thread',
+        projectId: 'project-auroradocs',
+        type: 'thread',
+        title: 'Feature checklist chat',
+        threadId: 'web:mock-project-1',
+        included: true,
+        pinned: false,
+        provenance: 'project-chat',
+        sensitivity: 'internal',
+        createdAt: '2026-06-15T09:45:00Z',
+        updatedAt: '2026-06-15T09:45:00Z',
+      },
+    ],
+    'project-ops-briefs': [
+      {
+        id: 'context-ops-dispatch-plan',
+        projectId: 'project-ops-briefs',
+        type: 'file',
+        title: 'Friday dispatch plan',
+        path: 'dispatch/friday-plan.md',
+        included: true,
+        pinned: true,
+        provenance: 'manual-upload',
+        sensitivity: 'normal',
+        createdAt: '2026-06-14T18:20:00Z',
+        updatedAt: '2026-06-14T18:20:00Z',
+      },
+    ],
+  };
+
+function mockProjectCapabilities(projectId: string) {
+  return [
+    {
+      id: 'project-files',
+      kind: 'files',
+      label: 'Project files',
+      enabled: true,
+      unavailable: false,
+      readOnly: true,
+      writeCapable: true,
+      approvalRequired: false,
+      summary: `${mockProjectFiles[projectId]?.length || 0} local project files available`,
+    },
+    {
+      id: 'external-writes',
+      kind: 'approval',
+      label: 'External writes',
+      enabled: true,
+      unavailable: false,
+      readOnly: false,
+      writeCapable: true,
+      approvalRequired: true,
+      summary:
+        'External sends, uploads, repo writes, calendar edits, webhooks, and connector mutations require approval.',
+    },
+    {
+      id: 'connector-gmail',
+      kind: 'connector',
+      label: 'gmail',
+      enabled: true,
+      unavailable: false,
+      readOnly: true,
+      writeCapable: true,
+      approvalRequired: true,
+      summary: 'Mock connector for source-backed email research.',
+    },
+  ];
+}
 
 const channels = [
   { name: 'whatsapp', connected: true, status: 'healthy', lastSeen: iso(1) },
@@ -486,7 +636,7 @@ function mockAssistantProfile(selectedAvatarId = 'tidal-crab'): JsonValue {
   };
 }
 
-const approvals = [
+const approvals: ApprovalRequest[] = [
   {
     id: 'approval-cowork-mcp-document',
     kind: 'tool-action',
@@ -2512,6 +2662,8 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       mockProjects.unshift(project);
       mockProjectFiles[project.id] = [];
       mockProjectThreads[project.id] = [];
+      mockProjectRuns[project.id] = [];
+      mockProjectContextItems[project.id] = [];
       return { project };
     }
   }
@@ -2525,7 +2677,266 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         project,
         files: mockProjectFiles[projectId] || [],
         threads: mockProjectThreads[projectId] || [],
+        runs: mockProjectRuns[projectId] || [],
+        context: mockProjectContextItems[projectId] || [],
+        capabilities: mockProjectCapabilities(projectId),
       };
+    }
+    if (parts.length === 3 && parts[2] === 'estimate' && method === 'POST') {
+      const text = `${String(req.body?.title || '')} ${String(req.body?.prompt || '')}`.toLowerCase();
+      const needsApproval =
+        text.includes('send') ||
+        text.includes('publish') ||
+        text.includes('upload') ||
+        text.includes('external');
+      const connectorHeavy =
+        text.includes('mcp') ||
+        text.includes('connector') ||
+        text.includes('email') ||
+        text.includes('mail') ||
+        text.includes('document');
+      return {
+        estimate: {
+          complexity: connectorHeavy ? 'connector-heavy' : 'quick',
+          approvalRisk: needsApproval ? 'high' : connectorHeavy ? 'medium' : 'low',
+          provider: req.body?.provider || null,
+          model: req.body?.model || null,
+          warnings: needsApproval
+            ? [
+                'Write-capable or external delivery language requires approval before mutation.',
+              ]
+            : [],
+        },
+      };
+    }
+    if (parts.length === 3 && parts[2] === 'runs' && method === 'GET') {
+      return { runs: mockProjectRuns[projectId] || [] };
+    }
+    if (parts.length === 3 && parts[2] === 'runs' && method === 'POST') {
+      const text = `${String(req.body?.title || '')} ${String(req.body?.prompt || '')}`.toLowerCase();
+      const needsApproval =
+        text.includes('send') ||
+        text.includes('publish') ||
+        text.includes('upload') ||
+        text.includes('external');
+      const connectorHeavy =
+        text.includes('mcp') ||
+        text.includes('connector') ||
+        text.includes('email') ||
+        text.includes('mail') ||
+        text.includes('document');
+      const run = {
+        id: 'run-mock-' + Date.now(),
+        projectId,
+        title: String(req.body?.title || 'Untitled Cowork run'),
+        status: 'draft',
+        provider: req.body?.provider || null,
+        model: req.body?.model || null,
+        complexity: connectorHeavy ? 'connector-heavy' : 'quick',
+        approvalRisk: needsApproval ? 'high' : connectorHeavy ? 'medium' : 'low',
+        summary: '',
+        stats: { toolCalls: 0, artifactsCreated: 0, approvalsRequested: 0 },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        steps: [
+          { title: 'Plan source-backed work', status: 'pending' },
+          { title: 'Gather approved context', status: 'pending' },
+          { title: 'Create local project artifact', status: 'pending' },
+          { title: 'Request approval for external writes', status: 'pending' },
+        ],
+        events: [{ kind: 'created', message: 'Cowork run created.' }],
+      };
+      mockProjectRuns[projectId] = [run, ...(mockProjectRuns[projectId] || [])];
+      return { run };
+    }
+    if (parts.length === 4 && parts[2] === 'runs' && method === 'GET') {
+      const run = (mockProjectRuns[projectId] || []).find(
+        (item) => item.id === parts[3],
+      );
+      return run ? { run } : { error: 'Run not found' };
+    }
+    if (
+      parts.length === 5 &&
+      parts[2] === 'runs' &&
+      parts[4] === 'artifacts' &&
+      method === 'POST'
+    ) {
+      const run = (mockProjectRuns[projectId] || []).find(
+        (item) => item.id === parts[3],
+      );
+      if (!run) return { error: 'Run not found' };
+      const filePath = String(req.body?.path || 'documents/mock-artifact.md');
+      const content = String(req.body?.content || '');
+      const sourceLedger = Array.isArray(req.body?.sourceLedger)
+        ? req.body.sourceLedger
+        : [];
+      const file = {
+        path: filePath,
+        kind: 'document',
+        size: content.length,
+        updatedAt: new Date().toISOString(),
+      };
+      mockProjectFiles[projectId] = [
+        file,
+        ...(mockProjectFiles[projectId] || []),
+      ];
+      mockProjectFileContents[projectId] = {
+        ...(mockProjectFileContents[projectId] || {}),
+        [filePath]: content,
+      };
+      const contextItem = {
+        id: 'context-mock-artifact-' + Date.now(),
+        projectId,
+        type: 'artifact',
+        title: String(req.body?.title || filePath.split('/').pop() || filePath),
+        path: filePath,
+        included: true,
+        pinned: req.body?.pinned === true,
+        provenance: 'source-ledger',
+        sensitivity: String(req.body?.sensitivity || 'normal'),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      mockProjectContextItems[projectId] = [
+        contextItem,
+        ...(mockProjectContextItems[projectId] || []),
+      ];
+      const events = Array.isArray(run.events) ? run.events : [];
+      events.push({
+        kind: 'artifact_created',
+        message: 'Local artifact saved.',
+        metadata: { path: filePath, sourceLedger },
+      });
+      run.events = events;
+      run.updatedAt = new Date().toISOString();
+      return {
+        artifact: { ...file, sourceLedger },
+        contextItem,
+        run,
+      };
+    }
+    if (
+      parts.length === 6 &&
+      parts[2] === 'runs' &&
+      parts[4] === 'approvals' &&
+      parts[5] === 'external-write' &&
+      method === 'POST'
+    ) {
+      const run = (mockProjectRuns[projectId] || []).find(
+        (item) => item.id === parts[3],
+      );
+      if (!run) return { error: 'Run not found' };
+      const existing = approvals.find(
+        (approval) =>
+          approval.kind === 'tool-action' &&
+          approval.targetType === 'cowork-run' &&
+          approval.targetId === parts[3] &&
+          approval.status === 'pending',
+      );
+      const approval =
+        existing ||
+        ({
+          id: 'approval-cowork-run-' + Date.now(),
+          kind: 'tool-action',
+          title: String(req.body?.title || 'Approve Cowork external write'),
+          summary: String(
+            req.body?.summary || 'Approve a Cowork external write.',
+          ),
+          risk: 'high',
+          requester: 'dashboard',
+          targetType: 'cowork-run',
+          targetId: parts[3],
+          source: 'cowork-project',
+          correlationId: parts[3],
+          expiresAt: null,
+          actionPreview: req.body?.actionPreview || null,
+          resourceSummary:
+            req.body?.resourceSummary || `${project.name}: ${run.title}`,
+          policyDecisionId: 'cowork-external-write-approval',
+          payload: {
+            ...(req.body?.payload && typeof req.body.payload === 'object'
+              ? req.body.payload
+              : {}),
+            projectId,
+            runId: parts[3],
+            action: req.body?.action || 'external-write',
+          },
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+          reviewedAt: null,
+          reviewedBy: null,
+          decisionNote: null,
+        } as (typeof approvals)[number]);
+      if (!existing) approvals.unshift(approval);
+      run.status = 'waiting_for_approval';
+      run.updatedAt = new Date().toISOString();
+      const events = Array.isArray(run.events) ? run.events : [];
+      if (!existing) {
+        events.push({
+          kind: 'approval_required',
+          message: 'External write approval requested.',
+          metadata: { approvalId: approval.id },
+        });
+      }
+      run.events = events;
+      return { approval, reused: Boolean(existing), run };
+    }
+    if (
+      parts.length === 5 &&
+      parts[2] === 'runs' &&
+      (parts[4] === 'retry' || parts[4] === 'cancel') &&
+      method === 'POST'
+    ) {
+      const run = (mockProjectRuns[projectId] || []).find(
+        (item) => item.id === parts[3],
+      );
+      if (!run) return { error: 'Run not found' };
+      run.status = parts[4] === 'cancel' ? 'cancelled' : 'draft';
+      run.updatedAt = new Date().toISOString();
+      const events = Array.isArray(run.events) ? run.events : [];
+      events.push({
+        kind: parts[4] === 'cancel' ? 'cancelled' : 'retry_requested',
+        message: parts[4] === 'cancel' ? 'Run cancelled.' : 'Retry requested.',
+      });
+      run.events = events;
+      return { run };
+    }
+    if (parts.length === 3 && parts[2] === 'context' && method === 'GET') {
+      return { items: mockProjectContextItems[projectId] || [] };
+    }
+    if (parts.length === 3 && parts[2] === 'context' && method === 'POST') {
+      const item = {
+        id: 'context-mock-' + Date.now(),
+        projectId,
+        type: String(req.body?.type || 'note'),
+        title: String(req.body?.title || 'Context item'),
+        path: req.body?.path || undefined,
+        url: req.body?.url || undefined,
+        threadId: req.body?.threadId || undefined,
+        artifactId: req.body?.artifactId || undefined,
+        included: req.body?.included !== false,
+        pinned: req.body?.pinned === true,
+        provenance: String(req.body?.provenance || 'manual'),
+        sensitivity: String(req.body?.sensitivity || 'unknown'),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      mockProjectContextItems[projectId] = [
+        item,
+        ...(mockProjectContextItems[projectId] || []),
+      ];
+      return { item };
+    }
+    if (parts.length === 4 && parts[2] === 'context' && method === 'PATCH') {
+      const item = (mockProjectContextItems[projectId] || []).find(
+        (entry) => entry.id === parts[3],
+      );
+      if (!item) return { error: 'Context item not found' };
+      Object.assign(item, req.body || {}, { updatedAt: new Date().toISOString() });
+      return { item };
+    }
+    if (parts.length === 3 && parts[2] === 'capabilities' && method === 'GET') {
+      return { capabilities: mockProjectCapabilities(projectId) };
     }
     if (
       parts.length === 4 &&
@@ -3331,7 +3742,7 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         name: 'infomaniak',
         label: 'Infomaniak kSuite',
         command: 'npx',
-        args: ['-y', '@henrikogaard/infomaniak-mcp'],
+        args: ['-y', '@henrikogard/infomaniak-mcp'],
         envVars: [
           'INFOMANIAK_TOKEN',
           'KDRIVE_ID',

@@ -83,6 +83,7 @@ describe('/api/threads CRUD', () => {
     } catch {
       /* may not be initialized */
     }
+    fs.rmSync(STORE_DIR, { recursive: true, force: true });
     _initTestDatabase();
   });
 
@@ -136,6 +137,103 @@ describe('/api/threads CRUD', () => {
     });
   });
 
+  it('POST / gives regular web chats configured external MCP access scoped to that thread', async () => {
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'mcp-servers.json'),
+      JSON.stringify([
+        { name: 'nanocrab', core: true },
+        {
+          name: 'infomaniak',
+          command: 'npx',
+          args: ['-y', '@henrikogard/infomaniak-mcp'],
+        },
+      ]),
+    );
+
+    const result = await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Inbox check' }),
+      });
+      expect(res.status).toBe(200);
+      return res.json() as Promise<{ id: string }>;
+    });
+
+    expect(getRegisteredGroup(result.id)?.containerConfig).toEqual({
+      allowedMcpServers: ['infomaniak'],
+    });
+    const folder = getRegisteredGroup(result.id)?.folder;
+
+    const permissions = JSON.parse(
+      fs.readFileSync(
+        path.join(STORE_DIR, 'connector-permissions.json'),
+        'utf-8',
+      ),
+    );
+    expect(permissions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          connectorId: 'infomaniak',
+          scope: 'groups',
+          allowedActions: ['*.read', 'tools.expose'],
+          requiresApproval: true,
+          groups: [folder],
+        }),
+      ]),
+    );
+  });
+
+  it('POST / does not claim MCP access when existing permissions are out of scope', async () => {
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'mcp-servers.json'),
+      JSON.stringify([
+        {
+          name: 'infomaniak',
+          command: 'npx',
+          args: ['-y', '@henrikogard/infomaniak-mcp'],
+        },
+      ]),
+    );
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'connector-permissions.json'),
+      JSON.stringify([
+        {
+          connectorId: 'infomaniak',
+          scope: 'main',
+          allowedActions: ['*.read', 'tools.expose'],
+          requiresApproval: true,
+          groups: [],
+          agents: [],
+          createdAt: '2026-06-13T10:00:00.000Z',
+          updatedAt: '2026-06-13T10:00:00.000Z',
+        },
+      ]),
+    );
+
+    const result = await withServer('admin', async (base) => {
+      const createRes = await fetch(`${base}/api/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Inbox check' }),
+      });
+      expect(createRes.status).toBe(200);
+      const created = (await createRes.json()) as { id: string };
+      const detailRes = await fetch(
+        `${base}/api/threads/${encodeURIComponent(created.id)}`,
+      );
+      expect(detailRes.status).toBe(200);
+      return detailRes.json() as Promise<{
+        mcpAccess: { enabled: boolean; servers: string[] };
+      }>;
+    });
+
+    expect(result.mcpAccess.enabled).toBe(false);
+    expect(result.mcpAccess.servers).toEqual([]);
+  });
+
   it('POST / preserves an explicit title when provided', async () => {
     const result = await withServer('admin', async (base) => {
       const res = await fetch(`${base}/api/threads`, {
@@ -183,6 +281,32 @@ describe('/api/threads CRUD', () => {
       created_at: now,
       updated_at: now,
     });
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'connector-permissions.json'),
+      JSON.stringify([
+        {
+          connectorId: 'gmail',
+          scope: 'main',
+          allowedActions: ['mail.read', 'tools.expose'],
+          requiresApproval: true,
+          groups: [],
+          agents: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          connectorId: 'google-docs',
+          scope: 'main',
+          allowedActions: ['document.write', 'tools.expose'],
+          requiresApproval: true,
+          groups: [],
+          agents: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]),
+    );
     setRegisteredGroup('web:project-mail-docs-thread', {
       name: 'Web Conversation',
       title: 'Sender summary',
@@ -223,6 +347,7 @@ describe('/api/threads CRUD', () => {
       enabled: true,
       scope: 'restricted',
       servers: ['gmail', 'google-docs'],
+      writesEnabled: true,
       requiresApprovalForWrites: true,
       examples: [
         'Latest emails -> sourced project summary',
@@ -230,6 +355,88 @@ describe('/api/threads CRUD', () => {
         'External MCP context -> local markdown document draft',
         'Project files plus MCP evidence -> source ledger and artifact',
       ],
+    });
+  });
+
+  it('GET /:id refreshes configured MCP access before reporting metadata', async () => {
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'mcp-servers.json'),
+      JSON.stringify([
+        {
+          name: 'infomaniak',
+          command: 'npx',
+          args: ['-y', '@henrikogard/infomaniak-mcp'],
+        },
+      ]),
+    );
+    setRegisteredGroup('web:stale-mcp-thread', {
+      name: 'Web Conversation',
+      title: 'Inbox',
+      kind: 'web',
+      folder: 'web-stale-mcp-thread',
+      trigger: '^',
+      added_at: '2026-06-15T12:00:00Z',
+      requiresTrigger: false,
+      containerConfig: {
+        allowedMcpServers: [],
+      } as any,
+    });
+
+    await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads/web:stale-mcp-thread`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        mcpAccess: { enabled: boolean; servers: string[] };
+      };
+      expect(body.mcpAccess.enabled).toBe(true);
+      expect(body.mcpAccess.servers).toEqual(['infomaniak']);
+    });
+  });
+
+  it('GET /:id does not report write approval needs when connector writes are not enabled', async () => {
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(STORE_DIR, 'connector-permissions.json'),
+      JSON.stringify([
+        {
+          connectorId: 'infomaniak',
+          scope: 'groups',
+          allowedActions: ['*.read', 'tools.expose'],
+          requiresApproval: false,
+          groups: ['web-read-only-mcp-thread'],
+          agents: [],
+          createdAt: '2026-06-13T10:00:00.000Z',
+          updatedAt: '2026-06-13T10:00:00.000Z',
+        },
+      ]),
+    );
+    setRegisteredGroup('web:read-only-mcp-thread', {
+      name: 'Web Conversation',
+      title: 'Read only',
+      kind: 'web',
+      folder: 'web-read-only-mcp-thread',
+      trigger: '^',
+      added_at: '2026-06-15T12:00:00Z',
+      requiresTrigger: false,
+      containerConfig: {
+        allowedMcpServers: ['infomaniak'],
+      } as any,
+    });
+
+    await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads/web:read-only-mcp-thread`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        mcpAccess: {
+          enabled: boolean;
+          writesEnabled: boolean;
+          requiresApprovalForWrites: boolean;
+        };
+      };
+      expect(body.mcpAccess.enabled).toBe(true);
+      expect(body.mcpAccess.writesEnabled).toBe(false);
+      expect(body.mcpAccess.requiresApprovalForWrites).toBe(false);
     });
   });
 

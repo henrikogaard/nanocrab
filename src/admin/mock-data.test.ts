@@ -384,6 +384,89 @@ describe('mock admin data', () => {
     });
   });
 
+  it('serves Cowork run local artifact creation in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/projects/project-auroradocs/runs/run-auroradocs-email-brief/artifacts`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            path: 'documents/mock-source-brief.md',
+            content: '# Mock source brief',
+            sourceLedger: [{ source: 'gmail', purpose: 'mock summary' }],
+          }),
+        },
+      );
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as {
+        artifact: { path: string; sourceLedger: unknown[] };
+        contextItem: { path: string; provenance: string };
+        run: { events: Array<{ kind: string }> };
+      };
+
+      expect(data.artifact).toMatchObject({
+        path: 'documents/mock-source-brief.md',
+        sourceLedger: [expect.objectContaining({ source: 'gmail' })],
+      });
+      expect(data.contextItem).toMatchObject({
+        path: 'documents/mock-source-brief.md',
+        provenance: 'source-ledger',
+      });
+      expect(data.run.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: 'artifact_created' }),
+        ]),
+      );
+    });
+  });
+
+  it('serves Cowork external-write approval creation in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/projects/project-auroradocs/runs/run-auroradocs-email-brief/approvals/external-write`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            action: 'publish-document',
+            title: 'Publish mock source brief',
+            summary: 'Publish the mock source-backed brief.',
+            resourceSummary: 'documents/mock-source-brief.md -> Google Docs',
+            payload: { connector: 'google-docs' },
+          }),
+        },
+      );
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as {
+        approval: {
+          kind: string;
+          status: string;
+          targetType: string;
+          targetId: string;
+        };
+        reused: boolean;
+        run: { status: string; events: Array<{ kind: string }> };
+      };
+
+      expect(data).toMatchObject({
+        reused: false,
+        approval: {
+          kind: 'tool-action',
+          status: 'pending',
+          targetType: 'cowork-run',
+          targetId: 'run-auroradocs-email-brief',
+        },
+        run: {
+          status: 'waiting_for_approval',
+          events: expect.arrayContaining([
+            expect.objectContaining({ kind: 'approval_required' }),
+          ]),
+        },
+      });
+    });
+  });
+
   it('serves autofix auto-pick settings and mock scan results', async () => {
     await withServer(async (baseUrl) => {
       const projectsResponse = await fetch(`${baseUrl}/api/autofix/projects`);

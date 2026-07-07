@@ -9,8 +9,14 @@ import {
   buildChannelStatus,
   isChannelEnabledForRegisteredGroups,
 } from '../../channel-status.js';
+import { getCoworkProjects, getWebThreads } from '../../db.js';
 import { requireRole } from '../middleware.js';
 import { logger } from '../../logger.js';
+import {
+  resolveWorkspaceIntent,
+  type WorkspaceIntentProject,
+  type WorkspaceIntentThread,
+} from '../../workspace-intent.js';
 
 const router = Router();
 const WHATSAPP_QR_TTL_MS = 60_000;
@@ -216,6 +222,76 @@ const SUPPORTED_CHANNELS = [
     description: 'Gmail as a channel or tool. Requires GCP OAuth credentials.',
   },
 ];
+
+function channelIntentProjects(bodyProjects: unknown): WorkspaceIntentProject[] {
+  if (Array.isArray(bodyProjects)) {
+    return bodyProjects
+      .filter((project): project is Record<string, unknown> =>
+        Boolean(project) && typeof project === 'object',
+      )
+      .map((project) => ({
+        id: String(project.id || ''),
+        name: String(project.name || ''),
+        slug:
+          typeof project.slug === 'string' && project.slug.trim()
+            ? project.slug
+            : null,
+      }))
+      .filter((project) => project.id && project.name);
+  }
+  return getCoworkProjects().map((project) => ({
+    id: project.id,
+    name: project.name,
+    slug: project.slug,
+  }));
+}
+
+function channelIntentThreads(bodyThreads: unknown): WorkspaceIntentThread[] {
+  if (Array.isArray(bodyThreads)) {
+    return bodyThreads
+      .filter((thread): thread is Record<string, unknown> =>
+        Boolean(thread) && typeof thread === 'object',
+      )
+      .map((thread) => ({
+        id: String(thread.id || ''),
+        title: String(thread.title || ''),
+        projectId:
+          typeof thread.projectId === 'string' && thread.projectId.trim()
+            ? thread.projectId
+            : null,
+      }))
+      .filter((thread) => thread.id && thread.title);
+  }
+  return Object.entries(getWebThreads()).map(([id, group]) => ({
+    id,
+    title: group.title || group.name || 'Conversation',
+    projectId: group.projectId || null,
+  }));
+}
+
+router.post('/intent/resolve', (req: Request, res: Response) => {
+  const prompt =
+    typeof req.body?.prompt === 'string' && req.body.prompt.trim()
+      ? req.body.prompt.trim()
+      : '';
+  if (!prompt) {
+    res.status(400).json({ error: 'prompt is required' });
+    return;
+  }
+  try {
+    const intent = resolveWorkspaceIntent({
+      prompt,
+      channel:
+        typeof req.body?.channel === 'string' ? req.body.channel : undefined,
+      projects: channelIntentProjects(req.body?.projects),
+      threads: channelIntentThreads(req.body?.threads),
+    });
+    res.json({ intent });
+  } catch (err) {
+    logger.error({ err }, 'Failed to resolve channel workspace intent');
+    res.status(500).json({ error: 'Failed to resolve workspace intent' });
+  }
+});
 
 router.get('/', (_req: Request, res: Response) => {
   const state = getState();

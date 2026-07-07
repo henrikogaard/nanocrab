@@ -16,7 +16,7 @@ let activeMode =
 // Page display metadata (label + icon) for every navigable page id — used by
 // the mode-scoped sidebar and the More drawer.
 const PAGE_META = {
-  chat: { label: 'Copilot', icon: 'chat' },
+  chat: { label: 'Chat', icon: 'chat' },
   projects: { label: 'Projects', icon: 'agents' },
   channels: { label: 'Channels', icon: 'messages' },
   messages: { label: 'Messages', icon: 'messages' },
@@ -23623,7 +23623,11 @@ function parseChatHash(hash) {
     const encoded = raw.slice('/chat/'.length);
     // Only treat as a thread route when there is a non-empty id segment
     if (encoded) {
-      return { isChatRoute: true, threadId: 'web:' + decodeURIComponent(encoded) };
+      const decoded = decodeURIComponent(encoded);
+      return {
+        isChatRoute: true,
+        threadId: decoded.startsWith('web:') ? decoded : 'web:' + decoded,
+      };
     }
     return { isChatRoute: true, threadId: null };
   }
@@ -23635,10 +23639,13 @@ function parseProjectChatHash(hash) {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash;
   const parts = raw.split('/').filter(Boolean);
   if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'chat') {
+    const decodedThreadId = decodeURIComponent(parts[3]);
     return {
       isProjectChatRoute: true,
       projectId: decodeURIComponent(parts[1]),
-      threadId: 'web:' + decodeURIComponent(parts[3]),
+      threadId: decodedThreadId.startsWith('web:')
+        ? decodedThreadId
+        : 'web:' + decodedThreadId,
     };
   }
   return null;

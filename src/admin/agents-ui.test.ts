@@ -765,7 +765,9 @@ describe('Agents launcher UI', () => {
     expect(source).toContain('.filter((p) => p.codingCapable)');
     expect(source).toContain('codingProvidersById');
     expect(source).toContain('model.codingCapable !== false');
-    expect(source).toContain("provider.id !== 'ollama'");
+    expect(source).toContain('codingProviderAllowsDefaultModel');
+    expect(source).toContain('provider.defaultModel');
+    expect(source).not.toContain("provider.id !== 'ollama'");
     expect(source).not.toContain(
       "['claude', 'codex', 'opencode'].includes(p.id)",
     );

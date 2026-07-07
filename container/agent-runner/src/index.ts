@@ -581,34 +581,103 @@ function explicitMcpToolPatterns(
   );
 }
 
+interface CustomMcpServerConfig {
+  name: string;
+  command?: string;
+  args?: string[];
+  envVars?: string[];
+}
+
+type McpServerDefinition = {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+};
+
+function readCustomMcpServers(): CustomMcpServerConfig[] {
+  const customPaths = [
+    '/workspace/project/store/mcp-servers.json',
+    '/workspace/mcp-config/mcp-servers.json',
+  ];
+  for (const customPath of customPaths) {
+    try {
+      if (!fs.existsSync(customPath)) continue;
+      const parsed = JSON.parse(
+        fs.readFileSync(customPath, 'utf-8'),
+      ) as unknown;
+      return Array.isArray(parsed) ? (parsed as CustomMcpServerConfig[]) : [];
+    } catch (err) {
+      log(
+        `Custom MCP server config load failed from ${customPath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return [];
+    }
+  }
+  return [];
+}
+
+function mcpToolPatternsForServer(
+  serverName: string,
+  patterns: string[] | null,
+): string[] {
+  if (!patterns) return [];
+  return patterns.filter(
+    (pattern) =>
+      normalizeConnectorId(connectorNameFromToolPattern(pattern)) ===
+      normalizeConnectorId(serverName),
+  );
+}
+
+function hasMcpServerWildcard(serverName: string, patterns: string[]): boolean {
+  return patterns.includes(`mcp__${normalizeConnectorId(serverName)}__*`);
+}
+
 function isMcpServerAllowedByToolPatterns(
   serverName: string,
   patterns: string[] | null,
   requireWildcardToolAccess: boolean,
 ): boolean {
   if (!patterns) return true;
-  const serverPatterns = patterns.filter(
-    (pattern) =>
-      normalizeConnectorId(connectorNameFromToolPattern(pattern)) ===
-      normalizeConnectorId(serverName),
-  );
+  const serverPatterns = mcpToolPatternsForServer(serverName, patterns);
   if (serverPatterns.length === 0) return false;
   if (!requireWildcardToolAccess) return true;
-  return serverPatterns.includes(`mcp__${normalizeConnectorId(serverName)}__*`);
+  return true;
 }
 
-function buildMcpServers(
+function maybeProxyMcpServer(
+  serverName: string,
+  server: McpServerDefinition,
+  serverPatterns: string[],
+  mcpServerPath: string,
+): McpServerDefinition {
+  if (
+    serverName === 'nanocrab' ||
+    serverPatterns.length === 0 ||
+    hasMcpServerWildcard(serverName, serverPatterns)
+  ) {
+    return server;
+  }
+
+  return {
+    command: 'node',
+    args: [path.join(path.dirname(mcpServerPath), 'mcp-tool-proxy.js')],
+    env: {
+      ...server.env,
+      NANOCRAB_MCP_TARGET_NAME: normalizeConnectorId(serverName),
+      NANOCRAB_MCP_TARGET_COMMAND: server.command,
+      NANOCRAB_MCP_TARGET_ARGS: JSON.stringify(server.args),
+      NANOCRAB_MCP_TARGET_ENV_KEYS: JSON.stringify(Object.keys(server.env)),
+      NANOCRAB_MCP_ALLOWED_TOOL_PATTERNS: JSON.stringify(serverPatterns),
+    },
+  };
+}
+
+export function buildMcpServers(
   containerInput: ContainerInput,
   mcpServerPath: string,
   options: { requireWildcardToolAccess?: boolean } = {},
-): Record<
-  string,
-  { command: string; args: string[]; env: Record<string, string> }
-> {
-  const allServers: Record<
-    string,
-    { command: string; args: string[]; env: Record<string, string> }
-  > = {
+): Record<string, McpServerDefinition> {
+  const allServers: Record<string, McpServerDefinition> = {
     nanocrab: {
       command: 'node',
       args: [mcpServerPath],
@@ -626,34 +695,19 @@ function buildMcpServers(
   };
 
   // Load custom MCP servers from store config (managed via dashboard)
-  try {
-    const customPath = '/workspace/project/store/mcp-servers.json';
-    if (fs.existsSync(customPath)) {
-      const custom = JSON.parse(fs.readFileSync(customPath, 'utf-8')) as Array<{
-        name: string;
-        command: string;
-        args: string[];
-        envVars?: string[];
-      }>;
-      for (const srv of custom) {
-        const serverName = normalizeConnectorId(srv.name);
-        if (serverName && srv.command && !allServers[serverName]) {
-          const env: Record<string, string> = {};
-          for (const key of srv.envVars || []) {
-            if (process.env[key]) env[key] = process.env[key]!;
-          }
-          allServers[serverName] = {
-            command: srv.command,
-            args: srv.args || [],
-            env,
-          };
-        }
+  for (const srv of readCustomMcpServers()) {
+    const serverName = normalizeConnectorId(srv.name);
+    if (serverName && srv.command && !allServers[serverName]) {
+      const env: Record<string, string> = {};
+      for (const key of srv.envVars || []) {
+        if (process.env[key]) env[key] = process.env[key]!;
       }
+      allServers[serverName] = {
+        command: srv.command,
+        args: srv.args || [],
+        env,
+      };
     }
-  } catch (err) {
-    log(
-      `Custom MCP server config load failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
   }
 
   const toolPatterns = explicitMcpToolPatterns(containerInput);
@@ -678,6 +732,7 @@ function buildMcpServers(
   ]);
   for (const name of allowedNames) {
     if (name !== 'nanocrab' && allServers[name]) {
+      const serverPatterns = mcpToolPatternsForServer(name, toolPatterns);
       if (
         !isMcpServerAllowedByToolPatterns(
           name,
@@ -687,7 +742,12 @@ function buildMcpServers(
       ) {
         continue;
       }
-      filtered[name] = allServers[name];
+      filtered[name] = maybeProxyMcpServer(
+        name,
+        allServers[name],
+        serverPatterns,
+        mcpServerPath,
+      );
     }
   }
   return filtered;
@@ -724,21 +784,9 @@ export function buildAllowedTools(containerInput: ContainerInput): string[] {
   const allMcpTools = ['mcp__github__*'];
 
   // Add custom MCP tool wildcards
-  try {
-    const customPath = '/workspace/project/store/mcp-servers.json';
-    if (fs.existsSync(customPath)) {
-      const custom = JSON.parse(fs.readFileSync(customPath, 'utf-8')) as Array<{
-        name: string;
-      }>;
-      for (const srv of custom) {
-        const serverName = normalizeConnectorId(srv.name);
-        if (serverName) allMcpTools.push(`mcp__${serverName}__*`);
-      }
-    }
-  } catch (err) {
-    log(
-      `Custom MCP tool allowlist load failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
+  for (const srv of readCustomMcpServers()) {
+    const serverName = normalizeConnectorId(srv.name);
+    if (serverName) allMcpTools.push(`mcp__${serverName}__*`);
   }
 
   // Main always gets everything

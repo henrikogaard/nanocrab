@@ -5,6 +5,10 @@ import { Router, Request, Response } from 'express';
 
 import { STORE_DIR } from '../../config.js';
 import {
+  createApproval,
+  findPendingApprovalForTarget,
+} from '../../approvals.js';
+import {
   classifyCoworkProjectFile,
   COWORK_PROJECT_FILE_PREVIEW_LIMIT,
   coworkProjectPath,
@@ -16,7 +20,16 @@ import {
   writeCoworkProjectFile,
 } from '../../cowork-projects.js';
 import { logger } from '../../logger.js';
-import type { ContainerConfig, CoworkProject } from '../../types.js';
+import type {
+  ContainerConfig,
+  CoworkApprovalRisk,
+  CoworkComplexity,
+  CoworkContextItem,
+  CoworkProject,
+  CoworkRun,
+  CoworkRunEvent,
+  CoworkRunStep,
+} from '../../types.js';
 import { isAgentProvider } from '../../agent-provider.js';
 import {
   loadConnectorPermissions,
@@ -26,15 +39,28 @@ import {
   type ConnectorPermission,
 } from '../../connector-permissions.js';
 import {
+  createCoworkContextItem,
   createCoworkProject,
+  createCoworkRun,
+  createCoworkRunEvent,
+  createCoworkRunStep,
+  getCoworkContextItem,
+  getCoworkContextItems,
   getCoworkProject,
   getCoworkProjectBySlug,
   getCoworkProjects,
+  getCoworkRun,
+  getCoworkRunEvents,
+  getCoworkRuns,
+  getCoworkRunSteps,
   getLatestStoredMessage,
   getWebThreads,
+  nextCoworkRunEventOrder,
   setRegisteredGroup,
   touchCoworkProject,
+  updateCoworkContextItem,
   updateCoworkProjectContext,
+  updateCoworkRunStatus,
 } from '../../db.js';
 import { buildThreadGroup, newWebJid } from '../../web-threads.js';
 import { getState } from '../state.js';
@@ -214,6 +240,213 @@ function projectSummary(project: CoworkProject) {
   };
 }
 
+function estimateCoworkRun(input: {
+  title?: unknown;
+  prompt?: unknown;
+  provider?: unknown;
+  model?: unknown;
+}): {
+  complexity: CoworkComplexity;
+  approvalRisk: CoworkApprovalRisk;
+  provider: string | null;
+  model: string | null;
+  warnings: string[];
+} {
+  const title = typeof input.title === 'string' ? input.title : '';
+  const prompt = typeof input.prompt === 'string' ? input.prompt : '';
+  const text = `${title}\n${prompt}`.toLowerCase();
+  const connectorTerms = [
+    'mcp',
+    'connector',
+    'email',
+    'mail',
+    'calendar',
+    'document',
+    'artifact',
+    'source',
+    'browser',
+    'research',
+  ];
+  const writeTerms = [
+    'send',
+    'publish',
+    'upload',
+    'webhook',
+    'external',
+    'write',
+    'calendar edit',
+    'delivery',
+  ];
+  const hasConnectorWork = connectorTerms.some((term) => text.includes(term));
+  const hasExternalWrite = writeTerms.some((term) => text.includes(term));
+  const complexity: CoworkComplexity = hasConnectorWork
+    ? 'connector-heavy'
+    : text.length > 600
+      ? 'long'
+      : text.length > 180
+        ? 'standard'
+        : 'quick';
+  const approvalRisk: CoworkApprovalRisk = hasExternalWrite
+    ? 'high'
+    : hasConnectorWork
+      ? 'medium'
+      : 'low';
+  const warnings =
+    approvalRisk === 'high'
+      ? [
+          'Write-capable or external delivery language requires approval before mutation.',
+        ]
+      : [];
+
+  return {
+    complexity,
+    approvalRisk,
+    provider:
+      typeof input.provider === 'string' && input.provider.trim()
+        ? input.provider.trim()
+        : null,
+    model:
+      typeof input.model === 'string' && input.model.trim()
+        ? input.model.trim()
+        : null,
+    warnings,
+  };
+}
+
+function parseStats(statsJson: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(statsJson) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function serializeCoworkRun(run: CoworkRun) {
+  return {
+    id: run.id,
+    projectId: run.project_id,
+    title: run.title,
+    status: run.status,
+    provider: run.provider,
+    model: run.model,
+    complexity: run.complexity,
+    approvalRisk: run.approval_risk,
+    prompt: run.prompt,
+    summary: run.summary,
+    stats: parseStats(run.stats_json),
+    createdAt: run.created_at,
+    updatedAt: run.updated_at,
+    steps: getCoworkRunSteps(run.id).map(serializeCoworkRunStep),
+    events: getCoworkRunEvents(run.id).map(serializeCoworkRunEvent),
+  };
+}
+
+function serializeCoworkRunStep(step: CoworkRunStep) {
+  return {
+    id: step.id,
+    runId: step.run_id,
+    order: step.step_order,
+    title: step.title,
+    status: step.status,
+    detail: step.detail,
+    createdAt: step.created_at,
+    updatedAt: step.updated_at,
+  };
+}
+
+function serializeCoworkRunEvent(event: CoworkRunEvent) {
+  return {
+    id: event.id,
+    runId: event.run_id,
+    order: event.event_order,
+    kind: event.kind,
+    message: event.message,
+    metadata: parseStats(event.metadata_json),
+    createdAt: event.created_at,
+  };
+}
+
+function serializeCoworkContextItem(item: CoworkContextItem) {
+  return {
+    id: item.id,
+    projectId: item.project_id,
+    type: item.type,
+    title: item.title,
+    path: item.path ?? undefined,
+    url: item.url ?? undefined,
+    threadId: item.thread_id ?? undefined,
+    artifactId: item.artifact_id ?? undefined,
+    included: Boolean(item.included),
+    pinned: Boolean(item.pinned),
+    provenance: item.provenance,
+    sensitivity: item.sensitivity,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
+function projectCapabilities(project: CoworkProject) {
+  const files = listCoworkProjectFiles(project);
+  const servers = configuredExternalMcpServers();
+  return [
+    {
+      id: 'project-files',
+      kind: 'files',
+      label: 'Project files',
+      enabled: true,
+      unavailable: false,
+      readOnly: true,
+      writeCapable: true,
+      approvalRequired: false,
+      summary: `${files.length} local project file${files.length === 1 ? '' : 's'} available`,
+    },
+    {
+      id: 'external-writes',
+      kind: 'approval',
+      label: 'External writes',
+      enabled: true,
+      unavailable: false,
+      readOnly: false,
+      writeCapable: true,
+      approvalRequired: true,
+      summary:
+        'External sends, uploads, repo writes, calendar edits, webhooks, and connector mutations require approval.',
+    },
+    ...servers.map((server) => ({
+      id: `connector-${server}`,
+      kind: 'connector',
+      label: server,
+      enabled: true,
+      unavailable: false,
+      readOnly: true,
+      writeCapable: true,
+      approvalRequired: true,
+      summary:
+        'Configured MCP connector. Reads may be exposed by permissions; writes are approval-gated.',
+    })),
+  ];
+}
+
+function appendCoworkRunEvent(
+  runId: string,
+  kind: string,
+  message: string,
+  metadata: Record<string, unknown> = {},
+): CoworkRunEvent {
+  return createCoworkRunEvent({
+    id: randomUUID(),
+    run_id: runId,
+    event_order: nextCoworkRunEventOrder(runId),
+    kind,
+    message,
+    metadata_json: JSON.stringify(metadata),
+    created_at: new Date().toISOString(),
+  });
+}
+
 router.get('/', (_req: Request, res: Response) => {
   try {
     res.json({ projects: getCoworkProjects().map(projectSummary) });
@@ -291,6 +524,500 @@ router.patch('/:id', (req: Request, res: Response) => {
   }
 });
 
+router.post('/:id/estimate', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+  res.json({ estimate: estimateCoworkRun(req.body) });
+});
+
+router.get('/:id/runs', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+  res.json({
+    runs: getCoworkRuns(project.id).map(serializeCoworkRun),
+  });
+});
+
+router.post('/:id/runs', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  const title =
+    typeof req.body.title === 'string' && req.body.title.trim()
+      ? req.body.title.trim()
+      : '';
+  if (!title) {
+    res.status(400).json({ error: 'Run title is required' });
+    return;
+  }
+
+  try {
+    const now = new Date().toISOString();
+    const estimate = estimateCoworkRun(req.body);
+    const run = createCoworkRun({
+      id: randomUUID(),
+      project_id: project.id,
+      title,
+      status: 'draft',
+      provider: estimate.provider,
+      model: estimate.model,
+      complexity: estimate.complexity,
+      approval_risk: estimate.approvalRisk,
+      prompt:
+        typeof req.body.prompt === 'string' && req.body.prompt.trim()
+          ? req.body.prompt.trim()
+          : null,
+      summary: null,
+      stats_json: JSON.stringify({
+        approvalsRequested: 0,
+        artifactsCreated: 0,
+        toolCalls: 0,
+      }),
+      created_at: now,
+      updated_at: now,
+    });
+    const stepTitles = [
+      'Plan source-backed work',
+      'Gather approved context',
+      'Create local project artifact',
+      'Request approval for external writes',
+    ];
+    stepTitles.forEach((stepTitle, index) => {
+      createCoworkRunStep({
+        id: randomUUID(),
+        run_id: run.id,
+        step_order: index + 1,
+        title: stepTitle,
+        status: 'pending',
+        detail: null,
+        created_at: now,
+        updated_at: now,
+      });
+    });
+    createCoworkRunEvent({
+      id: randomUUID(),
+      run_id: run.id,
+      event_order: 1,
+      kind: 'created',
+      message: 'Cowork run created.',
+      metadata_json: JSON.stringify({
+        complexity: run.complexity,
+        approvalRisk: run.approval_risk,
+      }),
+      created_at: now,
+    });
+    touchCoworkProject(project.id, now);
+    res.json({ run: serializeCoworkRun(run) });
+  } catch (err) {
+    logger.error({ err, projectId: project.id }, 'Failed to create Cowork run');
+    res.status(500).json({ error: 'Failed to create Cowork run' });
+  }
+});
+
+router.get('/:id/runs/:runId', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+  const run = getCoworkRun(project.id, String(req.params.runId));
+  if (!run) {
+    res.status(404).json({ error: 'Run not found' });
+    return;
+  }
+  res.json({ run: serializeCoworkRun(run) });
+});
+
+router.post('/:id/runs/:runId/artifacts', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+  const run = getCoworkRun(project.id, String(req.params.runId));
+  if (!run) {
+    res.status(404).json({ error: 'Run not found' });
+    return;
+  }
+  const rel = safeCoworkProjectFilePath(
+    typeof req.body.path === 'string' ? req.body.path : '',
+  );
+  if (!rel) {
+    res.status(400).json({ error: 'Invalid project artifact path' });
+    return;
+  }
+  const sourceLedger = Array.isArray(req.body.sourceLedger)
+    ? req.body.sourceLedger.filter(
+        (entry: unknown) => Boolean(entry) && typeof entry === 'object',
+      )
+    : [];
+
+  try {
+    const content =
+      typeof req.body.content === 'string' ? req.body.content : '';
+    const file = writeCoworkProjectFile(project, rel, content);
+    const now = new Date().toISOString();
+    const contextItem = createCoworkContextItem({
+      id: randomUUID(),
+      project_id: project.id,
+      type: 'artifact',
+      title:
+        typeof req.body.title === 'string' && req.body.title.trim()
+          ? req.body.title.trim()
+          : path.basename(rel),
+      path: rel,
+      url: null,
+      thread_id: null,
+      artifact_id: `run:${run.id}:${rel}`,
+      included: 1,
+      pinned: req.body.pinned === true ? 1 : 0,
+      provenance: 'source-ledger',
+      sensitivity:
+        typeof req.body.sensitivity === 'string' && req.body.sensitivity.trim()
+          ? req.body.sensitivity.trim()
+          : 'normal',
+      created_at: now,
+      updated_at: now,
+    });
+    appendCoworkRunEvent(run.id, 'artifact_created', 'Local artifact saved.', {
+      path: rel,
+      kind: file.kind,
+      sourceLedger,
+      contextItemId: contextItem.id,
+    });
+    touchCoworkProject(project.id, now);
+    const updatedRun = getCoworkRun(project.id, run.id) || run;
+    res.json({
+      artifact: {
+        path: file.path,
+        kind: file.kind,
+        size: file.size,
+        updatedAt: file.updatedAt,
+        sourceLedger,
+      },
+      contextItem: serializeCoworkContextItem(contextItem),
+      run: serializeCoworkRun(updatedRun),
+    });
+  } catch (err) {
+    logger.error(
+      { err, projectId: project.id, runId: run.id, filePath: rel },
+      'Failed to create Cowork run artifact',
+    );
+    res.status(500).json({ error: 'Failed to create Cowork run artifact' });
+  }
+});
+
+router.post(
+  '/:id/runs/:runId/approvals/external-write',
+  (req: Request, res: Response) => {
+    const project = getCoworkProject(String(req.params.id));
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+    const run = getCoworkRun(project.id, String(req.params.runId));
+    if (!run) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
+    const action =
+      typeof req.body.action === 'string' && req.body.action.trim()
+        ? req.body.action.trim()
+        : 'external-write';
+    const pending = findPendingApprovalForTarget(
+      'tool-action',
+      'cowork-run',
+      run.id,
+    );
+    const now = new Date().toISOString();
+    try {
+      const approval =
+        pending ||
+        createApproval({
+          kind: 'tool-action',
+          title:
+            typeof req.body.title === 'string' && req.body.title.trim()
+              ? req.body.title.trim()
+              : `Approve ${action}`,
+          summary:
+            typeof req.body.summary === 'string' && req.body.summary.trim()
+              ? req.body.summary.trim()
+              : 'Approve a Cowork external write before execution.',
+          risk: 'high',
+          requester: req.user?.username || 'dashboard',
+          targetType: 'cowork-run',
+          targetId: run.id,
+          source: 'cowork-project',
+          correlationId: run.id,
+          actionPreview:
+            typeof req.body.actionPreview === 'string' &&
+            req.body.actionPreview.trim()
+              ? req.body.actionPreview.trim()
+              : null,
+          resourceSummary:
+            typeof req.body.resourceSummary === 'string' &&
+            req.body.resourceSummary.trim()
+              ? req.body.resourceSummary.trim()
+              : `${project.name}: ${run.title}`,
+          policyDecisionId: 'cowork-external-write-approval',
+          payload: {
+            ...(req.body.payload && typeof req.body.payload === 'object'
+              ? req.body.payload
+              : {}),
+            projectId: project.id,
+            projectName: project.name,
+            runId: run.id,
+            runTitle: run.title,
+            action,
+          },
+        });
+      const updatedRun =
+        updateCoworkRunStatus(
+          project.id,
+          run.id,
+          'waiting_for_approval',
+          now,
+        ) || run;
+      if (!pending) {
+        appendCoworkRunEvent(
+          run.id,
+          'approval_required',
+          'External write approval requested.',
+          {
+            approvalId: approval.id,
+            action,
+            resourceSummary: approval.resourceSummary,
+          },
+        );
+      }
+      touchCoworkProject(project.id, now);
+      res.json({
+        approval,
+        reused: Boolean(pending),
+        run: serializeCoworkRun(updatedRun),
+      });
+    } catch (err) {
+      logger.error(
+        { err, projectId: project.id, runId: run.id },
+        'Failed to create Cowork external write approval',
+      );
+      res.status(500).json({ error: 'Failed to create approval' });
+    }
+  },
+);
+
+router.post('/:id/runs/:runId/retry', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+  const now = new Date().toISOString();
+  const run = updateCoworkRunStatus(
+    project.id,
+    String(req.params.runId),
+    'draft',
+    now,
+  );
+  if (!run) {
+    res.status(404).json({ error: 'Run not found' });
+    return;
+  }
+  appendCoworkRunEvent(run.id, 'retry_requested', 'Retry requested.');
+  touchCoworkProject(project.id, now);
+  res.json({ run: serializeCoworkRun(run) });
+});
+
+router.post('/:id/runs/:runId/cancel', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+  const now = new Date().toISOString();
+  const run = updateCoworkRunStatus(
+    project.id,
+    String(req.params.runId),
+    'cancelled',
+    now,
+  );
+  if (!run) {
+    res.status(404).json({ error: 'Run not found' });
+    return;
+  }
+  appendCoworkRunEvent(run.id, 'cancelled', 'Run cancelled.');
+  touchCoworkProject(project.id, now);
+  res.json({ run: serializeCoworkRun(run) });
+});
+
+router.get('/:id/context', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+  res.json({
+    items: getCoworkContextItems(project.id).map(serializeCoworkContextItem),
+  });
+});
+
+router.post('/:id/context', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+  const type =
+    typeof req.body.type === 'string' && req.body.type.trim()
+      ? req.body.type.trim()
+      : '';
+  const title =
+    typeof req.body.title === 'string' && req.body.title.trim()
+      ? req.body.title.trim()
+      : '';
+  if (!type || !title) {
+    res.status(400).json({ error: 'Context type and title are required' });
+    return;
+  }
+  const relPath =
+    typeof req.body.path === 'string' && req.body.path.trim()
+      ? safeCoworkProjectFilePath(req.body.path)
+      : null;
+  if (typeof req.body.path === 'string' && req.body.path.trim() && !relPath) {
+    res.status(400).json({ error: 'Invalid project file path' });
+    return;
+  }
+
+  try {
+    const now = new Date().toISOString();
+    const item = createCoworkContextItem({
+      id: randomUUID(),
+      project_id: project.id,
+      type,
+      title,
+      path: relPath,
+      url:
+        typeof req.body.url === 'string' && req.body.url.trim()
+          ? req.body.url.trim()
+          : null,
+      thread_id:
+        typeof req.body.threadId === 'string' && req.body.threadId.trim()
+          ? req.body.threadId.trim()
+          : null,
+      artifact_id:
+        typeof req.body.artifactId === 'string' && req.body.artifactId.trim()
+          ? req.body.artifactId.trim()
+          : null,
+      included: req.body.included === false ? 0 : 1,
+      pinned: req.body.pinned === true ? 1 : 0,
+      provenance:
+        typeof req.body.provenance === 'string' && req.body.provenance.trim()
+          ? req.body.provenance.trim()
+          : 'manual',
+      sensitivity:
+        typeof req.body.sensitivity === 'string' && req.body.sensitivity.trim()
+          ? req.body.sensitivity.trim()
+          : 'unknown',
+      created_at: now,
+      updated_at: now,
+    });
+    touchCoworkProject(project.id, now);
+    res.json({ item: serializeCoworkContextItem(item) });
+  } catch (err) {
+    logger.error(
+      { err, projectId: project.id },
+      'Failed to create Cowork context item',
+    );
+    res.status(500).json({ error: 'Failed to create Cowork context item' });
+  }
+});
+
+router.patch('/:id/context/:itemId', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+  const current = getCoworkContextItem(project.id, String(req.params.itemId));
+  if (!current) {
+    res.status(404).json({ error: 'Context item not found' });
+    return;
+  }
+  const relPath =
+    typeof req.body.path === 'string' && req.body.path.trim()
+      ? safeCoworkProjectFilePath(req.body.path)
+      : undefined;
+  if (typeof req.body.path === 'string' && req.body.path.trim() && !relPath) {
+    res.status(400).json({ error: 'Invalid project file path' });
+    return;
+  }
+  const now = new Date().toISOString();
+  const updated = updateCoworkContextItem(project.id, current.id, {
+    type:
+      typeof req.body.type === 'string' && req.body.type.trim()
+        ? req.body.type.trim()
+        : undefined,
+    title:
+      typeof req.body.title === 'string' && req.body.title.trim()
+        ? req.body.title.trim()
+        : undefined,
+    path: relPath,
+    url:
+      typeof req.body.url === 'string' && req.body.url.trim()
+        ? req.body.url.trim()
+        : undefined,
+    thread_id:
+      typeof req.body.threadId === 'string' && req.body.threadId.trim()
+        ? req.body.threadId.trim()
+        : undefined,
+    artifact_id:
+      typeof req.body.artifactId === 'string' && req.body.artifactId.trim()
+        ? req.body.artifactId.trim()
+        : undefined,
+    included:
+      typeof req.body.included === 'boolean'
+        ? req.body.included
+          ? 1
+          : 0
+        : undefined,
+    pinned:
+      typeof req.body.pinned === 'boolean' ? (req.body.pinned ? 1 : 0) : undefined,
+    provenance:
+      typeof req.body.provenance === 'string' && req.body.provenance.trim()
+        ? req.body.provenance.trim()
+        : undefined,
+    sensitivity:
+      typeof req.body.sensitivity === 'string' && req.body.sensitivity.trim()
+        ? req.body.sensitivity.trim()
+        : undefined,
+    updated_at: now,
+  });
+  if (!updated) {
+    res.status(404).json({ error: 'Context item not found' });
+    return;
+  }
+  touchCoworkProject(project.id, now);
+  res.json({ item: serializeCoworkContextItem(updated) });
+});
+
+router.get('/:id/capabilities', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+  res.json({ capabilities: projectCapabilities(project) });
+});
+
 router.get('/:id', (req: Request, res: Response) => {
   const project = getCoworkProject(String(req.params.id));
   if (!project) {
@@ -301,6 +1028,9 @@ router.get('/:id', (req: Request, res: Response) => {
     project: projectSummary(project),
     files: listCoworkProjectFiles(project),
     threads: projectThreads(project.id),
+    runs: getCoworkRuns(project.id).map(serializeCoworkRun),
+    context: getCoworkContextItems(project.id).map(serializeCoworkContextItem),
+    capabilities: projectCapabilities(project),
   });
 });
 

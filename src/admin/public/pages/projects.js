@@ -158,6 +158,8 @@
     var project = detail.project;
     var files = detail.files || [];
     var threads = detail.threads || [];
+    var runs = detail.runs || [];
+    var context = detail.context || [];
     var mcpAccess = project.mcpAccess || {};
     var mcpServers = Array.isArray(mcpAccess.servers) ? mcpAccess.servers : [];
     var mcpExamples = Array.isArray(mcpAccess.examples) ? mcpAccess.examples : [];
@@ -170,6 +172,8 @@
       'Workspace: /workspace/extra/project-' + (project.slug || project.id || 'project'),
       'Files: ' + files.length,
       'Chats: ' + threads.length,
+      'Runs: ' + runs.length,
+      'Context: ' + context.length,
       'Instructions: ' + (project.instructions || 'No project instructions yet'),
       'MCP status: ' + (mcpAccess.enabled ? 'external tools available' : 'no external MCP servers connected'),
       'Provider data health: ' + (providerLoadIssue || 'Provider catalog loaded without known fallback.'),
@@ -199,6 +203,26 @@
             .join('\n')
         : '- No project chats yet',
       threads.length > 8 ? '- ...and ' + (threads.length - 8) + ' more chats' : null,
+      '',
+      'Runs',
+      runs.length
+        ? runs
+            .slice(0, 8)
+            .map(function (run) {
+              return '- ' + (run.title || 'Untitled run') + ' (' + (run.status || 'draft') + ')';
+            })
+            .join('\n')
+        : '- No Cowork runs yet',
+      '',
+      'Context notebook',
+      context.length
+        ? context
+            .slice(0, 8)
+            .map(function (item) {
+              return '- ' + (item.title || 'Context item') + ' (' + (item.sensitivity || 'unknown') + ')';
+            })
+            .join('\n')
+        : '- No context notebook items yet',
       '',
       'MCP tools',
       mcpServers.length
@@ -700,6 +724,143 @@
     );
   }
 
+  function renderProjectRuns(runs) {
+    var items = Array.isArray(runs) ? runs : [];
+    if (!items.length) {
+      return (
+        '<div class="project-panel-empty project-runs-empty">' +
+        '<span>Runs</span>' +
+        '<strong>No Cowork runs yet.</strong>' +
+        '<p>Start with a project chat or source-backed artifact request.</p>' +
+        '</div>'
+      );
+    }
+    return (
+      '<div class="project-run-list">' +
+      items
+        .map(function (run) {
+          var risk = run.approvalRisk || 'low';
+          var blocked =
+            run.status === 'waiting_for_approval' || risk === 'high'
+              ? ' approval-blocked'
+              : '';
+          return (
+            '<article class="project-run-row' +
+            blocked +
+            '">' +
+            '<div>' +
+            '<span>' +
+            esc(run.title || 'Untitled run') +
+            '</span>' +
+            '<small>' +
+            esc(run.status || 'draft') +
+            ' &middot; Complexity: ' +
+            esc(run.complexity || 'quick') +
+            '</small>' +
+            '</div>' +
+            '<strong>Approval risk: ' +
+            esc(risk) +
+            '</strong>' +
+            '</article>'
+          );
+        })
+        .join('') +
+      '</div>'
+    );
+  }
+
+  function renderProjectContextNotebook(items) {
+    var context = Array.isArray(items) ? items : [];
+    if (!context.length) {
+      return (
+        '<div class="project-panel-empty project-context-empty">' +
+        '<span>Context notebook</span>' +
+        '<strong>No context notebook items yet.</strong>' +
+        '<p>Pin files, source ledgers, threads, and artifacts that should shape the next run.</p>' +
+        '</div>'
+      );
+    }
+    return (
+      '<div class="project-context-notebook">' +
+      context
+        .map(function (item) {
+          var target = item.path || item.url || item.threadId || item.artifactId || item.type;
+          return (
+            '<article class="project-context-item">' +
+            '<div>' +
+            '<span>' +
+            esc(item.title || 'Context item') +
+            '</span>' +
+            '<small>' +
+            esc(target || 'manual') +
+            '</small>' +
+            '</div>' +
+            '<div class="project-context-labels">' +
+            '<strong>Sensitivity: ' +
+            esc(item.sensitivity || 'unknown') +
+            '</strong>' +
+            '<strong>Provenance: ' +
+            esc(item.provenance || 'manual') +
+            '</strong>' +
+            '</div>' +
+            '</article>'
+          );
+        })
+        .join('') +
+      '</div>'
+    );
+  }
+
+  function renderProjectCapabilities(capabilities) {
+    var items = Array.isArray(capabilities) ? capabilities : [];
+    return (
+      '<div class="project-capability-panel">' +
+      '<div class="project-capability-head"><span>Capabilities</span><small>Active skills, plugins, connectors, and approval boundaries.</small></div>' +
+      (items.length
+        ? items
+            .map(function (capability) {
+              return (
+                '<article class="project-capability-row">' +
+                '<div><span>' +
+                esc(capability.label || capability.id || 'Capability') +
+                '</span><small>' +
+                esc(capability.summary || capability.kind || '') +
+                '</small></div>' +
+                '<strong>' +
+                (capability.approvalRequired
+                  ? 'External writes require approval'
+                  : capability.writeCapable
+                    ? 'Workspace write'
+                    : 'Read only') +
+                '</strong>' +
+                '</article>'
+              );
+            })
+            .join('')
+        : '<p>No capabilities reported yet.</p>') +
+      '</div>'
+    );
+  }
+
+  function renderProjectComplexity(runs) {
+    var latest = Array.isArray(runs) && runs.length ? runs[0] : null;
+    return (
+      '<div class="project-complexity-panel">' +
+      '<div><span>Complexity</span><strong>' +
+      esc(latest?.complexity || 'quick') +
+      '</strong></div>' +
+      '<div><span>Approval risk</span><strong>' +
+      esc(latest?.approvalRisk || 'low') +
+      '</strong></div>' +
+      '<p>' +
+      (latest && latest.approvalRisk === 'high'
+        ? 'External writes require approval before mutation.'
+        : 'Local drafts and reads can proceed inside the project boundary.') +
+      '</p>' +
+      '</div>'
+    );
+  }
+
   function renderProjectChatComposer(providerState) {
     var selectedProvider = providerState?.selectedProvider || '';
     var selectedModel = providerState?.selectedModel || '';
@@ -859,6 +1020,9 @@
       renderProjectMcpAccess(project) +
       renderToolLanes() +
       '</div>' +
+      '<div class="project-rail-card">' +
+      renderProjectCapabilities(detail.capabilities || []) +
+      '</div>' +
       '<div class="project-rail-card project-approval-card">' +
       '<div class="project-rail-title">Approvals</div>' +
       '<p>Publishing, sending, webhooks, and external writes need approval.</p>' +
@@ -958,6 +1122,7 @@
       '</div>' +
       renderProjectChatComposer(providerState) +
       renderProjectBrief(project, detail, providerState) +
+      renderProjectComplexity(detail.runs || []) +
       renderProjectActions(project) +
       renderProjectMcpRecipes() +
       renderProjectSourcePack() +
@@ -974,6 +1139,14 @@
       '<div class="project-section">' +
       '<div class="project-section-title">Chat history</div>' +
       renderThreads(project.id, detail.threads || []) +
+      '</div>' +
+      '<div class="project-section">' +
+      '<div class="project-section-title">Runs</div>' +
+      renderProjectRuns(detail.runs || []) +
+      '</div>' +
+      '<div class="project-section">' +
+      '<div class="project-section-title">Context notebook</div>' +
+      renderProjectContextNotebook(detail.context || []) +
       '</div>' +
       '</div>' +
       renderFilePreview() +

@@ -7,6 +7,7 @@ import { logger } from '../../logger.js';
 import type { ContainerConfig } from '../../types.js';
 import { isAgentProvider } from '../../agent-provider.js';
 import {
+  filterAllowedConnectorIds,
   loadConnectorPermissions,
   normalizeConnectorId,
   normalizeConnectorPermission,
@@ -40,6 +41,12 @@ const COWORK_MCP_THREAD_EXAMPLES = [
   'Project files plus MCP evidence -> source ledger and artifact',
 ];
 
+const WEB_MCP_THREAD_EXAMPLES = [
+  'Check recent email or calendar context',
+  'Search configured storage or document sources',
+  'Use external MCP context in this chat',
+];
+
 function readConfiguredExternalMcpServers(): string[] {
   try {
     if (!fs.existsSync(MCP_CONFIG_PATH)) return [];
@@ -60,12 +67,19 @@ function readConfiguredExternalMcpServers(): string[] {
       .filter((connectorId): connectorId is string => Boolean(connectorId))
       .sort((a, b) => a.localeCompare(b));
   } catch (err) {
-    logger.warn({ err }, 'Could not refresh MCP servers for project thread');
+    logger.warn({ err }, 'Could not read configured MCP servers for web chat');
     return [];
   }
 }
 
-function ensureProjectThreadMcpPermissions(serverNames: string[]): void {
+function hasConfiguredExternalMcpServers(): boolean {
+  return fs.existsSync(MCP_CONFIG_PATH);
+}
+
+function ensureWebThreadMcpPermissions(
+  serverNames: string[],
+  groupFolder: string,
+): void {
   if (!serverNames.length) return;
   const permissions = loadConnectorPermissions();
   const existingIds = new Set(
@@ -85,10 +99,10 @@ function ensureProjectThreadMcpPermissions(serverNames: string[]): void {
     additions.push(
       normalizeConnectorPermission({
         connectorId,
-        scope: 'main',
+        scope: 'groups',
         allowedActions: ['*.read', 'tools.expose'],
         requiresApproval: true,
-        groups: [],
+        groups: [groupFolder],
         agents: [],
       }),
     );
@@ -100,18 +114,78 @@ function ensureProjectThreadMcpPermissions(serverNames: string[]): void {
   }
 }
 
-function refreshProjectThreadMcpAccess(id: string) {
+function actionAllowsWrite(action: string): boolean {
+  return /(^|\.)(write|send|create|update|delete|upload|push|commit|open_pr|execute)$/i.test(
+    action,
+  );
+}
+
+function mcpWriteStatus(allowedMcpServers: string[]): {
+  writesEnabled: boolean;
+  requiresApprovalForWrites: boolean;
+} {
+  if (!allowedMcpServers.length) {
+    return { writesEnabled: false, requiresApprovalForWrites: false };
+  }
+  const permissions = loadConnectorPermissions();
+  let writesEnabled = false;
+  let requiresApprovalForWrites = false;
+  for (const serverName of allowedMcpServers) {
+    const connectorId = normalizeConnectorId(serverName);
+    const permission = permissions.find(
+      (item) => item.connectorId === connectorId,
+    );
+    if (!permission) {
+      requiresApprovalForWrites = true;
+      continue;
+    }
+    const hasWrite =
+      permission.allowedActions.includes('*') ||
+      permission.allowedActions.some(actionAllowsWrite);
+    if (hasWrite) {
+      writesEnabled = true;
+      if (permission.requiresApproval) requiresApprovalForWrites = true;
+    }
+  }
+  return { writesEnabled, requiresApprovalForWrites };
+}
+
+function allowedWebThreadMcpServers(
+  groupFolder: string,
+  configuredServers: string[],
+  isProjectThread: boolean,
+): string[] {
+  return filterAllowedConnectorIds({
+    connectorIds: configuredServers,
+    groupFolder,
+    agentId: groupFolder,
+    isMain: false,
+    isCoworkProject: isProjectThread,
+    action: 'tools.expose',
+  });
+}
+
+function webThreadMcpConfig(
+  groupFolder: string,
+  base: ContainerConfig = {},
+): ContainerConfig {
+  const allowedMcpServers = readConfiguredExternalMcpServers();
+  ensureWebThreadMcpPermissions(allowedMcpServers, groupFolder);
+  return {
+    ...base,
+    allowedMcpServers,
+  };
+}
+
+function refreshWebThreadMcpAccess(id: string) {
   const group = getRegisteredGroup(id);
-  if (
-    !group ||
-    group.kind !== 'web' ||
-    !(group.projectId || group.projectSlug)
-  ) {
+  if (!group || group.kind !== 'web') {
     return group;
   }
+  if (!hasConfiguredExternalMcpServers()) return group;
 
   const allowedMcpServers = readConfiguredExternalMcpServers();
-  ensureProjectThreadMcpPermissions(allowedMcpServers);
+  ensureWebThreadMcpPermissions(allowedMcpServers, group.folder);
 
   const existingConfig = group.containerConfig || {};
   const current = existingConfig.allowedMcpServers || [];
@@ -172,7 +246,9 @@ router.post('/', (req: Request, res: Response) => {
     const cleanTitle =
       typeof title === 'string' && title.trim() ? title.trim() : undefined;
 
-    let config: ContainerConfig = { allowedMcpServers: [] };
+    const jid = newWebJid();
+    const groupFolder = `web-${jid.slice('web:'.length)}`;
+    let config: ContainerConfig = webThreadMcpConfig(groupFolder);
 
     if (templateAgentId) {
       res.status(400).json({
@@ -189,12 +265,11 @@ router.post('/', (req: Request, res: Response) => {
       config = {
         provider,
         ...(model ? { model } : {}),
-        allowedMcpServers: [],
       } as ContainerConfig;
+      config = webThreadMcpConfig(groupFolder, config);
     }
-    // else config = undefined → buildThreadGroup uses default
+    // else config keeps the default web chat MCP access
 
-    const jid = newWebJid();
     const group = buildThreadGroup({
       jid,
       title: cleanTitle,
@@ -222,7 +297,7 @@ router.get('/:id', (req: Request, res: Response) => {
     res.status(404).json({ error: 'Thread not found' });
     return;
   }
-  const group = getRegisteredGroup(id);
+  const group = refreshWebThreadMcpAccess(id);
   if (!group || group.kind !== 'web') {
     res.status(404).json({ error: 'Thread not found' });
     return;
@@ -231,9 +306,20 @@ router.get('/:id', (req: Request, res: Response) => {
   const project = group.projectId ? getCoworkProject(group.projectId) : null;
   const allowedMcpServers = group.containerConfig?.allowedMcpServers;
   const isProjectThread = Boolean(group.projectId || group.projectSlug);
-  const hasProjectMcpAccess =
-    isProjectThread &&
-    (allowedMcpServers === undefined || allowedMcpServers.length > 0);
+  const effectiveMcpServers =
+    allowedMcpServers === undefined
+      ? undefined
+      : allowedWebThreadMcpServers(
+          group.folder,
+          allowedMcpServers,
+          isProjectThread,
+        );
+  const hasMcpAccess =
+    effectiveMcpServers === undefined || effectiveMcpServers.length > 0;
+  const writeStatus =
+    effectiveMcpServers === undefined
+      ? { writesEnabled: true, requiresApprovalForWrites: true }
+      : mcpWriteStatus(effectiveMcpServers);
   res.json({
     id,
     title: group.title?.trim() ? group.title : 'New conversation',
@@ -242,16 +328,21 @@ router.get('/:id', (req: Request, res: Response) => {
     projectSlug: group.projectSlug ?? project?.slug ?? null,
     projectName: project?.name ?? null,
     mcpAccess: {
-      enabled: hasProjectMcpAccess,
+      enabled: hasMcpAccess,
       scope:
         allowedMcpServers === undefined
           ? 'configured'
           : allowedMcpServers.length
             ? 'restricted'
             : 'nanocrab-only',
-      servers: allowedMcpServers ?? null,
-      requiresApprovalForWrites: isProjectThread,
-      examples: isProjectThread ? COWORK_MCP_THREAD_EXAMPLES : [],
+      servers: effectiveMcpServers ?? null,
+      writesEnabled: writeStatus.writesEnabled,
+      requiresApprovalForWrites: writeStatus.requiresApprovalForWrites,
+      examples: isProjectThread
+        ? COWORK_MCP_THREAD_EXAMPLES
+        : hasMcpAccess
+          ? WEB_MCP_THREAD_EXAMPLES
+          : [],
     },
   });
 });
@@ -283,7 +374,7 @@ router.post('/:id/messages', (req: Request, res: Response) => {
     res.status(404).json({ error: 'Thread not found' });
     return;
   }
-  const group = refreshProjectThreadMcpAccess(id);
+  const group = refreshWebThreadMcpAccess(id);
   if (!group) {
     res.status(404).json({ error: 'Thread not found' });
     return;
@@ -331,15 +422,30 @@ router.post('/:id/messages', (req: Request, res: Response) => {
       );
     }
 
+    const allowedMcpServers = group.containerConfig?.allowedMcpServers;
     const isProjectThread = Boolean(group.projectId || group.projectSlug);
+    const effectiveMcpServers =
+      allowedMcpServers === undefined
+        ? undefined
+        : allowedWebThreadMcpServers(
+            group.folder,
+            allowedMcpServers,
+            isProjectThread,
+          );
+    const hasMcpAccess =
+      effectiveMcpServers === undefined || effectiveMcpServers.length > 0;
+    const writeStatus =
+      effectiveMcpServers === undefined
+        ? { writesEnabled: true, requiresApprovalForWrites: true }
+        : mcpWriteStatus(effectiveMcpServers);
     res.json({
       ok: true,
-      mcpAccess: isProjectThread
+      mcpAccess: hasMcpAccess
         ? {
-            enabled:
-              (group.containerConfig?.allowedMcpServers || []).length > 0,
-            servers: group.containerConfig?.allowedMcpServers || [],
-            requiresApprovalForWrites: true,
+            enabled: true,
+            servers: effectiveMcpServers ?? null,
+            writesEnabled: writeStatus.writesEnabled,
+            requiresApprovalForWrites: writeStatus.requiresApprovalForWrites,
           }
         : undefined,
     });

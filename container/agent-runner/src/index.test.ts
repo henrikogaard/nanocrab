@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import fs from 'fs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { buildAllowedTools } from './index.js';
+import { buildAllowedTools, buildMcpServers } from './index.js';
 
 describe('agent-runner connector tool boundaries', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('uses host-provided MCP tool patterns instead of connector wildcards', () => {
     const tools = buildAllowedTools({
       prompt: 'check issue status',
@@ -34,6 +39,45 @@ describe('agent-runner connector tool boundaries', () => {
     expect(tools).not.toContain('mcp__github__*');
   });
 
+  it('proxies scoped MCP servers so runtime policy is enforced server-side', () => {
+    const servers = buildMcpServers(
+      {
+        prompt: 'check issue status',
+        groupFolder: 'main',
+        chatJid: 'wa:main',
+        isMain: true,
+        allowedMcpServers: ['github'],
+        allowedMcpToolPatterns: ['mcp__github__get_*', 'mcp__github__list_*'],
+      },
+      '/tmp/dist/ipc-mcp-stdio.js',
+      { requireWildcardToolAccess: true },
+    );
+
+    expect(servers.github.command).toBe('node');
+    expect(servers.github.args).toEqual(['/tmp/dist/mcp-tool-proxy.js']);
+    expect(servers.github.env.NANOCRAB_MCP_TARGET_COMMAND).toBe('npx');
+    expect(JSON.parse(servers.github.env.NANOCRAB_MCP_ALLOWED_TOOL_PATTERNS))
+      .toEqual(['mcp__github__get_*', 'mcp__github__list_*']);
+  });
+
+  it('keeps wildcard MCP servers direct when policy grants all tools', () => {
+    const servers = buildMcpServers(
+      {
+        prompt: 'check issue status',
+        groupFolder: 'main',
+        chatJid: 'wa:main',
+        isMain: true,
+        allowedMcpServers: ['github'],
+        allowedMcpToolPatterns: ['mcp__github__*'],
+      },
+      '/tmp/dist/ipc-mcp-stdio.js',
+      { requireWildcardToolAccess: true },
+    );
+
+    expect(servers.github.command).toBe('npx');
+    expect(servers.github.args).toEqual(['-y', '@iflow-mcp/server-github']);
+  });
+
   it('canonicalizes allowed MCP server names before exposing wildcard tools', () => {
     const tools = buildAllowedTools({
       prompt: 'check issue status',
@@ -44,5 +88,50 @@ describe('agent-runner connector tool boundaries', () => {
     });
 
     expect(tools).toContain('mcp__github__*');
+  });
+
+  it('prefers live project MCP config over copied runtime snapshots', () => {
+    vi.spyOn(fs, 'existsSync').mockImplementation((target) => {
+      const value = String(target);
+      return (
+        value === '/workspace/mcp-config/mcp-servers.json' ||
+        value === '/workspace/project/store/mcp-servers.json'
+      );
+    });
+    vi.spyOn(fs, 'readFileSync').mockImplementation((target) => {
+      const value = String(target);
+      if (value === '/workspace/mcp-config/mcp-servers.json') {
+        return JSON.stringify([
+          {
+            name: 'infomaniak',
+            command: 'npx',
+            args: ['-y', '@old/infomaniak-mcp'],
+          },
+        ]);
+      }
+      if (value === '/workspace/project/store/mcp-servers.json') {
+        return JSON.stringify([
+          {
+            name: 'infomaniak',
+            command: 'npx',
+            args: ['-y', '@new/infomaniak-mcp'],
+          },
+        ]);
+      }
+      return '';
+    });
+
+    const servers = buildMcpServers(
+      {
+        prompt: 'check inbox',
+        groupFolder: 'main',
+        chatJid: 'wa:main',
+        isMain: true,
+        allowedMcpServers: ['infomaniak'],
+      },
+      '/tmp/dist/ipc-mcp-stdio.js',
+    );
+
+    expect(servers.infomaniak.args).toEqual(['-y', '@new/infomaniak-mcp']);
   });
 });

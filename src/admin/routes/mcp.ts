@@ -44,7 +44,7 @@ const MCP_PRESETS: McpServerConfig[] = [
     name: 'infomaniak',
     label: 'Infomaniak kSuite',
     command: 'npx',
-    args: ['-y', '@henrikogaard/infomaniak-mcp'],
+    args: ['-y', '@henrikogard/infomaniak-mcp'],
     envVars: [
       'INFOMANIAK_TOKEN',
       'KDRIVE_ID',

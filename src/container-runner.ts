@@ -171,8 +171,47 @@ function loadConfiguredConnectorIds(): string[] {
         if (connectorId) ids.add(connectorId);
       }
     }
-  } catch {}
+  } catch {
+    /* ignore malformed MCP server config */
+  }
   return Array.from(ids);
+}
+
+function prepareRuntimeMcpConfigMount(
+  groupFolder: string,
+  connectorIds: string[],
+  isMain: boolean,
+): string | null {
+  if (isMain || !connectorIds.length) return null;
+  const sourcePath = path.join(STORE_DIR, 'mcp-servers.json');
+  if (!fs.existsSync(sourcePath)) return null;
+
+  const allowed = new Set(connectorIds.map((id) => normalizeConnectorId(id)));
+  const configured = JSON.parse(fs.readFileSync(sourcePath, 'utf-8')) as Array<{
+    name?: string;
+    command?: string;
+    args?: string[];
+    envVars?: string[];
+  }>;
+  const runtimeServers = configured
+    .filter((server) => allowed.has(normalizeConnectorId(server.name)))
+    .map((server) => ({
+      name: server.name,
+      command: server.command,
+      args: Array.isArray(server.args) ? server.args : [],
+      envVars: Array.isArray(server.envVars) ? server.envVars : [],
+    }))
+    .filter((server) => server.name && server.command);
+  if (!runtimeServers.length) return null;
+
+  const safeFolder = groupFolder.replace(/[^a-zA-Z0-9-]/g, '-') || 'default';
+  const targetDir = path.join(DATA_DIR, 'runtime-mcp-config', safeFolder);
+  fs.mkdirSync(targetDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(targetDir, 'mcp-servers.json'),
+    `${JSON.stringify(runtimeServers, null, 2)}\n`,
+  );
+  return targetDir;
 }
 
 function connectorIdsFromMcpToolPatterns(patterns: string[]): string[] {
@@ -195,6 +234,7 @@ function buildVolumeMounts(
   request?: string,
   sessionId?: string,
   agentBoundary?: AgentBoundary,
+  runtimeMcpConnectorIds: string[] = [],
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -299,6 +339,19 @@ function buildVolumeMounts(
         readonly: false,
       });
     }
+  }
+
+  const mcpConfigDir = prepareRuntimeMcpConfigMount(
+    group.folder,
+    runtimeMcpConnectorIds,
+    isMain,
+  );
+  if (mcpConfigDir) {
+    mounts.push({
+      hostPath: mcpConfigDir,
+      containerPath: '/workspace/mcp-config',
+      readonly: true,
+    });
   }
 
   // Per-group Claude SDK home (isolated from other groups).
@@ -589,7 +642,9 @@ function buildContainerArgs(
         }
       }
     }
-  } catch {}
+  } catch {
+    /* ignore malformed MCP server config */
+  }
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
@@ -722,6 +777,7 @@ export async function runContainerAgent(
     input.prompt,
     input.sessionId,
     agentBoundary,
+    executableConnectorIds,
   );
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanocrab-${safeName}-${Date.now()}`;

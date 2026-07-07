@@ -45,7 +45,15 @@ const CONNECTOR_PERMISSIONS_PATH = path.join(
 );
 
 const DEFAULT_CONNECTOR_ACTIONS = ['*'];
-const READ_TOOL_PREFIXES = ['get', 'list', 'read', 'search', 'fetch'];
+const READ_TOOL_PREFIXES = [
+  'get',
+  'list',
+  'read',
+  'search',
+  'fetch',
+  'download',
+  'help',
+];
 const WRITE_TOOL_PREFIXES = [
   'create',
   'update',
@@ -467,7 +475,10 @@ function semanticToolPatterns(
 ): string[] {
   const prefixes = mode === 'read' ? READ_TOOL_PREFIXES : WRITE_TOOL_PREFIXES;
   if (resource === '*') {
-    return prefixes.map((prefix) => toolPattern(connectorId, `${prefix}_*`));
+    return prefixes.flatMap((prefix) => [
+      toolPattern(connectorId, `${prefix}_*`),
+      toolPattern(connectorId, `${prefix}-*`),
+    ]);
   }
   const normalizedResource = resource.replace(/[^a-z0-9]+/gi, '_');
   return prefixes.flatMap((prefix) => [
@@ -476,6 +487,8 @@ function semanticToolPatterns(
       connectorId,
       `${prefix}- ${normalizedResource}*`.replace(' ', ''),
     ),
+    toolPattern(connectorId, `${normalizedResource}_${prefix}*`),
+    toolPattern(connectorId, `${normalizedResource}-${prefix}*`),
   ]);
 }
 

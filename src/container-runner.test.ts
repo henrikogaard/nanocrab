@@ -448,6 +448,8 @@ describe('container-runner MCP env forwarding', () => {
       MAIL_USER: 'mail@example.com',
       MAIL_PASSWORD: 'secret',
     });
+    vi.mocked(fs.copyFileSync).mockClear();
+    vi.mocked(fs.writeFileSync).mockClear();
   });
 
   afterEach(() => {
@@ -470,6 +472,26 @@ describe('container-runner MCP env forwarding', () => {
       'MAIL_USER',
       'MAIL_PASSWORD',
     ]);
+    expect(vi.mocked(fs.copyFileSync)).not.toHaveBeenCalled();
+    const runtimeConfigWrite = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.find(
+        (call) =>
+          call[0] ===
+          '/tmp/nanocrab-test-data/runtime-mcp-config/test-group/mcp-servers.json',
+      );
+    expect(runtimeConfigWrite).toBeTruthy();
+    expect(JSON.parse(String(runtimeConfigWrite?.[1]))).toEqual([
+      {
+        name: 'infomaniak',
+        command: 'npx',
+        args: ['-y', '@example/infomaniak-mcp'],
+        envVars: ['MAIL_USER', 'MAIL_PASSWORD'],
+      },
+    ]);
+    expect(spawnArgs).toContain(
+      '/tmp/nanocrab-test-data/runtime-mcp-config/test-group:/workspace/mcp-config:ro',
+    );
     expect(spawnArgs).toContain('--env-file');
     expect(spawnArgs).toContain('/tmp/nanocrab-env-test/env');
     expect(spawnArgs).not.toContain('MAIL_USER=mail@example.com');
@@ -513,6 +535,11 @@ describe('container-runner MCP env forwarding', () => {
       '/tmp/nanocrab-env-test/env',
       expect.stringContaining('MAIL_PASSWORD=secret'),
       { mode: 0o600 },
+    );
+    expect(vi.mocked(fs.copyFileSync)).not.toHaveBeenCalled();
+    const spawnArgs = vi.mocked(spawn).mock.calls.at(-1)?.[1] as string[];
+    expect(spawnArgs).not.toContain(
+      '/tmp/nanocrab-test-data/runtime-mcp-config/test-group:/workspace/mcp-config:ro',
     );
   });
 
