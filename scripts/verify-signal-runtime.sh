@@ -35,7 +35,19 @@ has_column() {
   local table="$1"
   local column="$2"
   local match
-  match="$(sqlite3 -readonly "$DB_FILE_PATH" "SELECT 1 FROM pragma_table_info('$table') WHERE name = '$column' LIMIT 1;" 2>/dev/null || true)"
+  if [ -n "${SQLITE_BIN:-}" ]; then
+    match="$("$SQLITE_BIN" -readonly "$DB_FILE_PATH" "SELECT 1 FROM pragma_table_info('$table') WHERE name = '$column' LIMIT 1;" 2>/dev/null || true)"
+  else
+    match="$(DB_FILE_PATH="$DB_FILE_PATH" TABLE_NAME="$table" COLUMN_NAME="$column" "$NODE_BIN" <<'NODE' 2>/dev/null || true
+const Database = require('better-sqlite3');
+const db = new Database(process.env.DB_FILE_PATH, { readonly: true });
+const row = db
+  .prepare("SELECT 1 AS found FROM pragma_table_info(?) WHERE name = ? LIMIT 1")
+  .get(process.env.TABLE_NAME, process.env.COLUMN_NAME);
+if (row) console.log('1');
+NODE
+)"
+  fi
   [ "$match" = "1" ]
 }
 
@@ -47,7 +59,8 @@ esac
 require_cmd ps
 require_cmd grep
 require_cmd tail
-require_cmd sqlite3
+SQLITE_BIN="$(command -v sqlite3 || true)"
+NODE_BIN="$(command -v node || true)"
 
 LOG_FILE_PATH="$(resolve_path "$LOG_FILE_INPUT")"
 DB_FILE_PATH="$(resolve_path "$DB_FILE_INPUT")"
@@ -55,10 +68,40 @@ DB_FILE_PATH="$(resolve_path "$DB_FILE_INPUT")"
 require_file "$LOG_FILE_PATH"
 require_file "$DB_FILE_PATH"
 
+if [ -z "$SQLITE_BIN" ] && [ -z "$NODE_BIN" ]; then
+  die "Required command missing: sqlite3 or node"
+fi
+
+run_db_query() {
+  local query
+  query="$(cat)"
+  if [ -n "$SQLITE_BIN" ]; then
+    "$SQLITE_BIN" -readonly "$DB_FILE_PATH" <<SQL
+.headers on
+.mode column
+$query
+SQL
+    return
+  fi
+
+  DB_FILE_PATH="$DB_FILE_PATH" QUERY="$query" "$NODE_BIN" <<'NODE'
+const Database = require('better-sqlite3');
+const db = new Database(process.env.DB_FILE_PATH, { readonly: true });
+const rows = db.prepare(process.env.QUERY).all();
+if (!rows.length) process.exit(0);
+const headers = Object.keys(rows[0]);
+console.log(headers.join('\t'));
+for (const row of rows) {
+  console.log(headers.map((header) => String(row[header] ?? '')).join('\t'));
+}
+NODE
+}
+
 section "Signal runtime inputs"
 echo "LOG_FILE=$LOG_FILE_PATH"
 echo "DB_FILE=$DB_FILE_PATH"
 echo "TAIL_LINES=$TAIL_LINES"
+echo "DB_READER=$([ -n "$SQLITE_BIN" ] && echo sqlite3 || echo node-better-sqlite3)"
 
 section "Process check"
 echo "signal-cli processes:"
@@ -91,9 +134,7 @@ for optional_column in folder enabled is_primary requires_trigger trigger_patter
   fi
 done
 
-sqlite3 -readonly "$DB_FILE_PATH" <<SQL
-.headers on
-.mode column
+run_db_query <<SQL
 SELECT $REGISTERED_GROUP_COLUMNS
 FROM registered_groups
 WHERE jid LIKE 'sig:%'
@@ -101,9 +142,7 @@ ORDER BY jid;
 SQL
 
 section "Recent Signal messages"
-sqlite3 -readonly "$DB_FILE_PATH" <<'SQL'
-.headers on
-.mode column
+run_db_query <<'SQL'
 SELECT timestamp,
        chat_jid,
        sender_name,
