@@ -591,7 +591,8 @@ function extractCitationLikeEntries(outputs: unknown[]): RunCitationEntry[] {
         (typeof entry.citation === 'string' && entry.citation.trim()
           ? {
               title: toTrimmedString(entry.title) || entry.citation.trim(),
-              sourceUrl: normalizeCitationSourceUrl(entry.citation.trim()) || '',
+              sourceUrl:
+                normalizeCitationSourceUrl(entry.citation.trim()) || '',
               ...(toTrimmedString(entry.note)
                 ? { note: toTrimmedString(entry.note)! }
                 : {}),
