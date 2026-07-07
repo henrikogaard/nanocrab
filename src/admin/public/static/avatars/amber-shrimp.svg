@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Amber Shrimp Avatar</title>
+  <desc id="desc">A curled amber shrimp avatar on a mint field.</desc>
+  <rect width="128" height="128" rx="28" fill="#ecfeff"/>
+  <circle cx="64" cy="64" r="46" fill="#99f6e4"/>
+  <path d="M88 42c17 19 9 52-19 60-23 6-44-8-47-28-3-21 14-39 35-39 14 0 24 7 28 18" fill="none" stroke="#f59e0b" stroke-width="18" stroke-linecap="round"/>
+  <path d="M55 47c8-2 18 2 24 10M42 57c10 0 20 5 26 14M38 74c9 5 19 7 31 5" fill="none" stroke="#b45309" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="91" cy="39" r="6" fill="#111827"/>
+  <path d="M96 34c10-8 17-8 22 0M91 58c10 0 19 4 25 12M33 94l-16 10m24-3-12 14" fill="none" stroke="#0f766e" stroke-width="5" stroke-linecap="round"/>
+  <path d="M93 77c8 3 13 8 15 15" fill="none" stroke="#f59e0b" stroke-width="8" stroke-linecap="round"/>
+</svg>

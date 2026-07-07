@@ -46,6 +46,10 @@ export interface ContainerConfig {
   // Soft approval — the agent follows these as part of its instructions.
   // Example: "Never run `rm -rf`, `git push --force`, or `DROP TABLE` without asking first"
   restrictions?: string;
+  // Main-agent channel visibility. Undefined/all = all known group chats.
+  // registered = registered bot groups only. allowed = only folders listed below.
+  channelScope?: 'all' | 'registered' | 'allowed';
+  allowedGroupFolders?: string[];
 }
 
 export interface RegisteredGroup {
@@ -340,12 +344,22 @@ export interface Channel {
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
+  getHealth?(): ChannelHealth;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
   // Optional: richer runtime health for dashboard and diagnostics.
   getStatus?(): ChannelStatusSnapshot;
+}
+
+export interface ChannelHealth {
+  name: string;
+  connected: boolean;
+  status: 'active' | 'degraded' | 'offline' | 'disabled';
+  lastActiveAt: string | null;
+  detail: string;
+  diagnostics?: Record<string, string | number | boolean | null>;
 }
 
 // Callback type that channels use to deliver inbound messages

@@ -201,7 +201,7 @@ export function securityHeaders(
 
 const AUDIT_LOG_PATH = path.join(process.cwd(), 'logs', 'admin-audit.log');
 
-interface AuditEntry {
+export interface AuditEntry {
   timestamp: string;
   ip: string;
   action: string;

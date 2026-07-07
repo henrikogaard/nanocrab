@@ -146,6 +146,7 @@ interface SkillRegistryEntry {
   triggers?: string[];
   examples?: string[];
   riskLevel?: string;
+  requiredTools?: string[];
 }
 
 function readActiveSkillRegistry(skillsDir: string): SkillRegistryEntry[] {
@@ -215,15 +216,24 @@ function readProviderNeutralSkillsContext(request = ''): string | undefined {
     .map((skill) => ({ ...skill, score: scoreSkill(skill, request) }))
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
   const likely = ranked.filter((skill) => skill.score > 0).slice(0, 8);
-  const fallback = ranked.slice(0, 12);
+  const fallback = ranked
+    .filter(
+      (skill) =>
+        skill.riskLevel !== 'high' &&
+        (!skill.requiredTools || skill.requiredTools.length === 0),
+    )
+    .slice(0, 12);
   const selected = likely.length ? likely : fallback;
   const entries = selected.map((skill) => {
     const label =
       skill.name === skill.path ? skill.path : `${skill.path} (${skill.name})`;
     const risk = skill.riskLevel ? ` risk:${skill.riskLevel}` : '';
+    const tools = skill.requiredTools?.length
+      ? ` tools:${skill.requiredTools.join(',')}`
+      : '';
     return skill.description
-      ? `- ${label}:${risk} ${skill.description}`
-      : `- ${label}:${risk}`;
+      ? `- ${label}:${risk}${tools} ${skill.description}`
+      : `- ${label}:${risk}${tools}`;
   });
 
   if (entries.length === 0) return undefined;

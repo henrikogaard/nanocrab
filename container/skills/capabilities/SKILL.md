@@ -55,13 +55,18 @@ NanoCrab exposes these MCP tools via the compatibility `mcp__nanocrab__*` prefix
 - `cancel_task` — cancel and delete a task
 - `update_task` — update an existing task
 - `register_group` — register a new chat/group (main only)
-- `register_coding_repo` — allow a GitHub repo for host-managed coding jobs (main only)
+- `register_coding_repo` — allow a GitHub repo for host-managed coding jobs with optional labels, assignee, coding rules, default provider/model, and trusted PR flow (main only)
 - `list_coding_repos` — list registered coding repos (main only)
 - `list_github_issues` — list open issues from registered repos (main only)
 - `start_coding_job` — clone/fix/code in `data/coding-workspaces` outside the chat sandbox (main only)
 - `pick_github_issue` — pick a matching issue and start a coding job (main only)
 - `schedule_github_issue_loop` — schedule automatic issue picking (main only)
-- `list_coding_jobs` / `get_coding_job` — inspect coding job status/output (main only)
+- `list_coding_jobs` / `get_coding_job` / `control_coding_job` — inspect status/output/implementation plan/timeline and approve, retry, open PR, refresh CI, cancel, or revert jobs (main only)
+
+Main-group chat shortcuts for mobile coding control:
+
+- `/coding-jobs`, `/coding-job <jobId>`, `/coding-pick owner/repo labels=a,b provider=codex [no-pr]`
+- `/coding-approve <jobId>`, `/coding-pr <jobId>`, `/coding-ci <jobId>`, `/coding-cancel <jobId>`
 - `propose_memory` — propose structured long-term memory for owner approval
 - `list_memories` / `approve_memory` / `reject_memory` — review memory records (main only)
 - `record_journal_event` / `search_journal_events` — store and search notable events

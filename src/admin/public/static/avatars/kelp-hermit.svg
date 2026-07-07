@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Kelp Hermit Avatar</title>
+  <desc id="desc">A compact hermit crab with a green shell.</desc>
+  <rect width="128" height="128" rx="28" fill="#f6f7eb"/>
+  <circle cx="64" cy="64" r="46" fill="#bbf7d0"/>
+  <path d="M43 38c18-16 49-3 49 22 0 19-17 31-36 27-20-4-31-23-13-49z" fill="#16a34a"/>
+  <path d="M54 47c12-8 27 0 27 14 0 11-10 18-21 15-10-3-17-16-6-29z" fill="#dcfce7"/>
+  <path d="M38 70c-7 2-15 8-20 16m72-16c7 2 15 8 20 16" fill="none" stroke="#a16207" stroke-width="7" stroke-linecap="round"/>
+  <ellipse cx="58" cy="76" rx="24" ry="17" fill="#f59e0b"/>
+  <circle cx="50" cy="61" r="5" fill="#111827"/>
+  <circle cx="68" cy="61" r="5" fill="#111827"/>
+  <path d="M52 82c6 4 16 4 22-1" fill="none" stroke="#78350f" stroke-width="4" stroke-linecap="round"/>
+  <path d="M29 52c-8-3-13 8-5 13 8 5 14-9 5-13zm66 0c8-3 13 8 5 13-8 5-14-9-5-13z" fill="#fbbf24"/>
+</svg>

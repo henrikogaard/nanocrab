@@ -22,6 +22,7 @@ export const STEPS: Record<
   () => Promise<{ run: (args: string[]) => Promise<void | SetupStepResult> }>
 > = {
   timezone: () => import('./timezone.js'),
+  preflight: () => import('./preflight.js'),
   environment: () => import('./environment.js'),
   container: () => import('./container.js'),
   groups: () => import('./groups.js'),
@@ -31,7 +32,7 @@ export const STEPS: Record<
   verify: () => import('./verify.js'),
   provider: () => import('./provider.js'),
   'codex-auth': () => import('./codex-auth.js'),
-  'admin': () => import('./admin.js'),
+  admin: () => import('./admin.js'),
   'signal-auth': () => import('./signal-auth.js'),
   'whatsapp-auth': () => import('./whatsapp-auth.js'),
 };

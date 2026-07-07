@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Coral Lobster Avatar</title>
+  <desc id="desc">A coral-colored lobster avatar with bold claws.</desc>
+  <rect width="128" height="128" rx="28" fill="#fff1f2"/>
+  <circle cx="64" cy="64" r="45" fill="#fecdd3"/>
+  <path d="M64 35c15 10 23 25 23 42 0 16-9 27-23 27S41 93 41 77c0-17 8-32 23-42z" fill="#fb7185"/>
+  <path d="M54 44h20M51 57h26M49 70h30M51 83h26" stroke="#be123c" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="55" cy="31" r="5" fill="#111827"/>
+  <circle cx="73" cy="31" r="5" fill="#111827"/>
+  <path d="M38 53 19 34m71 19 19-19M38 78 22 94m68-16 16 16" fill="none" stroke="#e11d48" stroke-width="7" stroke-linecap="round"/>
+  <path d="M22 27c-13-4-20 14-8 22 13 8 23-16 8-22zm84 0c13-4 20 14 8 22-13 8-23-16-8-22z" fill="#f43f5e"/>
+  <path d="M55 95c6 5 12 5 18 0" fill="none" stroke="#881337" stroke-width="4" stroke-linecap="round"/>
+</svg>

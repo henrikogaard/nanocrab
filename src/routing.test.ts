@@ -167,4 +167,49 @@ describe('getAvailableGroups', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(0);
   });
+
+  it('applies main-agent allowed channel scope to available groups', () => {
+    storeChatMetadata(
+      'allowed@g.us',
+      '2024-01-01T00:00:03.000Z',
+      'Allowed',
+      'whatsapp',
+      true,
+    );
+    storeChatMetadata(
+      'blocked@g.us',
+      '2024-01-01T00:00:02.000Z',
+      'Blocked',
+      'whatsapp',
+      true,
+    );
+    _setRegisteredGroups({
+      'allowed@g.us': {
+        name: 'Allowed',
+        folder: 'allowed',
+        trigger: '@Andy',
+        added_at: '2024-01-01T00:00:00.000Z',
+      },
+      'blocked@g.us': {
+        name: 'Blocked',
+        folder: 'blocked',
+        trigger: '@Andy',
+        added_at: '2024-01-01T00:00:00.000Z',
+      },
+    });
+
+    const groups = getAvailableGroups({
+      name: 'Main',
+      folder: 'main',
+      trigger: '',
+      added_at: '2024-01-01T00:00:00.000Z',
+      isMain: true,
+      containerConfig: {
+        channelScope: 'allowed',
+        allowedGroupFolders: ['allowed'],
+      },
+    });
+
+    expect(groups.map((group) => group.jid)).toEqual(['allowed@g.us']);
+  });
 });
