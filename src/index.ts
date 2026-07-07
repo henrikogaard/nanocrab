@@ -474,12 +474,23 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
-export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
+export function getAvailableGroups(
+  group?: RegisteredGroup,
+): import('./container-runner.js').AvailableGroup[] {
   const chats = getAllChats();
   const registeredJids = new Set(Object.keys(registeredGroups));
+  const allowedFolders =
+    group?.isMain && group.containerConfig?.channelScope === 'allowed'
+      ? new Set(group.containerConfig.allowedGroupFolders || [])
+      : null;
 
   return chats
     .filter((c) => c.jid !== '__group_sync__' && c.is_group)
+    .filter((c) => {
+      if (!allowedFolders) return true;
+      const registered = registeredGroups[c.jid];
+      return registered ? allowedFolders.has(registered.folder) : false;
+    })
     .map((c) => ({
       jid: c.jid,
       name: c.name,

@@ -105,7 +105,7 @@
       '<div><span></span><strong></strong></div>' +
       '</aside>' +
       '<div class="project-loading-main">' +
-      '<span class="messages-kicker">Cowork loading</span>' +
+      '<span class="messages-kicker cowork-kicker">Cowork loading</span>' +
       '<h2>Loading project workspaces</h2>' +
       '<p>Collecting virtual folders, source files, project chats, artifacts, and approved MCP context before opening the workbench.</p>' +
       '<div class="project-loading-flow">' +
@@ -758,9 +758,14 @@
             esc(run.complexity || 'quick') +
             '</small>' +
             '</div>' +
+            '<div class="project-run-actions">' +
             '<strong>Approval risk: ' +
             esc(risk) +
             '</strong>' +
+            '<button type="button" class="btn btn-sm btn-ghost" onclick="exportProjectRunCitationLedger(' +
+            jsStringAttr(run.id || '') +
+            ')">Export citation ledger</button>' +
+            '</div>' +
             '</article>'
           );
         })
@@ -1403,6 +1408,31 @@
       'Source pack prompt copied',
       'Copy source pack prompt',
     );
+  };
+
+  window.exportProjectRunCitationLedger = async function (runId) {
+    if (!activeProjectId || !runId) {
+      toast('Select a Cowork run before exporting citations', 'error');
+      return;
+    }
+    try {
+      var result = await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/runs/' +
+          encodeURIComponent(runId) +
+          '/research/export-ledger',
+        { method: 'POST' },
+      );
+      if (result.error) throw new Error(result.error);
+      toast('Citation ledger exported', 'success');
+      if (result.path) {
+        activeProjectFilePath = result.path;
+      }
+      refreshProjects();
+    } catch (err) {
+      toast('Could not export citation ledger: ' + (err.message || 'unknown error'), 'error');
+    }
   };
 
   window.clearProjectSourcePack = function () {

@@ -130,9 +130,7 @@ export async function runCodingCommand(
       `Picked ${command.repo}#${result.issue.number}: ${result.issue.title}`,
       `Job: ${result.job.id}`,
       result.job.investigationSummary || '',
-      result.job.status === 'await_approval'
-        ? `Approve with /coding-approve ${result.job.id}`
-        : '',
+      `Approve with /coding-approve ${result.job.id}`,
     ]
       .filter(Boolean)
       .join('\n');

@@ -17,7 +17,7 @@ let activeMode =
 // the mode-scoped sidebar and the More drawer.
 const PAGE_META = {
   chat: { label: 'Chat', icon: 'chat' },
-  projects: { label: 'Projects', icon: 'agents' },
+  projects: { label: 'Cowork Projects', icon: 'agents' },
   channels: { label: 'Channels', icon: 'messages' },
   messages: { label: 'Messages', icon: 'messages' },
   agents: { label: 'Agents', icon: 'agents' },
@@ -5629,98 +5629,16 @@ function taskRoutineAuditPromptText(task) {
   ].join('\n');
 }
 
-function renderRoutineRunsEmptyState(task) {
-  const id = task?.id || '';
-  return `
-    <div class="routine-runs-empty-state">
-      <div>
-        <span>Run history</span>
-        <strong>No runs recorded yet.</strong>
-        <p>Run this routine once to create evidence, then use the brief when handing recurring work to Cowork or MCP-backed project chats.</p>
-      </div>
-      <div class="routine-runs-empty-actions">
-        <button type="button" class="btn btn-sm btn-primary" onclick="taskRunNow('${esc(id)}')">Run now</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="copyTaskRoutineBrief('${esc(id)}')">Copy brief</button>
-      </div>
-    </div>`;
-}
-
-function renderRoutineRunsUnavailableState(task) {
-  const id = task?.id || '';
-  return `
-    <div class="routine-runs-empty-state is-warning">
-      <div>
-        <span>Run evidence unavailable</span>
-        <strong>Recent run history did not load.</strong>
-        <p>Retry before deciding this routine has no evidence. Use Monitoring or rerun under supervision if the automation output needs to be trusted.</p>
-      </div>
-      <div class="routine-runs-empty-actions">
-        <button type="button" class="btn btn-sm btn-primary" onclick="viewTaskDetail('${esc(id)}')">Retry evidence</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('monitoring')">Monitoring</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="copyTaskRoutineBrief('${esc(id)}')">Copy brief</button>
-      </div>
-    </div>`;
-}
-
-function renderRoutineDetailDataHealth(loadIssues, task) {
-  if (!Array.isArray(loadIssues) || loadIssues.length === 0) return '';
-  const id = task?.id || '';
-  return `
-    <div class="routine-detail-warning" role="status">
-      <div>
-        <span>Data health</span>
-        <strong>${loadIssues.length} routine feed${loadIssues.length === 1 ? '' : 's'} need review.</strong>
-        <p>${esc(loadIssues.join('; '))}. Retry before changing cadence, trusting run history, or promoting the routine to broader automation.</p>
-      </div>
-      <div class="routine-recovery-actions">
-        <button type="button" class="btn btn-sm btn-primary" onclick="viewTaskDetail('${esc(id)}')">Retry detail</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('approvals')">Approvals</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('monitoring')">Monitoring</button>
-      </div>
-    </div>`;
-}
-
-function renderRoutineDetailLoadingState(id) {
-  return `
-    <section class="routine-detail-loading-state" aria-busy="true" aria-label="Loading routine detail">
-      <div>
-        <span>Routine detail</span>
-        <strong>Loading task details</strong>
-        <p>Gathering schedule, prompt, provider settings, recent run evidence, and approval context before showing controls.</p>
-        ${id ? `<small>${esc(id)}</small>` : ''}
-      </div>
-      <div class="routine-detail-loading-grid" aria-hidden="true">
-        <i></i><i></i><i></i><i></i>
-      </div>
-    </section>`;
-}
-
-function renderRoutineRecoveryState(kind, message, options = {}) {
-  const title =
-    kind === 'task'
-      ? 'Routine detail could not load'
-      : 'Routine data could not load';
-  const detail =
-    kind === 'task'
-      ? 'The schedule may still exist, but NanoCrab could not load the run history, prompt, or approval context for this routine.'
-      : 'NanoCrab could not load scheduled work data. Review monitoring and approvals before adding more automation.';
-  const retryAction = options.retryAction || "navigate('tasks')";
-  return `
-    <section class="routine-recovery-state is-${esc(kind || 'load')}">
-      <div>
-        <span>Routine unavailable</span>
-        <strong>${esc(title)}</strong>
-        <p>${esc(detail)}</p>
-        ${message ? `<small>${esc(message)}</small>` : ''}
-      </div>
-      <div class="routine-recovery-actions">
-        <button type="button" class="btn btn-sm btn-primary" onclick="${retryAction}">Retry</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('approvals')">Approvals</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('monitoring')">Monitoring</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('projects')">Cowork</button>
-      </div>
-    </section>`;
-}
+const renderRoutineRunsEmptyState =
+  window.NanoRoutineStates.renderRoutineRunsEmptyState;
+const renderRoutineRunsUnavailableState =
+  window.NanoRoutineStates.renderRoutineRunsUnavailableState;
+const renderRoutineDetailDataHealth =
+  window.NanoRoutineStates.renderRoutineDetailDataHealth;
+const renderRoutineDetailLoadingState =
+  window.NanoRoutineStates.renderRoutineDetailLoadingState;
+const renderRoutineRecoveryState =
+  window.NanoRoutineStates.renderRoutineRecoveryState;
 
 function describeActiveRuns(task) {
   const active = Number(task.active_run_count || 0);
@@ -7610,7 +7528,7 @@ function providerLaneDecisionPromptText(state) {
 }
 
 async function renderProviders(el) {
-  const [data, groups, profileData] = await Promise.all([
+  const [data, groups, profileData, parity] = await Promise.all([
     api('/providers'),
     api('/groups'),
     api('/system/provider/profiles').catch(() => ({
@@ -7618,6 +7536,7 @@ async function renderProviders(el) {
       capabilityMatrix: {},
       purposes: [],
     })),
+    api('/providers/parity').catch(() => null),
   ]);
   const prefs = data.preferences;
   const brief = providerBrief(data, profileData);
@@ -7821,6 +7740,7 @@ async function renderProviders(el) {
           .join('')}
       </div>
     </section>
+    ${window.NanoProviderParity && parity ? window.NanoProviderParity.renderProviderParityPanel(parity) : ''}
     ${profileHtml}
     <div class="grid grid-2">${categoryHtml}</div>
     ${groupDefaultsHtml}`;
@@ -10544,115 +10464,10 @@ function fileGroupBriefText(state) {
   ].join('\n');
 }
 
-function renderFilesEmptyState(kind = 'group-select') {
-  const variants = {
-    groups: {
-      title: 'No group folders found',
-      detail:
-        'Connect a channel, start in Copilot, or create a Cowork project before expecting reusable group context here.',
-      flow: ['Connect', 'Collect', 'Promote'],
-      actions: `
-        <button type="button" class="btn btn-sm btn-primary" onclick="navigate('channels')">Channels</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('chat')">Copilot</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('projects')">Cowork</button>`,
-    },
-    'group-select': {
-      title: 'Select a group to browse its files',
-      detail:
-        'Use the group folder to inspect AGENTS.md, private runtime memory, conversations, and raw channel uploads before promoting anything durable.',
-      flow: ['Inspect', 'Decide', 'Promote'],
-      actions: `
-        <button type="button" class="btn btn-sm btn-primary" onclick="copyFileVaultBrief()">Copy vault brief</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('projects')">Open Cowork</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('memory')">Memory</button>`,
-    },
-    conversations: {
-      title: 'No saved conversations',
-      detail:
-        'This group has no archived threads yet. Start with Copilot or Cowork when you need recoverable working history.',
-      flow: ['Copilot', 'Archive', 'Summarize'],
-      actions: `
-        <button type="button" class="btn btn-sm btn-primary" onclick="navigate('chat')">Start Copilot</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('projects')">Project chats</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="copyFileGroupBrief()">Copy group brief</button>`,
-    },
-    attachments: {
-      title: 'No attachments',
-      detail:
-        'Raw uploads will appear here before they are promoted into project files, artifacts, memory, or reports.',
-      flow: ['Upload', 'Review', 'Promote'],
-      actions: `
-        <button type="button" class="btn btn-sm btn-primary" onclick="navigate('projects')">Cowork files</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('artifacts')">Artifacts</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="copyFileGroupBrief()">Copy group brief</button>`,
-    },
-    failed: {
-      title: 'Failed to load file',
-      detail:
-        'The file preview could not be opened. Use the group brief for handoff, then retry or open the raw download path.',
-      flow: ['Retry', 'Brief', 'Route'],
-      actions: `
-        <button type="button" class="btn btn-sm btn-primary" onclick="copyFileGroupBrief()">Copy group brief</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('monitoring')">Monitoring</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('projects')">Cowork</button>`,
-    },
-    unavailable: {
-      title: 'File vault unavailable',
-      detail:
-        'The group file catalog did not load. Retry before assuming there are no group instructions, memories, conversations, or uploads.',
-      flow: ['Retry', 'Monitor', 'Route'],
-      actions: `
-        <button type="button" class="btn btn-sm btn-primary" onclick="navigate('files')">Retry</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('monitoring')">Monitoring</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('projects')">Cowork</button>`,
-    },
-    'conversations-unavailable': {
-      title: 'Conversation archive unavailable',
-      detail:
-        'Saved thread history did not load for this group. Retry before asking an agent to summarize or resume from prior conversation context.',
-      flow: ['Retry', 'Brief', 'Cowork'],
-      actions: `
-        <button type="button" class="btn btn-sm btn-primary" onclick="selectGroup(window._fileGroupState?.folder)">Retry group</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="copyFileGroupBrief()">Copy group brief</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('projects')">Cowork</button>`,
-    },
-    'attachments-unavailable': {
-      title: 'Attachment archive unavailable',
-      detail:
-        'Raw channel uploads did not load for this group. Retry before promoting files into Cowork, Artifacts, Memory, or Reports.',
-      flow: ['Retry', 'Inspect', 'Promote'],
-      actions: `
-        <button type="button" class="btn btn-sm btn-primary" onclick="selectGroup(window._fileGroupState?.folder)">Retry group</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('artifacts')">Artifacts</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('projects')">Cowork</button>`,
-    },
-  };
-  const empty = variants[kind] || variants['group-select'];
-  return `
-    <div class="files-empty-state files-action-empty ${kind.includes('unavailable') ? 'is-warning' : ''}">
-      <div>
-        <h3>${esc(empty.title)}</h3>
-        <p>${esc(empty.detail)}</p>
-      </div>
-      <div class="files-empty-flow">
-        ${empty.flow.map((item) => `<span>${esc(item)}</span>`).join('')}
-      </div>
-      <div class="files-empty-actions">${empty.actions}</div>
-	    </div>`;
-}
-
-function renderFilesLoadingState(kind = 'group') {
-  const isConversation = kind === 'conversation';
-  return `
-    <section class="files-loading-state ${isConversation ? 'is-conversation' : ''}" aria-busy="true" aria-label="${isConversation ? 'Loading conversation file' : 'Loading group files'}">
-      <div>
-        <span>Context vault</span>
-        <strong>${isConversation ? 'Loading conversation transcript' : 'Loading group context'}</strong>
-        <p>${isConversation ? 'Opening the saved thread so it can be inspected, copied, or routed into Cowork.' : 'Gathering AGENTS.md, memory, saved conversations, and uploads for this group folder.'}</p>
-      </div>
-      <div class="files-loading-bars" aria-hidden="true"><i></i><i></i><i></i></div>
-    </section>`;
-}
+const renderFilesEmptyState =
+  window.NanoFileVaultStates.renderFilesEmptyState;
+const renderFilesLoadingState =
+  window.NanoFileVaultStates.renderFilesLoadingState;
 
 async function renderFiles(el) {
   let groups = [];

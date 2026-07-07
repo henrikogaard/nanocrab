@@ -4,14 +4,14 @@ import path from 'path';
 
 import {
   buildConnectorCatalog,
-  CONNECTOR_DEFINITIONS,
+  DEFAULT_CONNECTOR_CATALOG,
 } from '../../connector-catalog.js';
+import { loadConnectorPermissions } from '../../connector-permissions.js';
 import {
   listConnectorWorkflows,
   type ConnectorWorkflowDomain,
 } from '../../connector-workflows.js';
 import { readEnvFile } from '../../env.js';
-import { getState } from '../state.js';
 
 const router = Router();
 const MCP_CONFIG_PATH = path.join(process.cwd(), 'store', 'mcp-servers.json');
@@ -30,19 +30,42 @@ function configuredMcpServers(): string[] {
 }
 
 router.get('/', (_req, res) => {
-  const state = getState();
   const envKeys = [
-    ...new Set(CONNECTOR_DEFINITIONS.flatMap((item) => item.envVars)),
+    ...new Set(
+      DEFAULT_CONNECTOR_CATALOG.flatMap((item) => item.requiredEnvVars),
+    ),
   ];
   const envFile = readEnvFile(envKeys);
   const env = Object.fromEntries(
     envKeys.map((key) => [key, process.env[key] || envFile[key]]),
   );
+  const configuredServers = configuredMcpServers();
+  const permissions = loadConnectorPermissions();
   res.json(
     buildConnectorCatalog({
-      activeChannels: state.channels.map((channel) => channel.name),
-      configuredMcpServers: configuredMcpServers(),
-      env,
+      servers: DEFAULT_CONNECTOR_CATALOG.filter(
+        (definition) =>
+          definition.setupPath === 'built-in' ||
+          configuredServers.includes(definition.id),
+      ).map((definition) => ({
+        name: definition.id,
+        envVars: definition.requiredEnvVars,
+        envStatus: definition.requiredEnvVars.map((key) => ({
+          key,
+          isSet: Boolean(env[key]),
+        })),
+        permission: permissions.find(
+          (permission) => permission.connectorId === definition.id,
+        ),
+      })),
+      presets: DEFAULT_CONNECTOR_CATALOG.filter((definition) =>
+        definition.presetName
+          ? configuredServers.includes(definition.presetName)
+          : false,
+      ).map((definition) => ({
+        name: definition.presetName || definition.id,
+        installed: true,
+      })),
     }),
   );
 });

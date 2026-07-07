@@ -117,6 +117,7 @@ export interface CodingJob {
   changedFiles: string[];
   diffSummary: string | null;
   testSummary: string | null;
+  investigationSummary?: string | null;
   ciStatus: 'unknown' | 'pending' | 'success' | 'failure';
   lastCiError: string | null;
   transitionedAt: Partial<Record<CodingJobStatus, string>>;
@@ -295,6 +296,12 @@ export async function registerCodingRepo(input: {
   repo: string;
   defaultBranch?: string;
   labels?: string[];
+  assignee?: string;
+  milestone?: string;
+  defaultProvider?: string;
+  defaultModel?: string;
+  codingRules?: string;
+  trustedForPr?: boolean;
 }): Promise<CodingRepo> {
   assertRepoFullName(input.repo);
   const repos = loadCodingRepos();
@@ -305,6 +312,8 @@ export async function registerCodingRepo(input: {
   if (existing) {
     existing.defaultBranch = input.defaultBranch || existing.defaultBranch;
     existing.labels = input.labels || existing.labels;
+    if (input.assignee !== undefined) existing.assignee = input.assignee;
+    if (input.milestone !== undefined) existing.milestone = input.milestone;
     existing.enabled = true;
     existing.updatedAt = timestamp;
     saveCodingRepos(repos);
@@ -329,6 +338,8 @@ export async function registerCodingRepo(input: {
     fullName: input.repo,
     defaultBranch,
     labels: input.labels || [],
+    ...(input.assignee ? { assignee: input.assignee } : {}),
+    ...(input.milestone ? { milestone: input.milestone } : {}),
     enabled: true,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -1368,6 +1379,41 @@ export async function pickGitHubIssue(input: {
 
 export function getCodingJob(jobId: string): CodingJob | undefined {
   return loadCodingJobs().find((job) => job.id === jobId);
+}
+
+export interface CodingJobTimelineItem {
+  id: string;
+  jobId: string;
+  at: string;
+  kind: string;
+  title: string;
+  detail: string | null;
+  repo: string;
+  status: CodingJobStatus;
+  issueNumber: number | null;
+  prUrl: string | null;
+  ciStatus: CodingJob['ciStatus'];
+}
+
+export function listCodingJobTimeline(limit = 100): CodingJobTimelineItem[] {
+  return loadCodingJobs()
+    .flatMap((job) =>
+      job.transitionHistory.map((transition, index) => ({
+        id: `${transition.at}-${index}`,
+        jobId: job.id,
+        at: transition.at,
+        kind: transition.to,
+        title: `${job.repo}: ${transition.from} -> ${transition.to}`,
+        detail: transition.failureReason || null,
+        repo: job.repo,
+        status: job.status,
+        issueNumber: job.issueNumber,
+        prUrl: job.prUrl,
+        ciStatus: job.ciStatus,
+      })),
+    )
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, Math.min(Math.max(limit, 0), 500));
 }
 
 function recordJobApproval(

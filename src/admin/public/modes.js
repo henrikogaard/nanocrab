@@ -6,7 +6,7 @@
   const MODES = {
     chat: {
       id: 'chat',
-      label: 'Copilot',
+      label: 'Chat',
       icon: 'chat',
       guidance: 'Plain chat for quick questions, writing, and thinking.',
       pages: ['chat'],

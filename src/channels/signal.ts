@@ -18,7 +18,12 @@ import { logger } from '../logger.js';
 import { auditUploadSend } from '../upload-audit.js';
 import { transcribeAudio } from '../transcription.js';
 import { registerChannel, ChannelOpts } from './registry.js';
-import { Channel, ChannelStatusSnapshot, NewMessage } from '../types.js';
+import {
+  Channel,
+  ChannelHealth,
+  ChannelStatusSnapshot,
+  NewMessage,
+} from '../types.js';
 
 const SIGNAL_CLI_PORT = 8080;
 const DAEMON_STARTUP_TIMEOUT_MS = 90000;
@@ -604,6 +609,31 @@ export class SignalChannel implements Channel {
           ? 'Signal message activity observed'
           : 'signal-cli RPC endpoint is ready'
         : this.lastError || 'signal-cli daemon is not connected',
+    };
+  }
+
+  getHealth(): ChannelHealth {
+    const lastActiveAt =
+      (this as unknown as { lastActiveAt?: string }).lastActiveAt ||
+      maxIso(this.lastMessageAt, this.lastReadyAt);
+    const stale =
+      lastActiveAt !== null && Date.now() - Date.parse(lastActiveAt) > 300000;
+    const active = this.connected && !stale;
+    return {
+      name: this.name,
+      connected: active,
+      status: active ? 'active' : this.connected ? 'degraded' : 'offline',
+      lastActiveAt,
+      detail: active
+        ? 'signal-cli daemon is connected and recently active.'
+        : this.connected
+          ? 'signal-cli daemon is connected but heartbeat is stale.'
+          : this.lastError || 'signal-cli daemon is not connected.',
+      diagnostics: {
+        daemonPid:
+          (this as unknown as { daemon?: { pid?: number } }).daemon?.pid ||
+          null,
+      },
     };
   }
 
