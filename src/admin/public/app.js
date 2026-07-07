@@ -30,7 +30,7 @@ let activeMode =
 // the mode-scoped sidebar and the More drawer.
 const PAGE_META = {
   chat: { label: 'Copilot', icon: 'chat' },
-  projects: { label: 'Projects', icon: 'agents' },
+  projects: { label: 'Cowork Projects', icon: 'agents' },
   channels: { label: 'Channels', icon: 'messages' },
   messages: { label: 'Messages', icon: 'messages' },
   agents: { label: 'Agents', icon: 'agents' },
@@ -44,7 +44,7 @@ const PAGE_META = {
   artifacts: { label: 'Artifacts', icon: 'artifacts' },
   memory: { label: 'Memory', icon: 'memory' },
   timeline: { label: 'Timeline', icon: 'timeline' },
-  gitcode: { label: 'Git & Code', icon: 'gitcode' },
+  gitcode: { label: 'Code workspace', icon: 'gitcode' },
   devhub: { label: 'Terminal', icon: 'devhub' },
   autofix: { label: 'AutoFix', icon: 'autofix' },
   skills: { label: 'Skills', icon: 'skills' },

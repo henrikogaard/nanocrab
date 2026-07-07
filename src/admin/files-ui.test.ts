@@ -69,7 +69,10 @@ describe('Group Files context vault UI', () => {
 
   it('preserves group selection and editable instruction hooks', () => {
     const source = fs.readFileSync(appPath, 'utf8');
-    const fileVaultStatesSource = fs.readFileSync(fileVaultStatesUiPath, 'utf8');
+    const fileVaultStatesSource = fs.readFileSync(
+      fileVaultStatesUiPath,
+      'utf8',
+    );
 
     expect(source).toContain("api('/files')");
     expect(source).toContain('id="file-detail"');
@@ -83,7 +86,9 @@ describe('Group Files context vault UI', () => {
     expect(source).toContain('_fileGroupState');
     expect(source).toContain('copyFileGroupBrief');
     expect(source).toContain('Copy group brief');
-    expect(source).toContain('window.NanoFileVaultStates.renderFilesLoadingState');
+    expect(source).toContain(
+      'window.NanoFileVaultStates.renderFilesLoadingState',
+    );
     expect(source).toContain('renderFilesLoadingState');
     expect(fileVaultStatesSource).toContain('Loading group context');
     expect(fileVaultStatesSource).toContain(
@@ -103,7 +108,10 @@ describe('Group Files context vault UI', () => {
 
   it('keeps conversation and attachment affordances wired', () => {
     const source = fs.readFileSync(appPath, 'utf8');
-    const fileVaultStatesSource = fs.readFileSync(fileVaultStatesUiPath, 'utf8');
+    const fileVaultStatesSource = fs.readFileSync(
+      fileVaultStatesUiPath,
+      'utf8',
+    );
 
     expect(source).toContain('viewConversation');
     expect(source).toContain('id="conv-viewer"');
@@ -121,10 +129,15 @@ describe('Group Files context vault UI', () => {
   it('turns missing group files into context routing actions', () => {
     const source = fs.readFileSync(appPath, 'utf8');
     const style = fs.readFileSync(stylePath, 'utf8');
-    const fileVaultStatesSource = fs.readFileSync(fileVaultStatesUiPath, 'utf8');
+    const fileVaultStatesSource = fs.readFileSync(
+      fileVaultStatesUiPath,
+      'utf8',
+    );
     const detail = fileDetailSource(source);
 
-    expect(source).toContain('window.NanoFileVaultStates.renderFilesEmptyState');
+    expect(source).toContain(
+      'window.NanoFileVaultStates.renderFilesEmptyState',
+    );
     expect(source).toContain(
       'window.NanoFileVaultStates.renderFilesLoadingState',
     );
@@ -143,9 +156,7 @@ describe('Group Files context vault UI', () => {
     expect(fileVaultStatesSource).toContain('No attachments');
     expect(fileVaultStatesSource).toContain('Failed to load file');
     expect(fileVaultStatesSource).toContain('File vault unavailable');
-    expect(fileVaultStatesSource).toContain(
-      'Conversation archive unavailable',
-    );
+    expect(fileVaultStatesSource).toContain('Conversation archive unavailable');
     expect(fileVaultStatesSource).toContain('Attachment archive unavailable');
     expect(source).toContain(
       "renderFilesEmptyState('conversations-unavailable')",

@@ -24,6 +24,8 @@ describe('Route recovery UI', () => {
     expect(source).toContain('route-recovery-retry');
     expect(source).toContain('Page recovery');
     expect(source).toContain('Try again or move to another workspace lane');
+    expect(source).toContain('">Retry</button>');
+    expect(source).not.toContain('">Try again</button>');
     expect(source).toContain('Copy recovery brief');
     expect(source).toContain('window.copyRouteRecoveryBrief');
     expect(source).toContain('NanoCrab route recovery brief');

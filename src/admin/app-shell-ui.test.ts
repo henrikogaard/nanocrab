@@ -109,7 +109,10 @@ describe('App shell accessibility UI', () => {
     const recoverySource = fs.readFileSync(recoveryUiPath, 'utf8');
     const providerParitySource = fs.readFileSync(providerParityUiPath, 'utf8');
     const routineStatesSource = fs.readFileSync(routineStatesUiPath, 'utf8');
-    const fileVaultStatesSource = fs.readFileSync(fileVaultStatesUiPath, 'utf8');
+    const fileVaultStatesSource = fs.readFileSync(
+      fileVaultStatesUiPath,
+      'utf8',
+    );
     const indexSource = fs.readFileSync(
       path.join(process.cwd(), 'src/admin/public/index.html'),
       'utf8',

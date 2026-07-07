@@ -1591,6 +1591,10 @@ body {
   gap: 4px;
 }
 
+.agent-rule-field-wide {
+  min-width: 0;
+}
+
 .agent-rule-row {
   border-bottom: 1px solid var(--border);
   padding: 8px 0;
@@ -7453,6 +7457,16 @@ body {
 }
 
 .messages-kicker {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.cowork-kicker {
   display: block;
   margin-bottom: 6px;
   color: var(--accent);

@@ -400,7 +400,8 @@ router.get('/parity', (_req: Request, res: Response) => {
 
   const surfaces = surfaceConfig.map((surface) => {
     const profile =
-      profileMap.get(surface.profileId) || getProviderProfile(surface.profileId);
+      profileMap.get(surface.profileId) ||
+      getProviderProfile(surface.profileId);
     if (!profile) {
       return {
         ...surface,
@@ -432,7 +433,9 @@ router.get('/parity', (_req: Request, res: Response) => {
       notes.push('Selected model is invalid for this provider profile.');
     } else if (probe && probe.ok === false) {
       status = 'degraded';
-      notes.push('Latest provider probe failed; review before unattended work.');
+      notes.push(
+        'Latest provider probe failed; review before unattended work.',
+      );
     } else if (surface.id === 'coding' && !codingCapable) {
       status = 'blocked';
       notes.push('Coding profile is not agentic-capable for repository work.');
@@ -449,7 +452,8 @@ router.get('/parity', (_req: Request, res: Response) => {
 
     if (probe?.errorDetail) notes.push(probe.errorDetail);
     if (probe?.lastProbeAt) notes.push(`Last probe: ${probe.lastProbeAt}`);
-    if (notes.length === 0) notes.push('Provider and capabilities satisfy this surface.');
+    if (notes.length === 0)
+      notes.push('Provider and capabilities satisfy this surface.');
 
     return {
       ...surface,

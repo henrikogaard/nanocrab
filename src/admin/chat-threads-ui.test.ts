@@ -81,6 +81,8 @@ describe('WebChat new conversation modal', () => {
     expect(source).toContain('webchat-thread-action');
     expect(source).toContain('renderThreadSidebarEmptyState');
     expect(source).toContain('thread-sidebar-empty');
+    expect(source).toContain('<button type="button" class="btn btn-sm ');
+    expect(source).toContain("(isError ? 'btn-primary' : 'btn-ghost')");
     expect(source).toContain('window._webchatThreadListLoadIssue');
     expect(source).toContain('Chat list unavailable');
     expect(source).toContain('Retry list');

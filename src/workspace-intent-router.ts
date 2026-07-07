@@ -25,7 +25,9 @@ function recentVisibleContent(messages: NewMessage[]): string {
     .join('\n');
 }
 
-export function classifyWorkspaceIntent(messages: NewMessage[]): WorkspaceIntent {
+export function classifyWorkspaceIntent(
+  messages: NewMessage[],
+): WorkspaceIntent {
   const content = recentVisibleContent(messages);
   if (!content) return 'copilot';
 

@@ -616,6 +616,7 @@ describe('Agents launcher UI', () => {
     expect(source).toContain('.agent-danger-action');
     expect(source).toContain('.agent-rule-form');
     expect(source).toContain('.agent-rule-field');
+    expect(source).toContain('.agent-rule-field-wide');
     expect(source).toContain('.agent-rule-row');
     expect(source).toContain('.agent-rule-head');
     expect(source).toContain('.agent-rule-title');
@@ -791,7 +792,10 @@ describe('Agents launcher UI', () => {
   it('shows coding lane summary guidance in job details', () => {
     const source = fs.readFileSync(agentsPagePath, 'utf8');
     const start = source.indexOf('window.viewCodingJob = async function');
-    const end = source.indexOf('window.cancelAgentTask = async function', start);
+    const end = source.indexOf(
+      'window.cancelAgentTask = async function',
+      start,
+    );
     const detailMarkup = source.slice(start, end);
 
     expect(start).toBeGreaterThan(-1);

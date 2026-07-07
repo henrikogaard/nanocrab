@@ -772,7 +772,9 @@
         ? esc(issue) + '. Retry the list, or start a new chat if thread storage is healthy.'
         : 'Start a plain chat for quick thinking, writing, planning, or drafting.') +
       '</p>' +
-      '<button type="button" onclick="' +
+      '<button type="button" class="btn btn-sm ' +
+      (isError ? 'btn-primary' : 'btn-ghost') +
+      '" onclick="' +
       (isError
         ? 'WebChat.loadThreads().then(function(ts){var nav=document.getElementById(\'chat-thread-nav\'); if(nav) nav.innerHTML=WebChat.renderThreadList(ts, WebChat.activeThreadId);})'
         : 'WebChat.openNewConversationModal()') +

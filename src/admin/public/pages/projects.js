@@ -108,7 +108,7 @@
       '<div><span></span><strong></strong></div>' +
       '</aside>' +
       '<div class="project-loading-main">' +
-      '<span class="messages-kicker">Cowork loading</span>' +
+      '<span class="cowork-kicker">Cowork loading</span>' +
       '<h2>Loading project workspaces</h2>' +
       '<p>Collecting virtual folders, source files, project chats, artifacts, and approved MCP context before opening the workbench.</p>' +
       '<div class="project-loading-flow">' +

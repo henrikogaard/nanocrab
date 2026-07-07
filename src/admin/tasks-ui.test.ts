@@ -246,7 +246,9 @@ describe('Scheduled tasks productivity UI', () => {
     expect(editBlock).toContain(
       "setInlineStatus(m, routineActionErrorMessage('save', r), 'error')",
     );
-    expect(source).toContain('window.NanoRoutineStates.renderRoutineRunsEmptyState');
+    expect(source).toContain(
+      'window.NanoRoutineStates.renderRoutineRunsEmptyState',
+    );
     expect(source).toContain(
       'window.NanoRoutineStates.renderRoutineRunsUnavailableState',
     );
@@ -261,8 +263,12 @@ describe('Scheduled tasks productivity UI', () => {
     );
     expect(detailBlock).toContain('renderRoutineRunsEmptyState(task)');
     expect(detailBlock).toContain('renderRoutineRunsUnavailableState(task)');
-    expect(detailBlock).toContain('renderRoutineDetailDataHealth(loadIssues, task)');
-    expect(detailBlock).toContain("renderRoutineRecoveryState('task', e.message");
+    expect(detailBlock).toContain(
+      'renderRoutineDetailDataHealth(loadIssues, task)',
+    );
+    expect(detailBlock).toContain(
+      "renderRoutineRecoveryState('task', e.message",
+    );
     expect(detailBlock).toContain('renderRoutineDetailLoadingState(id)');
     expect(detailBlock).toContain('Recent run history unavailable');
     expect(detailBlock).toContain('Webhook approval context unavailable');
@@ -272,7 +278,9 @@ describe('Scheduled tasks productivity UI', () => {
     expect(detailBlock).toContain(
       'window._taskById = { ...(window._taskById || {}), [task.id]: task }',
     );
-    expect(routineStatesSource).toContain('function renderRoutineRunsEmptyState');
+    expect(routineStatesSource).toContain(
+      'function renderRoutineRunsEmptyState',
+    );
     expect(routineStatesSource).toContain(
       'function renderRoutineRunsUnavailableState',
     );
@@ -282,7 +290,9 @@ describe('Scheduled tasks productivity UI', () => {
     expect(routineStatesSource).toContain(
       'function renderRoutineDetailLoadingState',
     );
-    expect(routineStatesSource).toContain('function renderRoutineRecoveryState');
+    expect(routineStatesSource).toContain(
+      'function renderRoutineRecoveryState',
+    );
     expect(routineStatesSource).toContain('routine-runs-empty-state');
     expect(routineStatesSource).toContain('routine-recovery-state');
     expect(routineStatesSource).toContain('routine-detail-warning');

@@ -442,7 +442,9 @@ describe('/api/projects', () => {
     fs.mkdirSync(STORE_DIR, { recursive: true });
     fs.writeFileSync(
       path.join(STORE_DIR, 'mcp-servers.json'),
-      JSON.stringify([{ name: 'gmail', command: 'npx', args: ['-y', 'gmail'] }]),
+      JSON.stringify([
+        { name: 'gmail', command: 'npx', args: ['-y', 'gmail'] },
+      ]),
     );
 
     const result = await withServer(async (base) => {
@@ -451,13 +453,18 @@ describe('/api/projects', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'Action Preview Project' }),
       });
-      const { project } = (await createRes.json()) as { project: { id: string } };
+      const { project } = (await createRes.json()) as {
+        project: { id: string };
+      };
 
-      const threadRes = await fetch(`${base}/api/projects/${project.id}/threads`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: 'Seed connector permissions' }),
-      });
+      const threadRes = await fetch(
+        `${base}/api/projects/${project.id}/threads`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: 'Seed connector permissions' }),
+        },
+      );
       expect(threadRes.status).toBe(200);
 
       const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
@@ -471,15 +478,18 @@ describe('/api/projects', () => {
       expect(runRes.status).toBe(200);
       const runPayload = (await runRes.json()) as { run: { id: string } };
 
-      const contextRes = await fetch(`${base}/api/projects/${project.id}/context`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          title: 'Sensitive inbox extract',
-          sensitivity: 'sensitive',
-          source: 'gmail',
-        }),
-      });
+      const contextRes = await fetch(
+        `${base}/api/projects/${project.id}/context`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            title: 'Sensitive inbox extract',
+            sensitivity: 'sensitive',
+            source: 'gmail',
+          }),
+        },
+      );
       expect(contextRes.status).toBe(200);
 
       const readPreviewRes = await fetch(
@@ -495,7 +505,11 @@ describe('/api/projects', () => {
       );
       expect(readPreviewRes.status).toBe(200);
       const readPreview = (await readPreviewRes.json()) as {
-        preview: { allowed: boolean; requiresApproval: boolean; reason: string };
+        preview: {
+          allowed: boolean;
+          requiresApproval: boolean;
+          reason: string;
+        };
       };
 
       const writePreviewRes = await fetch(
@@ -511,7 +525,11 @@ describe('/api/projects', () => {
       );
       expect(writePreviewRes.status).toBe(200);
       const writePreview = (await writePreviewRes.json()) as {
-        preview: { allowed: boolean; requiresApproval: boolean; reason: string };
+        preview: {
+          allowed: boolean;
+          requiresApproval: boolean;
+          reason: string;
+        };
       };
 
       return { readPreview, writePreview };
@@ -537,7 +555,9 @@ describe('/api/projects', () => {
     fs.mkdirSync(STORE_DIR, { recursive: true });
     fs.writeFileSync(
       path.join(STORE_DIR, 'mcp-servers.json'),
-      JSON.stringify([{ name: 'gmail', command: 'npx', args: ['-y', 'gmail'] }]),
+      JSON.stringify([
+        { name: 'gmail', command: 'npx', args: ['-y', 'gmail'] },
+      ]),
     );
 
     const result = await withServer(async (base) => {
@@ -546,13 +566,18 @@ describe('/api/projects', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'Disallowed Action Request Project' }),
       });
-      const { project } = (await createRes.json()) as { project: { id: string } };
+      const { project } = (await createRes.json()) as {
+        project: { id: string };
+      };
 
-      const threadRes = await fetch(`${base}/api/projects/${project.id}/threads`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: 'Seed connector permissions' }),
-      });
+      const threadRes = await fetch(
+        `${base}/api/projects/${project.id}/threads`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: 'Seed connector permissions' }),
+        },
+      );
       expect(threadRes.status).toBe(200);
 
       const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
@@ -610,7 +635,9 @@ describe('/api/projects', () => {
     fs.mkdirSync(STORE_DIR, { recursive: true });
     fs.writeFileSync(
       path.join(STORE_DIR, 'mcp-servers.json'),
-      JSON.stringify([{ name: 'gmail', command: 'npx', args: ['-y', 'gmail'] }]),
+      JSON.stringify([
+        { name: 'gmail', command: 'npx', args: ['-y', 'gmail'] },
+      ]),
     );
 
     const result = await withServer(async (base) => {
@@ -619,13 +646,18 @@ describe('/api/projects', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'Approval Action Request Project' }),
       });
-      const { project } = (await createRes.json()) as { project: { id: string } };
+      const { project } = (await createRes.json()) as {
+        project: { id: string };
+      };
 
-      const threadRes = await fetch(`${base}/api/projects/${project.id}/threads`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: 'Seed connector permissions' }),
-      });
+      const threadRes = await fetch(
+        `${base}/api/projects/${project.id}/threads`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: 'Seed connector permissions' }),
+        },
+      );
       expect(threadRes.status).toBe(200);
 
       const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
@@ -841,7 +873,9 @@ describe('/api/projects', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'Run Notebook Project' }),
       });
-      const { project } = (await createRes.json()) as { project: { id: string } };
+      const { project } = (await createRes.json()) as {
+        project: { id: string };
+      };
 
       const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
         method: 'POST',
@@ -977,7 +1011,9 @@ describe('/api/projects', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'Research Coverage Project' }),
       });
-      const { project } = (await createRes.json()) as { project: { id: string } };
+      const { project } = (await createRes.json()) as {
+        project: { id: string };
+      };
 
       const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
         method: 'POST',
@@ -1047,6 +1083,24 @@ describe('/api/projects', () => {
         }),
       );
 
+      const invalidCitationRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${runPayload.run.id}/research/citations`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            title: 'Unsafe source',
+            sourceUrl: 'javascript:alert(1)',
+          }),
+        },
+      );
+      expect(invalidCitationRes.status).toBe(400);
+      await expect(invalidCitationRes.json()).resolves.toEqual(
+        expect.objectContaining({
+          error: expect.stringContaining('http:// or https://'),
+        }),
+      );
+
       const groupedCitationRes = await fetch(
         `${base}/api/projects/${project.id}/runs/${runPayload.run.id}`,
         {
@@ -1059,9 +1113,18 @@ describe('/api/projects', () => {
                 title: 'Topline report',
                 sourceUrl: 'https://example.com/topline',
                 citations: [
-                  { title: 'Source 1', sourceUrl: 'https://example.com/source-1' },
-                  { title: 'Source 2', sourceUrl: 'https://example.com/source-2' },
-                  { title: 'Source 3', sourceUrl: 'https://example.com/source-3' },
+                  {
+                    title: 'Source 1',
+                    sourceUrl: 'https://example.com/source-1',
+                  },
+                  {
+                    title: 'Source 2',
+                    sourceUrl: 'https://example.com/source-2',
+                  },
+                  {
+                    title: 'Source 3',
+                    sourceUrl: 'https://example.com/source-3',
+                  },
                 ],
               },
             ]),
@@ -1078,6 +1141,20 @@ describe('/api/projects', () => {
           status: 'sufficient',
         }),
       );
+
+      const escapedCitationRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${runPayload.run.id}/research/citations`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            title: 'Doc ](x)',
+            sourceUrl: 'https://example.com/research/(q1)',
+            note: 'Use [alpha](beta) and keep (draft) context',
+          }),
+        },
+      );
+      expect(escapedCitationRes.status).toBe(200);
 
       const exportLedgerRes = await fetch(
         `${base}/api/projects/${project.id}/runs/${runPayload.run.id}/research/export-ledger`,
@@ -1097,11 +1174,31 @@ describe('/api/projects', () => {
         `research/run-${runPayload.run.id}-citations.md`,
       );
 
+      const ledgerReadRes = await fetch(
+        `${base}/api/projects/${project.id}/files/read?path=${encodeURIComponent(
+          `research/run-${runPayload.run.id}-citations.md`,
+        )}`,
+      );
+      expect(ledgerReadRes.status).toBe(200);
+      const ledgerReadPayload = (await ledgerReadRes.json()) as {
+        file: { content: string };
+      };
+      expect(ledgerReadPayload.file.content).toContain(
+        '- [Doc \\]\\(x\\)](https://example.com/research/%28q1%29)',
+      );
+      expect(ledgerReadPayload.file.content).toContain(
+        '  - Note: Use \\[alpha\\]\\(beta\\) and keep \\(draft\\) context',
+      );
+
       const detailRes = await fetch(`${base}/api/projects/${project.id}`);
       expect(detailRes.status).toBe(200);
       const detail = (await detailRes.json()) as {
         files: Array<{ path: string; kind: string }>;
-        contextItems: Array<{ path: string | null; source: string; autoGenerated: number }>;
+        contextItems: Array<{
+          path: string | null;
+          source: string;
+          autoGenerated: number;
+        }>;
       };
       expect(detail.files).toEqual(
         expect.arrayContaining([
@@ -1120,10 +1217,16 @@ describe('/api/projects', () => {
         ]),
       );
 
-      const contextRes = await fetch(`${base}/api/projects/${project.id}/context`);
+      const contextRes = await fetch(
+        `${base}/api/projects/${project.id}/context`,
+      );
       expect(contextRes.status).toBe(200);
       const contextPayload = (await contextRes.json()) as {
-        contextItems: Array<{ path: string | null; source: string; autoGenerated: number }>;
+        contextItems: Array<{
+          path: string | null;
+          source: string;
+          autoGenerated: number;
+        }>;
       };
       expect(contextPayload.contextItems).toEqual(
         expect.arrayContaining([

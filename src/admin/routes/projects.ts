@@ -493,13 +493,15 @@ function inferRunIntent(prompt: string): {
     return {
       mode: 'research',
       requiresCitations: true,
-      sourceExpectation: 'Collect source links and attach citations in outputs.',
+      sourceExpectation:
+        'Collect source links and attach citations in outputs.',
     };
   }
   return {
     mode: 'execution',
     requiresCitations: false,
-    sourceExpectation: 'Use project files and context notebook as the primary source of truth.',
+    sourceExpectation:
+      'Use project files and context notebook as the primary source of truth.',
   };
 }
 
@@ -515,6 +517,31 @@ interface RunCitationEntry {
   note?: string;
 }
 
+function normalizeCitationSourceUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function escapeMarkdownInlineText(value: string): string {
+  return value.replace(/([\\`*_{}[\]()#+\-.!])/g, '\\$1');
+}
+
+function encodeMarkdownLinkDestination(value: string): string {
+  return encodeURI(value).replace(/[()]/g, (token) =>
+    token === '(' ? '%28' : '%29',
+  );
+}
+
 function extractCitationLikeEntries(outputs: unknown[]): RunCitationEntry[] {
   const toTrimmedString = (value: unknown): string | null => {
     if (typeof value !== 'string') return null;
@@ -527,9 +554,9 @@ function extractCitationLikeEntries(outputs: unknown[]): RunCitationEntry[] {
     fallback?: Record<string, unknown>,
   ): RunCitationEntry | null => {
     const sourceUrl =
-      toTrimmedString(value.sourceUrl) ||
-      toTrimmedString(value.url) ||
-      toTrimmedString(value.source) ||
+      normalizeCitationSourceUrl(value.sourceUrl) ||
+      normalizeCitationSourceUrl(value.url) ||
+      normalizeCitationSourceUrl(value.source) ||
       null;
     if (!sourceUrl) return null;
     const title =
@@ -539,7 +566,9 @@ function extractCitationLikeEntries(outputs: unknown[]): RunCitationEntry[] {
       toTrimmedString(fallback?.title) ||
       sourceUrl;
     const note =
-      toTrimmedString(value.note) || toTrimmedString(fallback?.note) || undefined;
+      toTrimmedString(value.note) ||
+      toTrimmedString(fallback?.note) ||
+      undefined;
     return note ? { title, sourceUrl, note } : { title, sourceUrl };
   };
 
@@ -554,26 +583,36 @@ function extractCitationLikeEntries(outputs: unknown[]): RunCitationEntry[] {
       directEntry =
         citationEntryFromRecord(entry) ||
         (entry.citation && typeof entry.citation === 'object'
-          ? citationEntryFromRecord(entry.citation as Record<string, unknown>, entry)
+          ? citationEntryFromRecord(
+              entry.citation as Record<string, unknown>,
+              entry,
+            )
           : null) ||
         (typeof entry.citation === 'string' && entry.citation.trim()
           ? {
               title: toTrimmedString(entry.title) || entry.citation.trim(),
-              sourceUrl: entry.citation.trim(),
-              ...(toTrimmedString(entry.note) ? { note: toTrimmedString(entry.note)! } : {}),
+              sourceUrl: normalizeCitationSourceUrl(entry.citation.trim()) || '',
+              ...(toTrimmedString(entry.note)
+                ? { note: toTrimmedString(entry.note)! }
+                : {}),
             }
           : null);
     } else if (typeof entry.citation === 'string' && entry.citation.trim()) {
       directEntry = {
         title: toTrimmedString(entry.title) || entry.citation.trim(),
-        sourceUrl: entry.citation.trim(),
-        ...(toTrimmedString(entry.note) ? { note: toTrimmedString(entry.note)! } : {}),
+        sourceUrl: normalizeCitationSourceUrl(entry.citation.trim()) || '',
+        ...(toTrimmedString(entry.note)
+          ? { note: toTrimmedString(entry.note)! }
+          : {}),
       };
     } else if (entry.citation && typeof entry.citation === 'object') {
       directEntry = citationEntryFromRecord(
         entry.citation as Record<string, unknown>,
         entry,
       );
+    }
+    if (directEntry && !directEntry.sourceUrl) {
+      directEntry = null;
     }
 
     if (!Array.isArray(entry.citations)) {
@@ -638,7 +677,8 @@ function runResearchCoverage(run: CoworkRun): {
   return {
     citationCount,
     status: 'sufficient',
-    guidance: 'Research coverage is sufficient. Keep citations aligned with key claims.',
+    guidance:
+      'Research coverage is sufficient. Keep citations aligned with key claims.',
   };
 }
 
@@ -1079,13 +1119,21 @@ router.post('/:id/runs', (req: Request, res: Response) => {
   const planSteps =
     intent.mode === 'research'
       ? [
-          { id: 'plan', title: 'Scoping research question', status: 'planning' },
+          {
+            id: 'plan',
+            title: 'Scoping research question',
+            status: 'planning',
+          },
           {
             id: 'gather',
             title: 'Gathering sources and citations',
             status: 'pending',
           },
-          { id: 'synthesize', title: 'Synthesizing findings', status: 'pending' },
+          {
+            id: 'synthesize',
+            title: 'Synthesizing findings',
+            status: 'pending',
+          },
           {
             id: 'deliver',
             title: 'Delivering sourced output',
@@ -1108,7 +1156,9 @@ router.post('/:id/runs', (req: Request, res: Response) => {
         ? req.body.provider
         : null,
     model:
-      typeof req.body.model === 'string' && req.body.model ? req.body.model : null,
+      typeof req.body.model === 'string' && req.body.model
+        ? req.body.model
+        : null,
     complexity_level: complexity.level,
     estimated_steps: complexity.estimatedSteps,
     budget_tier: complexity.budgetTier,
@@ -1147,57 +1197,68 @@ router.get('/:id/runs/:runId', (req: Request, res: Response) => {
   res.json({ run: runSummary(run) });
 });
 
-router.post('/:id/runs/:runId/research/citations', (req: Request, res: Response) => {
-  const project = getCoworkProject(String(req.params.id));
-  if (!project) {
-    res.status(404).json({ error: 'Project not found' });
-    return;
-  }
-  const run = getCoworkRun(project.id, String(req.params.runId));
-  if (!run) {
-    res.status(404).json({ error: 'Run not found' });
-    return;
-  }
+router.post(
+  '/:id/runs/:runId/research/citations',
+  (req: Request, res: Response) => {
+    const project = getCoworkProject(String(req.params.id));
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+    const run = getCoworkRun(project.id, String(req.params.runId));
+    if (!run) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
 
-  const title =
-    typeof req.body.title === 'string' ? req.body.title.trim() : '';
-  const sourceUrl =
-    typeof req.body.sourceUrl === 'string' ? req.body.sourceUrl.trim() : '';
-  const note =
-    typeof req.body.note === 'string' && req.body.note.trim()
-      ? req.body.note.trim()
-      : undefined;
-  if (!title || !sourceUrl) {
-    res.status(400).json({ error: 'Title and sourceUrl are required' });
-    return;
-  }
+    const title =
+      typeof req.body.title === 'string' ? req.body.title.trim() : '';
+    const sourceUrl =
+      typeof req.body.sourceUrl === 'string' ? req.body.sourceUrl.trim() : '';
+    const note =
+      typeof req.body.note === 'string' && req.body.note.trim()
+        ? req.body.note.trim()
+        : undefined;
+    if (!title || !sourceUrl) {
+      res.status(400).json({ error: 'Title and sourceUrl are required' });
+      return;
+    }
+    const normalizedSourceUrl = normalizeCitationSourceUrl(sourceUrl);
+    if (!normalizedSourceUrl) {
+      res.status(400).json({
+        error:
+          'sourceUrl must be a valid absolute URL using http:// or https://',
+      });
+      return;
+    }
 
-  const now = new Date().toISOString();
-  const outputs = parseJsonArray(run.outputs_json);
-  outputs.push({
-    id: randomUUID(),
-    kind: 'citation',
-    title,
-    sourceUrl,
-    note,
-    addedAt: now,
-  });
-  const events = parseJsonArray(run.events_json);
-  events.push({
-    id: randomUUID(),
-    timestamp: now,
-    kind: 'citation-added',
-    message: `Citation added: ${title}`,
-  });
-  const updated = updateCoworkRun(project.id, run.id, {
-    outputs_json: JSON.stringify(outputs),
-    events_json: JSON.stringify(events),
-    updated_at: now,
-    last_activity_at: now,
-  });
-  touchCoworkProject(project.id, now);
-  res.status(200).json({ run: runSummary(updated) });
-});
+    const now = new Date().toISOString();
+    const outputs = parseJsonArray(run.outputs_json);
+    outputs.push({
+      id: randomUUID(),
+      kind: 'citation',
+      title,
+      sourceUrl: normalizedSourceUrl,
+      note,
+      addedAt: now,
+    });
+    const events = parseJsonArray(run.events_json);
+    events.push({
+      id: randomUUID(),
+      timestamp: now,
+      kind: 'citation-added',
+      message: `Citation added: ${title}`,
+    });
+    const updated = updateCoworkRun(project.id, run.id, {
+      outputs_json: JSON.stringify(outputs),
+      events_json: JSON.stringify(events),
+      updated_at: now,
+      last_activity_at: now,
+    });
+    touchCoworkProject(project.id, now);
+    res.status(200).json({ run: runSummary(updated) });
+  },
+);
 
 router.post(
   '/:id/runs/:runId/research/export-ledger',
@@ -1224,7 +1285,9 @@ router.post(
     }
 
     const now = new Date().toISOString();
-    const filePath = safeCoworkProjectFilePath(`research/run-${run.id}-citations.md`);
+    const filePath = safeCoworkProjectFilePath(
+      `research/run-${run.id}-citations.md`,
+    );
     if (!filePath) {
       res.status(400).json({ error: 'Invalid ledger file path' });
       return;
@@ -1238,9 +1301,11 @@ router.post(
       '',
       '## Citations',
       ...citations.flatMap((citation) => {
-        const lines = [`- [${citation.title}](${citation.sourceUrl})`];
+        const lines = [
+          `- [${escapeMarkdownInlineText(citation.title)}](${encodeMarkdownLinkDestination(citation.sourceUrl)})`,
+        ];
         if (citation.note) {
-          lines.push(`  - Note: ${citation.note}`);
+          lines.push(`  - Note: ${escapeMarkdownInlineText(citation.note)}`);
         }
         return lines;
       }),
@@ -1284,7 +1349,9 @@ router.post(
             updated_at: now,
           });
       if (!contextItem) {
-        res.status(500).json({ error: 'Failed to update citation ledger context item' });
+        res
+          .status(500)
+          .json({ error: 'Failed to update citation ledger context item' });
         return;
       }
 
@@ -1365,9 +1432,7 @@ router.patch('/:id/runs/:runId', (req: Request, res: Response) => {
       ? (req.body.status as CoworkRunStatus)
       : undefined;
   const nextStatus: CoworkRunStatus =
-    statusFromBody ||
-    actionStatusMap[action] ||
-    run.status;
+    statusFromBody || actionStatusMap[action] || run.status;
   const events = parseJsonArray(run.events_json);
   const currentApprovals = parseJsonArray(run.approvals_json);
   const contextItems = listCoworkProjectContextItems(project.id);
@@ -1417,7 +1482,9 @@ router.patch('/:id/runs/:runId', (req: Request, res: Response) => {
         ? req.body.planSteps
         : run.plan_steps_json,
     outputs_json:
-      typeof req.body.outputs === 'string' ? req.body.outputs : run.outputs_json,
+      typeof req.body.outputs === 'string'
+        ? req.body.outputs
+        : run.outputs_json,
     approvals_json:
       typeof req.body.approvals === 'string'
         ? req.body.approvals
@@ -1430,127 +1497,136 @@ router.patch('/:id/runs/:runId', (req: Request, res: Response) => {
   res.json({ run: runSummary(updated) });
 });
 
-router.post('/:id/runs/:runId/actions/preview', (req: Request, res: Response) => {
-  const project = getCoworkProject(String(req.params.id));
-  if (!project) {
-    res.status(404).json({ error: 'Project not found' });
-    return;
-  }
-  const run = getCoworkRun(project.id, String(req.params.runId));
-  if (!run) {
-    res.status(404).json({ error: 'Run not found' });
-    return;
-  }
-  ensureProjectThreadMcpPermissions(projectThreadMcpServers());
+router.post(
+  '/:id/runs/:runId/actions/preview',
+  (req: Request, res: Response) => {
+    const project = getCoworkProject(String(req.params.id));
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+    const run = getCoworkRun(project.id, String(req.params.runId));
+    if (!run) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
+    ensureProjectThreadMcpPermissions(projectThreadMcpServers());
 
-  const connectorId =
-    typeof req.body.connectorId === 'string' ? req.body.connectorId : '';
-  const action = typeof req.body.action === 'string' ? req.body.action : '';
-  const preview = buildConnectorActionPreview({
-    project,
-    connectorId,
-    action,
-  });
-  res.json({
-    run: {
-      id: run.id,
-      status: run.status,
-    },
-    preview,
-  });
-});
-
-router.post('/:id/runs/:runId/actions/request', (req: Request, res: Response) => {
-  const project = getCoworkProject(String(req.params.id));
-  if (!project) {
-    res.status(404).json({ error: 'Project not found' });
-    return;
-  }
-  const run = getCoworkRun(project.id, String(req.params.runId));
-  if (!run) {
-    res.status(404).json({ error: 'Run not found' });
-    return;
-  }
-  ensureProjectThreadMcpPermissions(projectThreadMcpServers());
-
-  const connectorId =
-    typeof req.body.connectorId === 'string' ? req.body.connectorId.trim() : '';
-  const action = typeof req.body.action === 'string' ? req.body.action.trim() : '';
-  if (!connectorId || !action) {
-    res.status(400).json({ error: 'Connector ID and action are required' });
-    return;
-  }
-
-  const note =
-    typeof req.body.note === 'string' && req.body.note.trim()
-      ? req.body.note.trim()
-      : undefined;
-  const payload = req.body.payload;
-  const preview = buildConnectorActionPreview({
-    project,
-    connectorId,
-    action,
-  });
-  if (!preview.allowed) {
-    res.status(403).json({
-      error: preview.reason,
+    const connectorId =
+      typeof req.body.connectorId === 'string' ? req.body.connectorId : '';
+    const action = typeof req.body.action === 'string' ? req.body.action : '';
+    const preview = buildConnectorActionPreview({
+      project,
+      connectorId,
+      action,
+    });
+    res.json({
+      run: {
+        id: run.id,
+        status: run.status,
+      },
       preview,
     });
-    return;
-  }
+  },
+);
 
-  const now = new Date().toISOString();
-  const events = parseJsonArray(run.events_json);
-  const approvals = parseJsonArray(run.approvals_json);
-  const requiresApproval = preview.requiresApproval;
-  let nextStatus = run.status;
-
-  if (requiresApproval) {
-    approvals.push({
-      id: randomUUID(),
-      kind: 'connector-action',
-      status: 'pending',
-      connectorId: preview.connectorId,
-      action: preview.action,
-      note,
-      requestedAt: now,
-      sensitivitySignals: preview.sensitivitySignals,
-      payload,
-    });
-    events.push({
-      id: randomUUID(),
-      timestamp: now,
-      kind: 'action-requested',
-      message: `Connector action ${preview.connectorId}/${preview.action} requested and requires approval before execution.`,
-    });
-    nextStatus = 'waiting_for_approval';
-  } else {
-    events.push({
-      id: randomUUID(),
-      timestamp: now,
-      kind: 'action-authorized',
-      message: `Connector action ${preview.connectorId}/${preview.action} authorized by policy.`,
-    });
-    if (run.status === 'planning') {
-      nextStatus = 'running';
+router.post(
+  '/:id/runs/:runId/actions/request',
+  (req: Request, res: Response) => {
+    const project = getCoworkProject(String(req.params.id));
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
     }
-  }
+    const run = getCoworkRun(project.id, String(req.params.runId));
+    if (!run) {
+      res.status(404).json({ error: 'Run not found' });
+      return;
+    }
+    ensureProjectThreadMcpPermissions(projectThreadMcpServers());
 
-  const updated = updateCoworkRun(project.id, run.id, {
-    status: nextStatus,
-    approvals_json: JSON.stringify(approvals),
-    events_json: JSON.stringify(events),
-    updated_at: now,
-    last_activity_at: now,
-  });
-  touchCoworkProject(project.id, now);
-  res.status(requiresApproval ? 202 : 200).json({
-    requested: true,
-    approvalRequired: requiresApproval,
-    run: runSummary(updated),
-    preview,
-  });
-});
+    const connectorId =
+      typeof req.body.connectorId === 'string'
+        ? req.body.connectorId.trim()
+        : '';
+    const action =
+      typeof req.body.action === 'string' ? req.body.action.trim() : '';
+    if (!connectorId || !action) {
+      res.status(400).json({ error: 'Connector ID and action are required' });
+      return;
+    }
+
+    const note =
+      typeof req.body.note === 'string' && req.body.note.trim()
+        ? req.body.note.trim()
+        : undefined;
+    const payload = req.body.payload;
+    const preview = buildConnectorActionPreview({
+      project,
+      connectorId,
+      action,
+    });
+    if (!preview.allowed) {
+      res.status(403).json({
+        error: preview.reason,
+        preview,
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const events = parseJsonArray(run.events_json);
+    const approvals = parseJsonArray(run.approvals_json);
+    const requiresApproval = preview.requiresApproval;
+    let nextStatus = run.status;
+
+    if (requiresApproval) {
+      approvals.push({
+        id: randomUUID(),
+        kind: 'connector-action',
+        status: 'pending',
+        connectorId: preview.connectorId,
+        action: preview.action,
+        note,
+        requestedAt: now,
+        sensitivitySignals: preview.sensitivitySignals,
+        payload,
+      });
+      events.push({
+        id: randomUUID(),
+        timestamp: now,
+        kind: 'action-requested',
+        message: `Connector action ${preview.connectorId}/${preview.action} requested and requires approval before execution.`,
+      });
+      nextStatus = 'waiting_for_approval';
+    } else {
+      events.push({
+        id: randomUUID(),
+        timestamp: now,
+        kind: 'action-authorized',
+        message: `Connector action ${preview.connectorId}/${preview.action} authorized by policy.`,
+      });
+      if (run.status === 'planning') {
+        nextStatus = 'running';
+      }
+    }
+
+    const updated = updateCoworkRun(project.id, run.id, {
+      status: nextStatus,
+      approvals_json: JSON.stringify(approvals),
+      events_json: JSON.stringify(events),
+      updated_at: now,
+      last_activity_at: now,
+    });
+    touchCoworkProject(project.id, now);
+    res.status(requiresApproval ? 202 : 200).json({
+      requested: true,
+      approvalRequired: requiresApproval,
+      run: runSummary(updated),
+      preview,
+    });
+  },
+);
 
 router.get('/:id/context', (req: Request, res: Response) => {
   const project = getCoworkProject(String(req.params.id));
@@ -1561,22 +1637,24 @@ router.get('/:id/context', (req: Request, res: Response) => {
   const files = listCoworkProjectFiles(project);
   const threads = projectThreads(project.id);
   const runs = listCoworkRuns(project.id);
-  const contextItems = listCoworkProjectContextItems(project.id).map((item) => ({
-    id: item.id,
-    kind: item.kind,
-    title: item.title,
-    path: item.path,
-    source: item.source,
-    provenance: item.provenance,
-    sensitivity: item.sensitivity,
-    included: item.included,
-    pinned: item.pinned,
-    staleState: item.stale_state,
-    content: item.content,
-    autoGenerated: item.auto_generated,
-    createdAt: item.created_at,
-    updatedAt: item.updated_at,
-  }));
+  const contextItems = listCoworkProjectContextItems(project.id).map(
+    (item) => ({
+      id: item.id,
+      kind: item.kind,
+      title: item.title,
+      path: item.path,
+      source: item.source,
+      provenance: item.provenance,
+      sensitivity: item.sensitivity,
+      included: item.included,
+      pinned: item.pinned,
+      staleState: item.stale_state,
+      content: item.content,
+      autoGenerated: item.auto_generated,
+      createdAt: item.created_at,
+      updatedAt: item.updated_at,
+    }),
+  );
   res.json({
     contextItems: [...contextItems, ...autoContextItems(files, threads, runs)],
   });
@@ -1694,9 +1772,17 @@ router.patch('/:id/context/:itemId', (req: Request, res: Response) => {
           ? req.body.sensitivity.trim()
           : undefined,
       included:
-        typeof req.body.included === 'boolean' ? (req.body.included ? 1 : 0) : undefined,
+        typeof req.body.included === 'boolean'
+          ? req.body.included
+            ? 1
+            : 0
+          : undefined,
       pinned:
-        typeof req.body.pinned === 'boolean' ? (req.body.pinned ? 1 : 0) : undefined,
+        typeof req.body.pinned === 'boolean'
+          ? req.body.pinned
+            ? 1
+            : 0
+          : undefined,
       stale_state:
         typeof req.body.staleState === 'string' && req.body.staleState.trim()
           ? req.body.staleState.trim()

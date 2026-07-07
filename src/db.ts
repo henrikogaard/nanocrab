@@ -321,7 +321,9 @@ function createSchema(database: Database.Database): void {
       ['budget_tier', `TEXT NOT NULL DEFAULT 'medium'`],
     ]) {
       try {
-        database.exec(`ALTER TABLE cowork_runs ADD COLUMN ${column} ${definition}`);
+        database.exec(
+          `ALTER TABLE cowork_runs ADD COLUMN ${column} ${definition}`,
+        );
       } catch {
         /* column already exists */
       }

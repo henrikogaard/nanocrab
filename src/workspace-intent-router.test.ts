@@ -5,7 +5,10 @@ import {
   workspaceIntentContext,
 } from './workspace-intent-router.js';
 
-function message(content: string, overrides: Partial<NewMessage> = {}): NewMessage {
+function message(
+  content: string,
+  overrides: Partial<NewMessage> = {},
+): NewMessage {
   return {
     id: 'm1',
     chat_jid: 'wa:group',
@@ -28,7 +31,9 @@ describe('workspace intent router', () => {
 
   it('classifies cowork intent for research and artifact cues', () => {
     const intent = classifyWorkspaceIntent([
-      message('Research this topic, summarize sources with citations, and draft an email artifact.'),
+      message(
+        'Research this topic, summarize sources with citations, and draft an email artifact.',
+      ),
     ]);
 
     expect(intent).toBe('cowork');
@@ -43,8 +48,14 @@ describe('workspace intent router', () => {
   });
 
   it('returns lane-specific guidance markers in workspace context blocks', () => {
-    expect(workspaceIntentContext('code')).toContain('guidance="code-workspace"');
-    expect(workspaceIntentContext('cowork')).toContain('guidance="cowork-workspace"');
-    expect(workspaceIntentContext('copilot')).toContain('guidance="copilot-workspace"');
+    expect(workspaceIntentContext('code')).toContain(
+      'guidance="code-workspace"',
+    );
+    expect(workspaceIntentContext('cowork')).toContain(
+      'guidance="cowork-workspace"',
+    );
+    expect(workspaceIntentContext('copilot')).toContain(
+      'guidance="copilot-workspace"',
+    );
   });
 });

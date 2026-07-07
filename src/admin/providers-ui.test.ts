@@ -95,7 +95,9 @@ describe('AI Providers routing cockpit UI', () => {
       'Keep sends, publishes, repository writes, webhooks, and third-party updates approval-gated regardless of model.',
     );
     expect(source).toContain("api('/providers/parity')");
-    expect(source).toContain('window.NanoProviderParity.renderProviderParityPanel(parity)');
+    expect(source).toContain(
+      'window.NanoProviderParity.renderProviderParityPanel(parity)',
+    );
     expect(paritySource).toContain('window.NanoProviderParity');
     expect(paritySource).toContain('renderProviderParityPanel');
     expect(paritySource).toContain('provider-parity-panel');
