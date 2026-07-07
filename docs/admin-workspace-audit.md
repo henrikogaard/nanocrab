@@ -1,6 +1,6 @@
 # Admin Workspace QA And Accessibility Audit
 
-Last updated: 2026-06-19
+Last updated: 2026-07-07
 
 ## Scope
 
@@ -30,7 +30,12 @@ Latest run:
 
 | Date | Command | Result | Evidence |
 | --- | --- | --- | --- |
+| 2026-07-07 | `rtk mise exec node@22 -- npm run qa:admin` | Passed | `artifacts/admin-workspace-qa/2026-07-07T12-32-49-293Z/summary.json` |
 | 2026-06-19 | `rtk npm run qa:admin` | Passed | `artifacts/admin-workspace-qa/2026-06-19T21-27-26-307Z/summary.json` |
+
+The 2026-07-07 pass ran after all local branches/worktrees were merged into
+`main`. It reported no automated workspace issues across desktop and narrow
+viewports.
 
 During this pass the closed More drawer was found to keep offscreen controls in
 the keyboard tab order. The drawer is now `inert` and `aria-hidden` while closed,
