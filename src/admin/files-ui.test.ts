@@ -56,17 +56,25 @@ describe('Group Files context vault UI', () => {
     expect(source).toContain('copyFileVaultBrief');
     expect(source).toContain('Copy vault brief');
     expect(fileVaultStatesSource).toContain('Files context vault brief');
-    expect(fileVaultStatesSource).toContain('Global MEMORY.md stays personal and private.');
-    expect(fileVaultStatesSource).toContain('AGENTS.md defines group-specific behavior.');
+    expect(fileVaultStatesSource).toContain(
+      'Global MEMORY.md stays personal and private.',
+    );
+    expect(fileVaultStatesSource).toContain(
+      'AGENTS.md defines group-specific behavior.',
+    );
     expect(fileVaultStatesSource).toContain(
       'Saved threads support audit and context recovery.',
     );
-    expect(fileVaultStatesSource).toContain('Uploaded files and media from channels.');
+    expect(fileVaultStatesSource).toContain(
+      'Uploaded files and media from channels.',
+    );
     expect(fileVaultStatesSource).toContain(
       'Keep personal memory in the personal Memory space, group behavior in AGENTS.md, project work in Cowork projects, and raw channel uploads here until promoted into an artifact.',
     );
     expect(source).toContain('filePromotionChecklist()');
-    expect(fileVaultStatesSource).toContain('filePromotionChecklist().map(function (item) {');
+    expect(fileVaultStatesSource).toContain(
+      'filePromotionChecklist().map(function (item) {',
+    );
   });
 
   it('preserves group selection and editable instruction hooks', () => {

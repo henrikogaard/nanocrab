@@ -127,8 +127,12 @@ describe('Scheduled tasks productivity UI', () => {
     expect(source).toContain(
       "renderRoutineBlueprintEmptyState('unavailable', blueprintLoadIssue)",
     );
-    expect(routineStatesSource).toContain('renderRoutineBlueprintEmptyState(kind, issue)');
-    expect(routineStatesSource).toContain('Routine blueprint library unavailable');
+    expect(routineStatesSource).toContain(
+      'renderRoutineBlueprintEmptyState(kind, issue)',
+    );
+    expect(routineStatesSource).toContain(
+      'Routine blueprint library unavailable',
+    );
     expect(routineStatesSource).toContain('Blueprint data health');
     expect(routineStatesSource).toContain(
       'Draft from scratch for now, and retry before assuming no reusable automation patterns exist.',
