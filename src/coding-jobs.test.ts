@@ -61,6 +61,7 @@ import {
   approveCodingJob,
   buildCodingPrompt,
   listGitHubIssues,
+  listGitHubProjectBoards,
   loadCodingJobs,
   loadCodingRepos,
   getCodingJob,
@@ -212,6 +213,89 @@ describe('coding jobs', () => {
         author: 'reporter',
         htmlUrl: 'https://github.com/owner/repo/issues/7',
         updatedAt: '2026-06-09T10:00:00Z',
+      },
+    ]);
+  });
+
+  it('can browse all open issues when an empty label filter is explicit', async () => {
+    const fetchMock = mockGitHubFetch((url) => {
+      if (url.includes('/issues?')) return [];
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo', labels: ['autofix'] });
+
+    await listGitHubIssues({ repo: 'owner/repo', labels: [] });
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.not.stringContaining('labels='),
+      expect.any(Object),
+    );
+  });
+
+  it('lists repository project boards for the GitHub workbench', async () => {
+    const fetchMock = mockGitHubFetch((url) => {
+      if (url.endsWith('/graphql')) {
+        return {
+          data: {
+            repository: {
+              projectsV2: {
+                nodes: [
+                  {
+                    number: 12,
+                    title: 'Roadmap',
+                    url: 'https://github.com/orgs/owner/projects/12',
+                    shortDescription: 'Current delivery board',
+                    updatedAt: '2026-06-15T09:00:00Z',
+                    closed: false,
+                  },
+                ],
+              },
+              projects: {
+                nodes: [
+                  {
+                    name: 'Legacy bugs',
+                    url: 'https://github.com/owner/repo/projects/1',
+                    body: 'Classic project board',
+                    updatedAt: '2026-06-14T09:00:00Z',
+                    state: 'OPEN',
+                  },
+                ],
+              },
+            },
+          },
+        };
+      }
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo', labels: ['autofix'] });
+
+    const boards = await listGitHubProjectBoards({ repo: 'owner/repo' });
+
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      'https://api.github.com/graphql',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"owner":"owner"'),
+      }),
+    );
+    expect(boards).toEqual([
+      {
+        title: 'Roadmap',
+        url: 'https://github.com/orgs/owner/projects/12',
+        description: 'Current delivery board',
+        updatedAt: '2026-06-15T09:00:00Z',
+        closed: false,
+        type: 'project_v2',
+        number: 12,
+      },
+      {
+        title: 'Legacy bugs',
+        url: 'https://github.com/owner/repo/projects/1',
+        description: 'Classic project board',
+        updatedAt: '2026-06-14T09:00:00Z',
+        closed: false,
+        type: 'classic_project',
+        number: null,
       },
     ]);
   });

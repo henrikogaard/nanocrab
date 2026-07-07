@@ -2532,6 +2532,12 @@ body {
   line-height: 1.45;
 }
 
+.agent-coding-brief-side {
+  display: grid;
+  gap: 8px;
+  min-width: 240px;
+}
+
 .agent-coding-brief-stats {
   display: grid;
   grid-template-columns: repeat(3, minmax(58px, 1fr));
@@ -10667,6 +10673,7 @@ body {
   .agent-profile-field-grid,
   .agent-profile-capability-grid,
   .agent-coding-brief,
+  .agent-coding-brief-side,
   .agent-coding-controls,
   .agent-code-empty,
   .copilot-command-center,

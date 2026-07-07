@@ -256,6 +256,7 @@ function readDashboardWorkspaceContext(): string {
     '- Code: repositories, GitHub Copilot, coding agents, tests, pull requests, snippets, review rules, terminal, and repository automation.',
     '- More/Settings: integrations, credentials, providers, channels, approvals, memory, skills, marketplace, logs, backups, monitoring, and platform setup.',
     'Memory is personal/shared knowledge across agents. Skills are reusable agent capabilities and workflows. Keep Cowork project facts in the project workspace unless the user explicitly asks for cross-agent memory.',
+    'Channel messages are durable history in NanoCrab. When the user asks about earlier conversations, a specific past time, or details from days/weeks ago, use mcp__nanocrab__search_message_history instead of relying on the current prompt window.',
   ].join('\n');
 }
 

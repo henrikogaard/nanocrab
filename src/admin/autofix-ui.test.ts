@@ -106,6 +106,12 @@ describe('GitHub Autofix Code automation UI', () => {
     expect(source).toContain('viewAutofixJob');
     expect(source).toContain('approve-implementation');
     expect(source).toContain('approve-pr');
+    expect(source).toContain('open-pr');
+    expect(source).toContain('revert');
+    expect(source).toContain('close-pr');
+    expect(source).toContain('Open PR');
+    expect(source).toContain('Revert');
+    expect(source).toContain('Close PR');
     expect(source).toContain('autofixDenyNoteId');
     expect(source).toContain('autofix-deny-note-field');
     expect(source).toContain('page-header autofix-page-header');
@@ -216,6 +222,22 @@ describe('GitHub Autofix Code automation UI', () => {
     expect(source).not.toContain(
       'results.innerHTML = \'<div class="loading">Loading issues...</div>\'',
     );
+  });
+
+  it('exposes a GitHub issue and project-board workbench for assigning coding jobs', () => {
+    const source = fs.readFileSync(pagePath, 'utf8');
+
+    expect(source).toContain('GitHub workbench');
+    expect(source).toContain('Project boards');
+    expect(source).toContain('Assign coding task');
+    expect(source).toContain('renderAutofixWorkbench');
+    expect(source).toContain('autofixOpenWorkbench');
+    expect(source).toContain('autofixLoadWorkbench');
+    expect(source).toContain('autofixAssignIssueFromWorkbench');
+    expect(source).toContain('api(`/autofix/workbench?');
+    expect(source).toContain("api('/autofix/workbench/assign'");
+    expect(source).toContain('projectBoardsError');
+    expect(source).toContain('View on GitHub');
   });
 
   it('uses specific recovery copy for Autofix action failures', () => {

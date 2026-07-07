@@ -86,7 +86,7 @@ Additional plugins can be installed from git URLs via the Marketplace page, or c
 ### Autonomous Coding
 
 - **Assign Work Wizard** — start a freeform coding task from templates, pick the next matching GitHub issue, or enable Autofix auto-pickup from the Code/Cowork agent surfaces
-- **GitHub Coding Jobs** — register enabled repos, pick issues by repo/label/assignee/milestone/number, inspect diffs/output/tests/CI, approve implementation, approve PRs, retry, cancel, and revert
+- **GitHub Coding Jobs** — register enabled repos, browse issues and GitHub project boards in the web UI, assign an issue to a NanoCrab coding agent, inspect diffs/output/tests/CI, approve implementation, approve PRs, retry, cancel, and revert
 - **Repo Coding Rules** — save reviewed repo preferences such as required runtimes, test commands, and safety conventions; approved rules are injected into coding-job prompts without exposing secrets.
 - **Isolated Coding Jobs** — WhatsApp/Signal/Telegram agents can request repo coding jobs through MCP; an ephemeral coding container clones and edits inside `data/coding-workspaces`
 - **Mobile Coding Commands** — the main control group can use `/code repos`, `/code start`, `/code pick`, `/code status`, and `/code approve|cancel|retry|open-pr` to drive coding jobs from chat.
@@ -111,7 +111,10 @@ The agent calls MCP tools such as `register_coding_repo`,
 `list_github_issues`, `start_coding_job`, `pick_github_issue`, and
 the scheduled-task tools. The dashboard exposes the same flow under
 **Cowork -> Agents**, **Code -> Git & Code**, **Code -> GitHub Copilot**, and
-**Code -> Autofix**.
+**Code -> Autofix**. The Autofix page also includes a GitHub workbench for
+registered repos: it can browse open issues, show project boards when the token
+has read access, and start the existing host-managed coding-job lifecycle for a
+selected issue.
 Issue pickup only runs for
 enabled repo configs and supports repo, label, assignee, milestone, and direct
 issue-number filters. Jobs move through `queued -> investigate -> plan ->
@@ -215,6 +218,7 @@ success responses and do not mutate live files or services.
 
 - **Memory v2** — agents can propose structured memories with sensitivity, source, stale, and contradiction metadata; the dashboard reviews what becomes active.
 - **Journal v2** — agents can record notable events, extract daily/weekly summaries, and answer natural questions like "when was that fleet crash?" with cited events and summaries.
+- **Message History Search** — channel messages remain in SQLite and agents can use the read-only `search_message_history` NanoCrab MCP tool for older conversation context, including questions about a specific past time. Channel agents are scoped to their own chat; the main group can target registered chats.
 - **Skill Factory v2** — agents can propose provider-neutral `SKILL.md` drafts with version/provenance metadata, validation, diff review, and approval before installation into `container/skills`. Installed skills keep version snapshots with install state, dashboard diffs, and rollback controls.
 - **Bundled Default Skills** — NanoCrab ships with generic skills for memory curation, journaling, task planning, reports, GitHub issue work, code review, release management, email assistance, browser research, documents, images, and capabilities/status.
 - **Default Connector Skills** — the bundled connector package covers MCP catalog/setup, GitHub, drive/file, and browser/research workflows, with write-capable connector actions still routed through explicit approval.

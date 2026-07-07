@@ -40,6 +40,34 @@ function codingJobActive(status) {
   ].includes(status);
 }
 
+function codingJobCanOpenPr(job) {
+  return job?.status === 'await_pr_approval';
+}
+
+function codingJobCanRefreshCi(job) {
+  return Boolean(
+    job?.commitSha && ['open_pr', 'ci_running', 'completed'].includes(job.status),
+  );
+}
+
+function codingJobCanRevert(job) {
+  return Boolean(
+    job?.branch &&
+      !['queued', 'investigate', 'plan', 'implement', 'test', 'cancelled'].includes(
+        job.status,
+      ) &&
+      (job.commitSha ||
+        job.prUrl ||
+        ['await_pr_approval', 'open_pr', 'ci_running', 'completed', 'failed'].includes(
+          job.status,
+        )),
+  );
+}
+
+function codingJobCanClosePr(job) {
+  return Boolean(job?.prUrl);
+}
+
 function deriveCodingStageLaneDetails(status) {
   const visualStatus = status === 'running' ? 'implement' : status;
   if (['queued', 'investigate', 'plan'].includes(visualStatus)) {
@@ -1329,11 +1357,20 @@ async function renderAgents(el) {
           job.status === 'await_pr_approval'
             ? `<button class="btn btn-sm btn-primary" onclick="controlCodingJob('${esc(job.id)}','approve-pr')">Approve PR</button>`
             : '',
-          job.commitSha && ['ci_running', 'completed'].includes(job.status)
+          codingJobCanOpenPr(job)
+            ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','open-pr')">Open PR</button>`
+            : '',
+          codingJobCanRefreshCi(job)
             ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','refresh-ci')">CI</button>`
             : '',
           ['failed', 'cancelled'].includes(job.status)
             ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','retry')">Retry</button>`
+            : '',
+          codingJobCanRevert(job)
+            ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','revert')">Revert</button>`
+            : '',
+          codingJobCanClosePr(job)
+            ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','close-pr')">Close PR</button>`
             : '',
           !['completed', 'cancelled'].includes(job.status)
             ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(job.id)}','cancel')">Cancel</button>`
@@ -1670,10 +1707,13 @@ async function renderAgents(el) {
             <strong>${esc(codingBoardTitle)}</strong>
             <p>${esc(codingBoardDetail)}</p>
           </div>
-          <div class="agent-coding-brief-stats">
-            <span><strong>${codingRepos.length}</strong><small>repos</small></span>
-            <span><strong>${activeCodingJobCount}</strong><small>active</small></span>
-            <span><strong>${waitingCodingJobCount}</strong><small>gates</small></span>
+          <div class="agent-coding-brief-side">
+            <div class="agent-coding-brief-stats">
+              <span><strong>${codingRepos.length}</strong><small>repos</small></span>
+              <span><strong>${activeCodingJobCount}</strong><small>active</small></span>
+              <span><strong>${waitingCodingJobCount}</strong><small>gates</small></span>
+            </div>
+            <button class="btn btn-sm btn-ghost" onclick="navigate('autofix')">GitHub workbench</button>
           </div>
         </div>
         <div class="agent-coding-controls">
@@ -2520,11 +2560,20 @@ window.viewCodingJob = async function (id) {
       job.status === 'await_pr_approval'
         ? `<button class="btn btn-sm btn-primary" onclick="controlCodingJob('${esc(id)}','approve-pr')">Approve PR</button>`
         : '',
-      job.commitSha && ['ci_running', 'completed'].includes(job.status)
+      codingJobCanOpenPr(job)
+        ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(id)}','open-pr')">Open PR</button>`
+        : '',
+      codingJobCanRefreshCi(job)
         ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(id)}','refresh-ci')">Refresh CI</button>`
         : '',
       ['failed', 'cancelled'].includes(job.status)
         ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(id)}','retry')">Retry</button>`
+        : '',
+      codingJobCanRevert(job)
+        ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(id)}','revert')">Revert</button>`
+        : '',
+      codingJobCanClosePr(job)
+        ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(id)}','close-pr')">Close PR</button>`
         : '',
       !['completed', 'cancelled'].includes(job.status)
         ? `<button class="btn btn-sm btn-ghost" onclick="controlCodingJob('${esc(id)}','cancel')">Cancel</button>`

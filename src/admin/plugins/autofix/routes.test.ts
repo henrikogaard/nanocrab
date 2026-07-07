@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 
 import type { CodingJob } from '../../../coding-jobs.js';
 import {
+  buildAutofixWorkbenchResponse,
   buildAutofixStartInput,
   hasAutofixCapacity,
   normalizeAutofixProject,
   runAutofixAutoPickOnce,
 } from './routes.js';
+
+const routesPath = path.join(
+  process.cwd(),
+  'src/admin/plugins/autofix/routes.ts',
+);
 
 function job(overrides: Partial<CodingJob>): CodingJob {
   return {
@@ -206,5 +214,91 @@ describe('autofix project automation settings', () => {
       skippedLabel: 1,
     });
     expect(savedProjects[0][0].lastAutoPickAt).toBe('2026-06-15T09:00:00.000Z');
+  });
+
+  it('builds a GitHub workbench response with boards, issues, and active coding assignments', () => {
+    const project = normalizeAutofixProject({
+      id: 'project-1',
+      owner: 'owner',
+      repo: 'repo',
+      triggerLabel: 'autofix',
+      provider: 'codex',
+      model: 'gpt-5.4',
+      notifyJid: '',
+      autoReview: false,
+      createdAt: new Date(0).toISOString(),
+    });
+
+    const response = buildAutofixWorkbenchResponse({
+      projects: [project],
+      repos: [
+        {
+          id: 'owner-repo',
+          fullName: 'owner/repo',
+          defaultBranch: 'main',
+          labels: ['autofix'],
+          enabled: true,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+        },
+      ],
+      selectedRepo: 'owner/repo',
+      issues: [
+        {
+          number: 7,
+          title: 'Fix dashboard issue',
+          body: 'Broken workbench',
+          labels: ['autofix'],
+          assignees: ['henrik'],
+          milestone: 'MVP',
+          author: 'reporter',
+          htmlUrl: 'https://github.com/owner/repo/issues/7',
+          updatedAt: '2026-06-15T09:00:00Z',
+        },
+      ],
+      projectBoards: [
+        {
+          type: 'project_v2',
+          number: 12,
+          title: 'Roadmap',
+          url: 'https://github.com/orgs/owner/projects/12',
+          description: 'Current delivery board',
+          updatedAt: '2026-06-15T09:00:00Z',
+          closed: false,
+        },
+      ],
+      jobs: [
+        job({
+          id: 'active-job',
+          issueNumber: 7,
+          status: 'implement',
+        }),
+      ],
+      projectBoardsError: 'GitHub Projects scope is missing',
+    });
+
+    expect(response.selectedRepo).toBe('owner/repo');
+    expect(response.projectBoards[0]).toMatchObject({ title: 'Roadmap' });
+    expect(response.projectBoardsError).toBe(
+      'GitHub Projects scope is missing',
+    );
+    expect(response.issues[0]).toMatchObject({
+      number: 7,
+      activeJob: expect.objectContaining({
+        id: 'active-job',
+        status: 'implement',
+      }),
+    });
+  });
+
+  it('mirrors coding job lifecycle routes for Autofix job review actions', () => {
+    const source = fs.readFileSync(routesPath, 'utf8');
+
+    expect(source).toContain("router.post('/jobs/:id/open-pr'");
+    expect(source).toContain("router.post('/jobs/:id/revert'");
+    expect(source).toContain("router.post('/jobs/:id/close-pr'");
+    expect(source).toContain('openCodingJobPr(');
+    expect(source).toContain('revertCodingJob(');
+    expect(source).toContain('closeCodingJobPr(');
   });
 });

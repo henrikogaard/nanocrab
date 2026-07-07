@@ -98,6 +98,16 @@ export interface GitHubIssueSummary {
   updatedAt: string;
 }
 
+export interface GitHubProjectBoardSummary {
+  type: 'project_v2' | 'classic_project';
+  number: number | null;
+  title: string;
+  url: string;
+  description: string;
+  updatedAt: string;
+  closed: boolean;
+}
+
 export interface CodingJob {
   id: string;
   repo: string;
@@ -185,6 +195,12 @@ function assertRepoFullName(fullName: string): void {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName)) {
     throw new Error('repo must be in owner/name format');
   }
+}
+
+function splitRepoFullName(fullName: string): { owner: string; name: string } {
+  assertRepoFullName(fullName);
+  const [owner, name] = fullName.split('/');
+  return { owner, name };
 }
 
 function repoId(fullName: string): string {
@@ -292,6 +308,41 @@ export async function githubApi(
   return response.json();
 }
 
+async function githubGraphql<T>(
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<T> {
+  const token = getGitHubToken();
+  if (!token) throw new Error('GITHUB_TOKEN is not configured');
+  const response = await fetch('https://api.github.com/graphql', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`GitHub GraphQL ${response.status}: ${body.slice(0, 500)}`);
+  }
+  const payload = (await response.json()) as {
+    data?: T;
+    errors?: Array<{ message?: string }>;
+  };
+  if (payload.errors?.length) {
+    throw new Error(
+      `GitHub GraphQL: ${payload.errors
+        .map((error) => error.message || 'unknown error')
+        .join('; ')}`,
+    );
+  }
+  if (!payload.data) throw new Error('GitHub GraphQL returned no data');
+  return payload.data;
+}
+
 export async function registerCodingRepo(input: {
   repo: string;
   defaultBranch?: string;
@@ -388,7 +439,7 @@ export async function listGitHubIssues(input: {
     throw new Error(`Repo ${input.repo} is not registered for coding jobs`);
   }
 
-  const labels = input.labels?.length ? input.labels : repo.labels;
+  const labels = input.labels !== undefined ? input.labels : repo.labels;
   const milestoneQueryValue = input.issueNumber
     ? undefined
     : await resolveMilestoneQueryValue(input.repo, input.milestone);
@@ -471,6 +522,100 @@ export async function listGitHubIssues(input: {
   return issues
     .map((issue) => summarizeIssue(issue))
     .filter((issue): issue is GitHubIssueSummary => issue !== null);
+}
+
+export async function listGitHubProjectBoards(input: {
+  repo: string;
+  limit?: number;
+}): Promise<GitHubProjectBoardSummary[]> {
+  assertRepoFullName(input.repo);
+  const repo = getCodingRepo(input.repo);
+  if (!repo?.enabled) {
+    throw new Error(`Repo ${input.repo} is not registered for coding jobs`);
+  }
+
+  const { owner, name } = splitRepoFullName(input.repo);
+  const limit = Math.min(Math.max(input.limit || 20, 1), 50);
+  const data = await githubGraphql<{
+    repository?: {
+      projectsV2?: {
+        nodes?: Array<{
+          number?: number | null;
+          title?: string | null;
+          url?: string | null;
+          shortDescription?: string | null;
+          updatedAt?: string | null;
+          closed?: boolean | null;
+        } | null>;
+      } | null;
+      projects?: {
+        nodes?: Array<{
+          name?: string | null;
+          url?: string | null;
+          body?: string | null;
+          updatedAt?: string | null;
+          state?: string | null;
+        } | null>;
+      } | null;
+    } | null;
+  }>(
+    `query NanoCrabGitHubProjects($owner: String!, $name: String!, $limit: Int!) {
+      repository(owner: $owner, name: $name) {
+        projectsV2(first: $limit, orderBy: { field: UPDATED_AT, direction: DESC }) {
+          nodes {
+            number
+            title
+            url
+            shortDescription
+            updatedAt
+            closed
+          }
+        }
+        projects(first: $limit, states: OPEN) {
+          nodes {
+            name
+            url
+            body
+            updatedAt
+            state
+          }
+        }
+      }
+    }`,
+    { owner, name, limit },
+  );
+
+  const repository = data.repository;
+  if (!repository) return [];
+  const projectV2 = (repository.projectsV2?.nodes || [])
+    .filter((board): board is NonNullable<typeof board> => Boolean(board))
+    .filter((board) => Boolean(board.title && board.url))
+    .map(
+      (board): GitHubProjectBoardSummary => ({
+        type: 'project_v2',
+        number: typeof board.number === 'number' ? board.number : null,
+        title: board.title || '',
+        url: board.url || '',
+        description: board.shortDescription || '',
+        updatedAt: board.updatedAt || '',
+        closed: board.closed === true,
+      }),
+    );
+  const classic = (repository.projects?.nodes || [])
+    .filter((board): board is NonNullable<typeof board> => Boolean(board))
+    .filter((board) => Boolean(board.name && board.url))
+    .map(
+      (board): GitHubProjectBoardSummary => ({
+        type: 'classic_project',
+        number: null,
+        title: board.name || '',
+        url: board.url || '',
+        description: board.body || '',
+        updatedAt: board.updatedAt || '',
+        closed: board.state ? board.state !== 'OPEN' : false,
+      }),
+    );
+  return [...projectV2, ...classic];
 }
 
 function isCodingProvider(
@@ -1261,7 +1406,7 @@ export async function startCodingJob(
   const model = input.model || defaultModelForProvider(provider);
   let prompt = input.prompt || '';
   let issueTitle: string | null = null;
-  let issueNumber = input.issueNumber || null;
+  const issueNumber = input.issueNumber || null;
 
   if (issueNumber) {
     const issue = (await githubApi(

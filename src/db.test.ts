@@ -6,9 +6,11 @@ import {
   deleteTask,
   getAllChats,
   getAllRegisteredGroups,
+  getConversationMessagesThrough,
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
+  searchStoredMessages,
   getTaskById,
   getTaskRunLogs,
   logTaskRun,
@@ -292,6 +294,58 @@ describe('getMessagesSince', () => {
     expect(msgs).toHaveLength(3);
   });
 
+  it('builds prompt context with the previous bot reply for terse follow-ups', () => {
+    storeChatMetadata('terse@g.us', '2024-01-01T00:00:00.000Z');
+    store({
+      id: 'question',
+      chat_jid: 'terse@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'Henrik',
+      content: 'Kan du lage en presentasjon om sjøørret?',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+    storeMessage({
+      id: 'choices',
+      chat_jid: 'terse@g.us',
+      sender: 'Andy',
+      sender_name: 'Andy',
+      content: '1. Faglig\n2. Praktisk for sportsfiskere\n3. Biologi',
+      timestamp: '2024-01-01T00:00:02.000Z',
+      is_bot_message: true,
+    });
+    store({
+      id: 'answer',
+      chat_jid: 'terse@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'Henrik',
+      content: '2',
+      timestamp: '2024-01-01T00:00:03.000Z',
+    });
+
+    const pending = getMessagesSince(
+      'terse@g.us',
+      '2024-01-01T00:00:01.000Z',
+      'Andy',
+      10,
+    );
+    expect(pending.map((message) => message.content)).toEqual(['2']);
+
+    const promptContext = getConversationMessagesThrough(
+      'terse@g.us',
+      pending[pending.length - 1].timestamp,
+      'Andy',
+      2,
+    );
+
+    expect(promptContext.map((message) => message.content)).toEqual([
+      '1. Faglig\n2. Praktisk for sportsfiskere\n3. Biologi',
+      '2',
+    ]);
+    expect(formatMessages(promptContext, 'UTC')).toContain(
+      'Praktisk for sportsfiskere',
+    );
+  });
+
   it('recovers cursor from last bot reply when lastAgentTimestamp is missing', () => {
     // beforeEach already inserts m3 (bot reply at 00:00:03) and m4 (user at 00:00:04)
     // Add more old history before the bot reply
@@ -394,6 +448,48 @@ describe('getMessagesSince', () => {
       'Andy',
     );
     expect(msgs).toHaveLength(0);
+  });
+});
+
+describe('searchStoredMessages', () => {
+  it('finds retained chat history by text and time window, including bot replies', () => {
+    storeChatMetadata('history@g.us', '2024-02-01T00:00:00.000Z');
+    store({
+      id: 'old-user',
+      chat_jid: 'history@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'Henrik',
+      content: 'Vi snakket om sjøørret-presentasjonen i kveld.',
+      timestamp: '2024-02-01T18:45:00.000Z',
+    });
+    storeMessage({
+      id: 'old-bot',
+      chat_jid: 'history@g.us',
+      sender: 'Andy',
+      sender_name: 'Andy',
+      content: 'Jeg foreslo praktisk vinkel for sportsfiskere.',
+      timestamp: '2024-02-01T18:46:00.000Z',
+      is_bot_message: true,
+    });
+    store({
+      id: 'new-user',
+      chat_jid: 'history@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'Henrik',
+      content: 'Dette er en nyere melding uten treff.',
+      timestamp: '2024-03-01T12:00:00.000Z',
+    });
+
+    const messages = searchStoredMessages({
+      chatJid: 'history@g.us',
+      query: 'sportsfiskere',
+      fromTimestamp: '2024-02-01T00:00:00.000Z',
+      toTimestamp: '2024-02-02T00:00:00.000Z',
+      limit: 10,
+    });
+
+    expect(messages.map((message) => message.id)).toEqual(['old-bot']);
+    expect(messages[0].is_bot_message).toBe(true);
   });
 });
 

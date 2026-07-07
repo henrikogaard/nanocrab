@@ -39,6 +39,7 @@ import {
   getAllSessions,
   deleteSession,
   getAllTasks,
+  getConversationMessagesThrough,
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
@@ -215,6 +216,20 @@ function getOrRecoverCursor(chatJid: string): string {
     return botTs;
   }
   return '';
+}
+
+function getPromptContextMessages(
+  chatJid: string,
+  latestMessageTimestamp: string,
+  fallbackMessages: NewMessage[],
+): NewMessage[] {
+  const contextMessages = getConversationMessagesThrough(
+    chatJid,
+    latestMessageTimestamp,
+    ASSISTANT_NAME,
+    MAX_MESSAGES_PER_PROMPT,
+  );
+  return contextMessages.length > 0 ? contextMessages : fallbackMessages;
 }
 
 function saveState(): void {
@@ -551,8 +566,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const latestMessageText = missedMessages[missedMessages.length - 1].content;
+  const promptMessages = getPromptContextMessages(
+    chatJid,
+    missedMessages[missedMessages.length - 1].timestamp,
+    missedMessages,
+  );
   let runAgentOptions: RunAgentOptions = {};
-  let promptBody = formatMessages(missedMessages, TIMEZONE);
+  let promptBody = formatMessages(promptMessages, TIMEZONE);
 
   try {
     const invocation = resolveAgentProfileInvocation({
@@ -973,6 +993,12 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
+          const latestMessageToSend = messagesToSend[messagesToSend.length - 1];
+          const promptMessages = getPromptContextMessages(
+            chatJid,
+            latestMessageToSend.timestamp,
+            messagesToSend,
+          );
 
           const hasActiveMessageContainer = queue
             .getActiveContainers()
@@ -993,15 +1019,14 @@ async function startMessageLoop(): Promise<void> {
             if (handledProfileInvocation) continue;
           }
 
-          const formatted = formatMessages(messagesToSend, TIMEZONE);
+          const formatted = formatMessages(promptMessages, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
+            lastAgentTimestamp[chatJid] = latestMessageToSend.timestamp;
             saveState();
             // Show typing indicator while the container processes the piped message
             channel

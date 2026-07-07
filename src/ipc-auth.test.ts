@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'fs';
+import path from 'path';
 
 import {
   _initTestDatabase,
@@ -9,7 +10,10 @@ import {
   getRegisteredGroup,
   getTaskById,
   setRegisteredGroup,
+  storeChatMetadata,
+  storeMessage,
 } from './db.js';
+import { DATA_DIR } from './config.js';
 import {
   coworkProjectPath,
   writeCoworkProjectFile,
@@ -42,6 +46,30 @@ const THIRD_GROUP: RegisteredGroup = {
 
 let groups: Record<string, RegisteredGroup>;
 let deps: IpcDeps;
+
+function readIpcResponse(
+  sourceGroup: string,
+  requestId: string,
+): {
+  ok: boolean;
+  data?: unknown;
+  error?: string;
+} {
+  const responsePath = path.join(
+    DATA_DIR,
+    'ipc',
+    sourceGroup,
+    'responses',
+    `${requestId}.json`,
+  );
+  const response = JSON.parse(fs.readFileSync(responsePath, 'utf-8')) as {
+    ok: boolean;
+    data?: unknown;
+    error?: string;
+  };
+  fs.unlinkSync(responsePath);
+  return response;
+}
 
 beforeEach(() => {
   _initTestDatabase();
@@ -464,6 +492,111 @@ describe('IPC skill visibility', () => {
         false,
       ),
     ).toBe(false);
+  });
+});
+
+// --- Message history search authorization ---
+
+describe('message history IPC search', () => {
+  beforeEach(() => {
+    storeChatMetadata('other@g.us', '2024-02-01T00:00:00.000Z');
+    storeMessage({
+      id: 'other-old',
+      chat_jid: 'other@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'Henrik',
+      content: 'Sjøørret-planen var praktisk for sportsfiskere.',
+      timestamp: '2024-02-01T18:45:00.000Z',
+    });
+    storeMessage({
+      id: 'other-bot',
+      chat_jid: 'other@g.us',
+      sender: 'Andy',
+      sender_name: 'Andy',
+      content: 'Jeg svarte med tre varianter.',
+      timestamp: '2024-02-01T18:46:00.000Z',
+      is_bot_message: true,
+    });
+
+    storeChatMetadata('third@g.us', '2024-02-01T00:00:00.000Z');
+    storeMessage({
+      id: 'third-old',
+      chat_jid: 'third@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'Someone Else',
+      content: 'Privat tredjegruppe om sjøørret.',
+      timestamp: '2024-02-01T18:45:00.000Z',
+    });
+  });
+
+  it('lets a channel agent search only its own retained message history', async () => {
+    await processTaskIpc(
+      {
+        type: 'search_message_history',
+        requestId: 'history-own',
+        query: 'sjøørret',
+        fromTimestamp: '2024-02-01T00:00:00.000Z',
+        toTimestamp: '2024-02-02T00:00:00.000Z',
+        limit: 10,
+      } as unknown as Parameters<typeof processTaskIpc>[0],
+      'other-group',
+      false,
+      deps,
+    );
+
+    const response = readIpcResponse('other-group', 'history-own');
+
+    expect(response.ok).toBe(true);
+    expect(response.data).toMatchObject({
+      chatJid: 'other@g.us',
+      messages: [
+        expect.objectContaining({
+          id: 'other-old',
+          content: 'Sjøørret-planen var praktisk for sportsfiskere.',
+        }),
+      ],
+    });
+  });
+
+  it('blocks a channel agent from searching another chat history', async () => {
+    await processTaskIpc(
+      {
+        type: 'search_message_history',
+        requestId: 'history-blocked',
+        chatJid: 'third@g.us',
+        query: 'sjøørret',
+      } as unknown as Parameters<typeof processTaskIpc>[0],
+      'other-group',
+      false,
+      deps,
+    );
+
+    const response = readIpcResponse('other-group', 'history-blocked');
+
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain('search another chat');
+  });
+
+  it('lets the main group search a registered chat by JID', async () => {
+    await processTaskIpc(
+      {
+        type: 'search_message_history',
+        requestId: 'history-main-target',
+        chatJid: 'third@g.us',
+        query: 'tredjegruppe',
+      } as unknown as Parameters<typeof processTaskIpc>[0],
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const response = readIpcResponse('whatsapp_main', 'history-main-target');
+
+    expect(response.ok).toBe(true);
+    expect(response.data).toMatchObject({
+      chatJid: 'third@g.us',
+      messages: [expect.objectContaining({ id: 'third-old' })],
+    });
   });
 });
 

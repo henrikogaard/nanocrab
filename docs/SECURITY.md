@@ -53,6 +53,7 @@ The main group's project root is mounted read-only. Writable paths the agent nee
 Each group has isolated provider session state under `data/sessions/{group}/`. Claude SDK compatibility data currently lives at `data/sessions/{group}/.claude/`:
 
 - Groups cannot see other groups' conversation history
+- The `search_message_history` MCP tool is read-only and applies the same boundary: channel agents search only their own chat, while the main group can target registered chats
 - Session data includes full message history and file contents read
 - Prevents cross-group information disclosure
 
@@ -137,7 +138,7 @@ Claude, OpenRouter, and Google Gemini API traffic can be proxied this way. OpenR
 **Explicit Runtime Secret Exceptions:**
 
 - OpenCode coding jobs may receive `OPENCODE_API_KEY` because the OpenCode CLI reads its own credential environment.
-- GitHub coding jobs may receive `GITHUB_TOKEN` through an env file plus `GIT_ASKPASS` so clone/fetch/PR flows can run without interactive prompts.
+- GitHub coding jobs may receive `GITHUB_TOKEN` through an env file plus `GIT_ASKPASS` so clone/fetch/PR flows can run without interactive prompts. Dashboard issue and project-board browsing uses the same host-side token for read-only GitHub API calls.
 - Custom MCP servers receive only the env vars listed on that server and only when the connector is inside the agent boundary; scoped connectors are additionally filtered through the MCP tool proxy.
 - Google Workspace OAuth vars are forwarded only when a mail, calendar, docs, or drive connector is inside the active boundary.
 - Image-generation helpers may receive provider keys such as `FAL_KEY`, `LEONARDO_API_KEY`, or `OPENAI_API_KEY` when those helpers are enabled.

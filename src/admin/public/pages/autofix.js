@@ -26,6 +26,34 @@ function autofixDenyNoteId(id) {
   return `autofix-deny-note-${String(id || '').replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 }
 
+function autofixJobCanOpenPr(job) {
+  return job?.status === 'await_pr_approval';
+}
+
+function autofixJobCanRefreshCi(job) {
+  return Boolean(
+    job?.commitSha && ['open_pr', 'ci_running', 'completed'].includes(job.status),
+  );
+}
+
+function autofixJobCanRevert(job) {
+  return Boolean(
+    job?.branch &&
+      !['queued', 'investigate', 'plan', 'implement', 'test', 'cancelled'].includes(
+        job.status,
+      ) &&
+      (job.commitSha ||
+        job.prUrl ||
+        ['await_pr_approval', 'open_pr', 'ci_running', 'completed', 'failed'].includes(
+          job.status,
+        )),
+  );
+}
+
+function autofixJobCanClosePr(job) {
+  return Boolean(job?.prUrl);
+}
+
 function autofixLastPollLabel(value) {
   return value ? `last scan ${timeAgo(value)}` : 'not scanned yet';
 }
@@ -275,6 +303,10 @@ function renderAutofixCommandCenter({
           <span>${activeJobs.length}</span>
           <strong>Run scan now</strong>
         </button>
+        <button type="button" onclick="autofixOpenWorkbench()">
+          <span>${projects.length}</span>
+          <strong>GitHub workbench</strong>
+        </button>
         <button type="button" onclick="toggleAutofixAddForm(true)">
           <span>${reviewJobs.length}</span>
           <strong>Add watched repo</strong>
@@ -363,6 +395,90 @@ function renderAutofixIssueEmptyState(owner, repo, triggerLabel) {
     </section>`;
 }
 
+function renderAutofixWorkbench(data = {}) {
+  const repos = data.repos || [];
+  const issues = data.issues || [];
+  const boards = data.projectBoards || [];
+  const selectedRepo = data.selectedRepo || repos[0]?.fullName || '';
+  const repoOptions = repos
+    .map(
+      (repo) =>
+        `<option value="${esc(repo.fullName)}" ${repo.fullName === selectedRepo ? 'selected' : ''}>${esc(repo.fullName)}</option>`,
+    )
+    .join('');
+  const boardRows = boards.length
+    ? boards
+        .map(
+          (board) => `<div class="channel-card autofix-health-row">
+            <div class="autofix-row-body">
+              <strong>${esc(board.title)}</strong>
+              <span class="badge badge-muted autofix-mini-badge">${esc(board.type === 'project_v2' ? 'Projects v2' : 'Classic project')}</span>
+              ${board.closed ? '<span class="badge badge-warning autofix-mini-badge">Closed</span>' : '<span class="badge badge-success autofix-mini-badge">Open</span>'}
+              <div class="autofix-row-meta">${esc(board.description || 'No board description')}</div>
+            </div>
+            <a class="btn btn-sm btn-ghost" href="${esc(board.url)}" target="_blank" rel="noreferrer">View on GitHub</a>
+          </div>`,
+        )
+        .join('')
+    : `<div class="autofix-empty-state autofix-issue-empty-state">
+        <div>
+          <span>Project boards</span>
+          <strong>No GitHub project boards found</strong>
+          <p>${esc(data.projectBoardsError || 'This repository may not have project boards, or the GitHub token may need project read scope.')}</p>
+        </div>
+      </div>`;
+  const issueRows = issues.length
+    ? issues
+        .map((issue) => {
+          const activeJob = issue.activeJob;
+          return `<div class="channel-card autofix-issue-row">
+            <div class="autofix-row-body">
+              <strong>#${esc(String(issue.number))}</strong> ${esc(issue.title)}
+              ${(issue.labels || []).map((label) => `<span class="badge badge-muted autofix-mini-badge">${esc(label)}</span>`).join(' ')}
+              <div class="autofix-job-meta">${esc((issue.assignees || []).join(', ') || 'unassigned')}${issue.milestone ? ` \u2022 ${esc(issue.milestone)}` : ''} \u2022 ${esc(timeAgo(issue.updatedAt))}</div>
+            </div>
+            <div class="autofix-row-actions">
+              <a class="btn btn-sm btn-ghost" href="${esc(issue.htmlUrl)}" target="_blank" rel="noreferrer">View on GitHub</a>
+              ${
+                activeJob
+                  ? `<button class="btn btn-sm btn-ghost" onclick="viewAutofixJob('${esc(activeJob.id)}')">${esc(activeJob.status)}</button>`
+                  : `<button class="btn btn-sm btn-primary" onclick="autofixAssignIssueFromWorkbench('${esc(selectedRepo)}',${issue.number},this)">Assign coding task</button>`
+              }
+            </div>
+          </div>`;
+        })
+        .join('')
+    : renderAutofixIssueEmptyState(
+        selectedRepo.split('/')[0] || '',
+        selectedRepo.split('/')[1] || '',
+        '',
+      );
+  return `<div class="card">
+    <div class="autofix-panel-head">
+      <div>
+        <div class="card-title">GitHub workbench</div>
+        <p class="autofix-page-description">Browse registered GitHub issues and project boards, then assign one issue to a NanoCrab coding agent.</p>
+      </div>
+      <button class="btn btn-sm btn-ghost" onclick="toggleAutofixPanel('autofix-workbench', false)">\u2715</button>
+    </div>
+    <div class="autofix-filter-grid">
+      <select class="search-input" id="af-workbench-repo">${repoOptions}</select>
+      <input class="search-input" id="af-workbench-labels" placeholder="labels, optional">
+      <input class="search-input" id="af-workbench-assignee" placeholder="assignee">
+      <input class="search-input" id="af-workbench-milestone" placeholder="milestone">
+      <button class="btn btn-sm btn-primary" onclick="autofixLoadWorkbench()">Search</button>
+    </div>
+    <section class="autofix-section-card">
+      <div class="card-title">Project boards <span class="badge badge-muted autofix-count-badge">${boards.length}</span></div>
+      ${boardRows}
+    </section>
+    <section class="autofix-section-card">
+      <div class="card-title">Issues <span class="badge badge-muted autofix-count-badge">${issues.length}</span></div>
+      ${issueRows}
+    </section>
+  </div>`;
+}
+
 window.copyAutofixReadinessBrief = async function () {
   const state = window._autofixReadinessState;
   if (!state) {
@@ -396,6 +512,71 @@ window.toggleAutofixPanel = function (id, forceOpen) {
       ? forceOpen
       : panel.classList.contains('is-hidden');
   panel.classList.toggle('is-hidden', !shouldOpen);
+};
+
+window.autofixOpenWorkbench = async function (repo) {
+  const panel = document.getElementById('autofix-workbench');
+  if (!panel) return;
+  toggleAutofixPanel('autofix-workbench', true);
+  panel.innerHTML = renderAutofixLoadingState('issues');
+  await autofixLoadWorkbench(repo);
+};
+
+window.autofixLoadWorkbench = async function (repo) {
+  const panel = document.getElementById('autofix-workbench');
+  if (!panel) return;
+  const selectedRepo =
+    repo || document.getElementById('af-workbench-repo')?.value || '';
+  const labels = document.getElementById('af-workbench-labels')?.value?.trim();
+  const assignee = document
+    .getElementById('af-workbench-assignee')
+    ?.value?.trim();
+  const milestone = document
+    .getElementById('af-workbench-milestone')
+    ?.value?.trim();
+  const params = new URLSearchParams();
+  if (selectedRepo) params.set('repo', selectedRepo);
+  if (labels) params.set('labels', labels);
+  else params.set('allLabels', 'true');
+  if (assignee) params.set('assignee', assignee);
+  if (milestone) params.set('milestone', milestone);
+  panel.innerHTML = renderAutofixLoadingState('issues');
+  try {
+    const data = await api(`/autofix/workbench?${params.toString()}`);
+    panel.innerHTML = renderAutofixWorkbench(data);
+  } catch (e) {
+    panel.innerHTML = renderAutofixRecoveryState('issues', e.message, {
+      retryAction: 'autofixLoadWorkbench()',
+    });
+  }
+};
+
+window.autofixAssignIssueFromWorkbench = async function (repo, issueNumber, btn) {
+  const previous = btn?.textContent || 'Assign coding task';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Assigning...';
+  }
+  try {
+    const r = await api('/autofix/workbench/assign', {
+      method: 'POST',
+      body: JSON.stringify({ repo, issueNumber }),
+    });
+    if (!r.ok) {
+      toast(autofixActionErrorMessage('run', r.error), 'error');
+      return;
+    }
+    toast('Coding task assigned', 'success');
+    await autofixLoadWorkbench(repo);
+    if (r.jobId) setTimeout(() => viewAutofixJob(r.jobId), 500);
+  } catch (e) {
+    toast(autofixActionErrorMessage('run', e), 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = previous;
+    }
+  }
 };
 
 async function renderAutofix(el) {
@@ -528,6 +709,7 @@ async function renderAutofix(el) {
           <p class="autofix-page-description">Turn labeled GitHub issues into reviewed branches, test evidence, and PRs.</p>
         </div>
         <div class="autofix-header-actions">
+          <button class="btn btn-sm btn-ghost" onclick="autofixOpenWorkbench()">GitHub workbench</button>
           <button class="btn btn-sm btn-ghost" onclick="autofixRunAutoPickNow(this)">Run scan now</button>
           <button class="btn btn-sm btn-primary" onclick="toggleAutofixAddForm(true)">Add Project</button>
         </div>
@@ -589,6 +771,7 @@ async function renderAutofix(el) {
       </div>
 
       <div id="autofix-issue-picker" class="autofix-panel-slot is-hidden"></div>
+      <div id="autofix-workbench" class="autofix-panel-slot is-hidden"></div>
       <div id="autofix-job-output" class="autofix-panel-slot is-hidden"></div>
 
       <div class="card autofix-section-card">
@@ -866,11 +1049,20 @@ window.viewAutofixJob = async function (id) {
       job.status === 'await_pr_approval'
         ? `<button class="btn btn-sm btn-primary" onclick="autofixJobAction('${esc(id)}','approve-pr')">Approve PR</button>`
         : '',
-      job.commitSha && ['ci_running', 'completed'].includes(job.status)
+      autofixJobCanOpenPr(job)
+        ? `<button class="btn btn-sm btn-ghost" onclick="autofixJobAction('${esc(id)}','open-pr')">Open PR</button>`
+        : '',
+      autofixJobCanRefreshCi(job)
         ? `<button class="btn btn-sm btn-ghost" onclick="autofixJobAction('${esc(id)}','refresh-ci')">Refresh CI</button>`
         : '',
       ['failed', 'cancelled'].includes(job.status)
         ? `<button class="btn btn-sm btn-ghost" onclick="autofixJobAction('${esc(id)}','retry')">Retry</button>`
+        : '',
+      autofixJobCanRevert(job)
+        ? `<button class="btn btn-sm btn-ghost" onclick="autofixJobAction('${esc(id)}','revert')">Revert</button>`
+        : '',
+      autofixJobCanClosePr(job)
+        ? `<button class="btn btn-sm btn-ghost" onclick="autofixJobAction('${esc(id)}','close-pr')">Close PR</button>`
         : '',
       !['completed', 'cancelled'].includes(job.status)
         ? `<button class="btn btn-sm btn-ghost" onclick="autofixJobAction('${esc(id)}','cancel')">Cancel</button>`

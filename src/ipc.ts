@@ -27,6 +27,7 @@ import {
   getCoworkProject,
   getCoworkProjectBySlug,
   getCoworkProjects,
+  searchStoredMessages,
   getTaskById,
   touchCoworkProject,
   updateTask,
@@ -409,6 +410,12 @@ export async function processTaskIpc(
     fileContent?: string;
     caption?: string;
     filename?: string;
+    fromTimestamp?: string;
+    toTimestamp?: string;
+    aroundTimestamp?: string;
+    windowMinutes?: number;
+    includeBotMessages?: boolean;
+    includeUserMessages?: boolean;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -1163,6 +1170,70 @@ export async function processTaskIpc(
             limit: data.limit,
           }),
         );
+      } catch (err) {
+        writeIpcError(sourceGroup, data.requestId, err);
+      }
+      break;
+
+    case 'search_message_history':
+      try {
+        const ownChatJid = Object.entries(registeredGroups).find(
+          ([, group]) => group.folder === sourceGroup,
+        )?.[0];
+        const requestedChatJid =
+          typeof data.chatJid === 'string' ? data.chatJid.trim() : '';
+
+        if (!isMain && requestedChatJid && requestedChatJid !== ownChatJid) {
+          throw new Error(
+            'Only the main group can search another chat history',
+          );
+        }
+
+        const targetChatJid = requestedChatJid || ownChatJid;
+        if (!targetChatJid) {
+          throw new Error('No registered chat found for this group');
+        }
+        if (isMain && requestedChatJid && !registeredGroups[requestedChatJid]) {
+          throw new Error('chatJid must be a registered group');
+        }
+
+        let fromTimestamp =
+          typeof data.fromTimestamp === 'string'
+            ? data.fromTimestamp
+            : undefined;
+        let toTimestamp =
+          typeof data.toTimestamp === 'string' ? data.toTimestamp : undefined;
+        if (typeof data.aroundTimestamp === 'string') {
+          const aroundMs = Date.parse(data.aroundTimestamp);
+          if (!Number.isFinite(aroundMs)) {
+            throw new Error('aroundTimestamp must be a valid timestamp');
+          }
+          const windowMinutes = Math.min(
+            Math.max(
+              typeof data.windowMinutes === 'number' ? data.windowMinutes : 60,
+              1,
+            ),
+            10_080,
+          );
+          const windowMs = windowMinutes * 60_000;
+          fromTimestamp = new Date(aroundMs - windowMs).toISOString();
+          toTimestamp = new Date(aroundMs + windowMs).toISOString();
+        }
+
+        const messages = searchStoredMessages({
+          chatJid: targetChatJid,
+          query: typeof data.query === 'string' ? data.query : undefined,
+          fromTimestamp,
+          toTimestamp,
+          includeBotMessages: data.includeBotMessages,
+          includeUserMessages: data.includeUserMessages,
+          limit: typeof data.limit === 'number' ? data.limit : undefined,
+        });
+
+        writeIpcOk(sourceGroup, data.requestId, {
+          chatJid: targetChatJid,
+          messages,
+        });
       } catch (err) {
         writeIpcError(sourceGroup, data.requestId, err);
       }

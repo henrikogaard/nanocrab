@@ -34,16 +34,23 @@ import {
   approveCodingJob,
   approveCodingJobPr,
   cancelCodingJob,
+  closeCodingJobPr,
   denyCodingJob,
   getCodingJob,
+  listGitHubProjectBoards,
   listGitHubIssues,
   loadCodingJobs,
+  loadCodingRepos,
   openCodingJobPr,
   refreshCodingJobCi,
   registerCodingRepo,
+  revertCodingJob,
   retryCodingJob,
   startCodingJob,
   type CodingJob,
+  type CodingRepo,
+  type GitHubIssueSummary,
+  type GitHubProjectBoardSummary,
   type StartCodingJobInput,
 } from '../../../coding-jobs.js';
 
@@ -174,6 +181,75 @@ export function hasAutofixCapacity(
       job.type === 'issue',
   ).length;
   return activeCount < project.maxActiveJobs;
+}
+
+interface AutofixWorkbenchActiveJob {
+  id: string;
+  status: string;
+  provider: string;
+  model: string;
+  branch: string;
+  prUrl: string | null;
+  createdAt: string;
+}
+
+export interface AutofixWorkbenchResponse {
+  repos: CodingRepo[];
+  projects: Project[];
+  selectedRepo: string | null;
+  issues: Array<
+    GitHubIssueSummary & { activeJob: AutofixWorkbenchActiveJob | null }
+  >;
+  projectBoards: GitHubProjectBoardSummary[];
+  projectBoardsError: string | null;
+  jobs: CodingJob[];
+}
+
+export function buildAutofixWorkbenchResponse(input: {
+  repos: CodingRepo[];
+  projects: Project[];
+  selectedRepo: string | null;
+  issues: GitHubIssueSummary[];
+  projectBoards: GitHubProjectBoardSummary[];
+  projectBoardsError?: string | null;
+  jobs: CodingJob[];
+}): AutofixWorkbenchResponse {
+  const jobsByIssue = new Map<number, CodingJob>();
+  for (const job of input.jobs) {
+    if (
+      job.repo === input.selectedRepo &&
+      job.issueNumber != null &&
+      AUTOFIX_ACTIVE_JOB_STATUSES.has(job.status)
+    ) {
+      jobsByIssue.set(job.issueNumber, job);
+    }
+  }
+
+  return {
+    repos: input.repos,
+    projects: input.projects,
+    selectedRepo: input.selectedRepo,
+    projectBoards: input.projectBoards,
+    projectBoardsError: input.projectBoardsError || null,
+    jobs: input.jobs,
+    issues: input.issues.map((issue) => {
+      const activeJob = jobsByIssue.get(issue.number);
+      return {
+        ...issue,
+        activeJob: activeJob
+          ? {
+              id: activeJob.id,
+              status: activeJob.status,
+              provider: activeJob.provider,
+              model: activeJob.model,
+              branch: activeJob.branch,
+              prUrl: activeJob.prUrl,
+              createdAt: activeJob.createdAt,
+            }
+          : null,
+      };
+    }),
+  };
 }
 
 type AutoPickIssueLabel = string | { name?: string };
@@ -546,35 +622,147 @@ router.get('/jobs/:id', (req: Request, res: Response) => {
   res.json(job);
 });
 
+function parseQueryLabels(value: unknown): string[] | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  return value
+    .split(',')
+    .map((label) => label.trim())
+    .filter(Boolean);
+}
+
+function parseQueryString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function parseQueryIssueNumber(value: unknown): number | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : undefined;
+}
+
+router.get('/workbench', async (req: Request, res: Response) => {
+  const repos = loadCodingRepos().filter((repo) => repo.enabled);
+  const projects = loadProjects();
+  const selectedRepo =
+    parseQueryString(req.query.repo) ||
+    repos[0]?.fullName ||
+    (projects[0] ? `${projects[0].owner}/${projects[0].repo}` : null);
+
+  if (!selectedRepo) {
+    res.json(
+      buildAutofixWorkbenchResponse({
+        repos,
+        projects,
+        selectedRepo: null,
+        issues: [],
+        projectBoards: [],
+        jobs: [],
+      }),
+    );
+    return;
+  }
+
+  try {
+    const labels =
+      req.query.allLabels === 'true' ? [] : parseQueryLabels(req.query.labels);
+    const assignee = parseQueryString(req.query.assignee);
+    const milestone = parseQueryString(req.query.milestone);
+    const issueNumber = parseQueryIssueNumber(req.query.issueNumber);
+    const jobs = loadCodingJobs()
+      .filter((job) => job.type === 'issue' && job.repo === selectedRepo)
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      )
+      .slice(0, 30);
+    const issues = await listGitHubIssues({
+      repo: selectedRepo,
+      labels,
+      assignee,
+      milestone,
+      issueNumber,
+      limit: 50,
+    });
+    let projectBoards: GitHubProjectBoardSummary[] = [];
+    let projectBoardsError: string | null = null;
+    try {
+      projectBoards = await listGitHubProjectBoards({ repo: selectedRepo });
+    } catch (err) {
+      projectBoardsError = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        { err, repo: selectedRepo },
+        'Could not load GitHub project boards for Autofix workbench',
+      );
+    }
+    res.json(
+      buildAutofixWorkbenchResponse({
+        repos,
+        projects,
+        selectedRepo,
+        issues,
+        projectBoards,
+        projectBoardsError,
+        jobs,
+      }),
+    );
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post('/workbench/assign', async (req: Request, res: Response) => {
+  try {
+    const repo = String(req.body.repo || '').trim();
+    const issueNumber = Number(req.body.issueNumber);
+    if (!repo || !Number.isInteger(issueNumber) || issueNumber <= 0) {
+      res.status(400).json({ error: 'repo and issueNumber required' });
+      return;
+    }
+
+    const project = loadProjects().find(
+      (candidate) =>
+        `${candidate.owner}/${candidate.repo}`.toLowerCase() ===
+        repo.toLowerCase(),
+    );
+    const job = await startCodingJob({
+      repo,
+      issueNumber,
+      provider: req.body.provider || project?.provider,
+      model: req.body.model || project?.model,
+      createPr:
+        req.body.createPr === undefined
+          ? project?.createPr !== false
+          : req.body.createPr === true,
+      requestedBy: req.user?.username || 'github-workbench',
+    });
+    auditLog(
+      req,
+      'github_workbench_coding_job_started',
+      `${repo}#${issueNumber}`,
+    );
+    res.json({ ok: true, jobId: job.id, job });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 router.get('/issues', async (req: Request, res: Response) => {
   try {
     const repo = String(req.query.repo || '');
-    const labels =
-      typeof req.query.labels === 'string' && req.query.labels.trim()
-        ? req.query.labels
-            .split(',')
-            .map((label) => label.trim())
-            .filter(Boolean)
-        : undefined;
-    const assignee =
-      typeof req.query.assignee === 'string' && req.query.assignee.trim()
-        ? req.query.assignee.trim()
-        : undefined;
-    const milestone =
-      typeof req.query.milestone === 'string' && req.query.milestone.trim()
-        ? req.query.milestone.trim()
-        : undefined;
-    const issueNumber =
-      typeof req.query.issueNumber === 'string' && req.query.issueNumber.trim()
-        ? Number(req.query.issueNumber)
-        : undefined;
+    const labels = parseQueryLabels(req.query.labels);
+    const assignee = parseQueryString(req.query.assignee);
+    const milestone = parseQueryString(req.query.milestone);
+    const issueNumber = parseQueryIssueNumber(req.query.issueNumber);
     const issues = await listGitHubIssues({
       repo,
       labels,
       assignee,
       milestone,
-      issueNumber:
-        issueNumber && Number.isInteger(issueNumber) ? issueNumber : undefined,
+      issueNumber,
     });
     res.json(issues);
   } catch (err) {
@@ -1012,6 +1200,38 @@ router.post('/jobs/:id/cancel', (req: Request, res: Response) => {
       req.user?.username || 'autofix-dashboard',
     );
     auditLog(req, 'autofix_job_cancelled', job.id);
+    res.json({ ok: true, job });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post('/jobs/:id/revert', async (req: Request, res: Response) => {
+  try {
+    const jobId = String(req.params.id);
+    const job = await revertCodingJob(
+      jobId,
+      req.user?.username || 'autofix-dashboard',
+    );
+    auditLog(req, 'autofix_job_revert_requested', job.id);
+    res.json({ ok: true, job });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post('/jobs/:id/close-pr', async (req: Request, res: Response) => {
+  try {
+    const jobId = String(req.params.id);
+    const job = await closeCodingJobPr(
+      jobId,
+      req.user?.username || 'autofix-dashboard',
+    );
+    auditLog(req, 'autofix_pr_closed', job.id);
     res.json({ ok: true, job });
   } catch (err) {
     res.status(400).json({

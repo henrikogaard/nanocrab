@@ -760,6 +760,22 @@ describe('Agents launcher UI', () => {
     );
   });
 
+  it('surfaces all coding job lifecycle actions in the Agents UI', () => {
+    const source = fs.readFileSync(agentsPagePath, 'utf8');
+
+    expect(source).toContain('GitHub workbench');
+    expect(source).toContain("navigate('autofix')");
+    expect(source).toContain("controlCodingJob('${esc(job.id)}','open-pr')");
+    expect(source).toContain("controlCodingJob('${esc(id)}','open-pr')");
+    expect(source).toContain("controlCodingJob('${esc(job.id)}','revert')");
+    expect(source).toContain("controlCodingJob('${esc(id)}','revert')");
+    expect(source).toContain("controlCodingJob('${esc(job.id)}','close-pr')");
+    expect(source).toContain("controlCodingJob('${esc(id)}','close-pr')");
+    expect(source).toContain('Open PR');
+    expect(source).toContain('Revert');
+    expect(source).toContain('Close PR');
+  });
+
   it('adds an editable agent profile cockpit with explicit states', () => {
     const source = fs.readFileSync(agentsPagePath, 'utf8');
     const styles = fs.readFileSync(stylePath, 'utf8');

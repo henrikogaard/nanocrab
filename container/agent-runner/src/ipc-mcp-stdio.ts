@@ -1073,6 +1073,70 @@ server.tool(
 );
 
 server.tool(
+  'search_message_history',
+  'Search retained NanoCrab channel message history. Use this when the user asks about earlier conversations, a specific past time, or details from days/weeks ago. Non-main groups can search only the current chat; main can provide chat_jid for any registered chat.',
+  {
+    query: z
+      .string()
+      .optional()
+      .describe('Optional text to search in message content or sender name'),
+    chat_jid: z
+      .string()
+      .optional()
+      .describe('Main group only. Registered chat JID to search.'),
+    from_timestamp: z
+      .string()
+      .optional()
+      .describe('Inclusive ISO timestamp lower bound'),
+    to_timestamp: z
+      .string()
+      .optional()
+      .describe('Inclusive ISO timestamp upper bound'),
+    around_timestamp: z
+      .string()
+      .optional()
+      .describe(
+        'ISO timestamp to search around. Overrides from/to when supplied.',
+      ),
+    window_minutes: z
+      .number()
+      .int()
+      .min(1)
+      .max(10080)
+      .optional()
+      .describe('Minutes before and after around_timestamp. Default: 60.'),
+    include_bot_messages: z
+      .boolean()
+      .optional()
+      .describe('Set false to exclude bot replies from results'),
+    include_user_messages: z
+      .boolean()
+      .optional()
+      .describe('Set false to return only bot replies'),
+    limit: z.number().int().min(1).max(100).optional(),
+  },
+  async (args) => {
+    try {
+      return hostResultContent(
+        await requestHostTask('search_message_history', {
+          query: args.query,
+          chatJid: args.chat_jid,
+          fromTimestamp: args.from_timestamp,
+          toTimestamp: args.to_timestamp,
+          aroundTimestamp: args.around_timestamp,
+          windowMinutes: args.window_minutes,
+          includeBotMessages: args.include_bot_messages,
+          includeUserMessages: args.include_user_messages,
+          limit: args.limit,
+        }),
+      );
+    } catch (err) {
+      return hostErrorContent(err);
+    }
+  },
+);
+
+server.tool(
   'list_skills',
   'List active provider-neutral skills available to this group, including scope, visibility, triggers, and descriptions.',
   {},

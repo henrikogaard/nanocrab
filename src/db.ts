@@ -775,6 +775,140 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
+interface ConversationMessageRow {
+  id: string;
+  chat_jid: string;
+  sender: string;
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_from_me: number;
+  is_bot_message: number;
+  reply_to_message_id: string | null;
+  reply_to_message_content: string | null;
+  reply_to_sender_name: string | null;
+}
+
+export function getConversationMessagesThrough(
+  chatJid: string,
+  throughTimestamp: string,
+  botPrefix: string,
+  limit: number = 200,
+): NewMessage[] {
+  const safeLimit = Math.min(Math.max(limit || 200, 1), 500);
+  const rows = db
+    .prepare(
+      `
+      SELECT * FROM (
+        SELECT id, chat_jid, sender, sender_name, content, timestamp,
+               is_from_me, is_bot_message, reply_to_message_id,
+               reply_to_message_content, reply_to_sender_name
+        FROM messages
+        WHERE chat_jid = ? AND timestamp <= ?
+          AND content != '' AND content IS NOT NULL
+        ORDER BY timestamp DESC
+        LIMIT ?
+      ) ORDER BY timestamp
+    `,
+    )
+    .all(chatJid, throughTimestamp, safeLimit) as ConversationMessageRow[];
+
+  return rows.map((row) => {
+    const legacyBotPrefix = `${botPrefix}:`;
+    return {
+      id: row.id,
+      chat_jid: row.chat_jid,
+      sender: row.sender,
+      sender_name: row.sender_name,
+      content: row.content,
+      timestamp: row.timestamp,
+      is_from_me: row.is_from_me === 1,
+      is_bot_message:
+        row.is_bot_message === 1 || row.content.startsWith(legacyBotPrefix),
+      reply_to_message_id: row.reply_to_message_id ?? undefined,
+      reply_to_message_content: row.reply_to_message_content ?? undefined,
+      reply_to_sender_name: row.reply_to_sender_name ?? undefined,
+    };
+  });
+}
+
+function escapeSqlLike(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+export function searchStoredMessages(input: {
+  chatJid: string;
+  query?: string;
+  fromTimestamp?: string;
+  toTimestamp?: string;
+  includeBotMessages?: boolean;
+  includeUserMessages?: boolean;
+  limit?: number;
+}): NewMessage[] {
+  const safeLimit = Math.min(Math.max(input.limit || 50, 1), 500);
+  const conditions = ['chat_jid = ?', "content != ''", 'content IS NOT NULL'];
+  const values: Array<string | number> = [input.chatJid];
+
+  if (input.fromTimestamp) {
+    conditions.push('timestamp >= ?');
+    values.push(input.fromTimestamp);
+  }
+  if (input.toTimestamp) {
+    conditions.push('timestamp <= ?');
+    values.push(input.toTimestamp);
+  }
+
+  const query = input.query?.trim();
+  if (query) {
+    const likeQuery = `%${escapeSqlLike(query.toLowerCase())}%`;
+    conditions.push(
+      `(LOWER(content) LIKE ? ESCAPE '\\' OR LOWER(sender_name) LIKE ? ESCAPE '\\')`,
+    );
+    values.push(likeQuery, likeQuery);
+  }
+
+  if (input.includeBotMessages === false) {
+    conditions.push('is_bot_message = 0');
+  }
+  if (input.includeUserMessages === false) {
+    conditions.push('is_bot_message = 1');
+  }
+
+  const rows = db
+    .prepare(
+      `
+      SELECT * FROM (
+        SELECT id, chat_jid, sender, sender_name, content, timestamp,
+               is_from_me, is_bot_message, reply_to_message_id,
+               reply_to_message_content, reply_to_sender_name
+        FROM messages
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY timestamp DESC
+        LIMIT ?
+      ) ORDER BY timestamp
+    `,
+    )
+    .all(...values, safeLimit) as ConversationMessageRow[];
+
+  return rows.map((row) => {
+    const legacyBotPrefix = `${ASSISTANT_NAME}:`;
+    return {
+      id: row.id,
+      chat_jid: row.chat_jid,
+      sender: row.sender,
+      sender_name: row.sender_name,
+      content: row.content,
+      timestamp: row.timestamp,
+      is_from_me: row.is_from_me === 1,
+      is_bot_message:
+        row.is_bot_message === 1 || row.content.startsWith(legacyBotPrefix),
+      reply_to_message_id: row.reply_to_message_id ?? undefined,
+      reply_to_message_content: row.reply_to_message_content ?? undefined,
+      reply_to_sender_name: row.reply_to_sender_name ?? undefined,
+    };
+  });
+}
+
 interface RecentUserMessageRow {
   id: string;
   chat_jid: string;
