@@ -37,6 +37,16 @@ Most user requests are not hard-coded slash commands. In registered non-main gro
 
 The default trigger is `@` plus the configured `ASSISTANT_NAME`, for example `@NanoCrab`. Group-specific triggers are stored in group configuration and can be changed from the dashboard. Examples such as `!wolfclaw` or `!wolfie` are group triggers, not Discord Developer Portal commands.
 
+Agent Profile mentions come after the group trigger. They are natural-language
+routing hints for the shared agent profile router, not slash commands and not
+Discord commands:
+
+```text
+@NanoCrab @RepoFixer investigate the new autofix issue and draft a plan.
+@NanoCrab @ManualHost summarize this channel and keep the answer read-only.
+@NanoCrab @Researcher collect sources for the weekly report and stop before publishing.
+```
+
 ## Host Commands
 
 Run these from the NanoCrab repository on the host or VPS.
@@ -177,4 +187,6 @@ These are normal chat requests, not literal commands:
 @NanoCrab pick an autofix issue from henrikogaard/nanocrab and open a PR.
 @NanoCrab create a report about the last week of operations as Markdown and PDF.
 @NanoCrab make a reusable skill for writing alliance operation summaries.
+@NanoCrab @RepoFixer inspect henrikogaard/nanocrab issue 123 and prepare a safe plan.
+@NanoCrab @ManualHost review the pending approvals and explain what needs owner action.
 ```

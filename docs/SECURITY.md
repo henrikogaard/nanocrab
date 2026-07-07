@@ -86,6 +86,21 @@ MCP connectors have explicit permission records in `store/connector-permissions.
 
 Every container invocation also resolves an agent boundary from the group identity before runtime assembly. The boundary declares channel scopes, filesystem scopes, skill scopes, provider profile permissions, allowed connector ids, and external write permissions. Container mounts, runtime skill snapshots, provider fallback profile selection, channel capability metadata, connector tool exposure, and MCP credential forwarding are derived from that boundary. Unauthorized channel agents therefore cannot receive private skills, out-of-scope connector credentials, coding-only provider profiles, broad channel scopes, or write-capable external tools.
 
+Agent Profiles add a durable named identity and policy layer on top of that
+boundary. In the current MVP, the enforced controls remain the source group
+boundary, connector permissions, host policy, approval rules, and the requested
+run type. Profile records add identity, attribution, provider/model preference,
+enabled/disabled state, task-kind/subscription checks, and MCP narrowing where
+the execution path wires it in. Stored profile fields such as tool policy,
+skills, memory scopes, and write policy are operator configuration for the
+profile layer; they should not be treated as standalone security gates until a
+given run path explicitly enforces them.
+
+Profile-triggered autonomous work is limited to detection, attribution, and
+investigation/planning handoff in this MVP. File mutations, connector writes,
+uploads, external sends, PR creation, webhooks, and write-capable provider
+fallback remain approval-gated by the existing host policy and approval system.
+
 ### 3d. Scheduled Task And Webhook Delivery Controls
 
 Scheduled tasks inherit the boundary of the group that owns the task. Main-group
