@@ -8,6 +8,56 @@
       return String(value || '');
     };
 
+  var routineLaneDefinitions = [
+    {
+      lane: 'Copilot',
+      kinds: ['briefing', 'task'],
+      detail: 'Conversation follow-ups, reminders, and recurring briefings',
+    },
+    {
+      lane: 'Cowork',
+      kinds: ['briefing', 'operation', 'task'],
+      detail: 'Project summaries, MCP context, documents, and artifacts',
+    },
+    {
+      lane: 'Code',
+      kinds: ['github', 'release'],
+      detail: 'Repository checks, review reminders, and release routines',
+    },
+    {
+      lane: 'System',
+      kinds: ['heartbeat', 'monitor', 'operation'],
+      detail: 'Health checks, webhooks, uptime routines, and operator pings',
+    },
+  ];
+
+  var routineIntakeGuide = [
+    {
+      lane: 'Copilot',
+      action: "navigate('chat')",
+      label: 'Open Copilot',
+      detail: 'Use for one-off questions, drafting, explanation, and quick decisions that do not need project state.',
+    },
+    {
+      lane: 'Cowork',
+      action: "navigate('projects')",
+      label: 'Open Cowork',
+      detail: 'Use when the work needs files, MCP sources, documents, artifacts, project memory, or a saved handoff.',
+    },
+    {
+      lane: 'Code',
+      action: "navigate('agents')",
+      label: 'Open Code',
+      detail: 'Use for repositories, tests, pull requests, release checks, and coding agents with workspace access.',
+    },
+    {
+      lane: 'Routine',
+      action: 'openRoutineWizard()',
+      label: 'Draft routine',
+      detail: 'Use only after the work repeats, the output is understood, and external writes can stay approval-gated.',
+    },
+  ];
+
   function renderRoutineRunsEmptyState(task) {
     var id = task?.id || '';
     return `
@@ -99,6 +149,72 @@
         <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('monitoring')">Monitoring</button>
         <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('projects')">Cowork</button>
       </div>
+  </section>`;
+  }
+
+  function renderRoutineIntakeGuide(items) {
+    var guide = items || routineIntakeGuide;
+    return `<section class="routine-intake-guide">
+    <div class="routine-intake-copy">
+      <span class="routine-cockpit-kicker">Automation intake</span>
+      <h3>Choose the smallest workspace that can safely finish the work</h3>
+      <p>Not every useful request should become a schedule. Route one-off work to Copilot, project work to Cowork, repository work to Code, and promote only stable recurring work into Routines.</p>
+    </div>
+    <div class="routine-intake-grid">
+      ${guide
+        .map(
+          function (item) {
+            return '<button type="button" class="routine-intake-card" onclick="' + item.action + '">'
+              + '<span>' + esc(item.lane) + '</span>'
+              + '<strong>' + esc(item.label) + '</strong>'
+              + '<p>' + esc(item.detail) + '</p>'
+              + '</button>';
+          },
+        )
+        .join('')}
+    </div>
+  </section>`;
+  }
+
+  function renderRoutineBlueprintEmptyState(kind, issue) {
+    var isWarning = kind === 'unavailable';
+    return `
+    <section class="routine-blueprint-empty-state ${isWarning ? 'is-warning' : ''}">
+      <div>
+        <span>${isWarning ? 'Blueprint data health' : 'Blueprint library'}</span>
+        <strong>${isWarning ? 'Routine blueprint library unavailable' : 'No routine blueprints available'}</strong>
+        <p>${esc(
+          isWarning
+            ? (issue || 'Blueprints did not load.') + ' Draft from scratch for now, and retry before assuming no reusable automation patterns exist.'
+            : 'Blueprints normally fill schedule, prompt, context, and safety defaults. You can still draft an exact routine from scratch, then save useful patterns as skills or snippets later.',
+        )}</p>
+      </div>
+      <div class="routine-empty-actions">
+        <button type="button" class="btn btn-sm btn-primary" onclick="openRoutineWizard()">Draft routine</button>
+        ${
+          isWarning
+            ? '<button type="button" class="btn btn-sm btn-ghost" onclick="navigate(\'tasks\')">Retry templates</button>'
+            : ''
+        }
+        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('skills')">Review skills</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('snippets')">Snippets</button>
+      </div>
+    </section>`;
+  }
+
+  function renderRoutineTaskEmptyState() {
+    return `
+    <section class="routine-task-empty-state">
+      <div class="routine-task-empty-copy">
+        <span>First routine</span>
+        <strong>Create your first scheduled task</strong>
+        <p>Start with one supervised routine: a daily brief, system health check, repository review, or Cowork document follow-up. Keep external writes approval-gated until the output is trusted.</p>
+      </div>
+      <div class="routine-task-empty-flow">
+        <button type="button" onclick="applyRoutineBlueprint(0)"><strong>Daily brief</strong><small>Summarize what needs attention.</small></button>
+        <button type="button" onclick="applyRoutineBlueprint(2)"><strong>System health check</strong><small>Watch runtime and service health.</small></button>
+        <button type="button" onclick="openRoutineWizard()"><strong>Custom routine</strong><small>Set schedule, provider, context, and guardrails.</small></button>
+      </div>
     </section>`;
   }
 
@@ -108,5 +224,10 @@
     renderRoutineDetailDataHealth,
     renderRoutineDetailLoadingState,
     renderRoutineRecoveryState,
+    routineLaneDefinitions,
+    routineIntakeGuide,
+    renderRoutineIntakeGuide,
+    renderRoutineBlueprintEmptyState,
+    renderRoutineTaskEmptyState,
   };
 })();

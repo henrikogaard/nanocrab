@@ -8,11 +8,12 @@ const fileVaultStatesUiPath = path.join(
   process.cwd(),
   'src/admin/public/ui/file-vault-states.js',
 );
+const fileVaultStatesSource = fs.readFileSync(fileVaultStatesUiPath, 'utf8');
 
 const fileDetailSource = (source: string) =>
   source.slice(
     source.indexOf('window.selectGroup = async'),
-    source.indexOf('window.copyFileVaultBrief'),
+    source.indexOf('function setInlineStatus'),
   );
 
 describe('Group Files context vault UI', () => {
@@ -29,10 +30,10 @@ describe('Group Files context vault UI', () => {
     expect(source).toContain('fileStats');
     expect(source).toContain('loadIssues');
     expect(source).toContain('Data health:');
-    expect(source).toContain(
+    expect(fileVaultStatesSource).toContain(
       'File vault catalog loaded without known fallback.',
     );
-    expect(source).toContain('File vault catalog unavailable');
+    expect(fileVaultStatesSource).toContain('File vault unavailable');
     expect(source).toContain('files-stat ${loadIssues.length ?');
     expect(source).toContain(
       "Data health</span><strong>${loadIssues.length ? loadIssues.length : 'ok'}",
@@ -46,34 +47,30 @@ describe('Group Files context vault UI', () => {
     expect(source).toContain(
       'Use this before turning channel uploads, saved threads, memory, or instructions into Cowork files, reports, artifacts, or durable personal knowledge.',
     );
-    expect(source).toContain('Classify the source');
-    expect(source).toContain('Pick the durable home');
-    expect(source).toContain('Preserve provenance');
-    expect(source).toContain('Require approval for edits');
+    expect(fileVaultStatesSource).toContain('Classify the source');
+    expect(fileVaultStatesSource).toContain('Pick the durable home');
+    expect(fileVaultStatesSource).toContain('Preserve provenance');
+    expect(fileVaultStatesSource).toContain('Require approval for edits');
     expect(source).toContain('fileVaultBriefText');
     expect(source).toContain('_fileVaultState');
     expect(source).toContain('copyFileVaultBrief');
     expect(source).toContain('Copy vault brief');
-    expect(source).toContain('Files context vault brief');
-    expect(source).toContain('Global MEMORY.md stays personal and private.');
-    expect(source).toContain('AGENTS.md defines group-specific behavior.');
-    expect(source).toContain(
+    expect(fileVaultStatesSource).toContain('Files context vault brief');
+    expect(fileVaultStatesSource).toContain('Global MEMORY.md stays personal and private.');
+    expect(fileVaultStatesSource).toContain('AGENTS.md defines group-specific behavior.');
+    expect(fileVaultStatesSource).toContain(
       'Saved threads support audit and context recovery.',
     );
-    expect(source).toContain('Uploaded files and media from channels.');
-    expect(source).toContain(
+    expect(fileVaultStatesSource).toContain('Uploaded files and media from channels.');
+    expect(fileVaultStatesSource).toContain(
       'Keep personal memory in the personal Memory space, group behavior in AGENTS.md, project work in Cowork projects, and raw channel uploads here until promoted into an artifact.',
     );
-    expect(source).toContain('filePromotionChecklist().map');
+    expect(source).toContain('filePromotionChecklist()');
+    expect(fileVaultStatesSource).toContain('filePromotionChecklist().map(function (item) {');
   });
 
   it('preserves group selection and editable instruction hooks', () => {
     const source = fs.readFileSync(appPath, 'utf8');
-    const fileVaultStatesSource = fs.readFileSync(
-      fileVaultStatesUiPath,
-      'utf8',
-    );
-
     expect(source).toContain("api('/files')");
     expect(source).toContain('id="file-detail"');
     expect(source).toContain('file-group-link');
@@ -94,25 +91,22 @@ describe('Group Files context vault UI', () => {
     expect(fileVaultStatesSource).toContain(
       'Gathering AGENTS.md, memory, saved conversations, and uploads',
     );
-    expect(source).toContain('Group context brief');
-    expect(source).toContain('Group files loaded without known fallback.');
+    expect(fileVaultStatesSource).toContain('Group context brief');
+    expect(fileVaultStatesSource).toContain(
+      'Group files loaded without known fallback.',
+    );
     expect(source).toContain('groupLoadIssues');
     expect(source).toContain('Data health needs review');
     expect(source).toContain(
       'Retry this group before asking agents to rely on saved threads, uploads, or instruction context.',
     );
-    expect(source).toContain(
+    expect(fileVaultStatesSource).toContain(
       'For MCP-enabled Cowork work, cite the group folder and request explicit approval before editing memory, instructions, external documents, or channel-visible content.',
     );
   });
 
   it('keeps conversation and attachment affordances wired', () => {
     const source = fs.readFileSync(appPath, 'utf8');
-    const fileVaultStatesSource = fs.readFileSync(
-      fileVaultStatesUiPath,
-      'utf8',
-    );
-
     expect(source).toContain('viewConversation');
     expect(source).toContain('id="conv-viewer"');
     expect(source).toContain("renderFilesLoadingState('conversation')");
@@ -258,7 +252,7 @@ describe('Group Files context vault UI', () => {
     expect(detail).toContain('files-action-cell');
     expect(detail).toContain('files-download-link');
     expect(detail).toContain('files-attachment-thumb');
-    expect(detail).toContain('files-conversation-preview');
+    expect(appSource).toContain('files-conversation-preview');
     expect(detail).not.toContain(
       'style="display:flex;gap:8px;align-items:center"',
     );

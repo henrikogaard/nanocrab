@@ -4507,55 +4507,11 @@ const messageIntentCards = [
   },
 ];
 
-const routineLaneDefinitions = [
-  {
-    lane: 'Copilot',
-    kinds: ['briefing', 'task'],
-    detail: 'Conversation follow-ups, reminders, and recurring briefings',
-  },
-  {
-    lane: 'Cowork',
-    kinds: ['briefing', 'operation', 'task'],
-    detail: 'Project summaries, MCP context, documents, and artifacts',
-  },
-  {
-    lane: 'Code',
-    kinds: ['github', 'release'],
-    detail: 'Repository checks, review reminders, and release routines',
-  },
-  {
-    lane: 'System',
-    kinds: ['heartbeat', 'monitor', 'operation'],
-    detail: 'Health checks, webhooks, uptime routines, and operator pings',
-  },
-];
-
-const routineIntakeGuide = [
-  {
-    lane: 'Copilot',
-    action: "navigate('chat')",
-    label: 'Open Copilot',
-    detail: 'Use for one-off questions, drafting, explanation, and quick decisions that do not need project state.',
-  },
-  {
-    lane: 'Cowork',
-    action: "navigate('projects')",
-    label: 'Open Cowork',
-    detail: 'Use when the work needs files, MCP sources, documents, artifacts, project memory, or a saved handoff.',
-  },
-  {
-    lane: 'Code',
-    action: "navigate('agents')",
-    label: 'Open Code',
-    detail: 'Use for repositories, tests, pull requests, release checks, and coding agents with workspace access.',
-  },
-  {
-    lane: 'Routine',
-    action: 'openRoutineWizard()',
-    label: 'Draft routine',
-    detail: 'Use only after the work repeats, the output is understood, and external writes can stay approval-gated.',
-  },
-];
+const routineLaneDefinitions = window.NanoRoutineStates.routineLaneDefinitions;
+const routineIntakeGuide = window.NanoRoutineStates.routineIntakeGuide;
+const renderRoutineIntakeGuide = window.NanoRoutineStates.renderRoutineIntakeGuide;
+const renderRoutineBlueprintEmptyState = window.NanoRoutineStates.renderRoutineBlueprintEmptyState;
+const renderRoutineTaskEmptyState = window.NanoRoutineStates.renderRoutineTaskEmptyState;
 
 function messageTriageDestination(message) {
   const text = `${message?.content || ''} ${message?.chat_name || ''} ${message?.channel || ''}`;
@@ -5142,65 +5098,6 @@ function renderRoutineCockpit(tasks, options = {}) {
       </div>
     </section>
   </section>`;
-}
-
-function renderRoutineIntakeGuide() {
-  return `<section class="routine-intake-guide">
-    <div class="routine-intake-copy">
-      <span class="routine-cockpit-kicker">Automation intake</span>
-      <h3>Choose the smallest workspace that can safely finish the work</h3>
-      <p>Not every useful request should become a schedule. Route one-off work to Copilot, project work to Cowork, repository work to Code, and promote only stable recurring work into Routines.</p>
-    </div>
-    <div class="routine-intake-grid">
-      ${routineIntakeGuide
-        .map(
-          (item) => `<button type="button" class="routine-intake-card" onclick="${item.action}">
-        <span>${esc(item.lane)}</span>
-        <strong>${esc(item.label)}</strong>
-        <p>${esc(item.detail)}</p>
-      </button>`,
-        )
-        .join('')}
-    </div>
-  </section>`;
-}
-
-function renderRoutineBlueprintEmptyState(kind = 'empty', issue = '') {
-  const isWarning = kind === 'unavailable';
-  return `
-    <section class="routine-blueprint-empty-state ${isWarning ? 'is-warning' : ''}">
-      <div>
-        <span>${isWarning ? 'Blueprint data health' : 'Blueprint library'}</span>
-        <strong>${isWarning ? 'Routine blueprint library unavailable' : 'No routine blueprints available'}</strong>
-        <p>${esc(
-          isWarning
-            ? `${issue || 'Blueprints did not load.'} Draft from scratch for now, and retry before assuming no reusable automation patterns exist.`
-            : 'Blueprints normally fill schedule, prompt, context, and safety defaults. You can still draft an exact routine from scratch, then save useful patterns as skills or snippets later.',
-        )}</p>
-      </div>
-      <div class="routine-empty-actions">
-        <button type="button" class="btn btn-sm btn-primary" onclick="openRoutineWizard()">Draft routine</button>
-        ${isWarning ? '<button type="button" class="btn btn-sm btn-ghost" onclick="navigate(\'tasks\')">Retry templates</button>' : ''}
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('skills')">Review skills</button>
-        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('snippets')">Snippets</button>
-      </div>
-    </section>`;
-}
-
-function renderRoutineTaskEmptyState() {
-  return `
-    <section class="routine-task-empty-state">
-      <div class="routine-task-empty-copy">
-        <span>First routine</span>
-        <strong>Create your first scheduled task</strong>
-        <p>Start with one supervised routine: a daily brief, system health check, repository review, or Cowork document follow-up. Keep external writes approval-gated until the output is trusted.</p>
-      </div>
-      <div class="routine-task-empty-flow">
-        <button type="button" onclick="applyRoutineBlueprint(0)"><strong>Daily brief</strong><small>Summarize what needs attention.</small></button>
-        <button type="button" onclick="applyRoutineBlueprint(2)"><strong>System health check</strong><small>Watch runtime and service health.</small></button>
-        <button type="button" onclick="openRoutineWizard()"><strong>Custom routine</strong><small>Set schedule, provider, context, and guardrails.</small></button>
-      </div>
-    </section>`;
 }
 
 // Tasks
@@ -10335,139 +10232,19 @@ window.copyDockerRuntimeBrief = async function () {
 };
 
 // Files
-function fileContextCards() {
-  return [
-    {
-      title: 'Personal memory',
-      body: 'Global MEMORY.md stays personal and private.',
-      meta: 'private runtime memory',
-    },
-    {
-      title: 'Group instructions',
-      body: 'AGENTS.md defines group-specific behavior.',
-      meta: 'agent context',
-    },
-    {
-      title: 'Thread history',
-      body: 'Saved threads support audit and context recovery.',
-      meta: 'conversation archive',
-    },
-    {
-      title: 'Channel uploads',
-      body: 'Uploaded files and media from channels.',
-      meta: 'attachments',
-    },
-  ];
-}
-
-function filePromotionChecklist() {
-  return [
-    {
-      title: 'Classify the source',
-      detail:
-        'Decide whether the item is private memory, group instructions, chat history, a channel upload, or project evidence.',
-    },
-    {
-      title: 'Pick the durable home',
-      detail:
-        'Move reusable project work to Cowork, final outputs to Artifacts, source-backed summaries to Reports, and personal facts to Memory.',
-    },
-    {
-      title: 'Preserve provenance',
-      detail:
-        'Keep the group folder, filename, sender/channel, timestamp, and conversation reference with any promoted output.',
-    },
-    {
-      title: 'Require approval for edits',
-      detail:
-        'Ask before changing AGENTS.md, MEMORY.md, external documents, channel-visible files, or MCP-backed source systems.',
-    },
-  ];
-}
-
-function fileVaultBriefText(state) {
-  const groups = state?.groups || [];
-  const stats = state?.stats || {};
-  const cards = state?.cards || fileContextCards();
-  const loadIssues = Array.isArray(state?.loadIssues)
-    ? state.loadIssues.filter(Boolean)
-    : [];
-  const groupLines = groups.slice(0, 12).map((group) => {
-    const signals = [
-      group.hasAgentsMd ? 'AGENTS.md' : '',
-      group.hasConversations ? 'threads' : '',
-      group.hasAttachments ? 'uploads' : '',
-    ].filter(Boolean);
-    return `- ${group.name || 'unnamed'}: ${signals.join(', ') || 'empty'}`;
-  });
-  const cardLines = cards.map((card) => `- ${card.title}: ${card.body}`);
-
-  return [
-    'Files context vault brief',
-    '',
-    `Groups: ${stats.groups || 0}`,
-    `Instruction files: ${stats.agentFiles || 0}`,
-    `Conversation archives: ${stats.conversations || 0}`,
-    `Attachment folders: ${stats.attachments || 0}`,
-    `Data health: ${loadIssues.length ? loadIssues.join('; ') : 'File vault catalog loaded without known fallback.'}`,
-    '',
-    'Use this vault to inspect group-local context before asking an agent to resume, audit, or summarize work.',
-    'Keep personal memory in the personal Memory space, group behavior in AGENTS.md, project work in Cowork projects, and raw channel uploads here until promoted into an artifact.',
-    'When asking an agent to work from this context, name the group folder, expected output, files to inspect, and whether any memory or instruction edits need approval.',
-    '',
-    'Context boundaries',
-    ...cardLines,
-    '',
-    'Promotion checklist',
-    ...filePromotionChecklist().map((item) => `- ${item.title}: ${item.detail}`),
-    '',
-    'Group folders',
-    ...(groupLines.length ? groupLines : ['- No group folders found.']),
-  ].join('\n');
-}
-
-function fileGroupBriefText(state) {
-  const folder = state?.folder || 'unknown';
-  const agentsMd = state?.agentsMd || {};
-  const memoryMd = state?.memoryMd || null;
-  const conversations = state?.conversations || [];
-  const attachments = state?.attachments || [];
-  const loadIssues = Array.isArray(state?.loadIssues)
-    ? state.loadIssues.filter(Boolean)
-    : [];
-  const conversationLines = conversations
-    .slice(0, 8)
-    .map((file) => `- ${file.name} (${formatBytes(file.size)}, ${formatTime(file.modified)})`);
-  const attachmentLines = attachments
-    .slice(0, 8)
-    .map((file) => `- ${file.name} (${formatBytes(file.size)}, ${formatTime(file.modified)})`);
-
-  return [
-    'Group context brief',
-    '',
-    `Group: ${folder}`,
-    `AGENTS.md: ${agentsMd.content ? 'present' : 'empty or missing'}`,
-    `Private memory visible here: ${memoryMd ? 'yes' : 'no'}`,
-    `Conversations: ${conversations.length}`,
-    `Attachments: ${attachments.length}`,
-    `Data health: ${loadIssues.length ? loadIssues.join('; ') : 'Group files loaded without known fallback.'}`,
-    '',
-    'Use this when asking an agent to resume work from a group folder or turn channel history into a Cowork project artifact.',
-    'Inspect AGENTS.md before changing behavior, treat MEMORY.md as private personal/runtime context, and move durable project outputs into Cowork artifacts instead of leaving them as raw uploads.',
-    'For MCP-enabled Cowork work, cite the group folder and request explicit approval before editing memory, instructions, external documents, or channel-visible content.',
-    '',
-    'Conversation files',
-    ...(conversationLines.length ? conversationLines : ['- No saved conversations.']),
-    '',
-    'Attachments',
-    ...(attachmentLines.length ? attachmentLines : ['- No attachments.']),
-  ].join('\n');
-}
+const fileContextCards = window.NanoFileVaultStates.fileContextCards;
+const filePromotionChecklist = window.NanoFileVaultStates.filePromotionChecklist;
+const fileVaultBriefText = window.NanoFileVaultStates.fileVaultBriefText;
+const fileGroupBriefText = window.NanoFileVaultStates.fileGroupBriefText;
 
 const renderFilesEmptyState =
   window.NanoFileVaultStates.renderFilesEmptyState;
 const renderFilesLoadingState =
   window.NanoFileVaultStates.renderFilesLoadingState;
+const copyFileVaultBrief = window.NanoFileVaultStates.copyFileVaultBrief;
+const copyFileGroupBrief = window.NanoFileVaultStates.copyFileGroupBrief;
+window.copyFileVaultBrief = copyFileVaultBrief;
+window.copyFileGroupBrief = copyFileGroupBrief;
 
 async function renderFiles(el) {
   let groups = [];
@@ -10781,30 +10558,6 @@ window.viewConversation = async (folder, filename) => {
     viewer.innerHTML =
       `<div class="files-viewer-card">${renderFilesEmptyState('failed')}</div>`;
   }
-};
-
-window.copyFileVaultBrief = async function () {
-  const state = window._fileVaultState;
-  if (!state) {
-    toast('Open files first', 'warning');
-    return;
-  }
-  const text = fileVaultBriefText(state);
-  await copyTextWithFallback(text, 'Files vault brief copied', 'Copy files vault brief');
-};
-
-window.copyFileGroupBrief = async function () {
-  const state = window._fileGroupState;
-  if (!state) {
-    toast('Select a group first', 'warning');
-    return;
-  }
-  const text = fileGroupBriefText(state);
-  await copyTextWithFallback(
-    text,
-    'Group context brief copied',
-    'Copy group context brief',
-  );
 };
 
 function memoryKnowledgeTimelineItems({

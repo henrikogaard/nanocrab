@@ -22,16 +22,16 @@ describe('Scheduled tasks productivity UI', () => {
 
     expect(source).toContain('routineIntakeGuide');
     expect(source).toContain('renderRoutineIntakeGuide');
-    expect(source).toContain('routine-intake-guide');
-    expect(source).toContain('Automation intake');
-    expect(source).toContain(
+    expect(routineStatesSource).toContain('routine-intake-guide');
+    expect(routineStatesSource).toContain('Automation intake');
+    expect(routineStatesSource).toContain(
       'Choose the smallest workspace that can safely finish the work',
     );
-    expect(source).toContain(
+    expect(routineStatesSource).toContain(
       'Not every useful request should become a schedule',
     );
-    expect(source).toContain("navigate('projects')");
-    expect(source).toContain("navigate('agents')");
+    expect(routineStatesSource).toContain("navigate('projects')");
+    expect(routineStatesSource).toContain("navigate('agents')");
     expect(source).toContain('routine-cockpit');
     expect(source).toContain('routine-lane-map');
     expect(source).toContain('routine-decision-brief');
@@ -69,21 +69,21 @@ describe('Scheduled tasks productivity UI', () => {
 
     expect(source).toContain('routineLaneDefinitions');
     expect(source).toContain('routineLaneCards');
-    expect(source).toContain("lane: 'Copilot'");
-    expect(source).toContain("lane: 'Cowork'");
-    expect(source).toContain("lane: 'Code'");
-    expect(source).toContain("lane: 'System'");
-    expect(source).toContain("lane: 'Routine'");
-    expect(source).toContain(
+    expect(routineStatesSource).toContain("lane: 'Copilot'");
+    expect(routineStatesSource).toContain("lane: 'Cowork'");
+    expect(routineStatesSource).toContain("lane: 'Code'");
+    expect(routineStatesSource).toContain("lane: 'System'");
+    expect(routineStatesSource).toContain("lane: 'Routine'");
+    expect(routineStatesSource).toContain(
       'Use when the work needs files, MCP sources, documents, artifacts, project memory',
     );
-    expect(source).toContain(
+    expect(routineStatesSource).toContain(
       'Use only after the work repeats, the output is understood',
     );
-    expect(source).toContain(
+    expect(routineStatesSource).toContain(
       'Project summaries, MCP context, documents, and artifacts',
     );
-    expect(source).toContain(
+    expect(routineStatesSource).toContain(
       'Repository checks, review reminders, and release routines',
     );
   });
@@ -127,9 +127,10 @@ describe('Scheduled tasks productivity UI', () => {
     expect(source).toContain(
       "renderRoutineBlueprintEmptyState('unavailable', blueprintLoadIssue)",
     );
-    expect(source).toContain('Routine blueprint library unavailable');
-    expect(source).toContain('Blueprint data health');
-    expect(source).toContain(
+    expect(routineStatesSource).toContain('renderRoutineBlueprintEmptyState(kind, issue)');
+    expect(routineStatesSource).toContain('Routine blueprint library unavailable');
+    expect(routineStatesSource).toContain('Blueprint data health');
+    expect(routineStatesSource).toContain(
       'Draft from scratch for now, and retry before assuming no reusable automation patterns exist.',
     );
     expect(source).toContain('blueprintLoadIssue');
@@ -141,17 +142,17 @@ describe('Scheduled tasks productivity UI', () => {
       'window._routineQueueState = { tasks, approvalGuardCount, brief, loadIssues };',
     );
     expect(source).toContain('renderRoutineTaskEmptyState');
-    expect(source).toContain('routine-blueprint-empty-state');
-    expect(source).toContain('routine-task-empty-state');
-    expect(source).toContain(
+    expect(routineStatesSource).toContain('routine-blueprint-empty-state');
+    expect(routineStatesSource).toContain('routine-task-empty-state');
+    expect(routineStatesSource).toContain(
       'Blueprints normally fill schedule, prompt, context, and safety defaults.',
     );
-    expect(source).toContain('Start with one supervised routine');
-    expect(source).toContain(
+    expect(routineStatesSource).toContain('Start with one supervised routine');
+    expect(routineStatesSource).toContain(
       'Keep external writes approval-gated until the output is trusted.',
     );
-    expect(source).toContain("navigate('skills')");
-    expect(source).toContain("navigate('snippets')");
+    expect(routineStatesSource).toContain("navigate('skills')");
+    expect(routineStatesSource).toContain("navigate('snippets')");
     expect(source).not.toContain(
       'id="new-task-form" class="card routine-wizard" style="display:none"',
     );

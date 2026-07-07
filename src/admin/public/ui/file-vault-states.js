@@ -120,8 +120,230 @@
     </section>`;
   }
 
+  function fileContextCards() {
+    return [
+      {
+        title: 'Personal memory',
+        body: 'Global MEMORY.md stays personal and private.',
+        meta: 'private runtime memory',
+      },
+      {
+        title: 'Group instructions',
+        body: 'AGENTS.md defines group-specific behavior.',
+        meta: 'agent context',
+      },
+      {
+        title: 'Thread history',
+        body: 'Saved threads support audit and context recovery.',
+        meta: 'conversation archive',
+      },
+      {
+        title: 'Channel uploads',
+        body: 'Uploaded files and media from channels.',
+        meta: 'attachments',
+      },
+    ];
+  }
+
+  function filePromotionChecklist() {
+    return [
+      {
+        title: 'Classify the source',
+        detail:
+          'Decide whether the item is private memory, group instructions, chat history, a channel upload, or project evidence.',
+      },
+      {
+        title: 'Pick the durable home',
+        detail:
+          'Move reusable project work to Cowork, final outputs to Artifacts, source-backed summaries to Reports, and personal facts to Memory.',
+      },
+      {
+        title: 'Preserve provenance',
+        detail:
+          'Keep the group folder, filename, sender/channel, timestamp, and conversation reference with any promoted output.',
+      },
+      {
+        title: 'Require approval for edits',
+        detail:
+          'Ask before changing AGENTS.md, MEMORY.md, external documents, channel-visible files, or MCP-backed source systems.',
+      },
+    ];
+  }
+
+  function formatBytes(bytes) {
+    var num = Number(bytes || 0);
+    if (Number.isNaN(num) || !Number.isFinite(num) || num <= 0) return '0 B';
+    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var value = num;
+    var unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    if (unit === 0) return value + ' ' + units[unit];
+    return value.toFixed(value >= 10 ? 0 : 1) + ' ' + units[unit];
+  }
+
+  function formatTime(value) {
+    if (!value) return 'unknown';
+    var date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toISOString().replace('T', ' ').replace('.000Z', 'Z');
+  }
+
+  function fileVaultBriefText(state) {
+    var groups = state && state.groups ? state.groups : [];
+    var stats = state && state.stats ? state.stats : {};
+    var cards = state && state.cards ? state.cards : fileContextCards();
+    var loadIssues = Array.isArray(state && state.loadIssues)
+      ? state.loadIssues.filter(Boolean)
+      : [];
+    var groupLines = groups
+      .slice(0, 12)
+      .map(function (group) {
+        var signals = [
+          group.hasAgentsMd ? 'AGENTS.md' : '',
+          group.hasConversations ? 'threads' : '',
+          group.hasAttachments ? 'uploads' : '',
+        ].filter(Boolean);
+        return '- ' + (group.name || 'unnamed') + ': ' + (signals.join(', ') || 'empty');
+      });
+    var cardLines = cards.map(function (card) {
+      return '- ' + card.title + ': ' + card.body;
+    });
+
+    return [
+      'Files context vault brief',
+      '',
+      'Groups: ' + (stats.groups || 0),
+      'Instruction files: ' + (stats.agentFiles || 0),
+      'Conversation archives: ' + (stats.conversations || 0),
+      'Attachment folders: ' + (stats.attachments || 0),
+      'Data health: ' +
+        (loadIssues.length
+          ? loadIssues.join('; ')
+          : 'File vault catalog loaded without known fallback.'),
+      '',
+      'Use this vault to inspect group-local context before asking an agent to resume, audit, or summarize work.',
+      'Keep personal memory in the personal Memory space, group behavior in AGENTS.md, project work in Cowork projects, and raw channel uploads here until promoted into an artifact.',
+      'When asking an agent to work from this context, name the group folder, expected output, files to inspect, and whether any memory or instruction edits need approval.',
+      '',
+      'Context boundaries',
+      ].concat(cardLines).concat([
+        '',
+        'Promotion checklist',
+      ]).concat(
+        filePromotionChecklist().map(function (item) {
+          return '- ' + item.title + ': ' + item.detail;
+        }),
+      ).concat([
+        '',
+        'Group folders',
+      ]).concat(groupLines.length ? groupLines : ['- No group folders found.']);
+  }
+
+  function fileGroupBriefText(state) {
+    var folder = (state && state.folder) || 'unknown';
+    var agentsMd = (state && state.agentsMd) || {};
+    var memoryMd = state && state.memoryMd ? state.memoryMd : null;
+    var conversations = state && Array.isArray(state.conversations)
+      ? state.conversations
+      : [];
+    var attachments = state && Array.isArray(state.attachments)
+      ? state.attachments
+      : [];
+    var loadIssues = Array.isArray(state && state.loadIssues)
+      ? state.loadIssues.filter(Boolean)
+      : [];
+    var conversationLines = conversations
+      .slice(0, 8)
+      .map(function (file) {
+        return (
+          '- ' +
+          (file.name || 'unknown') +
+          ' (' +
+          formatBytes(file.size) +
+          ', ' +
+          formatTime(file.modified) +
+          ')'
+        );
+      });
+    var attachmentLines = attachments
+      .slice(0, 8)
+      .map(function (file) {
+        return (
+          '- ' +
+          (file.name || 'unknown') +
+          ' (' +
+          formatBytes(file.size) +
+          ', ' +
+          formatTime(file.modified) +
+          ')'
+        );
+      });
+
+    return [
+      'Group context brief',
+      '',
+      'Group: ' + folder,
+      'AGENTS.md: ' + (agentsMd && agentsMd.content ? 'present' : 'empty or missing'),
+      'Private memory visible here: ' + (memoryMd ? 'yes' : 'no'),
+      'Conversations: ' + conversations.length,
+      'Attachments: ' + attachments.length,
+      'Data health: ' +
+        (loadIssues.length
+          ? loadIssues.join('; ')
+          : 'Group files loaded without known fallback.'),
+      '',
+      'Use this when asking an agent to resume work from a group folder or turn channel history into a Cowork project artifact.',
+      'Inspect AGENTS.md before changing behavior, treat MEMORY.md as private personal/runtime context, and move durable project outputs into Cowork artifacts instead of leaving them as raw uploads.',
+      'For MCP-enabled Cowork work, cite the group folder and request explicit approval before editing memory, instructions, external documents, or channel-visible content.',
+      '',
+      'Conversation files',
+    ]
+      .concat(conversationLines.length ? conversationLines : ['- No saved conversations.'])
+      .concat([
+        '',
+        'Attachments',
+      ])
+      .concat(attachmentLines.length ? attachmentLines : ['- No attachments.'])
+      .join('\n');
+  }
+
+  async function copyFileVaultBrief() {
+    if (!window._fileVaultState) {
+      window.NanoFeedback?.toast('Open files first', 'warning');
+      return;
+    }
+    var text = fileVaultBriefText(window._fileVaultState);
+    await window.NanoFeedback.copyTextWithFallback(
+      text,
+      'Files vault brief copied',
+      'Copy files vault brief',
+    );
+  }
+
+  async function copyFileGroupBrief() {
+    if (!window._fileGroupState) {
+      window.NanoFeedback?.toast('Select a group first', 'warning');
+      return;
+    }
+    var text = fileGroupBriefText(window._fileGroupState);
+    await window.NanoFeedback.copyTextWithFallback(
+      text,
+      'Group context brief copied',
+      'Copy group context brief',
+    );
+  }
+
   window.NanoFileVaultStates = {
     renderFilesEmptyState,
     renderFilesLoadingState,
+    fileContextCards,
+    filePromotionChecklist,
+    fileVaultBriefText,
+    fileGroupBriefText,
+    copyFileVaultBrief,
+    copyFileGroupBrief,
   };
 })();
