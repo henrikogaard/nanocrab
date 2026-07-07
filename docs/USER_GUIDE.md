@@ -2,7 +2,7 @@
 
 Last updated: 2026-06-27
 
-Applies to: NanoCrab 2.0-RC3
+Applies to: NanoCrab 2.0-RC6
 
 This guide is for the person operating NanoCrab day to day. It focuses on the
 web UI, messaging workflow, coding agents, scheduled routines, approvals, and

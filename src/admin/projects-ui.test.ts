@@ -10,7 +10,7 @@ describe('Cowork Projects UI wiring', () => {
   it('registers the Projects page in the dashboard shell', () => {
     const source = fs.readFileSync(appPath, 'utf8');
 
-    expect(source).toContain("projects: { label: 'Projects'");
+    expect(source).toContain("projects: { label: 'Cowork Projects'");
     expect(source).toContain("projects: 'renderProjects'");
     expect(source).toContain("'project-chat': 'renderProjectChatPage'");
     expect(source).toContain('parseProjectChatHash');
@@ -116,6 +116,7 @@ describe('Cowork Projects UI wiring', () => {
     );
     expect(source).toContain('PROJECT_TEMPLATES');
     expect(source).toContain('renderProjectLoadingState');
+    expect(source).toContain('cowork-kicker');
     expect(source).toContain('Loading project workspaces');
     expect(source).toContain(
       'virtual folders, source files, project chats, artifacts, and approved MCP context',
@@ -166,6 +167,9 @@ describe('Cowork Projects UI wiring', () => {
     expect(source).toContain('id="project-chat-model"');
     expect(source).toContain('id="project-chat-title"');
     expect(source).toContain('renderProjectChatComposer');
+    expect(source).toContain('Export citation ledger');
+    expect(source).toContain('window.exportProjectRunCitationLedger');
+    expect(source).toContain('/research/export-ledger');
     expect(source).toContain('project-chat-entry');
     expect(source).toContain('Ask in this project');
     expect(source).toContain(

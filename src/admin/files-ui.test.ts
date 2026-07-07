@@ -4,6 +4,10 @@ import path from 'path';
 
 const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
+const fileVaultStatesUiPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/file-vault-states.js',
+);
 
 const fileDetailSource = (source: string) =>
   source.slice(
@@ -65,6 +69,10 @@ describe('Group Files context vault UI', () => {
 
   it('preserves group selection and editable instruction hooks', () => {
     const source = fs.readFileSync(appPath, 'utf8');
+    const fileVaultStatesSource = fs.readFileSync(
+      fileVaultStatesUiPath,
+      'utf8',
+    );
 
     expect(source).toContain("api('/files')");
     expect(source).toContain('id="file-detail"');
@@ -78,9 +86,12 @@ describe('Group Files context vault UI', () => {
     expect(source).toContain('_fileGroupState');
     expect(source).toContain('copyFileGroupBrief');
     expect(source).toContain('Copy group brief');
-    expect(source).toContain('renderFilesLoadingState');
-    expect(source).toContain('Loading group context');
     expect(source).toContain(
+      'window.NanoFileVaultStates.renderFilesLoadingState',
+    );
+    expect(source).toContain('renderFilesLoadingState');
+    expect(fileVaultStatesSource).toContain('Loading group context');
+    expect(fileVaultStatesSource).toContain(
       'Gathering AGENTS.md, memory, saved conversations, and uploads',
     );
     expect(source).toContain('Group context brief');
@@ -97,37 +108,56 @@ describe('Group Files context vault UI', () => {
 
   it('keeps conversation and attachment affordances wired', () => {
     const source = fs.readFileSync(appPath, 'utf8');
+    const fileVaultStatesSource = fs.readFileSync(
+      fileVaultStatesUiPath,
+      'utf8',
+    );
 
     expect(source).toContain('viewConversation');
     expect(source).toContain('id="conv-viewer"');
     expect(source).toContain("renderFilesLoadingState('conversation')");
-    expect(source).toContain('Loading conversation transcript');
-    expect(source).toContain(
+    expect(fileVaultStatesSource).toContain('Loading conversation transcript');
+    expect(fileVaultStatesSource).toContain(
       'Opening the saved thread so it can be inspected, copied, or routed into Cowork.',
     );
     expect(source).toContain('/download/conversations/');
     expect(source).toContain('/download/attachments/');
     expect(source).toContain('files-viewer-card');
-    expect(source).toContain('Failed to load file');
+    expect(fileVaultStatesSource).toContain('Failed to load file');
   });
 
   it('turns missing group files into context routing actions', () => {
     const source = fs.readFileSync(appPath, 'utf8');
     const style = fs.readFileSync(stylePath, 'utf8');
+    const fileVaultStatesSource = fs.readFileSync(
+      fileVaultStatesUiPath,
+      'utf8',
+    );
     const detail = fileDetailSource(source);
 
-    expect(source).toContain('function renderFilesEmptyState');
-    expect(source).toContain('files-action-empty');
-    expect(source).toContain('files-empty-flow');
-    expect(source).toContain('files-empty-actions');
-    expect(source).toContain('No group folders found');
-    expect(source).toContain('Select a group to browse its files');
-    expect(source).toContain('No saved conversations');
-    expect(source).toContain('No attachments');
-    expect(source).toContain('Failed to load file');
-    expect(source).toContain('File vault unavailable');
-    expect(source).toContain('Conversation archive unavailable');
-    expect(source).toContain('Attachment archive unavailable');
+    expect(source).toContain(
+      'window.NanoFileVaultStates.renderFilesEmptyState',
+    );
+    expect(source).toContain(
+      'window.NanoFileVaultStates.renderFilesLoadingState',
+    );
+    expect(source).not.toContain('function renderFilesEmptyState');
+    expect(source).not.toContain('function renderFilesLoadingState');
+    expect(fileVaultStatesSource).toContain('function renderFilesEmptyState');
+    expect(fileVaultStatesSource).toContain('function renderFilesLoadingState');
+    expect(fileVaultStatesSource).toContain('files-action-empty');
+    expect(fileVaultStatesSource).toContain('files-empty-flow');
+    expect(fileVaultStatesSource).toContain('files-empty-actions');
+    expect(fileVaultStatesSource).toContain('No group folders found');
+    expect(fileVaultStatesSource).toContain(
+      'Select a group to browse its files',
+    );
+    expect(fileVaultStatesSource).toContain('No saved conversations');
+    expect(fileVaultStatesSource).toContain('No attachments');
+    expect(fileVaultStatesSource).toContain('Failed to load file');
+    expect(fileVaultStatesSource).toContain('File vault unavailable');
+    expect(fileVaultStatesSource).toContain('Conversation archive unavailable');
+    expect(fileVaultStatesSource).toContain('Attachment archive unavailable');
     expect(source).toContain(
       "renderFilesEmptyState('conversations-unavailable')",
     );
@@ -171,6 +201,7 @@ describe('Group Files context vault UI', () => {
     expect(style).toContain('.files-empty-state.is-warning');
     expect(style).toContain('.files-empty-flow');
     expect(style).toContain('.files-empty-actions');
+    expect(fileVaultStatesSource).toContain('files-loading-state');
     expect(style).toContain('.files-loading-state');
     expect(style).toContain('.files-loading-bars');
     expect(style).toContain('@keyframes filesLoadingBar');

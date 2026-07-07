@@ -4,6 +4,10 @@ import path from 'path';
 
 const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
+const parityUiPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/provider-parity.js',
+);
 
 const providerCatalogSource = (source: string) =>
   source.slice(
@@ -37,6 +41,7 @@ describe('AI Providers routing cockpit UI', () => {
 
   it('surfaces provider readiness from configured providers, defaults, and profiles', () => {
     const source = fs.readFileSync(appPath, 'utf8');
+    const paritySource = fs.readFileSync(parityUiPath, 'utf8');
 
     expect(source).toContain('configuredProviders');
     expect(source).toContain('missingDefaultCategories');
@@ -89,6 +94,24 @@ describe('AI Providers routing cockpit UI', () => {
     expect(source).toContain(
       'Keep sends, publishes, repository writes, webhooks, and third-party updates approval-gated regardless of model.',
     );
+    expect(source).toContain("api('/providers/parity')");
+    expect(source).toContain(
+      'window.NanoProviderParity.renderProviderParityPanel(parity)',
+    );
+    expect(paritySource).toContain('window.NanoProviderParity');
+    expect(paritySource).toContain('renderProviderParityPanel');
+    expect(paritySource).toContain('provider-parity-panel');
+    expect(paritySource).toContain('Provider parity');
+    expect(paritySource).toContain('Conformance across key surfaces');
+    expect(paritySource).toContain('provider-parity-summary');
+    expect(paritySource).toContain('provider-parity-row');
+    expect(paritySource).toContain('provider-parity-note');
+    expect(paritySource).toContain('is-ready');
+    expect(paritySource).toContain('is-degraded');
+    expect(paritySource).toContain('is-blocked');
+    expect(paritySource).toContain('badge-success');
+    expect(paritySource).toContain('badge-warning');
+    expect(paritySource).toContain('badge-error');
   });
 
   it('keeps provider catalog, routing, and group defaults wired', () => {
@@ -247,6 +270,12 @@ describe('AI Providers routing cockpit UI', () => {
     expect(source).toContain('.provider-focus-grid');
     expect(source).toContain('.provider-focus-card');
     expect(source).toContain('.provider-launch-checklist');
+    expect(source).toContain('.provider-parity-panel');
+    expect(source).toContain('.provider-parity-summary');
+    expect(source).toContain('.provider-parity-grid');
+    expect(source).toContain('.provider-parity-row');
+    expect(source).toContain('.provider-parity-row.is-degraded');
+    expect(source).toContain('.provider-parity-row.is-blocked');
     expect(source).toContain('.provider-launch-checklist-grid');
     expect(source).toContain('.provider-launch-check.is-ready');
     expect(source).toContain('.provider-launch-check.is-review');
@@ -256,7 +285,7 @@ describe('AI Providers routing cockpit UI', () => {
     expect(source).toContain('.provider-fallback-card');
     expect(source).toContain('.provider-page-header,');
     expect(source).toContain(
-      '.provider-focus-lanes,\n  .provider-focus-grid,\n  .provider-launch-checklist-grid,\n  .provider-fallback-ladder,\n  .provider-fallback-grid {\n    grid-template-columns: 1fr;',
+      '.provider-focus-lanes,\n  .provider-parity-grid,\n  .provider-focus-grid,\n  .provider-launch-checklist-grid,\n  .provider-fallback-ladder,\n  .provider-fallback-grid {\n    grid-template-columns: 1fr;',
     );
   });
 });

@@ -33,7 +33,7 @@
 
   function renderRouteRecoveryActions(retryPage, includeCopy) {
     return `<div class="route-recovery-actions">
-    <button class="btn btn-sm btn-primary" onclick="navigate('${esc(retryPage)}')">Try again</button>
+    <button class="btn btn-sm btn-primary" onclick="navigate('${esc(retryPage)}')">Retry</button>
     ${includeCopy ? '<button class="btn btn-sm btn-ghost" onclick="copyRouteRecoveryBrief()">Copy recovery brief</button>' : ''}
     <button class="btn btn-sm btn-ghost" onclick="navigate('chat')">Copilot</button>
     <button class="btn btn-sm btn-ghost" onclick="navigate('projects')">Cowork</button>

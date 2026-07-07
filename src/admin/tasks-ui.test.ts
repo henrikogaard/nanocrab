@@ -4,6 +4,11 @@ import path from 'path';
 
 const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
+const routineStatesUiPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/routine-states.js',
+);
+const routineStatesSource = fs.readFileSync(routineStatesUiPath, 'utf8');
 
 const scheduledWorkSource = (source: string) =>
   source.slice(
@@ -241,10 +246,29 @@ describe('Scheduled tasks productivity UI', () => {
     expect(editBlock).toContain(
       "setInlineStatus(m, routineActionErrorMessage('save', r), 'error')",
     );
-    expect(detailBlock).toContain('renderRoutineRunsEmptyState');
-    expect(detailBlock).toContain('renderRoutineRunsUnavailableState');
-    expect(detailBlock).toContain('renderRoutineDetailDataHealth');
-    expect(detailBlock).toContain('renderRoutineRecoveryState');
+    expect(source).toContain(
+      'window.NanoRoutineStates.renderRoutineRunsEmptyState',
+    );
+    expect(source).toContain(
+      'window.NanoRoutineStates.renderRoutineRunsUnavailableState',
+    );
+    expect(source).toContain(
+      'window.NanoRoutineStates.renderRoutineDetailDataHealth',
+    );
+    expect(source).toContain(
+      'window.NanoRoutineStates.renderRoutineRecoveryState',
+    );
+    expect(source).toContain(
+      'window.NanoRoutineStates.renderRoutineDetailLoadingState',
+    );
+    expect(detailBlock).toContain('renderRoutineRunsEmptyState(task)');
+    expect(detailBlock).toContain('renderRoutineRunsUnavailableState(task)');
+    expect(detailBlock).toContain(
+      'renderRoutineDetailDataHealth(loadIssues, task)',
+    );
+    expect(detailBlock).toContain(
+      "renderRoutineRecoveryState('task', e.message",
+    );
     expect(detailBlock).toContain('renderRoutineDetailLoadingState(id)');
     expect(detailBlock).toContain('Recent run history unavailable');
     expect(detailBlock).toContain('Webhook approval context unavailable');
@@ -254,30 +278,52 @@ describe('Scheduled tasks productivity UI', () => {
     expect(detailBlock).toContain(
       'window._taskById = { ...(window._taskById || {}), [task.id]: task }',
     );
-    expect(source).toContain('routine-runs-empty-state');
-    expect(source).toContain('routine-recovery-state');
-    expect(source).toContain('routine-detail-warning');
-    expect(source).toContain('Run evidence unavailable');
-    expect(source).toContain(
+    expect(routineStatesSource).toContain(
+      'function renderRoutineRunsEmptyState',
+    );
+    expect(routineStatesSource).toContain(
+      'function renderRoutineRunsUnavailableState',
+    );
+    expect(routineStatesSource).toContain(
+      'function renderRoutineDetailDataHealth',
+    );
+    expect(routineStatesSource).toContain(
+      'function renderRoutineDetailLoadingState',
+    );
+    expect(routineStatesSource).toContain(
+      'function renderRoutineRecoveryState',
+    );
+    expect(routineStatesSource).toContain('routine-runs-empty-state');
+    expect(routineStatesSource).toContain('routine-recovery-state');
+    expect(routineStatesSource).toContain('routine-detail-warning');
+    expect(routineStatesSource).toContain('Run evidence unavailable');
+    expect(routineStatesSource).toContain(
       'Retry before deciding this routine has no evidence.',
     );
     expect(source).toContain(
       'Data health: ${loadIssues.length ? loadIssues.join',
     );
     expect(source).toContain('Routine detail loaded without known fallback.');
-    expect(source).toContain(
+    expect(routineStatesSource).toContain(
       'Retry before changing cadence, trusting run history, or promoting the routine to broader automation.',
     );
-    expect(source).toContain('routine-detail-loading-state');
-    expect(source).toContain('Loading task details');
-    expect(source).toContain(
+    expect(routineStatesSource).toContain('routine-detail-loading-state');
+    expect(routineStatesSource).toContain('Loading task details');
+    expect(routineStatesSource).toContain(
       'Gathering schedule, prompt, provider settings, recent run evidence, and approval context',
     );
-    expect(source).toContain('Run this routine once to create evidence');
-    expect(source).toContain('Routine detail could not load');
-    expect(source).toContain("navigate('approvals')");
-    expect(source).toContain("navigate('monitoring')");
-    expect(source).toContain("navigate('projects')");
+    expect(routineStatesSource).toContain(
+      'Run this routine once to create evidence',
+    );
+    expect(routineStatesSource).toContain('Routine detail could not load');
+    expect(routineStatesSource).toContain("navigate('approvals')");
+    expect(routineStatesSource).toContain("navigate('monitoring')");
+    expect(routineStatesSource).toContain("navigate('projects')");
+    expect(source).not.toContain('function renderRoutineRunsEmptyState');
+    expect(source).not.toContain('function renderRoutineRunsUnavailableState');
+    expect(source).not.toContain('function renderRoutineDetailDataHealth');
+    expect(source).not.toContain('function renderRoutineRecoveryState');
+    expect(source).not.toContain('function renderRoutineDetailLoadingState');
     expect(source).not.toContain(
       '\'<div class="empty routine-runs-empty">No runs recorded yet.</div>\'',
     );

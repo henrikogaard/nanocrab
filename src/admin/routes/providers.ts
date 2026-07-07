@@ -9,7 +9,9 @@ import { isAgentProvider } from '../../agent-provider.js';
 import { createApproval } from '../../approvals.js';
 import {
   getProviderProfile,
+  getProviderCapabilityMatrix,
   loadProviderProfiles,
+  type ProviderPurpose,
   providerModels,
   runLiveProviderProbe,
   getStoredProviderProbes,
@@ -373,6 +375,107 @@ router.get('/models', (req: Request, res: Response) => {
       ]),
     ),
   });
+});
+
+router.get('/parity', (_req: Request, res: Response) => {
+  const surfaceConfig: Array<{
+    id: 'chat' | 'coding' | 'automation' | 'reports' | 'tools';
+    label: string;
+    profileId: ProviderPurpose;
+  }> = [
+    { id: 'chat', label: 'Chat', profileId: 'default_chat' },
+    { id: 'coding', label: 'Coding', profileId: 'default_coding' },
+    {
+      id: 'automation',
+      label: 'Automation',
+      profileId: 'default_automation',
+    },
+    { id: 'reports', label: 'Reports', profileId: 'default_reports' },
+    { id: 'tools', label: 'Tools', profileId: 'default_skill_factory' },
+  ];
+  const profiles = loadProviderProfiles();
+  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
+  const capabilityMatrix = getProviderCapabilityMatrix();
+  const probes = getStoredProviderProbes();
+
+  const surfaces = surfaceConfig.map((surface) => {
+    const profile =
+      profileMap.get(surface.profileId) ||
+      getProviderProfile(surface.profileId);
+    if (!profile) {
+      return {
+        ...surface,
+        provider: 'unknown',
+        model: 'unknown',
+        available: false,
+        toolCalls: false,
+        structuredOutput: false,
+        status: 'blocked' as const,
+        notes: [`Profile ${surface.profileId} is missing`],
+      };
+    }
+    const staticCaps = capabilityMatrix[profile.provider];
+    const probe = probes[profile.id];
+    const providerAvailable = staticCaps?.available ?? false;
+    const modelValid = providerModels(profile.provider).includes(profile.model);
+    const capabilities = probe?.capabilities || staticCaps;
+    const toolCalls = capabilities?.tool_calls ?? false;
+    const structuredOutput = capabilities?.structured_output ?? false;
+    const codingCapable = (capabilities?.code_strength || 'none') === 'agentic';
+    const notes: string[] = [];
+    let status: 'ready' | 'degraded' | 'blocked' = 'ready';
+
+    if (!providerAvailable) {
+      status = 'blocked';
+      notes.push('Provider preflight is unavailable for this profile.');
+    } else if (!modelValid) {
+      status = 'blocked';
+      notes.push('Selected model is invalid for this provider profile.');
+    } else if (probe && probe.ok === false) {
+      status = 'degraded';
+      notes.push(
+        'Latest provider probe failed; review before unattended work.',
+      );
+    } else if (surface.id === 'coding' && !codingCapable) {
+      status = 'blocked';
+      notes.push('Coding profile is not agentic-capable for repository work.');
+    } else if (
+      (surface.id === 'automation' || surface.id === 'tools') &&
+      !toolCalls
+    ) {
+      status = 'degraded';
+      notes.push('Tool calls are unavailable for this surface.');
+    } else if (surface.id === 'reports' && !structuredOutput) {
+      status = 'degraded';
+      notes.push('Structured output is unavailable for reporting workflows.');
+    }
+
+    if (probe?.errorDetail) notes.push(probe.errorDetail);
+    if (probe?.lastProbeAt) notes.push(`Last probe: ${probe.lastProbeAt}`);
+    if (notes.length === 0)
+      notes.push('Provider and capabilities satisfy this surface.');
+
+    return {
+      ...surface,
+      provider: profile.provider,
+      model: profile.model,
+      available: providerAvailable,
+      toolCalls,
+      structuredOutput,
+      status,
+      notes,
+    };
+  });
+
+  const summary = surfaces.reduce(
+    (acc, surface) => {
+      acc[surface.status] += 1;
+      return acc;
+    },
+    { ready: 0, degraded: 0, blocked: 0 },
+  );
+
+  res.json({ surfaces, summary });
 });
 
 router.post('/probe', async (req: Request, res: Response) => {

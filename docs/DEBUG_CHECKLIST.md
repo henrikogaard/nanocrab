@@ -62,6 +62,30 @@ grep -E 'Connected|Connection closed|connection.*close|channel.*ready' logs/nano
 grep 'groupCount' logs/nanocrab.log | tail -3
 ```
 
+## Signal runtime verification
+
+```bash
+# Read-only Signal diagnostics (processes, logs, DB evidence)
+npm run verify:signal:runtime
+```
+
+Optional overrides:
+```bash
+LOG_FILE=/absolute/path/to/nanocrab.log \
+DB_FILE=/absolute/path/to/messages.db \
+TAIL_LINES=300 \
+npm run verify:signal:runtime
+```
+
+Controlled-message step:
+1. Send one known message from a Signal chat that should be registered.
+2. Re-run `npm run verify:signal:runtime`.
+3. Confirm evidence:
+   - `Process check` shows both `signal-cli` and NanoCrab processes.
+   - `Signal log snippets` includes connection/reuse and `Signal message stored` lines (watch for queue/drop context if present).
+   - `registered_groups rows (Signal)` lists expected `sig:*` chats.
+   - `Recent Signal messages` shows your controlled message near the top.
+
 ## First-Run Setup Preflight
 
 ```bash
