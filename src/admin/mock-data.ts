@@ -264,52 +264,54 @@ const mockProjectRuns: Record<string, Array<Record<string, JsonValue>>> = {
   ],
 };
 
-const mockProjectContextItems: Record<string, Array<Record<string, JsonValue>>> =
-  {
-    'project-auroradocs': [
-      {
-        id: 'context-auroradocs-source-ledger',
-        projectId: 'project-auroradocs',
-        type: 'file',
-        title: 'Email source ledger',
-        path: 'docs/brief.md',
-        included: true,
-        pinned: true,
-        provenance: 'gmail-mcp',
-        sensitivity: 'confidential',
-        createdAt: '2026-06-15T09:55:00Z',
-        updatedAt: '2026-06-15T10:02:00Z',
-      },
-      {
-        id: 'context-auroradocs-thread',
-        projectId: 'project-auroradocs',
-        type: 'thread',
-        title: 'Feature checklist chat',
-        threadId: 'web:mock-project-1',
-        included: true,
-        pinned: false,
-        provenance: 'project-chat',
-        sensitivity: 'internal',
-        createdAt: '2026-06-15T09:45:00Z',
-        updatedAt: '2026-06-15T09:45:00Z',
-      },
-    ],
-    'project-ops-briefs': [
-      {
-        id: 'context-ops-dispatch-plan',
-        projectId: 'project-ops-briefs',
-        type: 'file',
-        title: 'Friday dispatch plan',
-        path: 'dispatch/friday-plan.md',
-        included: true,
-        pinned: true,
-        provenance: 'manual-upload',
-        sensitivity: 'normal',
-        createdAt: '2026-06-14T18:20:00Z',
-        updatedAt: '2026-06-14T18:20:00Z',
-      },
-    ],
-  };
+const mockProjectContextItems: Record<
+  string,
+  Array<Record<string, JsonValue>>
+> = {
+  'project-auroradocs': [
+    {
+      id: 'context-auroradocs-source-ledger',
+      projectId: 'project-auroradocs',
+      type: 'file',
+      title: 'Email source ledger',
+      path: 'docs/brief.md',
+      included: true,
+      pinned: true,
+      provenance: 'gmail-mcp',
+      sensitivity: 'confidential',
+      createdAt: '2026-06-15T09:55:00Z',
+      updatedAt: '2026-06-15T10:02:00Z',
+    },
+    {
+      id: 'context-auroradocs-thread',
+      projectId: 'project-auroradocs',
+      type: 'thread',
+      title: 'Feature checklist chat',
+      threadId: 'web:mock-project-1',
+      included: true,
+      pinned: false,
+      provenance: 'project-chat',
+      sensitivity: 'internal',
+      createdAt: '2026-06-15T09:45:00Z',
+      updatedAt: '2026-06-15T09:45:00Z',
+    },
+  ],
+  'project-ops-briefs': [
+    {
+      id: 'context-ops-dispatch-plan',
+      projectId: 'project-ops-briefs',
+      type: 'file',
+      title: 'Friday dispatch plan',
+      path: 'dispatch/friday-plan.md',
+      included: true,
+      pinned: true,
+      provenance: 'manual-upload',
+      sensitivity: 'normal',
+      createdAt: '2026-06-14T18:20:00Z',
+      updatedAt: '2026-06-14T18:20:00Z',
+    },
+  ],
+};
 
 function mockProjectCapabilities(projectId: string) {
   return [
@@ -2683,7 +2685,8 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       };
     }
     if (parts.length === 3 && parts[2] === 'estimate' && method === 'POST') {
-      const text = `${String(req.body?.title || '')} ${String(req.body?.prompt || '')}`.toLowerCase();
+      const text =
+        `${String(req.body?.title || '')} ${String(req.body?.prompt || '')}`.toLowerCase();
       const needsApproval =
         text.includes('send') ||
         text.includes('publish') ||
@@ -2698,7 +2701,11 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       return {
         estimate: {
           complexity: connectorHeavy ? 'connector-heavy' : 'quick',
-          approvalRisk: needsApproval ? 'high' : connectorHeavy ? 'medium' : 'low',
+          approvalRisk: needsApproval
+            ? 'high'
+            : connectorHeavy
+              ? 'medium'
+              : 'low',
           provider: req.body?.provider || null,
           model: req.body?.model || null,
           warnings: needsApproval
@@ -2713,7 +2720,8 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       return { runs: mockProjectRuns[projectId] || [] };
     }
     if (parts.length === 3 && parts[2] === 'runs' && method === 'POST') {
-      const text = `${String(req.body?.title || '')} ${String(req.body?.prompt || '')}`.toLowerCase();
+      const text =
+        `${String(req.body?.title || '')} ${String(req.body?.prompt || '')}`.toLowerCase();
       const needsApproval =
         text.includes('send') ||
         text.includes('publish') ||
@@ -2733,7 +2741,11 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         provider: req.body?.provider || null,
         model: req.body?.model || null,
         complexity: connectorHeavy ? 'connector-heavy' : 'quick',
-        approvalRisk: needsApproval ? 'high' : connectorHeavy ? 'medium' : 'low',
+        approvalRisk: needsApproval
+          ? 'high'
+          : connectorHeavy
+            ? 'medium'
+            : 'low',
         summary: '',
         stats: { toolCalls: 0, artifactsCreated: 0, approvalsRequested: 0 },
         createdAt: new Date().toISOString(),
@@ -2932,7 +2944,9 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         (entry) => entry.id === parts[3],
       );
       if (!item) return { error: 'Context item not found' };
-      Object.assign(item, req.body || {}, { updatedAt: new Date().toISOString() });
+      Object.assign(item, req.body || {}, {
+        updatedAt: new Date().toISOString(),
+      });
       return { item };
     }
     if (parts.length === 3 && parts[2] === 'capabilities' && method === 'GET') {

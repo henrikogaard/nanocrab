@@ -149,7 +149,7 @@ describe('WebChat new conversation modal', () => {
     expect(source).not.toContain("window.confirm('Delete this conversation?')");
     expect(source).toContain('function conversationRoot()');
     expect(source).toContain("document.getElementById('page-content')");
-    expect(source).toContain("if (location.hash === nextHash)");
+    expect(source).toContain('if (location.hash === nextHash)');
     expect(source).toContain('data-thread-id="');
     expect(source).toContain('data-thread-title="');
     expect(source).toContain('installThreadListHandlers');
@@ -366,8 +366,12 @@ describe('WebChat new conversation modal', () => {
     expect(source).toContain('function formatMcpAccessSummary');
     expect(source).toContain('plainChatMcpAccessText');
     expect(source).toContain('Plain chat can use MCP scope');
-    expect(source).toContain('MCP access: ' + "' + plainChatMcpAccessText(threadMeta)");
-    expect(source).not.toContain('MCP access: no project connector context by default.');
+    expect(source).toContain(
+      'MCP access: ' + "' + plainChatMcpAccessText(threadMeta)",
+    );
+    expect(source).not.toContain(
+      'MCP access: no project connector context by default.',
+    );
   });
 
   it('uses delegated web chat actions instead of inline onclick attributes', () => {

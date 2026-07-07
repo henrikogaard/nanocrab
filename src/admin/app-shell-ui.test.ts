@@ -93,7 +93,9 @@ describe('App shell accessibility UI', () => {
 
     expect(appSource).toContain("chat: { label: 'Chat', icon: 'chat' }");
     expect(appSource).toContain('function parseChatHash(hash)');
-    expect(appSource).toContain("decoded.startsWith('web:') ? decoded : 'web:' + decoded");
+    expect(appSource).toContain(
+      "decoded.startsWith('web:') ? decoded : 'web:' + decoded",
+    );
     expect(appSource).toContain('function parseProjectChatHash(hash)');
     expect(appSource).toContain("decodedThreadId.startsWith('web:')");
   });

@@ -1,4 +1,8 @@
-export type WorkspaceIntentKind = 'copilot' | 'cowork' | 'code' | 'clarification';
+export type WorkspaceIntentKind =
+  | 'copilot'
+  | 'cowork'
+  | 'code'
+  | 'clarification';
 export type WorkspaceIntentConfidence = 'low' | 'medium' | 'high';
 
 export interface WorkspaceIntentProject {
@@ -97,7 +101,9 @@ function hasAny(promptText: string, terms: string[]): boolean {
   return terms.some((term) => promptText.includes(term));
 }
 
-function clarification(candidates: WorkspaceIntentCandidate[]): WorkspaceIntentResult {
+function clarification(
+  candidates: WorkspaceIntentCandidate[],
+): WorkspaceIntentResult {
   const labels = candidates.map((candidate) => candidate.label);
   return {
     kind: 'clarification',
@@ -122,7 +128,17 @@ export function resolveWorkspaceIntent(
 
   const issueNumber = parseIssueNumber(prompt);
   const repo = parseRepo(promptText);
-  const codeTerms = ['github', 'repo', 'repository', 'issue', 'pr', 'pull request', 'diff', 'bug', 'fix'];
+  const codeTerms = [
+    'github',
+    'repo',
+    'repository',
+    'issue',
+    'pr',
+    'pull request',
+    'diff',
+    'bug',
+    'fix',
+  ];
   if (issueNumber || hasAny(promptText, codeTerms)) {
     candidates.push({
       kind: 'code',
@@ -179,9 +195,7 @@ export function resolveWorkspaceIntent(
       label: thread ? `Copilot chat ${thread.title}` : 'Copilot chat',
       reason: 'Plain chat or conversation language was detected.',
       target: {
-        ...(thread
-          ? { threadId: thread.id, threadTitle: thread.title }
-          : {}),
+        ...(thread ? { threadId: thread.id, threadTitle: thread.title } : {}),
       },
     });
   }
@@ -196,7 +210,8 @@ export function resolveWorkspaceIntent(
       {
         kind: 'cowork',
         label: 'Cowork project',
-        reason: 'Use for project files, source context, documents, and artifacts.',
+        reason:
+          'Use for project files, source context, documents, and artifacts.',
       },
       {
         kind: 'code',
@@ -213,7 +228,10 @@ export function resolveWorkspaceIntent(
   const [candidate] = candidates;
   return {
     kind: candidate.kind,
-    confidence: candidate.target && Object.keys(candidate.target).length ? 'high' : 'medium',
+    confidence:
+      candidate.target && Object.keys(candidate.target).length
+        ? 'high'
+        : 'medium',
     approvalRequired: candidate.kind === 'code',
     reason: candidate.reason,
     target: candidate.target || null,

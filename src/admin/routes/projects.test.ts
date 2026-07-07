@@ -460,9 +460,7 @@ describe('/api/projects', () => {
       ]),
     );
     expect(result.run.events).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: 'created' }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ kind: 'created' })]),
     );
     expect(result.list.runs).toEqual([
       expect.objectContaining({ id: result.run.id, status: 'cancelled' }),
@@ -714,7 +712,8 @@ describe('/api/projects', () => {
       const body = {
         action: 'publish-document',
         title: 'Publish source brief',
-        summary: 'Publish the local source-backed brief to the document system.',
+        summary:
+          'Publish the local source-backed brief to the document system.',
         resourceSummary: 'documents/source-brief.md -> Google Docs',
         actionPreview: 'mcp__docs__create_document({ title, body })',
         payload: {

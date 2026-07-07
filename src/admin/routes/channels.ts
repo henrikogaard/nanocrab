@@ -223,11 +223,14 @@ const SUPPORTED_CHANNELS = [
   },
 ];
 
-function channelIntentProjects(bodyProjects: unknown): WorkspaceIntentProject[] {
+function channelIntentProjects(
+  bodyProjects: unknown,
+): WorkspaceIntentProject[] {
   if (Array.isArray(bodyProjects)) {
     return bodyProjects
-      .filter((project): project is Record<string, unknown> =>
-        Boolean(project) && typeof project === 'object',
+      .filter(
+        (project): project is Record<string, unknown> =>
+          Boolean(project) && typeof project === 'object',
       )
       .map((project) => ({
         id: String(project.id || ''),
@@ -249,8 +252,9 @@ function channelIntentProjects(bodyProjects: unknown): WorkspaceIntentProject[] 
 function channelIntentThreads(bodyThreads: unknown): WorkspaceIntentThread[] {
   if (Array.isArray(bodyThreads)) {
     return bodyThreads
-      .filter((thread): thread is Record<string, unknown> =>
-        Boolean(thread) && typeof thread === 'object',
+      .filter(
+        (thread): thread is Record<string, unknown> =>
+          Boolean(thread) && typeof thread === 'object',
       )
       .map((thread) => ({
         id: String(thread.id || ''),

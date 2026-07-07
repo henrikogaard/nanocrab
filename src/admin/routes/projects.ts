@@ -990,7 +990,11 @@ router.patch('/:id/context/:itemId', (req: Request, res: Response) => {
           : 0
         : undefined,
     pinned:
-      typeof req.body.pinned === 'boolean' ? (req.body.pinned ? 1 : 0) : undefined,
+      typeof req.body.pinned === 'boolean'
+        ? req.body.pinned
+          ? 1
+          : 0
+        : undefined,
     provenance:
       typeof req.body.provenance === 'string' && req.body.provenance.trim()
         ? req.body.provenance.trim()
