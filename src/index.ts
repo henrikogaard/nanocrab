@@ -56,7 +56,8 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { findChannel, formatOutbound } from './router.js';
+import { buildWorkspaceIntentPrompt } from './workspace-intent-prompt.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -572,7 +573,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     missedMessages,
   );
   let runAgentOptions: RunAgentOptions = {};
-  let promptBody = formatMessages(promptMessages, TIMEZONE);
+  let promptBody = buildWorkspaceIntentPrompt(promptMessages, TIMEZONE);
 
   try {
     const invocation = resolveAgentProfileInvocation({
@@ -1019,7 +1020,10 @@ async function startMessageLoop(): Promise<void> {
             if (handledProfileInvocation) continue;
           }
 
-          const formatted = formatMessages(promptMessages, TIMEZONE);
+          const formatted = buildWorkspaceIntentPrompt(
+            promptMessages,
+            TIMEZONE,
+          );
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(

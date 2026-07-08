@@ -12,6 +12,9 @@ const CODE_CUES = [
 ];
 
 const COWORK_CUES = [
+  /\bcowork\b/i,
+  /\bproject(?:\s+workspace)?\b/i,
+  /\b(?:brief|file|files?)\b/i,
   /\b(?:research|summari[sz]e|summary)\b/i,
   /\b(?:email|calendar|document|artifact|sources?|citation|citations)\b/i,
 ];

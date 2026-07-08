@@ -40,6 +40,7 @@ vi.mock('../state.js', () => ({
 const { _initTestDatabase, _closeDatabase, getRegisteredGroup } =
   await import('../../db.js');
 const { listApprovals } = await import('../../approvals.js');
+const { getResearchJob } = await import('../../research-jobs.js');
 const { loadConnectorPermissions } =
   await import('../../connector-permissions.js');
 const { default: projectsRouter } = await import('./projects.js');
@@ -658,6 +659,20 @@ describe('/api/projects', () => {
           writeCapable: true,
           approvalRequired: true,
         }),
+        expect.objectContaining({
+          id: 'project-skills',
+          kind: 'skills',
+          enabled: true,
+          readOnly: true,
+          writeCapable: false,
+        }),
+        expect.objectContaining({
+          id: 'project-plugins',
+          kind: 'plugins',
+          enabled: true,
+          readOnly: true,
+          writeCapable: false,
+        }),
       ]),
     );
   });
@@ -812,6 +827,147 @@ describe('/api/projects', () => {
         }),
       ]),
     );
+  });
+
+  it('runs Cowork action workflow previews as local artifacts or approval-gated writes', async () => {
+    const result = await withServer(async (base) => {
+      const createRes = await fetch(`${base}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Action Workflow Project' }),
+      });
+      const { project } = (await createRes.json()) as {
+        project: { id: string };
+      };
+
+      const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Prepare email summary',
+          prompt:
+            'Summarize email context and prepare a draft file delivery after approval.',
+        }),
+      });
+      const { run } = (await runRes.json()) as { run: { id: string } };
+
+      const summaryRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${run.id}/actions/workflows`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            kind: 'email-summary',
+            title: 'Inbox summary artifact',
+            mockData: [{ sender: 'alex@example.com', subject: 'Launch notes' }],
+          }),
+        },
+      );
+      expect(summaryRes.status).toBe(200);
+      const summaryPayload = (await summaryRes.json()) as {
+        workflow: {
+          kind: string;
+          status: string;
+          readOnly: boolean;
+          approvalRequired: boolean;
+          approvalId?: string;
+        };
+        artifact: { path: string; sourceLedger: unknown[] };
+        contextItem: { provenance: string; sensitivity: string };
+        run: { events: Array<{ kind: string }> };
+      };
+
+      const deliveryRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${run.id}/actions/workflows`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            kind: 'file-delivery',
+            artifactPath: 'deliveries/brief.md',
+            title: 'Deliver project brief',
+            target: 'client@example.com',
+          }),
+        },
+      );
+      expect(deliveryRes.status).toBe(202);
+      const deliveryPayload = (await deliveryRes.json()) as {
+        workflow: {
+          kind: string;
+          status: string;
+          approvalRequired: boolean;
+          approvalId: string;
+        };
+        approval: { id: string; status: string; policyDecisionId: string };
+        artifact: { path: string };
+        run: { status: string; approvals: Array<{ approvalId: string }> };
+      };
+
+      return { project, run, summaryPayload, deliveryPayload };
+    });
+
+    expect(result.summaryPayload.workflow).toMatchObject({
+      kind: 'email-summary',
+      status: 'artifact_created',
+      readOnly: true,
+      approvalRequired: false,
+    });
+    expect(result.summaryPayload.workflow.approvalId).toBeUndefined();
+    expect(result.summaryPayload.artifact).toMatchObject({
+      path: `actions/run-${result.run.id}-email-summary.md`,
+      sourceLedger: [
+        expect.objectContaining({
+          workflow: 'email-summary',
+          source: 'mock-connector',
+        }),
+      ],
+    });
+    expect(result.summaryPayload.contextItem).toMatchObject({
+      provenance: 'mcp-server',
+      sensitivity: 'normal',
+    });
+    expect(result.summaryPayload.run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'action-workflow-completed' }),
+      ]),
+    );
+
+    expect(result.deliveryPayload.workflow).toMatchObject({
+      kind: 'file-delivery',
+      status: 'waiting_for_approval',
+      approvalRequired: true,
+      approvalId: result.deliveryPayload.approval.id,
+    });
+    expect(result.deliveryPayload.run.status).toBe('waiting_for_approval');
+    expect(result.deliveryPayload.run.approvals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          approvalId: result.deliveryPayload.approval.id,
+        }),
+      ]),
+    );
+    expect(result.deliveryPayload.approval).toMatchObject({
+      id: result.deliveryPayload.workflow.approvalId,
+      status: 'pending',
+      policyDecisionId: 'cowork-action-workflow-approval',
+    });
+    expect(
+      listApprovals({
+        kind: 'tool-action',
+        targetType: 'cowork-run',
+        targetId: result.run.id,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        id: result.deliveryPayload.approval.id,
+        source: 'cowork-project',
+        payload: expect.objectContaining({
+          workflowKind: 'file-delivery',
+          projectId: result.project.id,
+          runId: result.run.id,
+        }),
+      }),
+    ]);
   });
 
   it('creates or reuses approval records before Cowork external writes', async () => {
@@ -1262,8 +1418,11 @@ describe('/api/projects', () => {
       );
       expect(requestRes.status).toBe(202);
       return requestRes.json() as Promise<{
+        projectId: string;
+        runId: string;
         requested: boolean;
         approvalRequired: boolean;
+        approvalId: string;
         preview: { allowed: boolean; requiresApproval: boolean };
         run: {
           status: string;
@@ -1302,6 +1461,7 @@ describe('/api/projects', () => {
           connectorId: 'gmail',
           action: 'gmail.read',
           note: 'Need explicit approval before reading inbox',
+          approvalId: expect.any(String),
           sensitivitySignals: expect.objectContaining({
             includedSensitiveItems: 0,
           }),
@@ -1319,6 +1479,27 @@ describe('/api/projects', () => {
     expect(result.run.events[result.run.events.length - 1]?.message).toContain(
       'gmail.read',
     );
+    expect(
+      listApprovals({
+        kind: 'tool-action',
+        targetType: 'cowork-run',
+        targetId: result.runId,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        id: result.approvalId,
+        status: 'pending',
+        title: 'Approve gmail.read',
+        source: 'cowork-project',
+        policyDecisionId: 'cowork-connector-action-approval',
+        payload: expect.objectContaining({
+          connectorId: 'gmail',
+          action: 'gmail.read',
+          projectId: result.projectId,
+          runId: result.runId,
+        }),
+      }),
+    ]);
   });
 
   it('reads project text files without allowing path traversal', async () => {
@@ -1818,5 +1999,135 @@ describe('/api/projects', () => {
     });
 
     expect(result.run.researchCoverage.status).not.toBe('missing');
+  });
+
+  it('links browser research jobs to Cowork runs and saves a source ledger artifact', async () => {
+    const result = await withServer(async (base) => {
+      const createRes = await fetch(`${base}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Linked Research Jobs' }),
+      });
+      const { project } = (await createRes.json()) as {
+        project: { id: string };
+      };
+
+      const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Browser research brief',
+          prompt: 'Research competitor updates with sources and screenshots.',
+        }),
+      });
+      const { run } = (await runRes.json()) as { run: { id: string } };
+
+      const jobRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${run.id}/research/jobs`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            query: 'Competitor launch notes',
+            urls: ['https://example.com/research/launch'],
+            notes: 'Capture pricing and delivery claims.',
+            screenshots: ['/tmp/example-screenshot.png'],
+            autoRun: false,
+          }),
+        },
+      );
+      expect(jobRes.status).toBe(200);
+      const jobPayload = (await jobRes.json()) as {
+        job: {
+          id: string;
+          projectId: string;
+          runId: string;
+          urls: string[];
+          sourceLedgerPath: string;
+          screenshots: string[];
+        };
+        artifact: { path: string; sourceLedger: unknown[] };
+        contextItem: { path: string; provenance: string };
+        run: {
+          outputs: Array<{ kind?: string; sourceUrl?: string }>;
+          researchCoverage: { citationCount: number; status: string };
+          events: Array<{ kind: string; metadata: Record<string, unknown> }>;
+        };
+      };
+
+      const ledgerReadRes = await fetch(
+        `${base}/api/projects/${project.id}/files/read?path=${encodeURIComponent(
+          jobPayload.artifact.path,
+        )}`,
+      );
+      expect(ledgerReadRes.status).toBe(200);
+      const ledgerRead = (await ledgerReadRes.json()) as {
+        file: { content: string };
+      };
+
+      return { project, run, jobPayload, ledgerRead };
+    });
+
+    expect(result.jobPayload.job).toMatchObject({
+      projectId: result.project.id,
+      runId: result.run.id,
+      urls: ['https://example.com/research/launch'],
+      screenshots: ['/tmp/example-screenshot.png'],
+    });
+    expect(result.jobPayload.job.sourceLedgerPath).toBe(
+      result.jobPayload.artifact.path,
+    );
+    expect(getResearchJob(result.jobPayload.job.id)).toEqual(
+      expect.objectContaining({
+        projectId: result.project.id,
+        runId: result.run.id,
+        sourceLedgerPath: result.jobPayload.artifact.path,
+      }),
+    );
+    expect(result.jobPayload.artifact).toMatchObject({
+      path: `research/run-${result.run.id}-job-${result.jobPayload.job.id}.md`,
+      sourceLedger: [
+        expect.objectContaining({
+          kind: 'research-job',
+          jobId: result.jobPayload.job.id,
+        }),
+      ],
+    });
+    expect(result.jobPayload.contextItem).toMatchObject({
+      path: result.jobPayload.artifact.path,
+      provenance: 'research-ledger',
+    });
+    expect(result.jobPayload.run.outputs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'citation',
+          sourceUrl: 'https://example.com/research/launch',
+        }),
+      ]),
+    );
+    expect(result.jobPayload.run.researchCoverage).toMatchObject({
+      citationCount: 1,
+      status: 'partial',
+    });
+    expect(result.jobPayload.run.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'research_job_linked',
+          metadata: expect.objectContaining({
+            jobId: result.jobPayload.job.id,
+            ledgerPath: result.jobPayload.artifact.path,
+          }),
+        }),
+      ]),
+    );
+    expect(result.ledgerRead.file.content).toContain(
+      '# Research job: Competitor launch notes',
+    );
+    expect(result.ledgerRead.file.content).toContain(
+      '- URL: https://example.com/research/launch',
+    );
+    expect(result.ledgerRead.file.content).toContain(
+      '- Screenshot: /tmp/example-screenshot.png',
+    );
   });
 });

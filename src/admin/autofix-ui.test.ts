@@ -81,7 +81,9 @@ describe('GitHub Autofix Code automation UI', () => {
     expect(source).toContain('(provider) => provider.codingCapable');
     expect(source).toContain('providerMap[provider.id]');
     expect(source).toContain('model.codingCapable !== false');
-    expect(source).toContain("provider.id !== 'ollama'");
+    expect(source).toContain('autofixProviderAllowsDefaultModel');
+    expect(source).toContain('provider.defaultModel');
+    expect(source).not.toContain("provider.id !== 'ollama'");
     expect(source).not.toContain("provider.id === 'claude' ||");
   });
 

@@ -16,9 +16,12 @@ export interface ResearchJob {
   query: string;
   urls: string[];
   requester: string;
+  projectId?: string | null;
+  runId?: string | null;
   status: 'queued' | 'running' | 'completed' | 'failed';
   notesPath: string | null;
   screenshots: string[];
+  sourceLedgerPath?: string | null;
   createdAt: string;
   completedAt: string | null;
   error: string | null;
@@ -98,6 +101,11 @@ export function createResearchJob(input: {
   query: string;
   urls?: string[];
   requester?: string;
+  projectId?: string;
+  runId?: string;
+  screenshots?: string[];
+  sourceLedgerPath?: string;
+  autoRun?: boolean;
 }): ResearchJob {
   const now = new Date().toISOString();
   const id = `research-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
@@ -106,24 +114,45 @@ export function createResearchJob(input: {
     query: input.query.trim(),
     urls: input.urls || [],
     requester: input.requester || 'dashboard',
+    projectId: input.projectId || null,
+    runId: input.runId || null,
     status: 'queued',
     notesPath: null,
-    screenshots: [],
+    screenshots: input.screenshots || [],
+    sourceLedgerPath: input.sourceLedgerPath || null,
     createdAt: now,
     completedAt: null,
     error: null,
   };
   if (!job.query) throw new Error('query is required');
   upsertJob(job);
-  setImmediate(() => {
-    void runResearchJob(job).catch((err) => {
-      job.status = 'failed';
-      job.error = err instanceof Error ? err.message : String(err);
-      job.completedAt = new Date().toISOString();
-      upsertJob(job);
+  if (input.autoRun !== false) {
+    setImmediate(() => {
+      void runResearchJob(job).catch((err) => {
+        job.status = 'failed';
+        job.error = err instanceof Error ? err.message : String(err);
+        job.completedAt = new Date().toISOString();
+        upsertJob(job);
+      });
     });
-  });
+  }
   return job;
+}
+
+export function updateResearchJobMetadata(
+  id: string,
+  patch: Partial<
+    Pick<
+      ResearchJob,
+      'projectId' | 'runId' | 'notesPath' | 'screenshots' | 'sourceLedgerPath'
+    >
+  >,
+): ResearchJob | undefined {
+  const job = getResearchJob(id);
+  if (!job) return undefined;
+  const updated = { ...job, ...patch };
+  upsertJob(updated);
+  return updated;
 }
 
 async function runResearchJob(job: ResearchJob): Promise<void> {
