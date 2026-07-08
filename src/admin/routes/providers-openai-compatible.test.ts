@@ -168,4 +168,83 @@ describe('/api/providers custom OpenAI-compatible endpoint', () => {
       'DEFAULT_OPENAI_COMPATIBLE_MODEL',
     );
   });
+
+  it('enables AI Router Switzerland with its API key, base URL, and selected model', async () => {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/api/providers/airouter/enable`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: 'sk-airouter',
+          baseUrl: 'https://api.airouter.ch/v1/',
+          model: 'Qwen3.6',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { ok: boolean; message: string };
+      expect(body.ok).toBe(true);
+      expect(body.message).toContain('AI Router Switzerland');
+      expect(mocks.updateEnvVar).toHaveBeenCalledWith(
+        'AIROUTER_API_KEY',
+        'sk-airouter',
+      );
+      expect(mocks.updateEnvVar).toHaveBeenCalledWith(
+        'AIROUTER_BASE_URL',
+        'https://api.airouter.ch/v1',
+      );
+      expect(mocks.updateEnvVar).toHaveBeenCalledWith(
+        'DEFAULT_AIROUTER_MODEL',
+        'Qwen3.6',
+      );
+
+      const catalogRes = await fetch(`${base}/api/providers`);
+      const catalog = (await catalogRes.json()) as {
+        providers: Array<{
+          id: string;
+          configured: boolean;
+          defaultModel?: string;
+          baseUrl?: string;
+          models?: string[];
+        }>;
+      };
+      const airouter = catalog.providers.find(
+        (provider) => provider.id === 'airouter',
+      );
+      expect(airouter).toMatchObject({
+        configured: true,
+        defaultModel: 'Qwen3.6',
+        baseUrl: 'https://api.airouter.ch/v1',
+      });
+      expect(airouter?.models).toEqual(
+        expect.arrayContaining(['Qwen3.6', 'DeepSeek-V4-Flash', 'deepseek-v4']),
+      );
+    });
+  });
+
+  it('lets an already configured Airouter endpoint swap models without re-entering the key', async () => {
+    mocks.envValues.AIROUTER_API_KEY = 'sk-existing-airouter';
+    mocks.envValues.AIROUTER_BASE_URL = 'https://api.airouter.ch/v1';
+    mocks.envValues.DEFAULT_AIROUTER_MODEL = 'Qwen3.6';
+
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/api/providers/airouter/enable`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'DeepSeek-V4-Flash',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mocks.updateEnvVar).not.toHaveBeenCalledWith(
+        'AIROUTER_API_KEY',
+        expect.any(String),
+      );
+      expect(mocks.updateEnvVar).toHaveBeenCalledWith(
+        'DEFAULT_AIROUTER_MODEL',
+        'DeepSeek-V4-Flash',
+      );
+    });
+  });
 });

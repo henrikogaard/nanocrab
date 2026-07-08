@@ -136,4 +136,46 @@ describe('/api/files artifact promotion', () => {
       ),
     ).toContain('Raw group artifact.');
   });
+
+  it('does not expose private memory or group instructions as promotable artifacts', async () => {
+    const groupDir = path.join(GROUPS_DIR, 'signal-main');
+    fs.mkdirSync(groupDir, { recursive: true });
+    fs.writeFileSync(path.join(groupDir, 'AGENTS.md'), '# Group instructions');
+    fs.writeFileSync(path.join(groupDir, 'MEMORY.md'), '# Private memory');
+    const project = createCoworkProject({
+      id: 'project-no-private-promote',
+      name: 'No Private Promotion',
+      slug: 'no-private-promotion',
+      description: null,
+      instructions: null,
+      created_at: '2026-07-08T10:00:00.000Z',
+      updated_at: '2026-07-08T10:00:00.000Z',
+    });
+
+    await withServer(async (base) => {
+      const listRes = await fetch(`${base}/api/files/signal-main/artifacts`);
+      expect(listRes.status).toBe(200);
+      await expect(listRes.json()).resolves.toEqual([]);
+
+      const promoteRes = await fetch(
+        `${base}/api/files/signal-main/artifacts/${encodeURIComponent('AGENTS.md')}/promote`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            projectId: project.id,
+            path: 'private/AGENTS.md',
+          }),
+        },
+      );
+
+      expect(promoteRes.status).toBe(404);
+    });
+
+    expect(
+      fs.existsSync(
+        path.join(coworkProjectPath(project), 'private', 'AGENTS.md'),
+      ),
+    ).toBe(false);
+  });
 });

@@ -72,14 +72,14 @@ Channel agents use the same workspace map. From WhatsApp, Signal, Telegram, or a
 
 Optional features that can be enabled/disabled from the dashboard:
 
-| Plugin             | Description                                                                             |
-| ------------------ | --------------------------------------------------------------------------------------- |
-| **GitHub Autofix** | Label an issue `autofix` → an agent clones repo, writes fix, opens PR. Auto-pick labeled issues and auto-review PRs. |
-| **GitHub Copilot** | Multi-account OAuth, assign Copilot to issues, track PRs                                |
-| **Uptime Monitor** | HTTP + file-freshness health checks with bot alerts                                     |
+| Plugin             | Description                                                                                                                                                                                                                   |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **GitHub Autofix** | Label an issue `autofix` → an agent clones repo, writes fix, opens PR. Auto-pick labeled issues and auto-review PRs.                                                                                                          |
+| **GitHub Copilot** | Multi-account OAuth, assign Copilot to issues, track PRs                                                                                                                                                                      |
+| **Uptime Monitor** | HTTP + file-freshness health checks with bot alerts                                                                                                                                                                           |
 | **Chat**           | Copilot plain web conversations — threads in the sidebar, "New conversation" with provider/model selection and optional title, generated title fallback after the first message, no agent templates, and no project workspace |
-| **Workflows**      | Automation workflows, routines, missions, runbooks, and tracked operator steps          |
-| **Wiki**           | Markdown knowledge base                                                                 |
+| **Workflows**      | Automation workflows, routines, missions, runbooks, and tracked operator steps                                                                                                                                                |
+| **Wiki**           | Markdown knowledge base                                                                                                                                                                                                       |
 
 Additional plugins can be installed from git URLs via the Marketplace page, or created as personal plugins that stay local (gitignored).
 
@@ -149,8 +149,9 @@ so repository work still edits files in the isolated job workspace. Ollama's
 default chat models and generic custom model ids remain chat/local-task
 oriented; choose an explicit code model such as `codestral` or `qwen3-coder`
 before assigning local/custom coding work. The AI Providers dashboard can save
-a custom `/v1` base URL, optional key, and model, then Settings can make
-`openai-compatible` the active default for new agent sessions.
+a custom `/v1` base URL, optional key, and model, or a first-class Airouter
+subscription endpoint, then Settings can make that provider the active default
+for new agent sessions.
 
 ### Agent Profiles
 
@@ -361,7 +362,7 @@ The container image installs `opencode-ai`. NanoCrab mounts persisted OpenCode
 config/auth directories from `data/opencode/`, so provider logins survive
 container restarts.
 
-### Start With Ollama, OpenRouter, Or Google
+### Start With Ollama, OpenRouter, Airouter, Or Google
 
 These providers use OpenAI-compatible `/chat/completions` endpoints.
 
@@ -378,6 +379,12 @@ npx tsx setup/index.ts --step provider -- \
   --provider=openrouter \
   --model=openrouter/auto
 
+# AI Router Switzerland
+# Add AIROUTER_API_KEY=... to .env or your service environment first.
+npx tsx setup/index.ts --step provider -- \
+  --provider=airouter \
+  --model=Qwen3.6
+
 # Google Gemini OpenAI-compatible endpoint
 # Add GEMINI_API_KEY=... to .env or your service environment first.
 npx tsx setup/index.ts --step provider -- \
@@ -385,9 +392,11 @@ npx tsx setup/index.ts --step provider -- \
   --model=gemini-2.5-flash
 ```
 
-OpenRouter defaults to `https://openrouter.ai/api/v1`. Google defaults to
+OpenRouter defaults to `https://openrouter.ai/api/v1`. Airouter defaults to
+`https://api.airouter.ch/v1` with `Qwen3.6`, `DeepSeek-V4-Flash`, and
+`deepseek-v4` model choices. Google defaults to
 `https://generativelanguage.googleapis.com/v1beta/openai/`. In containers,
-OpenRouter and Google traffic goes through NanoCrab's credential proxy, so the
+hosted OpenAI-compatible traffic goes through NanoCrab's credential proxy, so
 real API keys stay on the host for normal agent runs. OpenRouter coding jobs
 also use the proxy URL with a placeholder key. Ollama is translated to the
 Docker host gateway when needed, which is the normal VPS/Linux container path.

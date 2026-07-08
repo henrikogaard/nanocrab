@@ -219,6 +219,31 @@ describe('credential-proxy', () => {
     expect(lastUpstreamHeaders.authorization).toBe('Bearer sk-custom-real-key');
   });
 
+  it('injects the Airouter API key through the hosted provider route', async () => {
+    proxyPort = await startProxy({
+      AIROUTER_API_KEY: 'sk-airouter-real-key',
+      AIROUTER_BASE_URL: `http://127.0.0.1:${upstreamPort}/v1`,
+    });
+
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: 'GET',
+        path: '/__nanocrab/providers/airouter/models',
+        headers: {
+          authorization: 'Bearer placeholder',
+        },
+      },
+      '',
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(lastUpstreamPath).toBe('/v1/models');
+    expect(lastUpstreamHeaders.authorization).toBe(
+      'Bearer sk-airouter-real-key',
+    );
+  });
+
   it('returns 502 when upstream is unreachable', async () => {
     Object.assign(mockEnv, {
       ANTHROPIC_API_KEY: 'sk-ant-real-key',

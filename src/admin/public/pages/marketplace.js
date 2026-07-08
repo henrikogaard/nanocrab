@@ -203,17 +203,17 @@ function renderMarketplaceActivationRunway() {
 function renderMarketplaceEmptyState() {
   const steps = [
     {
-      label: '01',
+      label: 'Fit',
       title: 'Match capability',
       body: 'Decide whether the plugin belongs in Copilot, Cowork, Code, or System before exposing new routes, tools, or skills.',
     },
     {
-      label: '02',
+      label: 'Review',
       title: 'Review source',
       body: 'Check plugin.json, frontend pages, credentials, MCP tools, skills, and container permissions before install.',
     },
     {
-      label: '03',
+      label: 'Activate',
       title: 'Restart deliberately',
       body: 'Install from a trusted Git repository, add required credentials, then restart NanoCrab when you are ready to activate it.',
     },

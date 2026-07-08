@@ -436,6 +436,11 @@ describe('Settings personal space UI', () => {
     expect(source).toContain('settings-provider-model-field');
     expect(source).toContain('settings-inline-check');
     expect(source).toContain('settings-provider-preflight');
+    expect(source).toContain('Test and validate');
+    expect(source).toContain('testAndValidateProvider');
+    expect(source).toContain('URLSearchParams');
+    expect(source).toContain('provider-base-url');
+    expect(source).toContain('provider-model');
     expect(source).toContain('settings-provider-auth-note');
     expect(source).toContain('renderProviderCheckRows');
     expect(source).toContain('settings-provider-check');

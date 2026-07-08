@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import express from 'express';
+import type { CoworkProject } from '../../types.js';
 
 const STORE_DIR = path.join(
   os.tmpdir(),
@@ -43,6 +44,7 @@ const { listApprovals } = await import('../../approvals.js');
 const { getResearchJob } = await import('../../research-jobs.js');
 const { loadConnectorPermissions } =
   await import('../../connector-permissions.js');
+const { coworkProjectPath } = await import('../../cowork-projects.js');
 const { default: projectsRouter } = await import('./projects.js');
 
 function buildApp() {
@@ -321,7 +323,7 @@ describe('/api/projects', () => {
         body: JSON.stringify({ name: 'Research Notes' }),
       });
       const { project } = (await createRes.json()) as {
-        project: { id: string };
+        project: CoworkProject;
       };
 
       const fileRes = await fetch(`${base}/api/projects/${project.id}/files`, {
@@ -349,6 +351,10 @@ describe('/api/projects', () => {
       expect(chatRes.status).toBe(200);
       const chat = (await chatRes.json()) as { id: string };
 
+      fs.mkdirSync(path.join(coworkProjectPath(project), 'empty-folder'), {
+        recursive: true,
+      });
+
       const detailRes = await fetch(`${base}/api/projects/${project.id}`);
       expect(detailRes.status).toBe(200);
       const detail = (await detailRes.json()) as {
@@ -359,9 +365,12 @@ describe('/api/projects', () => {
       return { project, chat, detail };
     });
 
-    expect(result.detail.files).toEqual([
-      expect.objectContaining({ path: 'docs/brief.md', kind: 'document' }),
-    ]);
+    expect(result.detail.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'empty-folder', kind: 'folder' }),
+        expect.objectContaining({ path: 'docs/brief.md', kind: 'document' }),
+      ]),
+    );
     expect(result.detail.threads).toEqual([
       expect.objectContaining({ id: result.chat.id, title: 'Brief outline' }),
     ]);

@@ -16,6 +16,7 @@ import {
   ollamaRuntimeProvider,
   opencodeRuntimeProvider,
   openrouterRuntimeProvider,
+  airouterRuntimeProvider,
 } from './agent-runtime/provider.js';
 
 export type {
@@ -32,6 +33,7 @@ const registeredProviders: Provider[] = [
   ollamaRuntimeProvider,
   openrouterRuntimeProvider,
   googleRuntimeProvider,
+  airouterRuntimeProvider,
   openaiResponsesProvider,
   anthropicMessagesProvider,
   geminiProvider,
@@ -59,4 +61,5 @@ export {
   ollamaRuntimeProvider,
   openrouterRuntimeProvider,
   googleRuntimeProvider,
+  airouterRuntimeProvider,
 };

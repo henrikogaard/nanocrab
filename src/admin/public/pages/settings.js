@@ -231,6 +231,7 @@ window.renderSettings = async function (el) {
       'google/gemini-2.5-pro',
     ],
     google: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'],
+    airouter: ['Qwen3.6', 'DeepSeek-V4-Flash', 'deepseek-v4'],
   };
   const providerDefaults = providerInfo.modelsByProvider || {};
   const providerDefinitions = providerInfo.definitions || {
@@ -275,6 +276,14 @@ window.renderSettings = async function (el) {
       defaultBaseUrl:
         'https://generativelanguage.googleapis.com/v1beta/openai/',
       envKey: 'GEMINI_API_KEY',
+    },
+    airouter: {
+      id: 'airouter',
+      name: 'AI Router Switzerland',
+      description: 'Swiss-hosted OpenAI-compatible endpoint',
+      runtime: 'openai-compatible',
+      defaultBaseUrl: 'https://api.airouter.ch/v1',
+      envKey: 'AIROUTER_API_KEY',
     },
   };
   const selectedProvider = providerInfo.provider || 'claude';
@@ -928,7 +937,7 @@ window.renderSettings = async function (el) {
         </div>
         ${providerBaseUrlField}
         <button class="btn btn-sm btn-primary" onclick="saveProvider()">Save</button>
-        <button class="btn btn-sm btn-ghost" onclick="preflightProvider('${esc(selectedProvider)}')">Preflight</button>
+        <button class="btn btn-sm btn-ghost" onclick="testAndValidateProvider('${esc(selectedProvider)}')">Test and validate</button>
         <label class="settings-inline-check"><input type="checkbox" id="provider-restart-active" checked> restart active sessions</label>
         <span id="provider-msg" class="settings-muted-status"></span>
       </div>
@@ -1483,6 +1492,30 @@ window.preflightProvider = async function (provider) {
   } catch (e) {
     if (target)
       target.innerHTML = `<span class="badge badge-error">Fail</span> ${esc(e.message)}`;
+  }
+};
+
+window.testAndValidateProvider = async function (provider) {
+  const target = document.getElementById('provider-preflight');
+  if (target) target.innerHTML = 'Checking...';
+  const params = new URLSearchParams();
+  const model = document.getElementById('provider-model')?.value?.trim();
+  const baseUrl = document.getElementById('provider-base-url')?.value?.trim();
+  if (model) params.set('model', model);
+  if (baseUrl) params.set('baseUrl', baseUrl);
+  try {
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    const r = await api(`/system/provider/preflight/${provider}${suffix}`);
+    if (!target) return;
+    target.innerHTML = renderProviderCheckRows(r.checks || []);
+    toast(
+      r.ok ? 'Provider test passed' : 'Provider test needs review',
+      r.ok ? 'success' : 'warning',
+    );
+  } catch (e) {
+    if (target)
+      target.innerHTML = `<span class="badge badge-error">Fail</span> ${esc(e.message)}`;
+    toast(settingsActionErrorMessage('provider', e), 'error');
   }
 };
 

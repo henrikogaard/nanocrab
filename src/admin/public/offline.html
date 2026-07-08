@@ -8,14 +8,14 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0b0d0f;
-      --panel: #15181b;
-      --panel-strong: #1d2226;
-      --border: #30373d;
-      --text: #f5f1ea;
-      --muted: #a8a099;
-      --accent: #4db6a7;
-      --accent-soft: rgba(77, 182, 167, 0.14);
+      --bg: oklch(17% 0.018 250);
+      --panel: oklch(21% 0.018 250);
+      --panel-strong: oklch(25% 0.02 250);
+      --border: oklch(31% 0.022 250);
+      --text: oklch(94% 0.009 250);
+      --muted: oklch(76% 0.022 250);
+      --accent: oklch(68% 0.115 222);
+      --accent-soft: color-mix(in oklch, var(--accent) 18%, transparent);
     }
 
     * {
@@ -29,8 +29,11 @@
       place-items: center;
       padding: 32px 18px;
       background:
-        radial-gradient(circle at 28% 24%, rgba(77, 182, 167, 0.1), transparent 28rem),
-        linear-gradient(145deg, #0b0d0f 0%, #121416 54%, #0e1113 100%);
+        linear-gradient(
+          180deg,
+          color-mix(in oklch, var(--panel) 38%, var(--bg)),
+          var(--bg) 260px
+        );
       color: var(--text);
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
@@ -38,9 +41,8 @@
     main {
       width: min(100%, 720px);
       border: 1px solid var(--border);
-      border-radius: 18px;
-      background: color-mix(in srgb, var(--panel) 94%, transparent);
-      box-shadow: 0 22px 80px rgba(0, 0, 0, 0.38);
+      border-radius: 14px;
+      background: var(--panel);
       padding: clamp(24px, 5vw, 44px);
     }
 
@@ -63,7 +65,7 @@
       color: var(--muted);
       font-size: 0.76rem;
       font-weight: 700;
-      letter-spacing: 0.1em;
+      letter-spacing: 0;
       text-transform: uppercase;
     }
 
@@ -115,7 +117,7 @@
       padding: 16px;
       border: 1px solid var(--border);
       border-radius: 14px;
-      background: rgba(255, 255, 255, 0.025);
+      background: color-mix(in oklch, var(--panel-strong) 62%, var(--panel));
     }
 
     .recovery strong {
@@ -145,14 +147,14 @@
       padding: 14px;
       border: 1px solid var(--border);
       border-radius: 12px;
-      background: rgba(255, 255, 255, 0.025);
+      background: color-mix(in oklch, var(--panel-strong) 62%, var(--panel));
     }
 
     .offline-work-card span {
       color: var(--accent);
       font-size: 0.72rem;
       font-weight: 800;
-      letter-spacing: 0.08em;
+      letter-spacing: 0;
       text-transform: uppercase;
     }
 
@@ -176,8 +178,7 @@
       border: 1px solid var(--border);
       border-radius: 14px;
       background:
-        linear-gradient(135deg, rgba(77, 182, 167, 0.08), transparent 58%),
-        rgba(255, 255, 255, 0.025);
+        color-mix(in oklch, var(--accent) 6%, var(--panel));
     }
 
     .resume-targets h2 {
@@ -212,7 +213,7 @@
       color: var(--accent);
       font-size: 0.68rem;
       font-weight: 800;
-      letter-spacing: 0.08em;
+      letter-spacing: 0;
       text-transform: uppercase;
     }
 
@@ -237,15 +238,17 @@
 
     button {
       min-height: 44px;
-      border: 1px solid color-mix(in srgb, var(--accent) 66%, white);
+      border: 1px solid color-mix(in oklch, var(--accent) 66%, white);
       border-radius: 10px;
       padding: 0 18px;
       background: var(--accent);
-      color: #07100f;
+      color: oklch(15% 0.018 250);
       font: inherit;
       font-weight: 750;
       cursor: pointer;
-      transition: transform 160ms ease, background 160ms ease;
+      transition:
+        transform 160ms cubic-bezier(0.16, 1, 0.3, 1),
+        background 160ms cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     button.secondary {
@@ -255,7 +258,7 @@
     }
 
     button:hover {
-      background: color-mix(in srgb, var(--accent) 88%, white);
+      background: color-mix(in oklch, var(--accent) 88%, white);
       transform: translateY(-1px);
     }
 
@@ -287,7 +290,7 @@
       padding: 14px;
       border: 1px solid var(--border);
       border-radius: 14px;
-      background: rgba(255, 255, 255, 0.025);
+      background: color-mix(in oklch, var(--panel-strong) 62%, var(--panel));
     }
 
     .manual-copy.is-visible {
@@ -306,7 +309,7 @@
       padding: 12px;
       border: 1px solid var(--border);
       border-radius: 10px;
-      background: #0f1214;
+      background: var(--bg);
       color: var(--text);
       font: 0.86rem/1.55 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
       resize: vertical;
@@ -365,17 +368,17 @@
     </section>
     <section class="offline-work-plan" aria-label="Offline work plan">
       <article class="offline-work-card">
-        <span>01 Draft only</span>
+        <span>Draft only</span>
         <strong>Keep useful work local</strong>
         <p>Write notes, outlines, and reply drafts in local files while Copilot, Cowork, Code, and MCP tools are unavailable.</p>
       </article>
       <article class="offline-work-card">
-        <span>02 Hold changes</span>
+        <span>Hold changes</span>
         <strong>Do not publish externally</strong>
         <p>Wait on email sends, document publishing, webhook triggers, calendar updates, repository pushes, and third-party writes.</p>
       </article>
       <article class="offline-work-card">
-        <span>03 Reconcile</span>
+        <span>Reconcile</span>
         <strong>Restart with evidence</strong>
         <p>After reconnecting, check Monitoring, Logs, Approvals, and project history before resuming agents or scheduled work.</p>
       </article>

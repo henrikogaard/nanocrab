@@ -136,6 +136,12 @@ const mockProjectFiles: Record<string, Array<Record<string, JsonValue>>> = {
       size: 2410,
       updatedAt: '2026-06-14T16:20:00Z',
     },
+    {
+      path: 'empty-folder',
+      kind: 'folder',
+      size: 0,
+      updatedAt: '2026-06-15T10:01:00Z',
+    },
   ],
   'project-ops-briefs': [
     {
@@ -4623,9 +4629,9 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   }
   if (pathname === '/artifacts/vault/summary') {
     return {
-      total: 2,
-      totalSizeBytes: 48_128,
-      kinds: ['report'],
+      total: 3,
+      totalSizeBytes: 60_416,
+      kinds: ['report', 'cowork-artifact'],
       formats: ['html', 'markdown'],
     };
   }
@@ -4676,6 +4682,31 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         retentionDays: 90,
         expiresAt: day(89),
         tags: ['report', 'journal', 'memory'],
+      },
+      {
+        id: 'cowork-project-auroradocs:docs/brief.md',
+        title: 'AuroraDocs project brief',
+        kind: 'cowork-artifact',
+        format: 'markdown',
+        path: '/mock/store/cowork/project-auroradocs/docs/brief.md',
+        sizeBytes: 12_288,
+        sourceType: 'cowork-project',
+        sourceId: 'project-auroradocs',
+        projectId: 'project-auroradocs',
+        projectName: 'AuroraDocs MCP workspace',
+        projectSlug: 'auroradocs-mcp-workspace',
+        projectFilePath: 'docs/brief.md',
+        sourceLinks: [
+          {
+            label: 'AuroraDocs project file',
+            source: 'cowork:project-auroradocs/docs/brief.md',
+          },
+        ],
+        createdAt: iso(45),
+        updatedAt: iso(20),
+        retentionDays: null,
+        expiresAt: null,
+        tags: ['cowork', 'project', 'mcp'],
       },
     ];
     return records.filter((record) => {

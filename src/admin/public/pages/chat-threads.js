@@ -592,11 +592,11 @@
       }).join('') +
       '</div>' +
       '<div class="webchat-mcp-source-flow" aria-label="MCP source-to-document checklist">' +
-      PROJECT_MCP_SOURCE_STEPS.map(function (step, index) {
+      PROJECT_MCP_SOURCE_STEPS.map(function (step) {
         return (
           '<article>' +
           '<span>' +
-          esc('0' + (index + 1)) +
+          esc((step.label || '').split(' ')[0] || 'Source') +
           '</span>' +
           '<strong>' +
           esc(step.label) +

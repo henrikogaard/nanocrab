@@ -181,6 +181,25 @@ describe('AI Providers routing cockpit UI', () => {
     expect(actionBlock).toContain('apiKey');
   });
 
+  it('surfaces AI Router Switzerland as an easy OpenAI-compatible provider', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const catalog = providerCatalogSource(source);
+    const actionBlock = source.slice(
+      source.indexOf('window.copyProviderRoutingBrief'),
+      source.indexOf('function reportStatusBadge'),
+    );
+
+    expect(catalog).toContain("p.id === 'airouter'");
+    expect(catalog).toContain('provider-airouter-base-url');
+    expect(catalog).toContain('provider-airouter-model');
+    expect(catalog).toContain('provider-airouter-api-key');
+    expect(catalog).toContain('Qwen3.6');
+    expect(catalog).toContain('DeepSeek-V4-Flash');
+    expect(catalog).toContain('deepseek-v4');
+    expect(actionBlock).toContain('enableOpenAiCompatibleProvider');
+    expect(actionBlock).toContain("'/providers/' + providerId + '/enable'");
+  });
+
   it('uses class-based provider catalog rows', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');

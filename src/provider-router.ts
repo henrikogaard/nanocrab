@@ -253,6 +253,17 @@ const STATIC_CAPABILITIES: Record<AgentProvider, ProviderCapabilities> = {
     privacy_tier: 'third-party',
     supports_mcp_strategy: 'container-loop',
   },
+  airouter: {
+    tool_calls: true,
+    structured_output: true,
+    streaming: true,
+    vision: true,
+    code_strength: 'basic',
+    context_window: 262144,
+    cost_tier: 'medium',
+    privacy_tier: 'hosted',
+    supports_mcp_strategy: 'container-loop',
+  },
   'openai-compatible': {
     tool_calls: false,
     structured_output: false,

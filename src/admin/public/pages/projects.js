@@ -514,6 +514,19 @@
       parts.forEach(function (part, index) {
         currentPath = currentPath ? currentPath + '/' + part : part;
         var isFile = index === parts.length - 1;
+        if (isFile && file.kind === 'folder') {
+          if (!folders[currentPath]) {
+            var emptyFolder = {
+              type: 'folder',
+              name: part,
+              path: currentPath,
+              children: [],
+            };
+            folders[currentPath] = emptyFolder;
+            level.push(emptyFolder);
+          }
+          return;
+        }
         if (isFile) {
           level.push({
             type: 'file',
@@ -1617,6 +1630,13 @@
   function projectFileRouteKind(detail, targetPath) {
     if (!detail || !targetPath) return 'none';
     var files = Array.isArray(detail.files) ? detail.files : [];
+    if (
+      files.some(function (file) {
+        return file.path === targetPath && file.kind === 'folder';
+      })
+    ) {
+      return 'folder';
+    }
     if (
       files.some(function (file) {
         return file.path === targetPath;

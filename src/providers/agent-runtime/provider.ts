@@ -123,6 +123,17 @@ const CAPABILITIES: Record<AgentProvider, ProviderCapabilitiesResult> = {
     privacyTier: 'high',
     supportsMcpStrategy: true,
   },
+  airouter: {
+    toolCalls: true,
+    structuredOutput: true,
+    streaming: true,
+    vision: true,
+    codeStrength: 'medium',
+    contextWindow: 262144,
+    costTier: 'medium',
+    privacyTier: 'medium',
+    supportsMcpStrategy: true,
+  },
   'openai-compatible': {
     toolCalls: false,
     structuredOutput: false,
@@ -223,3 +234,4 @@ export const opencodeRuntimeProvider = new AgentRuntimeProvider('opencode');
 export const ollamaRuntimeProvider = new AgentRuntimeProvider('ollama');
 export const openrouterRuntimeProvider = new AgentRuntimeProvider('openrouter');
 export const googleRuntimeProvider = new AgentRuntimeProvider('google');
+export const airouterRuntimeProvider = new AgentRuntimeProvider('airouter');

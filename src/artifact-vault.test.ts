@@ -151,6 +151,36 @@ describe('artifact vault', () => {
         ]),
       }),
     );
+    expect(searchArtifactVault({ query: 'artifacts/brief.md' })).toContainEqual(
+      expect.objectContaining({ projectFilePath: 'artifacts/brief.md' }),
+    );
+    expect(searchArtifactVault({ query: 'cowork-run:run-1' })).toContainEqual(
+      expect.objectContaining({ title: 'Launch brief' }),
+    );
+    expect(searchArtifactVault({ query: 'Launch brief' })).toContainEqual(
+      expect.objectContaining({ projectId: 'project-aurora' }),
+    );
+    expect(searchArtifactVault({ source: 'aurora-docs' })).toContainEqual(
+      expect.objectContaining({ projectSlug: 'aurora-docs' }),
+    );
+
+    const secondResult = buildArtifactVaultFromCoworkArtifacts({
+      artifacts: [
+        {
+          projectId: 'project-aurora',
+          projectName: 'Aurora Docs',
+          projectSlug: 'aurora-docs',
+          title: 'Launch brief',
+          filePath: 'artifacts/brief.md',
+          hostPath: artifactPath,
+          artifactId: 'run:run-1:artifacts/brief.md',
+          updatedAt: '2026-07-08T10:30:00.000Z',
+        },
+      ],
+      now: new Date('2026-07-08T10:35:00.000Z'),
+    });
+
+    expect(secondResult).toMatchObject({ added: 0, updated: 1, total: 1 });
 
     const pruneResult = pruneArtifactVault({
       now: new Date('2027-07-08T10:20:00.000Z'),

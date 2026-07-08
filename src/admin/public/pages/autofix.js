@@ -331,9 +331,9 @@ function renderAutofixCommandCenter({
 
 function renderAutofixProjectEmptyState() {
   const steps = [
-    ['01', 'Register repository', 'Add owner, repo, trigger label, provider, PR policy, and optional auto-pick cadence.'],
-    ['02', 'Verify webhooks', 'Confirm GitHub webhook and credential readiness before relying on scheduled pickup.'],
-    ['03', 'Review evidence', 'Keep fixes tied to diffs, tests, CI, approvals, and PR links.'],
+    ['Register', 'Register repository', 'Add owner, repo, trigger label, provider, PR policy, and optional auto-pick cadence.'],
+    ['Webhook', 'Verify webhooks', 'Confirm GitHub webhook and credential readiness before relying on scheduled pickup.'],
+    ['Evidence', 'Review evidence', 'Keep fixes tied to diffs, tests, CI, approvals, and PR links.'],
   ];
   return `
     <section class="autofix-empty-state autofix-project-empty-state">

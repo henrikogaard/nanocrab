@@ -62,7 +62,7 @@ function renderHelp(el) {
 
   const mcpWorkflowSteps = [
     {
-      step: '01',
+      step: 'Workspace',
       title: 'Start in a Cowork project',
       detail:
         'Create or open a project so files, previous chats, summaries, and documents live beside the work.',
@@ -70,7 +70,7 @@ function renderHelp(el) {
       actionLabel: 'Open Projects',
     },
     {
-      step: '02',
+      step: 'Provider',
       title: 'Choose a tool-capable provider',
       detail:
         'Pick the provider and model in the project composer before starting chat. MCP work needs a provider that supports tool calls.',
@@ -78,7 +78,7 @@ function renderHelp(el) {
       actionLabel: 'Check Providers',
     },
     {
-      step: '03',
+      step: 'Source',
       title: 'Ask for the source and outcome',
       detail:
         'Use prompts like latest emails into a doc, all emails from a sender, calendar follow-up, or generate a project summary.',
@@ -86,7 +86,7 @@ function renderHelp(el) {
       actionLabel: 'Use MCP prompt',
     },
     {
-      step: '04',
+      step: 'Approval',
       title: 'Approve external writes',
       detail:
         'Reading approved sources can happen in chat. Creating external documents, sending messages, or updating third-party records goes through Approvals.',

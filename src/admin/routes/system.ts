@@ -868,6 +868,14 @@ router.get(
     }
     const definition = getAgentProviderDefinition(provider);
     const config = getAgentProviderConfig();
+    const requestedBaseUrl =
+      typeof req.query.baseUrl === 'string' && req.query.baseUrl.trim()
+        ? req.query.baseUrl.trim()
+        : '';
+    const requestedModel =
+      typeof req.query.model === 'string' && req.query.model.trim()
+        ? req.query.model.trim()
+        : '';
 
     const checks: Array<{
       id: string;
@@ -957,12 +965,25 @@ router.get(
 
     if (definition.runtime === 'openai-compatible') {
       const baseUrl =
-        config.baseUrlsByProvider[provider] || definition.defaultBaseUrl || '';
+        requestedBaseUrl ||
+        config.baseUrlsByProvider[provider] ||
+        definition.defaultBaseUrl ||
+        '';
+      const selectedModel =
+        requestedModel ||
+        config.modelsByProvider[provider] ||
+        DEFAULT_AGENT_MODELS[provider];
       checks.push({
         id: 'base-url',
         label: `${definition.name} base URL`,
         ok: Boolean(baseUrl),
         detail: baseUrl || 'No base URL configured',
+      });
+      checks.push({
+        id: 'model',
+        label: `${definition.name} model`,
+        ok: isValidAgentModel(provider, selectedModel),
+        detail: selectedModel,
       });
 
       const envKey = providerApiKeyEnvKey(provider);

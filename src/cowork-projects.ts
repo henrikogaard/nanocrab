@@ -106,7 +106,20 @@ export function listCoworkProjectFiles(project: CoworkProject): Array<{
   }> = [];
 
   function walk(dir: string): void {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    if (dir !== root && entries.length === 0) {
+      const stat = fs.statSync(dir);
+      const rel = path.relative(root, dir).split(path.sep).join('/');
+      files.push({
+        path: rel,
+        kind: 'folder',
+        size: 0,
+        updatedAt: stat.mtime.toISOString(),
+      });
+      return;
+    }
+
+    for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(full);

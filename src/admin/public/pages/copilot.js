@@ -112,14 +112,14 @@ function renderCopilotEmptyState(kind, options = {}) {
       : 'Connect GitHub';
   const steps = isAccounts
     ? [
-        ['01', 'Connect account', 'OAuth unlocks repository browsing and issue assignment.'],
-        ['02', 'Pick repository', 'Choose work that belongs in Code, not a pure chat or Cowork project.'],
-        ['03', 'Assign issue', 'Keep the result tied to Git Ops, tests, and approvals.'],
+        ['Account', 'Connect account', 'OAuth unlocks repository browsing and issue assignment.'],
+        ['Repo', 'Pick repository', 'Choose work that belongs in Code, not a pure chat or Cowork project.'],
+        ['Issue', 'Assign issue', 'Keep the result tied to Git Ops, tests, and approvals.'],
       ]
     : [
-        ['01', 'Browse repos', 'Find an issue small enough for a Copilot handoff.'],
-        ['02', 'Use Autofix', 'Escalate repeatable pickup, build/test loops, or PR orchestration.'],
-        ['03', 'Review evidence', 'Return to Git & Code for repository state and test proof.'],
+        ['Browse', 'Browse repos', 'Find an issue small enough for a Copilot handoff.'],
+        ['Automate', 'Use Autofix', 'Escalate repeatable pickup, build/test loops, or PR orchestration.'],
+        ['Verify', 'Review evidence', 'Return to Git & Code for repository state and test proof.'],
       ];
   return `
     <section class="copilot-empty-state is-${esc(kind)}">

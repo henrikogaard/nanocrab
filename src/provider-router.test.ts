@@ -25,6 +25,7 @@ vi.mock('./agent-provider.js', async () => {
     'anthropic-messages': true,
     gemini: true,
     mistral: true,
+    airouter: true,
     'openai-compatible': true,
   }));
   return {
@@ -36,10 +37,12 @@ vi.mock('./agent-provider.js', async () => {
         codex: 'gpt-5.4',
         openrouter: 'openrouter/auto',
         ollama: 'gemma4:e2b',
+        airouter: 'Qwen3.6',
       },
       baseUrlsByProvider: {
         openrouter: 'https://openrouter.example/api/v1',
         ollama: 'http://localhost:11434/v1',
+        airouter: 'https://api.airouter.ch/v1',
       },
     })),
     getProviderAvailability,
@@ -87,6 +90,7 @@ describe('provider-router persistence', () => {
       'anthropic-messages': true,
       gemini: true,
       mistral: true,
+      airouter: true,
       'openai-compatible': true,
     } as never);
     vi.stubGlobal(
@@ -230,6 +234,7 @@ describe('provider-router persistence', () => {
       'anthropic-messages': true,
       gemini: true,
       mistral: true,
+      airouter: true,
       'openai-compatible': true,
     } as never);
     const { runLiveProviderProbe, loadProviderProfiles } =
@@ -272,6 +277,7 @@ describe('provider-router persistence', () => {
       'anthropic-messages': true,
       gemini: true,
       mistral: true,
+      airouter: true,
       'openai-compatible': true,
     } as never);
     const {
@@ -466,6 +472,7 @@ describe('provider-router persistence', () => {
       'anthropic-messages': true,
       gemini: true,
       mistral: true,
+      airouter: true,
       'openai-compatible': true,
     } as never);
     const {
@@ -568,6 +575,7 @@ describe('provider-router persistence', () => {
       'anthropic-messages': true,
       gemini: true,
       mistral: true,
+      airouter: true,
       'openai-compatible': true,
     } as never);
     const {

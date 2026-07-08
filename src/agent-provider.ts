@@ -13,6 +13,7 @@ export const AGENT_PROVIDERS = [
   'anthropic-messages',
   'gemini',
   'mistral',
+  'airouter',
   'openai-compatible',
 ] as const;
 export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
@@ -151,6 +152,18 @@ export const AGENT_PROVIDER_DEFINITIONS: Record<
     selectable: true,
     requiresAuth: true,
   },
+  airouter: {
+    id: 'airouter',
+    name: 'AI Router Switzerland',
+    runtime: 'openai-compatible',
+    description:
+      'Swiss-hosted OpenAI-compatible gateway for Qwen, DeepSeek, and embedding models.',
+    envKey: 'AIROUTER_API_KEY',
+    baseUrlEnvKey: 'AIROUTER_BASE_URL',
+    defaultBaseUrl: 'https://api.airouter.ch/v1',
+    selectable: true,
+    requiresAuth: true,
+  },
   'openai-compatible': {
     id: 'openai-compatible',
     name: 'Custom OpenAI-Compatible',
@@ -200,6 +213,7 @@ export const AGENT_PROVIDER_MODELS: Record<AgentProvider, string[]> = {
     'mistral-medium-latest',
     'codestral-latest',
   ],
+  airouter: ['Qwen3.6', 'DeepSeek-V4-Flash', 'deepseek-v4'],
   'openai-compatible': ['model-id'],
 };
 
@@ -214,6 +228,7 @@ export const DEFAULT_AGENT_MODELS: Record<AgentProvider, string> = {
   'anthropic-messages': 'claude-sonnet-4-6',
   gemini: 'gemini-3.5-flash',
   mistral: 'mistral-large-latest',
+  airouter: 'Qwen3.6',
   'openai-compatible': 'model-id',
 };
 
@@ -309,6 +324,7 @@ export function isValidAgentModel(
       'openai-compatible',
       'gemini',
       'mistral',
+      'airouter',
     ].includes(provider)
   ) {
     return /^[a-zA-Z0-9._:/@+-]+$/.test(model);

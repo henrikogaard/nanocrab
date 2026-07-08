@@ -91,6 +91,7 @@ describe('Cowork Projects UI wiring', () => {
     expect(source).toContain('projectFileHash');
     expect(source).toContain('project-file-tree');
     expect(source).toContain('project-folder-row');
+    expect(source).toContain("isFile && file.kind === 'folder'");
     expect(source).toContain('continueProjectPathInChat');
     expect(source).toContain('consumeProjectFileRoute');
     expect(source).toContain('project-file-route-active');

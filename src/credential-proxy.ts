@@ -37,6 +37,9 @@ export function startCredentialProxy(
     'GEMINI_API_KEY',
     'GOOGLE_API_KEY',
     'GOOGLE_OPENAI_BASE_URL',
+    'AIROUTER_API_KEY',
+    'AIROUTER_BASE_URL',
+    'DEFAULT_AIROUTER_BASE_URL',
     'OPENAI_COMPATIBLE_API_KEY',
     'OPENAI_COMPATIBLE_BASE_URL',
     'DEFAULT_OPENAI_COMPATIBLE_BASE_URL',
@@ -65,6 +68,14 @@ export function startCredentialProxy(
         secret('GOOGLE_OPENAI_BASE_URL') ||
         'https://generativelanguage.googleapis.com/v1beta/openai',
       apiKey: secret('GEMINI_API_KEY') || secret('GOOGLE_API_KEY'),
+      requiresApiKey: true,
+    },
+    airouter: {
+      baseUrl:
+        secret('AIROUTER_BASE_URL') ||
+        secret('DEFAULT_AIROUTER_BASE_URL') ||
+        'https://api.airouter.ch/v1',
+      apiKey: secret('AIROUTER_API_KEY'),
       requiresApiKey: true,
     },
     'openai-compatible': {

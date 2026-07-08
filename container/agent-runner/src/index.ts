@@ -43,6 +43,7 @@ interface ContainerInput {
     | 'ollama'
     | 'openrouter'
     | 'google'
+    | 'airouter'
     | 'openai-compatible';
   model?: string;
 }
@@ -79,6 +80,7 @@ const OPENAI_COMPATIBLE_PROVIDERS = new Set([
   'ollama',
   'openrouter',
   'google',
+  'airouter',
   'openai-compatible',
 ]);
 
@@ -1152,7 +1154,9 @@ export function openAiCompatibleBaseUrl(provider: string): string {
         ? 'https://openrouter.ai/api/v1'
         : provider === 'google'
           ? 'https://generativelanguage.googleapis.com/v1beta/openai'
-          : '';
+          : provider === 'airouter'
+            ? 'https://api.airouter.ch/v1'
+            : '';
   return (
     process.env.AGENT_PROVIDER_BASE_URL ||
     process.env[`DEFAULT_${providerKey}_BASE_URL`] ||
@@ -1171,6 +1175,7 @@ function openAiCompatibleApiKey(provider: string): string | undefined {
   if (provider === 'google') {
     return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   }
+  if (provider === 'airouter') return process.env.AIROUTER_API_KEY;
   if (provider === 'openai-compatible') {
     return process.env.OPENAI_COMPATIBLE_API_KEY;
   }
@@ -1312,6 +1317,21 @@ function buildOpenCodeConfig(
       models: {
         'gemini-2.5-flash': { name: 'Gemini 2.5 Flash' },
         'gemini-2.5-pro': { name: 'Gemini 2.5 Pro' },
+      },
+    };
+  }
+  if (process.env.AIROUTER_API_KEY || process.env.AIROUTER_BASE_URL) {
+    provider.airouter = {
+      npm: '@ai-sdk/openai-compatible',
+      name: 'AI Router Switzerland',
+      options: {
+        apiKey: '{env:AIROUTER_API_KEY}',
+        baseURL: process.env.AIROUTER_BASE_URL || 'https://api.airouter.ch/v1',
+      },
+      models: {
+        'Qwen3.6': { name: 'Qwen3.6' },
+        'DeepSeek-V4-Flash': { name: 'DeepSeek-V4-Flash' },
+        'deepseek-v4': { name: 'DeepSeek V4 alias' },
       },
     };
   }

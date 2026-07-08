@@ -10,7 +10,7 @@ import path from 'path';
 
 export const EDITION_NAME = 'NanoCrab Edition'; // Full name
 export const EDITION_SHORT = 'NanoCrab'; // Display title
-export const EDITION_VERSION = '2.0-RC6';
+export const EDITION_VERSION = '2.0-RC7';
 
 // Read application version from package.json.
 let _appVersion = 'unknown';

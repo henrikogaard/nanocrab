@@ -26,8 +26,12 @@ describe('custom OpenAI-compatible agent provider config', () => {
     delete process.env.DEFAULT_PROVIDER;
     delete process.env.OPENAI_COMPATIBLE_BASE_URL;
     delete process.env.OPENAI_COMPATIBLE_API_KEY;
+    delete process.env.AIROUTER_API_KEY;
+    delete process.env.AIROUTER_BASE_URL;
     delete process.env.DEFAULT_OPENAI_COMPATIBLE_MODEL;
+    delete process.env.DEFAULT_AIROUTER_MODEL;
     delete process.env.DEFAULT_OPENAI_COMPATIBLE_BASE_URL;
+    delete process.env.DEFAULT_AIROUTER_BASE_URL;
   });
 
   it('uses shell-safe env keys for custom OpenAI-compatible defaults', () => {
@@ -51,5 +55,26 @@ describe('custom OpenAI-compatible agent provider config', () => {
       'http://127.0.0.1:8080/v1',
     );
     expect(getProviderAvailability()['openai-compatible']).toBe(true);
+  });
+
+  it('configures AI Router Switzerland as a hosted OpenAI-compatible provider', () => {
+    expect(providerModelEnvKey('airouter' as any)).toBe(
+      'DEFAULT_AIROUTER_MODEL',
+    );
+    expect(providerBaseUrlEnvKey('airouter' as any)).toBe(
+      'DEFAULT_AIROUTER_BASE_URL',
+    );
+
+    envValues.DEFAULT_PROVIDER = 'airouter';
+    envValues.AIROUTER_API_KEY = 'sk-airouter';
+    envValues.DEFAULT_AIROUTER_MODEL = 'DeepSeek-V4-Flash';
+
+    const config = getAgentProviderConfig();
+    expect(config.provider).toBe('airouter');
+    expect(config.model).toBe('DeepSeek-V4-Flash');
+    expect(config.baseUrlsByProvider.airouter as string).toBe(
+      'https://api.airouter.ch/v1',
+    );
+    expect(getProviderAvailability().airouter as boolean).toBe(true);
   });
 });

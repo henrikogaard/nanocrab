@@ -8,6 +8,7 @@ import { getCodexAuthStatus } from '../../codex-auth.js';
 import {
   DEFAULT_AGENT_MODELS,
   type AgentProvider,
+  getAgentProviderDefinition,
   isAgentProvider,
   isValidAgentModel,
   providerBaseUrlEnvKey,
@@ -195,6 +196,20 @@ const PROVIDERS: Provider[] = [
     requiresApiKey: false,
     agentProviderId: 'openai-compatible',
   },
+  {
+    id: 'airouter',
+    name: 'AI Router Switzerland',
+    category: 'LLM',
+    description:
+      'Swiss-hosted OpenAI-compatible endpoint with Qwen3.6, DeepSeek-V4-Flash, vision, tools, streaming, and a 262K context window.',
+    website: 'https://airouter.ch/docs.html',
+    envKey: 'AIROUTER_API_KEY',
+    baseUrlEnvKey: 'AIROUTER_BASE_URL',
+    models: ['Qwen3.6', 'DeepSeek-V4-Flash', 'deepseek-v4'],
+    defaultModel: DEFAULT_AGENT_MODELS.airouter,
+    requiresApiKey: true,
+    agentProviderId: 'airouter',
+  },
 
   // OpenAI OAuth (Codex only)
   {
@@ -320,13 +335,20 @@ router.post('/:id/enable', (req: Request, res: Response) => {
   }
 
   const { apiKey } = req.body;
-  if (provider.id === 'openai-compatible') {
+  if (
+    provider.agentProviderId &&
+    getAgentProviderDefinition(provider.agentProviderId).runtime ===
+      'openai-compatible'
+  ) {
+    const definition = getAgentProviderDefinition(provider.agentProviderId);
     const baseUrl =
-      typeof req.body.baseUrl === 'string' ? req.body.baseUrl.trim() : '';
+      typeof req.body.baseUrl === 'string' && req.body.baseUrl.trim()
+        ? req.body.baseUrl.trim()
+        : definition.defaultBaseUrl || '';
     const model =
       typeof req.body.model === 'string' && req.body.model.trim()
         ? req.body.model.trim()
-        : DEFAULT_AGENT_MODELS['openai-compatible'];
+        : DEFAULT_AGENT_MODELS[provider.agentProviderId];
     if (!baseUrl) {
       res.status(400).json({ error: 'Base URL required' });
       return;
@@ -340,13 +362,23 @@ router.post('/:id/enable', (req: Request, res: Response) => {
       res.status(400).json({ error: 'Base URL must be a valid URL' });
       return;
     }
-    if (!isValidAgentModel('openai-compatible', model)) {
+    if (!isValidAgentModel(provider.agentProviderId, model)) {
       res.status(400).json({ error: 'Model contains unsupported characters' });
       return;
     }
+    const existingApiKey =
+      process.env[provider.envKey] ||
+      readEnvFile([provider.envKey])[provider.envKey];
+    if (provider.requiresApiKey !== false && !apiKey && !existingApiKey) {
+      res.status(400).json({ error: 'API key required' });
+      return;
+    }
 
-    updateEnvVar('OPENAI_COMPATIBLE_BASE_URL', baseUrl.replace(/\/+$/, ''));
-    updateEnvVar(providerModelEnvKey('openai-compatible'), model);
+    updateEnvVar(
+      provider.baseUrlEnvKey || providerBaseUrlEnvKey(provider.agentProviderId),
+      baseUrl.replace(/\/+$/, ''),
+    );
+    updateEnvVar(providerModelEnvKey(provider.agentProviderId), model);
     if (typeof apiKey === 'string' && apiKey.trim()) {
       updateEnvVar(provider.envKey, apiKey.trim());
     }
@@ -391,10 +423,10 @@ router.post('/:id/disable', (req: Request, res: Response) => {
   }
 
   removeEnvVar(provider.envKey);
-  if (provider.id === 'openai-compatible') {
-    removeEnvVar('OPENAI_COMPATIBLE_BASE_URL');
-    removeEnvVar(providerModelEnvKey('openai-compatible'));
-    removeEnvVar(providerBaseUrlEnvKey('openai-compatible'));
+  if (provider.agentProviderId) {
+    if (provider.baseUrlEnvKey) removeEnvVar(provider.baseUrlEnvKey);
+    removeEnvVar(providerModelEnvKey(provider.agentProviderId));
+    removeEnvVar(providerBaseUrlEnvKey(provider.agentProviderId));
   }
   auditLog(req, 'provider_disabled', `${id} (${provider.envKey})`);
   res.json({ ok: true, message: `${provider.name} disabled.` });

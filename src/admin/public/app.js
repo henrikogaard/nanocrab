@@ -1205,11 +1205,11 @@ async function renderGitCodeConsolidated(el) {
         <button class="btn btn-sm btn-ghost" onclick="copyGitCodeWorkspaceBrief()">Copy code brief</button>
       </div>
       <div class="gitcode-lane-grid">
-        <button class="gitcode-lane" onclick="window.switchTab('gc-tabs','git')"><span>01</span><strong>Git Ops</strong><small>Review working tree, branches, diffs, and commits.</small></button>
-        <button class="gitcode-lane" onclick="window.switchTab('gc-tabs','editor')"><span>02</span><strong>Editor</strong><small>Open a focused file workbench for surgical changes.</small></button>
-        <button class="gitcode-lane" onclick="window.switchTab('gc-tabs','tests');window._tabLoaderRegistry?.['gc-tabs']?.('tests')"><span>03</span><strong>Tests</strong><small>Turn verification into evidence before handoff.</small></button>
-        <button class="gitcode-lane" onclick="window.switchTab('gc-tabs','snippets');window._tabLoaderRegistry?.['gc-tabs']?.('snippets')"><span>04</span><strong>Snippets</strong><small>Capture reusable command and prompt patterns.</small></button>
-        <button class="gitcode-lane" onclick="window.switchTab('gc-tabs','rules');window._tabLoaderRegistry?.['gc-tabs']?.('rules')"><span>05</span><strong>Review rules</strong><small>Keep code review expectations close to the work.</small></button>
+        <button class="gitcode-lane" onclick="window.switchTab('gc-tabs','git')"><span>Inspect</span><strong>Git Ops</strong><small>Review working tree, branches, diffs, and commits.</small></button>
+        <button class="gitcode-lane" onclick="window.switchTab('gc-tabs','editor')"><span>Edit</span><strong>Editor</strong><small>Open a focused file workbench for surgical changes.</small></button>
+        <button class="gitcode-lane" onclick="window.switchTab('gc-tabs','tests');window._tabLoaderRegistry?.['gc-tabs']?.('tests')"><span>Verify</span><strong>Tests</strong><small>Turn verification into evidence before handoff.</small></button>
+        <button class="gitcode-lane" onclick="window.switchTab('gc-tabs','snippets');window._tabLoaderRegistry?.['gc-tabs']?.('snippets')"><span>Reuse</span><strong>Snippets</strong><small>Capture reusable command and prompt patterns.</small></button>
+        <button class="gitcode-lane" onclick="window.switchTab('gc-tabs','rules');window._tabLoaderRegistry?.['gc-tabs']?.('rules')"><span>Review</span><strong>Review rules</strong><small>Keep code review expectations close to the work.</small></button>
       </div>
     </section>
     <div id="gc-tabs">${renderTabs(
@@ -1317,21 +1317,25 @@ function uptimeDecisionCards() {
 function uptimeAgentReadinessChecklist() {
   return [
     {
+      tag: 'Map',
       title: 'Map dependency to work',
       detail:
         'Name which Cowork project, Code run, schedule, MCP workflow, or channel delivery depends on this monitor.',
     },
     {
+      tag: 'Verify',
       title: 'Verify the right signal',
       detail:
         'Prefer status plus body or freshness checks over a bare 200 when agents need generated context or external APIs.',
     },
     {
+      tag: 'Route',
       title: 'Pick the owner route',
       detail:
         'Send alerts to the group, project, or operator lane that can pause the work and fix the dependency.',
     },
     {
+      tag: 'Fallback',
       title: 'Choose fallback behavior',
       detail:
         'Decide whether agents should switch to read-only Copilot, short Cowork diagnosis, or wait for recovery.',
@@ -1935,9 +1939,9 @@ function renderApprovalSaferAlternativeLadder() {
       <div class="approval-safer-ladder-grid">
         ${approvalSaferAlternativeLadder()
           .map(
-            (item, index) => `
+            (item) => `
         <article class="approval-safer-step">
-          <span>${String(index + 1).padStart(2, '0')}</span>
+          <span>${esc((item.label || '').split(' ')[0] || 'Option')}</span>
           <strong>${esc(item.label)}</strong>
           <p>${esc(item.detail)}</p>
         </article>`,
@@ -1958,9 +1962,9 @@ function renderApprovalDecisionRunway() {
       <div class="approval-decision-runway-grid">
         ${approvalDecisionRunway()
           .map(
-            (step, index) => `
+            (step) => `
         <article class="approval-runway-step">
-          <span>${String(index + 1).padStart(2, '0')}</span>
+          <span>${esc((step.label || '').split(' ')[0] || 'Decision')}</span>
           <strong>${esc(step.label)}</strong>
           <p>${esc(step.detail)}</p>
           <small>${esc(step.route)}</small>
@@ -2592,9 +2596,9 @@ async function renderUptime(el) {
       <div class="uptime-agent-gate-grid">
         ${uptimeAgentReadinessChecklist()
           .map(
-            (item, index) => `
+            (item) => `
           <article class="uptime-agent-gate-card">
-            <span>${String(index + 1).padStart(2, '0')}</span>
+            <span>${esc(item.tag)}</span>
             <strong>${esc(item.title)}</strong>
             <p>${esc(item.detail)}</p>
           </article>`,
@@ -6030,9 +6034,9 @@ function renderCredentialCoworkSourceRunway(stats, readyMcpServers) {
         <p>Use this path for requests like “summarize my latest emails,” “check messages from this sender,” or “create a document from that context.”</p>
       </div>
       <div class="credentials-source-runway-grid">
-        ${credentialCoworkSourceRunway().map((step, index) => `
+        ${credentialCoworkSourceRunway().map((step) => `
           <article class="credentials-source-step is-${esc(step.state)}">
-            <span>${String(index + 1).padStart(2, '0')}</span>
+            <span>${esc((step.label || '').split(' ')[0] || 'Source')}</span>
             <strong>${esc(step.label)}</strong>
             <p>${esc(step.detail)}</p>
           </article>
@@ -6051,9 +6055,9 @@ function renderCredentialMcpPreflight(stats, readyMcpServers) {
         <p>Use this before asking Cowork to summarize latest email, check messages from a sender, draft a document, or combine external context with project files.</p>
       </div>
       <div class="credentials-mcp-preflight-steps">
-        ${credentialMcpPreflightSteps().map((step, index) => `
+        ${credentialMcpPreflightSteps().map((step) => `
           <article class="credentials-mcp-preflight-step">
-            <span>${String(index + 1).padStart(2, '0')}</span>
+            <span>${esc((step.label || '').split(' ')[0] || 'Check')}</span>
             <strong>${esc(step.label)}</strong>
             <p>${esc(step.detail)}</p>
           </article>
@@ -6811,9 +6815,9 @@ async function renderMcp(el) {
       <div class="mcp-source-checklist-grid">
         ${mcpSourceArtifactChecklist()
           .map(
-            (item, index) => `
+            (item) => `
           <article class="mcp-source-check">
-            <span>${String(index + 1).padStart(2, '0')}</span>
+            <span>${esc((item.title || '').split(' ')[0] || 'Source')}</span>
             <strong>${esc(item.title)}</strong>
             <p>${esc(item.detail)}</p>
           </article>`,
@@ -7376,21 +7380,47 @@ async function renderProviders(el) {
           const isDefault = globalDefault === p.id;
           const isLast = index === providers.length - 1;
           const isCustomOpenAiCompatible = p.id === 'openai-compatible';
-          const customEndpointFields = isCustomOpenAiCompatible
+          const isAirouter = p.id === 'airouter';
+          const airouterModelSuggestions = [
+            'Qwen3.6',
+            'DeepSeek-V4-Flash',
+            'deepseek-v4',
+          ];
+          const endpointFieldPrefix = isAirouter
+            ? 'provider-airouter'
+            : 'provider-openai-compatible';
+          const endpointBaseUrlId = isAirouter
+            ? 'provider-airouter-base-url'
+            : 'provider-openai-compatible-base-url';
+          const endpointModelId = isAirouter
+            ? 'provider-airouter-model'
+            : 'provider-openai-compatible-model';
+          const endpointApiKeyId = isAirouter
+            ? 'provider-airouter-api-key'
+            : 'provider-openai-compatible-api-key';
+          const endpointModelOptions = isAirouter
+            ? airouterModelSuggestions
+            : p.models || [];
+          const isOpenAiCompatibleEndpoint =
+            isCustomOpenAiCompatible || isAirouter;
+          const customEndpointFields = isOpenAiCompatibleEndpoint
             ? `<div class="provider-endpoint-fields">
                 <div class="form-group">
                   <label>Base URL</label>
-                  <input class="search-input" id="provider-openai-compatible-base-url" value="${esc(p.baseUrl || '')}" placeholder="http://127.0.0.1:8080/v1">
+                  <input class="search-input" id="${endpointBaseUrlId}" value="${esc(p.baseUrl || '')}" placeholder="${esc(p.defaultBaseUrl || (isAirouter ? 'https://api.airouter.ch/v1' : 'http://127.0.0.1:8080/v1'))}">
                 </div>
                 <div class="form-group">
                   <label>Model</label>
-                  <input class="search-input" id="provider-openai-compatible-model" value="${esc(p.defaultModel || 'model-id')}" placeholder="qwen3-coder">
+                  <input class="search-input" id="${endpointModelId}" list="${endpointFieldPrefix}-model-options" value="${esc(p.defaultModel || (isAirouter ? 'Qwen3.6' : 'model-id'))}" placeholder="${esc(isAirouter ? 'Qwen3.6' : 'qwen3-coder')}">
+                  <datalist id="${endpointFieldPrefix}-model-options">
+                    ${endpointModelOptions.map((m) => `<option value="${esc(m)}"></option>`).join('')}
+                  </datalist>
                 </div>
                 <div class="form-group">
                   <label>API key</label>
-                  <input class="search-input" id="provider-openai-compatible-api-key" type="password" placeholder="Optional">
+                  <input class="search-input" id="${endpointApiKeyId}" type="password" placeholder="${p.requiresApiKey === false ? 'Optional' : 'Required'}">
                 </div>
-                <button class="btn btn-sm btn-primary" onclick="enableOpenAiCompatibleProvider(this)">${p.configured ? 'Save endpoint' : 'Enable endpoint'}</button>
+                <button class="btn btn-sm btn-primary" onclick="enableOpenAiCompatibleProvider('${esc(p.id)}', this)">${p.configured ? 'Save endpoint' : 'Enable endpoint'}</button>
               </div>`
             : '';
           return `
@@ -7407,7 +7437,7 @@ async function renderProviders(el) {
             </div>
           </div>
           <div class="provider-catalog-actions">
-            ${!p.configured && !isCustomOpenAiCompatible ? `<button class="btn btn-sm btn-primary" onclick="enableProvider('${esc(p.id)}','${esc(p.name)}','${esc(p.envKey)}',this)">Enable</button>` : ''}
+            ${!p.configured && !isOpenAiCompatibleEndpoint ? `<button class="btn btn-sm btn-primary" onclick="enableProvider('${esc(p.id)}','${esc(p.name)}','${esc(p.envKey)}',this)">Enable</button>` : ''}
             ${p.configured && !p.envKey.startsWith('CODEX_') ? `<button class="btn btn-sm btn-ghost" onclick="disableProvider('${esc(p.id)}')">Disable</button>` : ''}
             ${p.configured && !isDefault ? `<button class="btn btn-sm btn-ghost" onclick="setDefaultProvider('${esc(cat)}','${esc(p.id)}')">Set as Default</button>` : ''}
             ${p.models && p.models.length > 0 ? `<span class="provider-model-list">Models: ${p.models.map((m) => `<code>${esc(m)}</code>`).join(', ')}</span>` : ''}
@@ -7639,11 +7669,15 @@ window.enableProvider = async (id, name, envKey, btnEl) => {
   });
 };
 
-window.enableOpenAiCompatibleProvider = async function () {
-  const baseUrl = document.getElementById('provider-openai-compatible-base-url')?.value?.trim();
-  const model = document.getElementById('provider-openai-compatible-model')?.value?.trim();
-  const apiKey = document.getElementById('provider-openai-compatible-api-key')?.value?.trim();
-  const r = await api('/providers/openai-compatible/enable', {
+window.enableOpenAiCompatibleProvider = async function (providerId = 'openai-compatible') {
+  const prefix =
+    providerId === 'airouter'
+      ? 'provider-airouter'
+      : 'provider-openai-compatible';
+  const baseUrl = document.getElementById(`${prefix}-base-url`)?.value?.trim();
+  const model = document.getElementById(`${prefix}-model`)?.value?.trim();
+  const apiKey = document.getElementById(`${prefix}-api-key`)?.value?.trim();
+  const r = await api('/providers/' + providerId + '/enable', {
     method: 'POST',
     body: JSON.stringify({ baseUrl, model, apiKey }),
   });
@@ -7977,9 +8011,9 @@ function renderReportOutputGate() {
       <div class="report-output-gate-grid">
         ${reportOutputGate()
           .map(
-            (item, index) => `
+            (item) => `
         <article class="report-output-gate-card">
-          <span>${String(index + 1).padStart(2, '0')}</span>
+          <span>${esc((item.label || '').split(' ')[0] || 'Gate')}</span>
           <strong>${esc(item.label)}</strong>
           <p>${esc(item.detail)}</p>
         </article>`,
@@ -8171,10 +8205,10 @@ async function renderReports(el) {
           <span class="report-kicker">Pipeline</span>
           <h3>Reports stay reviewable before anything leaves NanoCrab.</h3>
           <div class="report-pipeline-list">
-            <div class="report-pipeline-step"><span class="report-step-index">01</span><div><strong>Request</strong><span>Choose sources, formats, and provider.</span></div></div>
-            <div class="report-pipeline-step"><span class="report-step-index">02</span><div><strong>Outline</strong><span>Approve the structure before drafting.</span></div></div>
-            <div class="report-pipeline-step"><span class="report-step-index">03</span><div><strong>Export</strong><span>Create Markdown, HTML, DOCX, or PDF artifacts.</span></div></div>
-            <div class="report-pipeline-step"><span class="report-step-index">04</span><div><strong>Delivery</strong><span>Release only after approval.</span></div></div>
+            <div class="report-pipeline-step"><span class="report-step-index">Source</span><div><strong>Request</strong><span>Choose sources, formats, and provider.</span></div></div>
+            <div class="report-pipeline-step"><span class="report-step-index">Shape</span><div><strong>Outline</strong><span>Approve the structure before drafting.</span></div></div>
+            <div class="report-pipeline-step"><span class="report-step-index">Export</span><div><strong>Export</strong><span>Create Markdown, HTML, DOCX, or PDF artifacts.</span></div></div>
+            <div class="report-pipeline-step"><span class="report-step-index">Approve</span><div><strong>Delivery</strong><span>Release only after approval.</span></div></div>
           </div>
         </aside>
       </section>
@@ -8727,9 +8761,9 @@ async function renderArtifacts(el) {
     <section class="artifacts-lifecycle-map">
       ${artifactLifecycleCards()
         .map(
-          (card, index) => `
+          (card) => `
       <article class="artifacts-lifecycle-card">
-        <span>${String(index + 1).padStart(2, '0')}</span>
+        <span>${esc((card.title || '').split(' ')[0] || 'Artifact')}</span>
         <strong>${esc(card.title)}</strong>
         <p>${esc(card.body)}</p>
       </article>`,
@@ -8866,9 +8900,9 @@ function renderArtifactEmptyState() {
         </div>
       </div>
       <div class="artifact-empty-flow">
-        <article><span>01</span><strong>Generate</strong><p>Use Reports, Cowork projects, MCP summaries, or scheduled briefings.</p></article>
-        <article><span>02</span><strong>Review</strong><p>Keep source links and approvals beside each generated output.</p></article>
-        <article><span>03</span><strong>Reuse</strong><p>Copy the artifact handoff when another agent should continue the work.</p></article>
+        <article><span>Create</span><strong>Generate</strong><p>Use Reports, Cowork projects, MCP summaries, or scheduled briefings.</p></article>
+        <article><span>Check</span><strong>Review</strong><p>Keep source links and approvals beside each generated output.</p></article>
+        <article><span>Handoff</span><strong>Reuse</strong><p>Copy the artifact handoff when another agent should continue the work.</p></article>
       </div>
     </section>`;
 }
@@ -10447,9 +10481,9 @@ async function renderFiles(el) {
       <div class="files-promotion-grid">
         ${filePromotionChecklist()
           .map(
-            (item, index) => `
+            (item) => `
           <article class="files-promotion-card">
-            <span>${String(index + 1).padStart(2, '0')}</span>
+            <span>${esc((item.title || '').split(' ')[0] || 'File')}</span>
             <strong>${esc(item.title)}</strong>
             <p>${esc(item.detail)}</p>
           </article>`,
@@ -11811,9 +11845,9 @@ async function renderMounts(el) {
       <div class="mounts-preflight-grid">
         ${mountPreflightChecklist()
           .map(
-            (item, index) => `
+            (item) => `
           <article class="mounts-preflight-card">
-            <span>${String(index + 1).padStart(2, '0')}</span>
+            <span>${esc((item.title || '').split(' ')[0] || 'Mount')}</span>
             <strong>${esc(item.title)}</strong>
             <p>${esc(item.detail)}</p>
           </article>`,
@@ -13231,7 +13265,7 @@ async function renderEditor(el) {
       </div>
     </section>
     <section class="editor-workflow-map">
-      ${editorWorkflowCards().map((card, index) => `<article class="editor-workflow-card"><span>${String(index + 1).padStart(2, '0')}</span><strong>${esc(card.title)}</strong><p>${esc(card.body)}</p></article>`).join('')}
+      ${editorWorkflowCards().map((card) => `<article class="editor-workflow-card"><span>${esc((card.title || '').split(' ')[0] || 'Edit')}</span><strong>${esc(card.title)}</strong><p>${esc(card.body)}</p></article>`).join('')}
     </section>
     <section class="editor-readiness-gate" aria-label="Editor readiness gate">
       <div class="editor-readiness-head">
@@ -14296,9 +14330,9 @@ function renderAuditTraceRecovery() {
       <div class="audit-trace-recovery-grid">
         ${auditTraceRecoverySteps()
           .map(
-            (item, index) => `
+            (item) => `
         <article class="audit-trace-step">
-          <span>${String(index + 1).padStart(2, '0')}</span>
+          <span>${esc((item.label || '').split(' ')[0] || 'Audit')}</span>
           <strong>${esc(item.label)}</strong>
           <p>${esc(item.detail)}</p>
         </article>`,
@@ -18705,9 +18739,9 @@ function renderWorkflowAutomationGate() {
       <div class="workflow-automation-gate-grid">
         ${workflowAutomationPromotionGate()
           .map(
-            (gate, index) => `
+            (gate) => `
           <div class="workflow-automation-step">
-            <span>${index + 1}</span>
+            <span>${esc((gate.title || '').split(' ')[0] || 'Gate')}</span>
             <strong>${esc(gate.title)}</strong>
             <p>${esc(gate.detail)}</p>
           </div>`,
@@ -19932,9 +19966,9 @@ function renderGitOpsNoReposState(loadIssues = []) {
         <p>Git Ops needs a mounted repo to inspect branches, diffs, commits, and changed files before agents commit, push, or hand work off.</p>
       </div>
       <div class="gitops-empty-flow">
-        <div><span>01</span><strong>Add mount</strong><small>Approve a host path under Mounts so NanoCrab can see the repository.</small></div>
-        <div><span>02</span><strong>Attach group</strong><small>Add the mount to the Code or Cowork group that should work with it.</small></div>
-        <div><span>03</span><strong>Review proof</strong><small>Return to Git Ops and Test Runner before committing or pushing.</small></div>
+        <div><span>Mount</span><strong>Add mount</strong><small>Approve a host path under Mounts so NanoCrab can see the repository.</small></div>
+        <div><span>Scope</span><strong>Attach group</strong><small>Add the mount to the Code or Cowork group that should work with it.</small></div>
+        <div><span>Proof</span><strong>Review proof</strong><small>Return to Git Ops and Test Runner before committing or pushing.</small></div>
       </div>
       <div class="gitops-empty-actions">
         <button class="btn btn-sm btn-primary" onclick="navigate('mounts')">Open Mounts</button>
@@ -20095,9 +20129,9 @@ async function renderGitOps(el) {
             </div>
           </div>
           <div class="gitops-handoff-grid">
-            ${gitOpsHandoffRunway().map((item, index) => `
+            ${gitOpsHandoffRunway().map((item) => `
               <article class="gitops-handoff-card">
-                <span>${String(index + 1).padStart(2, '0')}</span>
+                <span>${esc((item.step || '').split(' ')[0] || 'Proof')}</span>
                 <strong>${esc(item.step)}</strong>
                 <p>${esc(item.detail)}</p>
               </article>
@@ -20934,9 +20968,9 @@ async function renderSnippets(el) {
         <p>Use this when deciding whether a pattern belongs in Copilot, Cowork, Code, Operations, or a full Skill.</p>
       </div>
       <div class="snippet-promotion-steps">
-        ${snippetPromotionSteps().map((step, index) => `
+        ${snippetPromotionSteps().map((step) => `
           <article class="snippet-promotion-step">
-            <span>${String(index + 1).padStart(2, '0')}</span>
+            <span>${esc((step.label || '').split(' ')[0] || 'Snippet')}</span>
             <strong>${esc(step.label)}</strong>
             <p>${esc(step.detail)}</p>
           </article>
@@ -22587,9 +22621,9 @@ async function renderReviewRules(el) {
             <p>Use this before approving PRs, coding-agent output, release handoffs, or risky repository changes.</p>
           </div>
           <div class="review-evidence-steps">
-            ${reviewEvidenceLadder().map((step, index) => `
+            ${reviewEvidenceLadder().map((step) => `
               <article class="review-evidence-step">
-                <span>${String(index + 1).padStart(2, '0')}</span>
+                <span>${esc((step.label || '').split(' ')[0] || 'Proof')}</span>
                 <strong>${esc(step.label)}</strong>
                 <p>${esc(step.detail)}</p>
               </article>

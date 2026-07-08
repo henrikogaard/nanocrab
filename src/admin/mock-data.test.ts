@@ -434,6 +434,61 @@ describe('mock admin data', () => {
     });
   });
 
+  it('serves an empty Cowork project folder in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        `${baseUrl}/api/projects/project-auroradocs`,
+      );
+      const data = (await response.json()) as {
+        files: Array<{ path: string; kind: string }>;
+      };
+
+      expect(data.files).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: 'empty-folder', kind: 'folder' }),
+        ]),
+      );
+    });
+  });
+
+  it('serves Cowork project artifact records in the mock artifact vault', async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/artifacts/vault`);
+      const records = (await response.json()) as Array<{
+        sourceType: string;
+        projectId?: string;
+        projectName?: string;
+        projectFilePath?: string;
+        tags: string[];
+      }>;
+
+      expect(records).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sourceType: 'cowork-project',
+            projectId: 'project-auroradocs',
+            projectName: 'AuroraDocs MCP workspace',
+            projectFilePath: 'docs/brief.md',
+            tags: expect.arrayContaining(['cowork', 'project']),
+          }),
+        ]),
+      );
+
+      const summaryResponse = await fetch(
+        `${baseUrl}/api/artifacts/vault/summary`,
+      );
+      const summary = (await summaryResponse.json()) as {
+        total: number;
+        kinds: string[];
+      };
+
+      expect(summary.total).toBe(3);
+      expect(summary.kinds).toEqual(
+        expect.arrayContaining(['report', 'cowork-artifact']),
+      );
+    });
+  });
+
   it('serves Cowork run local artifact creation in mock mode', async () => {
     await withServer(async (baseUrl) => {
       const response = await fetch(
