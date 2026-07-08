@@ -299,6 +299,78 @@ describe('/api/projects', () => {
     );
   });
 
+  it('injects included context notebook items into project chat instructions', async () => {
+    const result = await withServer(async (base) => {
+      const createRes = await fetch(`${base}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Notebook Injection' }),
+      });
+      const { project } = (await createRes.json()) as {
+        project: { id: string };
+      };
+
+      await fetch(`${base}/api/projects/${project.id}/files`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          path: 'docs/source.md',
+          content: '# Source notes',
+        }),
+      });
+
+      await fetch(`${base}/api/projects/${project.id}/context`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          type: 'file',
+          title: 'Pinned source notes',
+          path: 'docs/source.md',
+          included: true,
+          pinned: true,
+          provenance: 'manual-upload',
+          sensitivity: 'confidential',
+        }),
+      });
+      await fetch(`${base}/api/projects/${project.id}/context`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          type: 'note',
+          title: 'Stale excluded note',
+          included: false,
+          provenance: 'manual',
+          sensitivity: 'normal',
+        }),
+      });
+
+      const chatRes = await fetch(
+        `${base}/api/projects/${project.id}/threads`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: 'Use project notebook' }),
+        },
+      );
+      expect(chatRes.status).toBe(200);
+      return (await chatRes.json()) as { id: string };
+    });
+
+    const group = getRegisteredGroup(result.id);
+    expect(group?.containerConfig?.restrictions).toContain(
+      'Project context notebook:',
+    );
+    expect(group?.containerConfig?.restrictions).toContain(
+      '- Pinned source notes [file, confidential, pinned, manual-upload] path: docs/source.md',
+    );
+    expect(group?.containerConfig?.restrictions).toContain(
+      'Only included notebook items are injected into this chat. Excluded items remain inspectable in the UI but should not be used unless the user asks to include them.',
+    );
+    expect(group?.containerConfig?.restrictions).not.toContain(
+      'Stale excluded note',
+    );
+  });
+
   it('keeps generated source-backed documents visible in project context', async () => {
     const result = await withServer(async (base) => {
       const createRes = await fetch(`${base}/api/projects`, {
@@ -588,6 +660,60 @@ describe('/api/projects', () => {
         }),
       ]),
     );
+  });
+
+  it('removes context notebook entries without deleting source files', async () => {
+    const result = await withServer(async (base) => {
+      const createRes = await fetch(`${base}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Remove Context Entry' }),
+      });
+      const { project } = (await createRes.json()) as {
+        project: { id: string };
+      };
+
+      await fetch(`${base}/api/projects/${project.id}/files`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          path: 'docs/source.md',
+          content: '# Source still exists',
+        }),
+      });
+
+      const contextRes = await fetch(
+        `${base}/api/projects/${project.id}/context`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            type: 'file',
+            title: 'Removable source',
+            path: 'docs/source.md',
+          }),
+        },
+      );
+      const context = (await contextRes.json()) as {
+        item: { id: string };
+      };
+
+      const removeRes = await fetch(
+        `${base}/api/projects/${project.id}/context/${context.item.id}`,
+        { method: 'DELETE' },
+      );
+      expect(removeRes.status).toBe(200);
+
+      const listRes = await fetch(`${base}/api/projects/${project.id}/context`);
+      const list = (await listRes.json()) as { items: unknown[] };
+      const downloadRes = await fetch(
+        `${base}/api/projects/${project.id}/files/download?path=docs%2Fsource.md`,
+      );
+      return { list, downloadStatus: downloadRes.status };
+    });
+
+    expect(result.list.items).toEqual([]);
+    expect(result.downloadStatus).toBe(200);
   });
 
   it('creates source-backed local artifacts for Cowork runs and records their ledger context', async () => {

@@ -2687,6 +2687,16 @@ export function updateCoworkContextItem(
   return getCoworkContextItem(projectId, itemId);
 }
 
+export function deleteCoworkContextItem(
+  projectId: string,
+  itemId: string,
+): boolean {
+  const result = db
+    .prepare('DELETE FROM cowork_context_items WHERE project_id = ? AND id = ?')
+    .run(projectId, itemId);
+  return result.changes > 0;
+}
+
 // --- JSON migration ---
 
 function migrateJsonState(): void {

@@ -153,6 +153,42 @@
     return parts[parts.length - 1] || 'project-file';
   }
 
+  function projectContextTarget(item) {
+    return item.path || item.url || item.threadId || item.artifactId || item.type || 'manual';
+  }
+
+  function projectContextFreshness(item) {
+    var updated = Date.parse(item.updatedAt || item.createdAt || '');
+    if (!Number.isFinite(updated)) {
+      return { label: 'Unknown freshness', tone: 'neutral' };
+    }
+    var ageDays = Math.floor((Date.now() - updated) / 86400000);
+    if (ageDays < 0) ageDays = 0;
+    if (ageDays <= 7) return { label: 'Fresh', tone: 'ready' };
+    if (ageDays <= 30) return { label: 'Review', tone: 'attention' };
+    return { label: 'Stale', tone: 'stale' };
+  }
+
+  function renderProjectContextSourceAction(item) {
+    if (item.path) {
+      return (
+        '<a class="btn btn-sm btn-ghost" href="' +
+        esc(projectFileDownloadHref(item.path)) +
+        '" download="' +
+        esc(projectFileDownloadName(item.path)) +
+        '">Download source</a>'
+      );
+    }
+    if (item.url) {
+      return (
+        '<a class="btn btn-sm btn-ghost" href="' +
+        esc(item.url) +
+        '" target="_blank" rel="noopener">Open source</a>'
+      );
+    }
+    return '';
+  }
+
   function projectHandoffBriefText(detail) {
     if (!detail || !detail.project) return '';
     var project = detail.project;
@@ -787,18 +823,43 @@
     }
     return (
       '<div class="project-context-notebook">' +
+      '<div class="project-context-notebook-head"><span>Active context</span><small>Included items are injected into the next project chat. Excluded items stay visible here.</small></div>' +
       context
         .map(function (item) {
-          var target = item.path || item.url || item.threadId || item.artifactId || item.type;
+          var target = projectContextTarget(item);
+          var freshness = projectContextFreshness(item);
+          var included = item.included !== false;
+          var pinned = item.pinned === true;
           return (
             '<article class="project-context-item">' +
-            '<div>' +
+            '<div class="project-context-item-main">' +
             '<span>' +
             esc(item.title || 'Context item') +
             '</span>' +
             '<small>' +
             esc(target || 'manual') +
             '</small>' +
+            '<small>Updated ' +
+            esc(item.updatedAt || item.createdAt || 'unknown') +
+            '</small>' +
+            '<div class="project-context-item-badges">' +
+            '<span class="project-context-chip ' +
+            (included ? 'is-active' : 'is-idle') +
+            '">' +
+            (included ? 'Included' : 'Excluded') +
+            '</span>' +
+            (pinned
+              ? '<span class="project-context-chip is-ready">Pinned</span>'
+              : '') +
+            '<span class="project-context-chip is-' +
+            esc(freshness.tone) +
+            '">' +
+            esc(freshness.label) +
+            '</span>' +
+            '<span class="project-context-chip is-neutral">' +
+            esc(item.type || 'note') +
+            '</span>' +
+            '</div>' +
             '</div>' +
             '<div class="project-context-labels">' +
             '<strong>Sensitivity: ' +
@@ -807,6 +868,26 @@
             '<strong>Provenance: ' +
             esc(item.provenance || 'manual') +
             '</strong>' +
+            '<div class="project-context-item-actions">' +
+            renderProjectContextSourceAction(item) +
+            '<button type="button" class="btn btn-sm btn-ghost" onclick="toggleProjectContextIncluded(' +
+            jsStringAttr(item.id || '') +
+            ', ' +
+            (included ? 'false' : 'true') +
+            ')">' +
+            (included ? 'Exclude from prompt' : 'Include in prompt') +
+            '</button>' +
+            '<button type="button" class="btn btn-sm btn-ghost" onclick="toggleProjectContextPinned(' +
+            jsStringAttr(item.id || '') +
+            ', ' +
+            (pinned ? 'false' : 'true') +
+            ')">' +
+            (pinned ? 'Unpin' : 'Pin') +
+            '</button>' +
+            '<button type="button" class="btn btn-sm btn-ghost" onclick="removeProjectContextItem(' +
+            jsStringAttr(item.id || '') +
+            ')">Remove from notebook</button>' +
+            '</div>' +
             '</div>' +
             '</article>'
           );
@@ -1533,6 +1614,61 @@
         saveBtn.disabled = false;
         saveBtn.textContent = 'Save context';
       }
+    }
+  };
+
+  async function updateProjectContextItem(itemId, patch) {
+    if (!activeProjectId || !itemId) return;
+    try {
+      var result = await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/context/' +
+          encodeURIComponent(itemId),
+        {
+          method: 'PATCH',
+          body: JSON.stringify(patch || {}),
+        },
+      );
+      if (result.error) throw new Error(result.error);
+      toast('Project context updated', 'success');
+      refreshProjects();
+    } catch (err) {
+      toast(projectActionErrorMessage('context', err), 'error');
+    }
+  }
+
+  window.toggleProjectContextIncluded = function (itemId, included) {
+    updateProjectContextItem(itemId, { included: included === true });
+  };
+
+  window.toggleProjectContextPinned = function (itemId, pinned) {
+    updateProjectContextItem(itemId, { pinned: pinned === true });
+  };
+
+  window.removeProjectContextItem = async function (itemId) {
+    if (!activeProjectId || !itemId) return;
+    if (
+      window.confirm &&
+      !window.confirm(
+        'Remove this item from the project context notebook? Underlying files and artifacts are kept.',
+      )
+    ) {
+      return;
+    }
+    try {
+      var result = await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/context/' +
+          encodeURIComponent(itemId),
+        { method: 'DELETE' },
+      );
+      if (result.error) throw new Error(result.error);
+      toast('Context item removed from notebook', 'success');
+      refreshProjects();
+    } catch (err) {
+      toast(projectActionErrorMessage('context', err), 'error');
     }
   };
 

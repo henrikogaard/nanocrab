@@ -216,6 +216,15 @@ describe('Cowork Projects UI wiring', () => {
     expect(source).toContain('Approval risk');
     expect(source).toContain('Sensitivity');
     expect(source).toContain('Provenance');
+    expect(source).toContain('projectContextFreshness');
+    expect(source).toContain('toggleProjectContextIncluded');
+    expect(source).toContain('toggleProjectContextPinned');
+    expect(source).toContain('removeProjectContextItem');
+    expect(source).toContain('Include in prompt');
+    expect(source).toContain('Exclude from prompt');
+    expect(source).toContain('Remove from notebook');
+    expect(source).toContain('Download source');
+    expect(source).toContain('Updated ');
     expect(source).toContain('approval-blocked');
     expect(source).toContain('External writes require approval');
     expect(source).toContain('No Cowork runs yet');

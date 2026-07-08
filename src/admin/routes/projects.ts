@@ -44,6 +44,7 @@ import {
   createCoworkRun,
   createCoworkRunEvent,
   createCoworkRunStep,
+  deleteCoworkContextItem,
   getCoworkContextItem,
   getCoworkContextItems,
   getCoworkProject,
@@ -208,6 +209,38 @@ function projectFileManifest(
     lines.push(`- ...and ${files.length - 24} more project files`);
   }
   return ['Project file manifest:', ...lines].join('\n');
+}
+
+function contextItemLocator(item: CoworkContextItem): string {
+  if (item.path) return `path: ${item.path}`;
+  if (item.url) return `url: ${item.url}`;
+  if (item.thread_id) return `thread: ${item.thread_id}`;
+  if (item.artifact_id) return `artifact: ${item.artifact_id}`;
+  return 'manual note';
+}
+
+function projectContextNotebookManifest(items: CoworkContextItem[]): string {
+  const included = items.filter((item) => item.included);
+  if (!included.length) {
+    return 'Project context notebook: no included notebook items yet. Use project files and ask before treating excluded/stale notebook items as active context.';
+  }
+
+  const lines = included.slice(0, 24).map((item) => {
+    const flags = [
+      item.type || 'note',
+      item.sensitivity || 'unknown',
+      item.pinned ? 'pinned' : 'unpinned',
+      item.provenance || 'manual',
+    ].join(', ');
+    return `- ${item.title} [${flags}] ${contextItemLocator(item)}; updated: ${item.updated_at}`;
+  });
+  if (included.length > 24) {
+    lines.push(`- ...and ${included.length - 24} more included notebook items`);
+  }
+  lines.push(
+    'Only included notebook items are injected into this chat. Excluded items remain inspectable in the UI but should not be used unless the user asks to include them.',
+  );
+  return ['Project context notebook:', ...lines].join('\n');
 }
 
 const PROJECT_MCP_EXAMPLES = [
@@ -1387,6 +1420,26 @@ router.patch('/:id/context/:itemId', (req: Request, res: Response) => {
   res.json({ item: updated });
 });
 
+router.delete('/:id/context/:itemId', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+  const current = getCoworkContextItem(project.id, String(req.params.itemId));
+  if (!current) {
+    res.status(404).json({ error: 'Context item not found' });
+    return;
+  }
+  const removed = deleteCoworkContextItem(project.id, current.id);
+  if (!removed) {
+    res.status(404).json({ error: 'Context item not found' });
+    return;
+  }
+  touchCoworkProject(project.id, new Date().toISOString());
+  res.json({ removed: true, item: serializeCoworkContextItem(current) });
+});
+
 router.get('/:id/capabilities', (req: Request, res: Response) => {
   const project = getCoworkProject(String(req.params.id));
   if (!project) {
@@ -1560,6 +1613,7 @@ router.post('/:id/threads', (req: Request, res: Response) => {
 
   ensureCoworkProjectFolder(project);
   const files = listCoworkProjectFiles(project);
+  const contextItems = getCoworkContextItems(project.id);
   const allowedMcpServers = projectThreadMcpServers();
   ensureProjectThreadMcpPermissions(allowedMcpServers);
   const mcpServerContext = allowedMcpServers.length
@@ -1569,6 +1623,7 @@ router.post('/:id/threads', (req: Request, res: Response) => {
     `Project: ${project.name}`,
     `Project files are mounted read/write at /workspace/extra/project-${project.slug}.`,
     projectFileManifest(files),
+    projectContextNotebookManifest(contextItems),
     mcpServerContext,
     'This is a Cowork project chat. You may call approved MCP servers when they help the task, including mail, calendar, document, storage, and custom MCP servers allowed by connector permissions.',
     'For requests like creating a document or summary from the latest emails, checking all emails from a sender, generating a source-backed document, or turning external context into a project artifact, call the relevant approved MCP tools and save durable drafts or summaries in the project workspace. If the relevant MCP tool is not exposed, say what is missing instead of inventing external source results.',
