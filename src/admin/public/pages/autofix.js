@@ -802,9 +802,15 @@ window.autofixUpdateModels = function () {
   if (!providerEl || !modelEl) return;
   const provider = (window._autofixProvidersById || {})[providerEl.value] || {};
   const models = (window._autofixModelsByProvider || {})[providerEl.value] || [];
-  const defaultAllowed = provider.id !== 'ollama';
+  const defaultAllowed = autofixProviderAllowsDefaultModel(provider, models);
   modelEl.innerHTML = `${defaultAllowed ? '<option value="">Default model</option>' : ''}${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
 };
+
+function autofixProviderAllowsDefaultModel(provider, models) {
+  if (!provider || !provider.defaultModel) return true;
+  const defaultModel = (models || []).find((model) => model.id === provider.defaultModel);
+  return defaultModel ? defaultModel.codingCapable !== false : provider.codingCapable === true;
+}
 
 window.autofixAddProject = async function () {
   const owner = document.getElementById('af-owner').value.trim();

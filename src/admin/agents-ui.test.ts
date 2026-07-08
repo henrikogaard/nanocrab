@@ -903,6 +903,25 @@ describe('Agents launcher UI', () => {
     );
   });
 
+  it('makes Code assignment the primary repo work flow with explicit target and plan controls', () => {
+    const source = fs.readFileSync(agentsPagePath, 'utf8');
+
+    expect(source).toContain('assign-coding-target-type');
+    expect(source).toContain('value="auto">Next issue');
+    expect(source).toContain('value="issue-number">Issue #');
+    expect(source).toContain('value="freeform">Freeform task');
+    expect(source).toContain('assign-coding-issue-number');
+    expect(source).toContain('assign-coding-prompt');
+    expect(source).toContain('assign-coding-plan-mode');
+    expect(source).toContain('value="plan-first"');
+    expect(source).toContain('value="implement-now"');
+    expect(source).toContain('startAssignedCodingJob');
+    expect(source).toContain("api('/agents/coding/jobs'");
+    expect(source).toContain("api('/agents/coding/pick-issue'");
+    expect(source).toContain('assignmentPlanDirective');
+    expect(source).toContain('Implementation approval is still required');
+  });
+
   it('styles the delegation cockpit for desktop and narrow screens', () => {
     const source = fs.readFileSync(stylePath, 'utf8');
 

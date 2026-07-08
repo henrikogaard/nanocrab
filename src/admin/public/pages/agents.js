@@ -1669,13 +1669,28 @@ async function renderAgents(el) {
         <div class="assign-pane is-hidden" id="assign-pane-github">
           <div class="assign-grid-compact">
             <div class="form-group"><label>Repository</label><select class="search-input" id="assign-coding-repo-select">${codingRepoOptions || '<option value="">No repos registered</option>'}</select></div>
+            <div class="form-group"><label>Target</label><select class="search-input" id="assign-coding-target-type">
+              <option value="auto">Next issue</option>
+              <option value="issue-number">Issue #</option>
+              <option value="freeform">Freeform task</option>
+            </select></div>
+            <div class="form-group"><label>Issue #</label><input class="search-input" id="assign-coding-issue-number" placeholder="optional"></div>
             <div class="form-group"><label>Provider</label><select class="search-input" id="assign-coding-provider-select" onchange="updateAssignCodingModels()">${codingProviderOptions || '<option value="claude">Claude</option>'}</select></div>
             <div class="form-group"><label>Model</label><select class="search-input" id="assign-coding-model-select"><option value="">Default model</option></select></div>
+            <div class="form-group"><label>Mode</label><select class="search-input" id="assign-coding-plan-mode">
+              <option value="plan-first">Plan first</option>
+              <option value="implement-now">Implement after approval</option>
+            </select></div>
             <div class="form-group"><label>Labels</label><input class="search-input" id="assign-coding-labels" placeholder="p0, autofix, bug"></div>
+          </div>
+          <div class="form-group">
+            <label>Instructions</label>
+            <textarea class="search-input assign-prompt-input" id="assign-coding-prompt" rows="3" placeholder="Optional issue context, freeform repo task, tests, PR expectations, or handoff details."></textarea>
+            <div class="field-hint">Implementation approval is still required before repository writes, PR creation, or retry/cancel handoff changes proceed.</div>
           </div>
           <label class="assign-check"><input type="checkbox" id="assign-coding-create-pr" checked> Create a draft PR when changes are ready</label>
           <div class="assign-action-row">
-            <button class="btn btn-primary" onclick="assignPickCodingIssue()">Pick Next Issue</button>
+            <button class="btn btn-primary" onclick="startAssignedCodingJob()">Start Code Assignment</button>
             <button class="btn btn-ghost" onclick="document.getElementById('coding-repo-new')?.focus()">Register Repo Below</button>
           </div>
         </div>
@@ -2412,15 +2427,35 @@ window.pickCodingIssue = async function () {
   }
 };
 
-window.assignPickCodingIssue = async function () {
+function assignmentPlanDirective(mode) {
+  if (mode === 'implement-now') {
+    return 'Assignment mode: implement after approval. Implementation approval is still required before repository writes, PR creation, or external delivery proceed.';
+  }
+  return 'Assignment mode: plan first. Produce a concrete plan and wait for implementation approval before changing repository files.';
+}
+
+function assignedCodingPrompt(prompt, mode) {
+  return [assignmentPlanDirective(mode), prompt || ''].filter(Boolean).join('\n\n');
+}
+
+window.startAssignedCodingJob = async function () {
   const repo = document.getElementById('assign-coding-repo-select')?.value;
+  const targetType =
+    document.getElementById('assign-coding-target-type')?.value || 'auto';
   const provider = document.getElementById('assign-coding-provider-select')?.value;
   const model = document.getElementById('assign-coding-model-select')?.value;
+  const prompt =
+    document.getElementById('assign-coding-prompt')?.value?.trim() || '';
+  const planMode =
+    document.getElementById('assign-coding-plan-mode')?.value || 'plan-first';
   const labels = document
     .getElementById('assign-coding-labels')
     ?.value?.split(',')
     .map((label) => label.trim())
     .filter(Boolean);
+  const issueRaw =
+    document.getElementById('assign-coding-issue-number')?.value?.trim() || '';
+  const issueNumber = issueRaw ? Number(issueRaw.replace(/^#/, '')) : undefined;
   const createPr =
     document.getElementById('assign-coding-create-pr')?.checked === true;
   if (!repo) {
@@ -2428,26 +2463,55 @@ window.assignPickCodingIssue = async function () {
     document.getElementById('assign-coding-repo-select')?.focus();
     return;
   }
+  if (targetType === 'issue-number' && (!issueNumber || Number.isNaN(issueNumber))) {
+    toast('Enter a valid issue number', 'warning');
+    document.getElementById('assign-coding-issue-number')?.focus();
+    return;
+  }
+  if (targetType === 'freeform' && !prompt) {
+    toast('Describe the freeform repo task first', 'warning');
+    document.getElementById('assign-coding-prompt')?.focus();
+    return;
+  }
   try {
-    const r = await api('/agents/coding/pick-issue', {
-      method: 'POST',
-      body: JSON.stringify({
-        repo,
-        labels,
-        provider,
-        model: model || undefined,
-        createPr,
-      }),
-    });
+    const r =
+      targetType === 'auto'
+        ? await api('/agents/coding/pick-issue', {
+            method: 'POST',
+            body: JSON.stringify({
+              repo,
+              labels,
+              provider,
+              model: model || undefined,
+              createPr,
+            }),
+          })
+        : await api('/agents/coding/jobs', {
+            method: 'POST',
+            body: JSON.stringify({
+              repo,
+              issueNumber:
+                targetType === 'issue-number' ? issueNumber : undefined,
+              prompt: assignedCodingPrompt(prompt, planMode),
+              provider,
+              model: model || undefined,
+              createPr,
+            }),
+          });
     if (!r.ok) {
       toast(agentActionErrorMessage('issue', r.error), 'error');
       return;
     }
-    if (!r.issue) {
+    if (targetType === 'auto' && !r.issue) {
       toast('No matching open issue found', 'info');
       return;
     }
-    toast(`Started coding job for #${r.issue.number}`, 'success');
+    toast(
+      targetType === 'auto'
+        ? `Started coding job for #${r.issue.number}`
+        : `Started Code assignment for ${repo}`,
+      'success',
+    );
     toggleTaskLauncher(false);
     setTimeout(() => {
       if (currentPage === 'agents') navigate('agents');
@@ -2456,6 +2520,8 @@ window.assignPickCodingIssue = async function () {
     toast(agentActionErrorMessage('issue', e), 'error');
   }
 };
+
+window.assignPickCodingIssue = window.startAssignedCodingJob;
 
 window.assignCreateAutofixProject = async function () {
   const ownerEl = document.getElementById('assign-af-owner');

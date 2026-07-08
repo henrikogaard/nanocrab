@@ -47,7 +47,7 @@ Full web dashboard at your domain with 7-layer security (firewall, TLS, IP allow
 The dashboard is **mode-first**: the sidebar leads with three top-level focus modes — **Copilot**, **Cowork**, and **Code** — and operational/admin surfaces live in a secondary **More** drawer. Switching mode swaps the mode-scoped sidebar:
 
 - **Copilot** — ChatGPT-style plain conversations. Start a new chat by choosing a provider/model and optional title; there is no agent template or project workspace. If no title is supplied, NanoCrab can name the thread after the first user message.
-- **Cowork** — Projects, agents, tasks, workflows, approvals, reports, artifacts, documents, source ledgers, and MCP-backed collaboration. Cowork projects are virtual folders with files, artifacts, documents, chats, previous thread history, project instructions, provider/model selection, a curated context notebook with included/excluded/pinned source items, and approved MCP server access for source-backed work such as email summaries or document drafts.
+- **Cowork** — Projects, agents, tasks, workflows, approvals, reports, artifacts, documents, source ledgers, and MCP-backed collaboration. Cowork projects are virtual folders with files, artifacts, documents, chats, previous thread history, project instructions, provider/model selection, a curated context notebook with included/excluded/pinned source items, active skills/plugins/connectors readiness, reusable run estimates, action workflow previews, research-job ledgers, and approved MCP server access for source-backed work such as email summaries or document drafts.
 - **Code** — Git & Code, Terminal/Developer Hub, Autofix, and GitHub Copilot. Use this mode for repositories, issues, PRs, tests, review rules, snippets, and coding-agent handoffs.
 - **More** — Dashboard, Channels, Messages, Deploy, Monitoring, Containers, Integrations, Webhooks, Credentials, Security, Audit, Uptime, Backup, Usage, Groups, Sessions, Marketplace, Help, and personal setup surfaces.
 
@@ -57,8 +57,8 @@ Channel agents use the same workspace map. From WhatsApp, Signal, Telegram, or a
 
 - **Dashboard** — live stats, weather, channel status, message feed, cockpit, smart refresh, and workspace route guidance
 - **Copilot chat** — pure web conversations with thread history, provider/model selection, optional title, generated title fallback, inline progress/tool visibility, and no agent templates
-- **Cowork Projects** — virtual project folders with files, artifacts, documents, project chats, previous thread history, instructions, run detail panels with plan/events/approvals/output, context notebook inclusion controls, MCP source workflows, and local draft-first output
-- **Agents** — assignment flows for delegated tasks, GitHub issue pickup, Autofix auto-pickup setup, coding-job output, and bot agents
+- **Cowork Projects** — virtual project folders with files, artifacts, documents, project chats, previous thread history, instructions, run detail panels with plan/events/approvals/output/stats, context notebook inclusion controls, canonical provenance/sensitivity labels, MCP source workflows, action workflow artifacts, browser research ledgers, and local draft-first output
+- **Agents** — assignment flows for delegated tasks, Code repo assignments by next issue, issue number, or freeform prompt, Autofix auto-pickup setup, coding-job output, and bot agents
 - **Agent Profiles** — named identities such as `@RepoFixer` or `@ManualHost` with provider/model choices, skills, memory scopes, connector limits, subscriptions, and approval-aware write policies managed from the Agents cockpit
 - **Tasks & Workflows** — routine blueprints, schedule builder, missions, runbooks, delivery modes, run history, heartbeat checks, and run-now controls
 - **Reports & Artifacts** — source-backed deliverables, briefing schedules, generated files, vault search, retention, and Cowork handoff prompts
@@ -85,7 +85,7 @@ Additional plugins can be installed from git URLs via the Marketplace page, or c
 
 ### Autonomous Coding
 
-- **Assign Work Wizard** — start a freeform coding task from templates, pick the next matching GitHub issue, or enable Autofix auto-pickup from the Code/Cowork agent surfaces
+- **Assign Work Wizard** — start a freeform coding task from templates, assign Code work by next matching issue, explicit issue number, or freeform repo prompt, choose plan-first vs implement-after-approval intent, or enable Autofix auto-pickup from the Code/Cowork agent surfaces
 - **GitHub Coding Jobs** — register enabled repos, browse issues and GitHub project boards in the web UI, assign an issue to a NanoCrab coding agent, inspect diffs/output/tests/CI, approve implementation, approve PRs, retry, cancel, and revert
 - **Repo Coding Rules** — save reviewed repo preferences such as required runtimes, test commands, and safety conventions; approved rules are injected into coding-job prompts without exposing secrets.
 - **Isolated Coding Jobs** — WhatsApp/Signal/Telegram agents can request repo coding jobs through MCP; an ephemeral coding container clones and edits inside `data/coding-workspaces`
@@ -139,13 +139,16 @@ stored in `store/coding-jobs.json`, registered repos live in
 `store/coding-repos.json`, and workspaces live under
 `data/coding-workspaces/jobs/`.
 
-Coding jobs support `claude`, `codex`, `opencode`, `openrouter`, and code-capable
-Ollama models. OpenRouter and local Ollama coding jobs run through the agentic
-OpenCode shell so repository work still edits files in the isolated job
-workspace. Ollama's default chat models remain chat/local-task oriented; choose
-an explicit code model such as `codestral` before assigning local coding work.
-Google and other OpenAI-compatible chat providers stay in the normal agent path
-unless a dedicated coding runtime is added.
+Coding jobs support `claude`, `codex`, `opencode`, `openrouter`, and
+code-capable Ollama models. `/api/agents/providers` is the source of truth for
+provider/model coding capability, so Agents and Autofix selectors rely on
+per-model `codingCapable` metadata instead of provider-name allow/deny lists.
+OpenRouter and local Ollama coding jobs run through the agentic OpenCode shell
+so repository work still edits files in the isolated job workspace. Ollama's
+default chat models remain chat/local-task oriented; choose an explicit code
+model such as `codestral` before assigning local coding work. Google and other
+OpenAI-compatible chat providers stay in the normal agent path unless a
+dedicated coding runtime is added.
 
 ### Agent Profiles
 

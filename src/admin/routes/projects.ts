@@ -8,6 +8,7 @@ import {
   createApproval,
   findPendingApprovalForTarget,
 } from '../../approvals.js';
+import { estimateCoworkRun } from '../../cowork-run-estimator.js';
 import {
   classifyCoworkProjectFile,
   COWORK_PROJECT_FILE_PREVIEW_LIMIT,
@@ -20,10 +21,19 @@ import {
   writeCoworkProjectFile,
 } from '../../cowork-projects.js';
 import { logger } from '../../logger.js';
+import {
+  isApprovalSensitiveCoworkItem,
+  normalizeCoworkProvenance,
+  normalizeCoworkSensitivity,
+} from '../../cowork-metadata.js';
+import {
+  createResearchJob,
+  updateResearchJobMetadata,
+} from '../../research-jobs.js';
+import { listSkillRegistry } from '../../skill-registry.js';
+import { getPlugins, isPluginEnabled } from '../plugins/registry.js';
 import type {
   ContainerConfig,
-  CoworkApprovalRisk,
-  CoworkComplexity,
   CoworkContextItem,
   CoworkProject,
   CoworkRun,
@@ -254,6 +264,8 @@ function projectSummary(project: CoworkProject) {
   const files = listCoworkProjectFiles(project);
   const threads = projectThreads(project.id);
   const servers = configuredExternalMcpServers();
+  const skills = listSkillRegistry();
+  const plugins = getPlugins();
   return {
     ...project,
     path: coworkProjectPath(project),
@@ -271,84 +283,24 @@ function projectSummary(project: CoworkProject) {
       examples: PROJECT_MCP_EXAMPLES,
     },
     capabilities: {
-      skills: { total: 0 },
-      plugins: { total: 0 },
+      skills: {
+        total: skills.length,
+        active: skills.filter((skill) => skill.enabled).length,
+      },
+      plugins: {
+        total: plugins.length,
+        active: plugins.filter((plugin) => isPluginEnabled(plugin.id)).length,
+      },
       connectors: { total: servers.length },
     },
   };
 }
 
-function estimateCoworkRun(input: {
-  title?: unknown;
-  prompt?: unknown;
-  provider?: unknown;
-  model?: unknown;
-}): {
-  complexity: CoworkComplexity;
-  approvalRisk: CoworkApprovalRisk;
-  provider: string | null;
-  model: string | null;
-  warnings: string[];
-} {
-  const title = typeof input.title === 'string' ? input.title : '';
-  const prompt = typeof input.prompt === 'string' ? input.prompt : '';
-  const text = `${title}\n${prompt}`.toLowerCase();
-  const connectorTerms = [
-    'mcp',
-    'connector',
-    'email',
-    'mail',
-    'calendar',
-    'document',
-    'artifact',
-    'source',
-    'browser',
-    'research',
-  ];
-  const writeTerms = [
-    'send',
-    'publish',
-    'upload',
-    'webhook',
-    'external',
-    'write',
-    'calendar edit',
-    'delivery',
-  ];
-  const hasConnectorWork = connectorTerms.some((term) => text.includes(term));
-  const hasExternalWrite = writeTerms.some((term) => text.includes(term));
-  const complexity: CoworkComplexity = hasConnectorWork
-    ? 'connector-heavy'
-    : text.length > 600
-      ? 'long'
-      : text.length > 180
-        ? 'standard'
-        : 'quick';
-  const approvalRisk: CoworkApprovalRisk = hasExternalWrite
-    ? 'high'
-    : hasConnectorWork
-      ? 'medium'
-      : 'low';
-  const warnings =
-    approvalRisk === 'high'
-      ? [
-          'Write-capable or external delivery language requires approval before mutation.',
-        ]
-      : [];
-
-  return {
-    complexity,
-    approvalRisk,
-    provider:
-      typeof input.provider === 'string' && input.provider.trim()
-        ? input.provider.trim()
-        : null,
-    model:
-      typeof input.model === 'string' && input.model.trim()
-        ? input.model.trim()
-        : null,
-    warnings,
-  };
+function projectContextSizeBytes(project: CoworkProject): number {
+  return listCoworkProjectFiles(project).reduce(
+    (total, file) => total + file.size,
+    0,
+  );
 }
 
 function parseStats(statsJson: string): Record<string, unknown> {
@@ -451,7 +403,11 @@ function coworkResearchCoverage(outputs: Array<Record<string, unknown>>) {
 
 function coworkRunApprovals(events: CoworkRunEvent[]) {
   return events
-    .filter((event) => event.kind === 'action-requested')
+    .filter((event) =>
+      ['action-requested', 'action-workflow-approval-requested'].includes(
+        event.kind,
+      ),
+    )
     .map((event) => parseStats(event.metadata_json))
     .filter((metadata) => metadata.approval)
     .map((metadata) => metadata.approval);
@@ -465,6 +421,97 @@ function markdownUrl(value: unknown): string {
   return String(value || '')
     .replace(/\(/g, '%28')
     .replace(/\)/g, '%29');
+}
+
+const COWORK_ACTION_WORKFLOWS = {
+  'email-summary': {
+    label: 'Email summary',
+    connectorId: 'gmail',
+    action: 'gmail.read',
+    readOnly: true,
+    description: 'Read mail context and save a local project summary artifact.',
+  },
+  'email-draft': {
+    label: 'Email draft',
+    connectorId: 'gmail',
+    action: 'gmail.send',
+    readOnly: false,
+    description:
+      'Prepare an email draft preview and require approval before external mutation.',
+  },
+  'calendar-draft': {
+    label: 'Calendar draft',
+    connectorId: 'calendar',
+    action: 'calendar.write',
+    readOnly: false,
+    description:
+      'Prepare a calendar change preview and require approval before external mutation.',
+  },
+  'document-artifact': {
+    label: 'Document artifact',
+    connectorId: 'documents',
+    action: 'documents.read',
+    readOnly: true,
+    description:
+      'Generate a local source-backed document artifact from supplied context.',
+  },
+  'file-delivery': {
+    label: 'File delivery',
+    connectorId: 'files',
+    action: 'files.send',
+    readOnly: false,
+    description:
+      'Prepare a file delivery preview and require approval before external send.',
+  },
+} as const;
+
+type CoworkActionWorkflowKind = keyof typeof COWORK_ACTION_WORKFLOWS;
+
+function coworkActionWorkflowKind(
+  value: unknown,
+): CoworkActionWorkflowKind | null {
+  return typeof value === 'string' && value in COWORK_ACTION_WORKFLOWS
+    ? (value as CoworkActionWorkflowKind)
+    : null;
+}
+
+function workflowArtifactPath(
+  run: CoworkRun,
+  kind: CoworkActionWorkflowKind,
+  rawPath: unknown,
+): string {
+  const requested =
+    typeof rawPath === 'string' ? safeCoworkProjectFilePath(rawPath) : null;
+  return requested || `actions/run-${run.id}-${kind}.md`;
+}
+
+function workflowPreviewContent(input: {
+  title: string;
+  kind: CoworkActionWorkflowKind;
+  connectorId: string;
+  action: string;
+  target: string | null;
+  note: string | null;
+  mockData: unknown[];
+}): string {
+  return [
+    `# ${input.title}`,
+    '',
+    `Workflow: ${input.kind}`,
+    `Connector: ${input.connectorId}`,
+    `Action: ${input.action}`,
+    input.target ? `Target: ${input.target}` : '',
+    input.note ? `Note: ${input.note}` : '',
+    '',
+    '## Preview',
+    COWORK_ACTION_WORKFLOWS[input.kind].description,
+    '',
+    input.mockData.length ? '## Mock connector data' : '',
+    input.mockData.length ? JSON.stringify(input.mockData, null, 2) : '',
+    '',
+  ]
+    .filter((line) => line !== '')
+    .join('\n');
 }
 
 function serializeCoworkRun(run: CoworkRun) {
@@ -540,6 +587,10 @@ function serializeCoworkContextItem(item: CoworkContextItem) {
 function projectCapabilities(project: CoworkProject) {
   const files = listCoworkProjectFiles(project);
   const servers = configuredExternalMcpServers();
+  const skills = listSkillRegistry();
+  const activeSkills = skills.filter((skill) => skill.enabled);
+  const plugins = getPlugins();
+  const activePlugins = plugins.filter((plugin) => isPluginEnabled(plugin.id));
   return [
     {
       id: 'project-files',
@@ -564,6 +615,73 @@ function projectCapabilities(project: CoworkProject) {
       summary:
         'External sends, uploads, repo writes, calendar edits, webhooks, and connector mutations require approval.',
     },
+    {
+      id: 'project-skills',
+      kind: 'skills',
+      label: 'Active skills',
+      enabled: true,
+      unavailable: false,
+      readOnly: true,
+      writeCapable: false,
+      approvalRequired: false,
+      summary: `${activeSkills.length} active skill${activeSkills.length === 1 ? '' : 's'} of ${skills.length} installed`,
+      states: {
+        enabled: activeSkills.length,
+        disabled: skills.length - activeSkills.length,
+        private: skills.filter((skill) => skill.visibility === 'private')
+          .length,
+        system: skills.filter((skill) => skill.visibility === 'system').length,
+      },
+    },
+    {
+      id: 'project-plugins',
+      kind: 'plugins',
+      label: 'Active plugins',
+      enabled: true,
+      unavailable: false,
+      readOnly: true,
+      writeCapable: false,
+      approvalRequired: false,
+      summary: `${activePlugins.length} active plugin${activePlugins.length === 1 ? '' : 's'} of ${plugins.length} registered`,
+      states: {
+        enabled: activePlugins.length,
+        disabled: plugins.length - activePlugins.length,
+      },
+    },
+    ...activeSkills.slice(0, 12).map((skill) => ({
+      id: `skill-${skill.path}`,
+      kind: 'skill',
+      label: skill.name,
+      enabled: skill.enabled,
+      unavailable: false,
+      readOnly: true,
+      writeCapable: skill.requiredTools.some((tool) =>
+        /\b(write|send|upload|delete|create|update)\b/i.test(tool),
+      ),
+      approvalRequired: skill.riskLevel !== 'low',
+      summary: `${skill.category} skill, ${skill.scope} scope, ${skill.visibility} visibility`,
+      states: {
+        scope: skill.scope,
+        visibility: skill.visibility,
+        riskLevel: skill.riskLevel,
+      },
+    })),
+    ...plugins.slice(0, 12).map((plugin) => {
+      const enabled = isPluginEnabled(plugin.id);
+      return {
+        id: `plugin-${plugin.id}`,
+        kind: 'plugin',
+        label: plugin.name,
+        enabled,
+        unavailable: !enabled,
+        readOnly: true,
+        writeCapable: true,
+        approvalRequired: true,
+        summary: enabled
+          ? plugin.description
+          : `${plugin.name} is disabled in Settings.`,
+      };
+    }),
     ...servers.map((server) => ({
       id: `connector-${server}`,
       kind: 'connector',
@@ -679,7 +797,16 @@ router.post('/:id/estimate', (req: Request, res: Response) => {
     res.status(404).json({ error: 'Project not found' });
     return;
   }
-  res.json({ estimate: estimateCoworkRun(req.body) });
+  res.json({
+    estimate: estimateCoworkRun({
+      ...req.body,
+      connectorIds: configuredExternalMcpServers(),
+      contextItemCount: getCoworkContextItems(project.id).filter(
+        (item) => item.included,
+      ).length,
+      contextSizeBytes: projectContextSizeBytes(project),
+    }),
+  });
 });
 
 router.get('/:id/runs', (req: Request, res: Response) => {
@@ -711,7 +838,14 @@ router.post('/:id/runs', (req: Request, res: Response) => {
 
   try {
     const now = new Date().toISOString();
-    const estimate = estimateCoworkRun(req.body);
+    const estimate = estimateCoworkRun({
+      ...req.body,
+      connectorIds: configuredExternalMcpServers(),
+      contextItemCount: getCoworkContextItems(project.id).filter(
+        (item) => item.included,
+      ).length,
+      contextSizeBytes: projectContextSizeBytes(project),
+    });
     const run = createCoworkRun({
       id: randomUUID(),
       project_id: project.id,
@@ -730,6 +864,9 @@ router.post('/:id/runs', (req: Request, res: Response) => {
         approvalsRequested: 0,
         artifactsCreated: 0,
         toolCalls: 0,
+        toolClasses: estimate.toolClasses,
+        warnings: estimate.warnings,
+        context: estimate.context,
       }),
       created_at: now,
       updated_at: now,
@@ -905,15 +1042,41 @@ router.post(
     const now = new Date().toISOString();
     const sensitiveItems = getCoworkContextItems(project.id).filter(
       (item) =>
-        item.included &&
-        /sensitive|confidential|private/i.test(item.sensitivity),
+        item.included && isApprovalSensitiveCoworkItem(item.sensitivity),
     ).length;
-    const approval = {
+    const approvalRecord = createApproval({
+      kind: 'tool-action',
+      title: `Approve ${preview.action}`,
+      summary:
+        trimmed(req.body.note) ||
+        `Approve ${preview.connectorId} connector action ${preview.action}.`,
+      risk: preview.requiresApproval ? 'high' : 'medium',
+      requester: req.user?.username || 'dashboard',
+      targetType: 'cowork-run',
+      targetId: run.id,
+      source: 'cowork-project',
+      correlationId: run.id,
+      actionPreview: preview.action,
+      resourceSummary: `${project.name}: ${run.title}`,
+      policyDecisionId: 'cowork-connector-action-approval',
+      payload: {
+        projectId: project.id,
+        projectName: project.name,
+        runId: run.id,
+        runTitle: run.title,
+        connectorId: preview.connectorId,
+        action: preview.action,
+        note: trimmed(req.body.note) || '',
+        sensitivitySignals: { includedSensitiveItems: sensitiveItems },
+      },
+    });
+    const actionApproval = {
       kind: 'connector-action',
       status: 'pending',
       connectorId: preview.connectorId,
       action: preview.action,
       note: trimmed(req.body.note) || '',
+      approvalId: approvalRecord.id,
       requestedAt: now,
       sensitivitySignals: { includedSensitiveItems: sensitiveItems },
     };
@@ -922,7 +1085,7 @@ router.post(
       'action-requested',
       `${preview.action} approval requested.`,
       {
-        approval,
+        approval: actionApproval,
       },
     );
     const updated =
@@ -932,11 +1095,373 @@ router.post(
     res.status(202).json({
       requested: true,
       approvalRequired: preview.requiresApproval,
+      approvalId: approvalRecord.id,
+      projectId: project.id,
+      runId: run.id,
       preview,
       run: serializeCoworkRun(updated),
     });
   },
 );
+
+router.post(
+  '/:id/runs/:runId/actions/workflows',
+  (req: Request, res: Response) => {
+    const project = getCoworkProject(String(req.params.id));
+    const run = project
+      ? getCoworkRun(project.id, String(req.params.runId))
+      : undefined;
+    if (!project || !run) {
+      res
+        .status(404)
+        .json({ error: project ? 'Run not found' : 'Project not found' });
+      return;
+    }
+
+    const kind = coworkActionWorkflowKind(req.body.kind);
+    if (!kind) {
+      res.status(400).json({
+        error:
+          'Unsupported Cowork action workflow. Use email-summary, email-draft, calendar-draft, document-artifact, or file-delivery.',
+      });
+      return;
+    }
+
+    const config = COWORK_ACTION_WORKFLOWS[kind];
+    const connectorId = trimmed(req.body.connectorId) || config.connectorId;
+    const action = trimmed(req.body.action) || config.action;
+    const title = trimmed(req.body.title) || config.label;
+    const target = trimmed(req.body.target);
+    const note = trimmed(req.body.note);
+    const artifactPath = workflowArtifactPath(run, kind, req.body.artifactPath);
+    const mockData = Array.isArray(req.body.mockData) ? req.body.mockData : [];
+    const now = new Date().toISOString();
+    const sourceLedger = [
+      {
+        kind: 'action-workflow',
+        workflow: kind,
+        source: mockData.length ? 'mock-connector' : connectorId,
+        connectorId,
+        action,
+        target,
+        createdAt: now,
+      },
+    ];
+
+    try {
+      const file = writeCoworkProjectFile(
+        project,
+        artifactPath,
+        workflowPreviewContent({
+          title,
+          kind,
+          connectorId,
+          action,
+          target,
+          note,
+          mockData,
+        }),
+      );
+      const contextItem = createCoworkContextItem({
+        id: randomUUID(),
+        project_id: project.id,
+        type: 'artifact',
+        title,
+        path: file.path,
+        url: null,
+        thread_id: null,
+        artifact_id: `run:${run.id}:${kind}`,
+        included: 1,
+        pinned: 0,
+        provenance: normalizeCoworkProvenance('mcp-server'),
+        sensitivity: normalizeCoworkSensitivity(
+          config.readOnly ? 'normal' : 'approval-required',
+        ),
+        created_at: now,
+        updated_at: now,
+      });
+      appendCoworkRunEvent(
+        run.id,
+        'artifact_created',
+        `${config.label} preview artifact saved.`,
+        {
+          path: file.path,
+          kind: file.kind,
+          sourceLedger,
+          contextItemId: contextItem.id,
+        },
+      );
+
+      let approval = null;
+      let updatedRun = run;
+      const approvalRequired = !config.readOnly;
+      const workflow = {
+        id: `${run.id}:${kind}`,
+        kind,
+        title,
+        connectorId,
+        action,
+        readOnly: config.readOnly,
+        approvalRequired,
+        status: approvalRequired ? 'waiting_for_approval' : 'artifact_created',
+        artifactPath: file.path,
+        approvalId: undefined as string | undefined,
+        preview: {
+          target,
+          note,
+          sourceLedger,
+        },
+      };
+
+      if (approvalRequired) {
+        approval = createApproval({
+          kind: 'tool-action',
+          title: `Approve ${config.label}`,
+          summary:
+            note ||
+            `Approve ${kind} external action ${action} for ${project.name}.`,
+          risk: 'high',
+          requester: req.user?.username || 'dashboard',
+          targetType: 'cowork-run',
+          targetId: run.id,
+          source: 'cowork-project',
+          correlationId: run.id,
+          actionPreview: `${connectorId}.${action}`,
+          resourceSummary: target || `${project.name}: ${run.title}`,
+          policyDecisionId: 'cowork-action-workflow-approval',
+          payload: {
+            projectId: project.id,
+            projectName: project.name,
+            runId: run.id,
+            runTitle: run.title,
+            workflowKind: kind,
+            connectorId,
+            action,
+            target,
+            artifactPath: file.path,
+          },
+        });
+        workflow.approvalId = approval.id;
+        appendCoworkRunEvent(
+          run.id,
+          'action-workflow-approval-requested',
+          `${config.label} approval requested.`,
+          {
+            approval: {
+              kind: 'action-workflow',
+              status: 'pending',
+              workflowKind: kind,
+              connectorId,
+              action,
+              artifactPath: file.path,
+              approvalId: approval.id,
+              requestedAt: now,
+            },
+          },
+        );
+        updatedRun =
+          updateCoworkRunStatus(
+            project.id,
+            run.id,
+            'waiting_for_approval',
+            now,
+          ) || run;
+      } else {
+        appendCoworkRunEvent(
+          run.id,
+          'action-workflow-completed',
+          `${config.label} artifact created.`,
+          {
+            workflow: {
+              kind,
+              connectorId,
+              action,
+              artifactPath: file.path,
+            },
+          },
+        );
+      }
+
+      touchCoworkProject(project.id, now);
+      res.status(approvalRequired ? 202 : 200).json({
+        workflow,
+        approval,
+        artifact: {
+          path: file.path,
+          kind: file.kind,
+          size: file.size,
+          updatedAt: file.updatedAt,
+          sourceLedger,
+        },
+        contextItem: serializeCoworkContextItem(contextItem),
+        run: serializeCoworkRun(
+          getCoworkRun(project.id, updatedRun.id) || updatedRun,
+        ),
+      });
+    } catch (err) {
+      logger.error(
+        { err, projectId: project.id, runId: run.id, kind },
+        'Failed to create Cowork action workflow',
+      );
+      res.status(500).json({ error: 'Failed to create action workflow' });
+    }
+  },
+);
+
+router.post('/:id/runs/:runId/research/jobs', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  const run = project
+    ? getCoworkRun(project.id, String(req.params.runId))
+    : undefined;
+  if (!project || !run) {
+    res
+      .status(404)
+      .json({ error: project ? 'Run not found' : 'Project not found' });
+    return;
+  }
+
+  const query = trimmed(req.body.query);
+  if (!query) {
+    res.status(400).json({ error: 'query is required' });
+    return;
+  }
+  const rawUrls: string[] = Array.isArray(req.body.urls)
+    ? req.body.urls.map((url: unknown) => String(url)).filter(Boolean)
+    : [];
+  const urls: Array<string | null> = rawUrls.map(validHttpUrl);
+  if (urls.some((url) => !url)) {
+    res
+      .status(400)
+      .json({ error: 'Research URLs must be http:// or https://' });
+    return;
+  }
+  const screenshots: string[] = Array.isArray(req.body.screenshots)
+    ? req.body.screenshots
+        .map((screenshot: unknown) => String(screenshot).trim())
+        .filter(Boolean)
+    : [];
+  const notes = trimmed(req.body.notes);
+
+  try {
+    const job = createResearchJob({
+      query,
+      urls: urls.filter((url): url is string => Boolean(url)),
+      requester: req.user?.username || 'dashboard',
+      projectId: project.id,
+      runId: run.id,
+      screenshots,
+      autoRun: req.body.autoRun !== false,
+    });
+    const now = new Date().toISOString();
+    const rel = `research/run-${run.id}-job-${job.id}.md`;
+    const sourceLedger = [
+      {
+        kind: 'research-job',
+        jobId: job.id,
+        query,
+        urls: job.urls,
+        screenshots,
+        notes,
+        createdAt: now,
+      },
+    ];
+    const body = [
+      `# Research job: ${query}`,
+      '',
+      `Job: ${job.id}`,
+      `Run: ${run.id}`,
+      `Status: ${job.status}`,
+      notes ? `Notes: ${notes}` : '',
+      '',
+      '## Sources',
+      ...(job.urls.length
+        ? job.urls.map((url) => `- URL: ${url}`)
+        : ['- No URLs supplied']),
+      '',
+      '## Screenshots',
+      ...(screenshots.length
+        ? screenshots.map((screenshot) => `- Screenshot: ${screenshot}`)
+        : ['- No screenshots captured yet']),
+      '',
+    ]
+      .filter((line) => line !== '')
+      .join('\n');
+    const file = writeCoworkProjectFile(project, rel, body);
+    const linkedJob =
+      updateResearchJobMetadata(job.id, { sourceLedgerPath: rel }) || job;
+    const contextItem = createCoworkContextItem({
+      id: randomUUID(),
+      project_id: project.id,
+      type: 'artifact',
+      title: `${run.title} research job ledger`,
+      path: rel,
+      url: null,
+      thread_id: null,
+      artifact_id: `research-job:${job.id}`,
+      included: 1,
+      pinned: 0,
+      provenance: normalizeCoworkProvenance('research-ledger'),
+      sensitivity: normalizeCoworkSensitivity('normal'),
+      created_at: now,
+      updated_at: now,
+    });
+
+    for (const url of job.urls) {
+      appendCoworkRunEvent(
+        run.id,
+        'citation_added',
+        'Research job URL captured.',
+        {
+          title: url,
+          sourceUrl: url,
+          note: `Captured from linked research job ${job.id}.`,
+        },
+      );
+    }
+    appendCoworkRunEvent(
+      run.id,
+      'artifact_created',
+      'Research job ledger saved.',
+      {
+        path: rel,
+        kind: file.kind,
+        sourceLedger,
+        contextItemId: contextItem.id,
+      },
+    );
+    appendCoworkRunEvent(
+      run.id,
+      'research_job_linked',
+      'Research job linked.',
+      {
+        jobId: job.id,
+        query,
+        urls: job.urls,
+        screenshots,
+        notesPath: linkedJob.notesPath,
+        ledgerPath: rel,
+        contextItemId: contextItem.id,
+      },
+    );
+    touchCoworkProject(project.id, now);
+    res.json({
+      job: linkedJob,
+      artifact: {
+        path: file.path,
+        kind: file.kind,
+        size: file.size,
+        updatedAt: file.updatedAt,
+        sourceLedger,
+      },
+      contextItem: serializeCoworkContextItem(contextItem),
+      run: serializeCoworkRun(getCoworkRun(project.id, run.id) || run),
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
 
 router.post(
   '/:id/runs/:runId/research/citations',
@@ -1011,7 +1536,7 @@ router.post(
       included: 1,
       pinned: 0,
       provenance: 'research-ledger',
-      sensitivity: 'normal',
+      sensitivity: normalizeCoworkSensitivity('normal'),
       created_at: now,
       updated_at: now,
     });
@@ -1071,11 +1596,11 @@ router.post('/:id/runs/:runId/artifacts', (req: Request, res: Response) => {
       artifact_id: `run:${run.id}:${rel}`,
       included: 1,
       pinned: req.body.pinned === true ? 1 : 0,
-      provenance: 'source-ledger',
+      provenance: normalizeCoworkProvenance('source-ledger'),
       sensitivity:
         typeof req.body.sensitivity === 'string' && req.body.sensitivity.trim()
-          ? req.body.sensitivity.trim()
-          : 'normal',
+          ? normalizeCoworkSensitivity(req.body.sensitivity)
+          : normalizeCoworkSensitivity('normal'),
       created_at: now,
       updated_at: now,
     });
@@ -1326,14 +1851,14 @@ router.post('/:id/context', (req: Request, res: Response) => {
       pinned: req.body.pinned === true ? 1 : 0,
       provenance:
         typeof req.body.provenance === 'string' && req.body.provenance.trim()
-          ? req.body.provenance.trim()
+          ? normalizeCoworkProvenance(req.body.provenance)
           : typeof req.body.source === 'string' && req.body.source.trim()
-            ? req.body.source.trim()
-            : 'manual',
+            ? normalizeCoworkProvenance(req.body.source)
+            : normalizeCoworkProvenance('manual'),
       sensitivity:
         typeof req.body.sensitivity === 'string' && req.body.sensitivity.trim()
-          ? req.body.sensitivity.trim()
-          : 'unknown',
+          ? normalizeCoworkSensitivity(req.body.sensitivity)
+          : normalizeCoworkSensitivity('unknown'),
       created_at: now,
       updated_at: now,
     });
@@ -1404,11 +1929,11 @@ router.patch('/:id/context/:itemId', (req: Request, res: Response) => {
         : undefined,
     provenance:
       typeof req.body.provenance === 'string' && req.body.provenance.trim()
-        ? req.body.provenance.trim()
+        ? normalizeCoworkProvenance(req.body.provenance)
         : undefined,
     sensitivity:
       typeof req.body.sensitivity === 'string' && req.body.sensitivity.trim()
-        ? req.body.sensitivity.trim()
+        ? normalizeCoworkSensitivity(req.body.sensitivity)
         : undefined,
     updated_at: now,
   });

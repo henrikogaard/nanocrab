@@ -16,7 +16,7 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 - Routines and scheduled tasks now include dashboard blueprints, freeform draft creation, exact cron/interval/one-time schedules, dashboard/chat/file/webhook delivery modes, approval-gated webhook delivery, named routine sessions, chained task context, heartbeat checks, quiet hours, stale policies, active-run limits, run history, and run-now controls.
 - Autofix now supports issue-webhook startup, scheduled auto-pickup, max-active-job limits, project cadence controls, connector health checks, and approval-gated implementation/PR publishing.
 - Better terminal controls exist in the dashboard: named shell session id, reconnect, clear, copy transcript, and xterm output.
-- Cowork foundation slice is underway: Copilot chat hardening issue #96 is closed, project-scoped Cowork run/context/capability APIs exist, local source-backed artifacts can be attached to Cowork runs with source-ledger context, Cowork external writes create or reuse approval records before mutation, selected context notebook items are injected into project chats, the Projects dashboard shows run complexity, approval risk, run detail plans/events/approvals/output, context notebook labels/actions, active capabilities, and mock connector-heavy/sensitive states, and a channel workspace intent resolver now classifies prompts into Copilot, Cowork, Code, or clarification without sending messages.
+- Cowork/provider milestone slice is implemented: project-scoped Cowork run/context/capability APIs expose active skills, plugins, connectors, readiness states, reusable complexity/budget estimates, run stats, canonical provenance/sensitivity labels, action workflow previews, approval-gated external writes, research-job source ledgers, citation coverage, local artifacts, and selected context notebook injection. Channel prompts now receive workspace intent context before generic agent execution, and Code/Autofix provider selectors use provider/model coding capability metadata rather than provider-name exceptions.
 - Admin frontend decomposition is in progress: page-level modules already carry major surfaces, shared UI helpers cover data health, feedback, shell states, recovery, provider parity, routine states, and file-vault states, and shell navigation metadata now lives in `ui/shell-navigation.js` instead of the large app shell.
 - Standalone cleanup is implemented: NanoCrab is treated as its own product with NanoCrab-first code, plugins, skills, MCP names, container names, docs, and migration tooling.
 - P0 closure sweep complete: non-epic P0 issues for cockpit/approvals, provider hardening, memory/skill review surfaces, timeline/router safety, GitHub coding jobs, policy/audit/dry-run controls, connector boundaries, and first-run setup are closed. Remaining P0-labeled GitHub issues are roadmap epics with lower-priority follow-up children still open.
@@ -31,7 +31,7 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 - **Supported and selectable:** `claude` through Claude Agent SDK, `codex` through OpenAI Codex CLI, and `opencode` through OpenCode CLI.
 - **OpenAI-compatible chat providers:** `ollama`, `openrouter`, and `google` are selectable with preconfigured base URLs, model suggestions, preflight checks, and container runner support through `/chat/completions`.
 - **Secret handling:** hosted OpenAI-compatible provider calls are routed through NanoCrab's credential proxy, so OpenRouter/Google keys remain on the host. Ollama uses its local/LAN endpoint without a secret by default.
-- **Remaining problem:** Provider profiles, live model probes, fallback approvals, and task/workflow overrides exist; continued work is mostly deeper provider coverage, production diagnostics, and UX polish around probe results.
+- **Remaining problem:** Provider profiles, live model probes, fallback approvals, coding capability metadata, and task/workflow overrides exist; continued work is mostly deeper provider coverage, production diagnostics, and UX polish around probe results.
 
 ### Provider Requirements
 
@@ -185,6 +185,7 @@ Goal: work with GitHub repos and produce PRs while the owner is on the go.
   - DONE: PR status and CI tracking
 - Mobile-safe workflow:
   - DONE: dashboard can browse registered repo issues/project boards, start one-off coding jobs, or pick issues from registered repos.
+  - DONE: Agents Code assignment can target next matching issue, direct issue number, or freeform repo work with provider/model capability filtering and plan-first vs implement-after-approval intent.
   - DONE: "Investigate" creates a read-only plan stage before implementation.
   - DONE: "Implement" requires approval and creates commits.
   - DONE: "Open PR" requires approval before host-side GitHub mutation.
@@ -235,6 +236,7 @@ Goal: give agents a durable research/reporting workflow without making the core 
 - Browser research:
   - keep `agent-browser` and system Chromium as the default browsing path.
   - Playwright is available for workflows that need direct browser-control APIs, screenshots, or repeatable UI tests.
+  - DONE: Cowork runs can link research jobs, persist source URLs as citations, save source-ledger artifacts in project files/context, and expose seeded screenshot evidence in the run/job DTOs.
   - store research notes, source URLs, snapshots, and final outputs as artifacts.
 - Research job profile:
   - browse and collect sources
