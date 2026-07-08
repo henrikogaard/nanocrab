@@ -1,9 +1,20 @@
+import { randomUUID } from 'crypto';
 import { Router, Request, Response } from 'express';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { getAllRegisteredGroups } from '../../db.js';
+import { GROUPS_DIR, STORE_DIR } from '../../config.js';
+import {
+  createCoworkContextItem,
+  getAllRegisteredGroups,
+  getCoworkProject,
+  touchCoworkProject,
+} from '../../db.js';
+import {
+  safeCoworkProjectFilePath,
+  writeCoworkProjectFile,
+} from '../../cowork-projects.js';
 import { isValidGroupFolder } from '../../group-folder.js';
 import {
   AGENT_INSTRUCTIONS_FILE,
@@ -17,8 +28,6 @@ import { auditLog } from '../security.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
-const GROUPS_DIR = path.join(PROJECT_ROOT, 'groups');
-const STORE_DIR = path.join(PROJECT_ROOT, 'store');
 const GLOBAL_INSTRUCTIONS_DIR = path.join(GROUPS_DIR, 'global');
 
 const SKIP_DIRS = new Set([
@@ -241,6 +250,7 @@ router.get('/', (_req: Request, res: Response) => {
         hasMemoryMd: fs.existsSync(path.join(groupPath, 'MEMORY.md')),
         hasConversations: fs.existsSync(path.join(groupPath, 'conversations')),
         hasAttachments: fs.existsSync(path.join(groupPath, 'attachments')),
+        hasArtifacts: fs.existsSync(path.join(groupPath, 'artifacts')),
       };
     });
     res.json(groups);
@@ -392,6 +402,110 @@ router.get('/:groupFolder/attachments', (req: Request, res: Response) => {
   }
 });
 
+router.get('/:groupFolder/artifacts', (req: Request, res: Response) => {
+  const folder = req.params.groupFolder as string;
+  if (!isValidGroupFolder(folder)) {
+    res.status(400).json({ error: 'Invalid group folder' });
+    return;
+  }
+  const artifactsDir = path.join(GROUPS_DIR, folder, 'artifacts');
+  try {
+    const files = fs
+      .readdirSync(artifactsDir)
+      .filter((f) => !f.startsWith('.'))
+      .map((f) => {
+        const stat = fs.statSync(path.join(artifactsDir, f));
+        return { name: f, size: stat.size, modified: stat.mtime.toISOString() };
+      });
+    res.json(files);
+  } catch {
+    res.json([]);
+  }
+});
+
+router.post(
+  '/:groupFolder/artifacts/:filename/promote',
+  (req: Request, res: Response) => {
+    const folder = req.params.groupFolder as string;
+    const filename = req.params.filename as string;
+    if (!isValidGroupFolder(folder)) {
+      res.status(400).json({ error: 'Invalid group folder' });
+      return;
+    }
+    if (filename.includes('..') || filename.includes('/')) {
+      res.status(400).json({ error: 'Invalid filename' });
+      return;
+    }
+
+    const projectId =
+      typeof req.body.projectId === 'string' ? req.body.projectId.trim() : '';
+    if (!projectId) {
+      res.status(400).json({ error: 'Project id required' });
+      return;
+    }
+    const project = getCoworkProject(projectId);
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+
+    const targetPath = safeCoworkProjectFilePath(
+      typeof req.body.path === 'string' && req.body.path.trim()
+        ? req.body.path
+        : `artifacts/${filename}`,
+    );
+    if (!targetPath) {
+      res.status(400).json({ error: 'Invalid project file path' });
+      return;
+    }
+
+    const sourcePath = path.join(GROUPS_DIR, folder, 'artifacts', filename);
+    try {
+      const content = fs.readFileSync(sourcePath, 'utf-8');
+      const file = writeCoworkProjectFile(project, targetPath, content);
+      const now = new Date().toISOString();
+      const contextItem = createCoworkContextItem({
+        id: `ctx-${randomUUID()}`,
+        project_id: project.id,
+        type: 'artifact',
+        title: filename,
+        path: file.path,
+        url: null,
+        thread_id: null,
+        artifact_id: `group-artifact:${folder}/${filename}`,
+        included: 1,
+        pinned: 0,
+        provenance: 'manual-upload',
+        sensitivity: 'normal',
+        created_at: now,
+        updated_at: now,
+      });
+      touchCoworkProject(project.id, now);
+      auditLog(
+        req,
+        'group_artifact_promoted',
+        `${folder}/artifacts/${filename} -> ${project.id}/${file.path}`,
+      );
+      res.json({
+        file,
+        contextItem,
+        provenance: {
+          sourceGroup: folder,
+          sourceArtifact: filename,
+          originalPath: sourcePath,
+          promotedAt: now,
+        },
+      });
+    } catch (err) {
+      res.status(fs.existsSync(sourcePath) ? 500 : 404).json({
+        error: fs.existsSync(sourcePath)
+          ? 'Failed to promote artifact'
+          : 'Artifact not found',
+      });
+    }
+  },
+);
+
 // Shared memory file
 router.get('/memory', (_req: Request, res: Response) => {
   const memPath = path.join(GROUPS_DIR, 'global', 'MEMORY.md');
@@ -433,7 +547,7 @@ router.put('/memory', (req: Request, res: Response) => {
   }
 });
 
-// Download/view a file (attachments or conversations)
+// Download/view a file (attachments, conversations, or artifacts)
 router.get(
   '/:groupFolder/download/:type/:filename',
   (req: Request, res: Response) => {
@@ -445,7 +559,7 @@ router.get(
       res.status(400).json({ error: 'Invalid group folder' });
       return;
     }
-    if (!['attachments', 'conversations'].includes(type)) {
+    if (!['attachments', 'conversations', 'artifacts'].includes(type)) {
       res.status(400).json({ error: 'Invalid file type' });
       return;
     }

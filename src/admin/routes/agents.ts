@@ -15,6 +15,7 @@ import {
   AGENT_PROVIDER_DEFINITIONS,
   AGENT_PROVIDER_MODELS,
   DEFAULT_AGENT_MODELS,
+  getAgentProviderConfig,
   getProviderAvailability,
   isCodingCapableProvider,
   codingProviderUnavailableReason,
@@ -100,9 +101,18 @@ function saveTasks(tasks: AgentTask[]): void {
 // Available container agent providers (for multi-provider support)
 router.get('/providers', (_req: Request, res: Response) => {
   const availability = getProviderAvailability();
+  const config = getAgentProviderConfig();
   res.json(
     Object.values(AGENT_PROVIDER_DEFINITIONS).map((provider) => {
-      const modelIds = AGENT_PROVIDER_MODELS[provider.id];
+      const defaultModel =
+        config.modelsByProvider[provider.id] ||
+        DEFAULT_AGENT_MODELS[provider.id];
+      const modelIds = [
+        ...new Set([
+          defaultModel,
+          ...(AGENT_PROVIDER_MODELS[provider.id] || []),
+        ]),
+      ];
       const codingCapable = modelIds.some((model) =>
         isCodingCapableProvider(provider.id, model),
       );
@@ -114,16 +124,13 @@ router.get('/providers', (_req: Request, res: Response) => {
         codingCapable,
         codingUnavailableReason: codingCapable
           ? null
-          : codingProviderUnavailableReason(
-              provider.id,
-              DEFAULT_AGENT_MODELS[provider.id],
-            ),
+          : codingProviderUnavailableReason(provider.id, defaultModel),
         models: modelIds.map((id) => ({
           id,
           label: id,
           codingCapable: isCodingCapableProvider(provider.id, id),
         })),
-        defaultModel: DEFAULT_AGENT_MODELS[provider.id],
+        defaultModel,
       };
     }),
   );

@@ -37,6 +37,7 @@ import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
+  getCoworkProjects,
   deleteSession,
   getAllTasks,
   getConversationMessagesThrough,
@@ -44,6 +45,7 @@ import {
   getMessagesSince,
   getNewMessages,
   getRouterState,
+  getWebThreads,
   initDatabase,
   setRegisteredGroup,
   setRouterState,
@@ -57,7 +59,11 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatOutbound } from './router.js';
-import { buildWorkspaceIntentPrompt } from './workspace-intent-prompt.js';
+import {
+  buildWorkspaceIntentPrompt,
+  resolveWorkspaceIntentForMessages,
+} from './workspace-intent-prompt.js';
+import type { WorkspaceIntentResult } from './workspace-intent.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -573,7 +579,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     missedMessages,
   );
   let runAgentOptions: RunAgentOptions = {};
-  let promptBody = buildWorkspaceIntentPrompt(promptMessages, TIMEZONE);
+  const workspaceIntent = resolveWorkspaceIntentForMessages(
+    promptMessages,
+    currentWorkspaceIntentTargets(),
+  );
+  let promptBody = buildWorkspaceIntentPrompt(promptMessages, TIMEZONE, {
+    intent: workspaceIntent,
+  });
+
+  if (shouldSendWorkspaceClarification(group, workspaceIntent)) {
+    lastAgentTimestamp[chatJid] =
+      missedMessages[missedMessages.length - 1].timestamp;
+    saveState();
+    await sendBotTextReply(
+      channel,
+      chatJid,
+      workspaceIntent.clarificationPrompt ||
+        'Which workspace should handle this request?',
+    );
+    return true;
+  }
 
   try {
     const invocation = resolveAgentProfileInvocation({
@@ -777,6 +802,32 @@ interface RunAgentOptions {
   provider?: AgentProvider;
   model?: string;
   allowedMcpServers?: string[];
+}
+
+function currentWorkspaceIntentTargets() {
+  return {
+    projects: getCoworkProjects().map((project) => ({
+      id: project.id,
+      name: project.name,
+      slug: project.slug,
+    })),
+    threads: Object.entries(getWebThreads()).map(([id, group]) => ({
+      id,
+      title: group.title || group.name || 'Conversation',
+      projectId: group.projectId || null,
+    })),
+  };
+}
+
+function shouldSendWorkspaceClarification(
+  group: RegisteredGroup,
+  intent: WorkspaceIntentResult,
+): boolean {
+  return (
+    group.kind !== 'web' &&
+    intent.kind === 'clarification' &&
+    Boolean(intent.clarificationPrompt)
+  );
 }
 
 async function runAgent(
@@ -1020,9 +1071,26 @@ async function startMessageLoop(): Promise<void> {
             if (handledProfileInvocation) continue;
           }
 
+          const workspaceIntent = resolveWorkspaceIntentForMessages(
+            promptMessages,
+            currentWorkspaceIntentTargets(),
+          );
+          if (shouldSendWorkspaceClarification(group, workspaceIntent)) {
+            await sendBotTextReply(
+              channel,
+              chatJid,
+              workspaceIntent.clarificationPrompt ||
+                'Which workspace should handle this request?',
+            );
+            lastAgentTimestamp[chatJid] = latestMessageToSend.timestamp;
+            saveState();
+            continue;
+          }
+
           const formatted = buildWorkspaceIntentPrompt(
             promptMessages,
             TIMEZONE,
+            { intent: workspaceIntent },
           );
 
           if (queue.sendMessage(chatJid, formatted)) {

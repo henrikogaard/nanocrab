@@ -1,7 +1,12 @@
 import fs from 'fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { buildAllowedTools, buildMcpServers } from './index.js';
+import {
+  buildAllowedTools,
+  buildMcpServers,
+  isOpenAiCompatibleAgentProvider,
+  openAiCompatibleBaseUrl,
+} from './index.js';
 
 describe('agent-runner connector tool boundaries', () => {
   afterEach(() => {
@@ -56,8 +61,9 @@ describe('agent-runner connector tool boundaries', () => {
     expect(servers.github.command).toBe('node');
     expect(servers.github.args).toEqual(['/tmp/dist/mcp-tool-proxy.js']);
     expect(servers.github.env.NANOCRAB_MCP_TARGET_COMMAND).toBe('npx');
-    expect(JSON.parse(servers.github.env.NANOCRAB_MCP_ALLOWED_TOOL_PATTERNS))
-      .toEqual(['mcp__github__get_*', 'mcp__github__list_*']);
+    expect(
+      JSON.parse(servers.github.env.NANOCRAB_MCP_ALLOWED_TOOL_PATTERNS),
+    ).toEqual(['mcp__github__get_*', 'mcp__github__list_*']);
   });
 
   it('keeps wildcard MCP servers direct when policy grants all tools', () => {
@@ -133,5 +139,24 @@ describe('agent-runner connector tool boundaries', () => {
     );
 
     expect(servers.infomaniak.args).toEqual(['-y', '@new/infomaniak-mcp']);
+  });
+});
+
+describe('agent-runner OpenAI-compatible dispatch', () => {
+  afterEach(() => {
+    delete process.env.AGENT_PROVIDER_BASE_URL;
+    delete process.env.DEFAULT_OPENAI_COMPATIBLE_BASE_URL;
+    delete process.env.OPENAI_COMPATIBLE_BASE_URL;
+  });
+
+  it('recognizes the custom OpenAI-compatible provider without defaulting to Google', () => {
+    expect(isOpenAiCompatibleAgentProvider('openai-compatible')).toBe(true);
+    expect(isOpenAiCompatibleAgentProvider('google')).toBe(true);
+
+    expect(openAiCompatibleBaseUrl('openai-compatible')).toBe('');
+    process.env.AGENT_PROVIDER_BASE_URL = 'https://custom.example/v1/';
+    expect(openAiCompatibleBaseUrl('openai-compatible')).toBe(
+      'https://custom.example/v1',
+    );
   });
 });

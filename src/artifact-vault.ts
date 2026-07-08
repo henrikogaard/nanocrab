@@ -21,6 +21,10 @@ export interface ArtifactVaultRecord {
   sourceId: string;
   sourceArtifactIndex: number | null;
   sourceLinks: ArtifactSourceLink[];
+  projectId?: string;
+  projectSlug?: string;
+  projectName?: string;
+  projectFilePath?: string;
   createdAt: string;
   updatedAt: string;
   retentionDays: number;
@@ -42,6 +46,22 @@ export interface BuildArtifactVaultInput {
   reports: ReportJob[];
   now?: Date;
   retentionDays?: number;
+}
+
+export interface CoworkArtifactVaultInput {
+  artifacts: Array<{
+    projectId: string;
+    projectName: string;
+    projectSlug: string;
+    title: string;
+    filePath: string;
+    hostPath?: string;
+    artifactId?: string;
+    sourceLinks?: ArtifactSourceLink[];
+    createdAt?: string;
+    updatedAt?: string;
+  }>;
+  now?: Date;
 }
 
 export interface PruneArtifactVaultInput {
@@ -98,7 +118,7 @@ function normalizeRecord(
       ? value.updatedAt
       : nowIso();
   const retentionDays =
-    typeof value.retentionDays === 'number' && value.retentionDays > 0
+    typeof value.retentionDays === 'number' && value.retentionDays >= 0
       ? Math.floor(value.retentionDays)
       : DEFAULT_RETENTION_DAYS;
   return {
@@ -119,6 +139,22 @@ function normalizeRecord(
         ? Math.floor(value.sourceArtifactIndex)
         : null,
     sourceLinks: normalizeSourceLinks(value.sourceLinks),
+    projectId:
+      typeof value.projectId === 'string' && value.projectId
+        ? value.projectId
+        : undefined,
+    projectSlug:
+      typeof value.projectSlug === 'string' && value.projectSlug
+        ? value.projectSlug
+        : undefined,
+    projectName:
+      typeof value.projectName === 'string' && value.projectName
+        ? value.projectName
+        : undefined,
+    projectFilePath:
+      typeof value.projectFilePath === 'string' && value.projectFilePath
+        ? value.projectFilePath
+        : undefined,
     createdAt:
       typeof value.createdAt === 'string' && value.createdAt
         ? value.createdAt
@@ -137,6 +173,10 @@ function normalizeRecord(
 
 function artifactId(sourceId: string, artifactPath: string): string {
   return `${sourceId}:${path.basename(artifactPath)}`;
+}
+
+function coworkArtifactId(projectId: string, artifactPath: string): string {
+  return `cowork:${projectId}:${artifactPath}`;
 }
 
 function expiresAt(updatedAt: string, retentionDays: number): string | null {
@@ -179,6 +219,11 @@ export function searchArtifactVault(
     .filter(
       (record) =>
         !source ||
+        `${record.sourceType} ${record.sourceId} ${record.projectId || ''} ${
+          record.projectSlug || ''
+        } ${record.projectName || ''}`
+          .toLowerCase()
+          .includes(source) ||
         record.sourceLinks.some((link) =>
           `${link.label} ${link.source} ${link.url || ''}`
             .toLowerCase()
@@ -194,6 +239,10 @@ export function searchArtifactVault(
         record.path,
         record.sourceType,
         record.sourceId,
+        record.projectId,
+        record.projectSlug,
+        record.projectName,
+        record.projectFilePath,
         ...record.tags,
         ...record.sourceLinks.flatMap((link) => [link.label, link.source]),
       ]
@@ -241,6 +290,64 @@ export function buildArtifactVaultFromReports(input: BuildArtifactVaultInput): {
       else added++;
       byId.set(id, record);
     }
+  }
+
+  const next = Array.from(byId.values());
+  writeRecords(next);
+  return { added, updated, total: next.length };
+}
+
+export function buildArtifactVaultFromCoworkArtifacts(
+  input: CoworkArtifactVaultInput,
+): {
+  added: number;
+  updated: number;
+  total: number;
+} {
+  const records = readRecords();
+  const byId = new Map(records.map((record) => [record.id, record]));
+  let added = 0;
+  let updated = 0;
+  const generatedAt = nowIso(input.now);
+
+  for (const artifact of input.artifacts) {
+    const filePath = artifact.filePath;
+    if (!artifact.projectId || !filePath) continue;
+    const id = coworkArtifactId(
+      artifact.projectId,
+      artifact.artifactId || filePath,
+    );
+    const ext = path.extname(filePath).replace(/^\./, '').toLowerCase();
+    const record = normalizeRecord({
+      id,
+      title: artifact.title || path.basename(filePath),
+      kind: 'cowork-artifact',
+      format: ext || 'file',
+      path: artifact.hostPath || filePath,
+      sizeBytes: artifact.hostPath ? fileSize(artifact.hostPath) : 0,
+      sourceType: 'cowork-project',
+      sourceId: artifact.projectId,
+      sourceArtifactIndex: null,
+      sourceLinks: artifact.sourceLinks || [],
+      projectId: artifact.projectId,
+      projectSlug: artifact.projectSlug,
+      projectName: artifact.projectName,
+      projectFilePath: filePath,
+      createdAt: artifact.createdAt || generatedAt,
+      updatedAt: artifact.updatedAt || generatedAt,
+      retentionDays: 0,
+      expiresAt: null,
+      tags: [
+        'cowork',
+        'project',
+        artifact.projectSlug,
+        artifact.projectName,
+        ext || 'file',
+      ].filter(Boolean),
+    });
+    if (byId.has(id)) updated++;
+    else added++;
+    byId.set(id, record);
   }
 
   const next = Array.from(byId.values());

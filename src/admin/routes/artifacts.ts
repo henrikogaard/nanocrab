@@ -1,11 +1,15 @@
 import { Router, Request, Response } from 'express';
+import path from 'path';
 
 import {
+  buildArtifactVaultFromCoworkArtifacts,
   buildArtifactVaultFromReports,
   listArtifactVault,
   pruneArtifactVault,
   searchArtifactVault,
 } from '../../artifact-vault.js';
+import { coworkProjectPath } from '../../cowork-projects.js';
+import { getCoworkContextItems, getCoworkProjects } from '../../db.js';
 import { listReportJobs } from '../../report-jobs.js';
 import { requireRole } from '../middleware.js';
 import { auditLog } from '../security.js';
@@ -43,8 +47,52 @@ router.post(
   '/vault/reindex',
   requireRole('admin'),
   (_req: Request, res: Response) => {
-    const result = buildArtifactVaultFromReports({ reports: listReportJobs() });
-    res.json({ ok: true, ...result });
+    const reportResult = buildArtifactVaultFromReports({
+      reports: listReportJobs(),
+    });
+    const coworkArtifacts = getCoworkProjects().flatMap((project) =>
+      getCoworkContextItems(project.id)
+        .filter((item) => item.included !== 0 && item.type === 'artifact')
+        .filter((item) => Boolean(item.path))
+        .map((item) => ({
+          projectId: project.id,
+          projectName: project.name,
+          projectSlug: project.slug,
+          title: item.title || path.basename(item.path || ''),
+          filePath: item.path || '',
+          hostPath: path.join(coworkProjectPath(project), item.path || ''),
+          artifactId: item.artifact_id || item.id,
+          sourceLinks: [
+            item.artifact_id
+              ? {
+                  label: 'Cowork artifact',
+                  source: `cowork-artifact:${item.artifact_id}`,
+                }
+              : null,
+            item.provenance
+              ? {
+                  label: 'Project provenance',
+                  source: `cowork-provenance:${item.provenance}`,
+                }
+              : null,
+          ].filter(
+            (link): link is { label: string; source: string } => Boolean(link),
+          ),
+          createdAt: item.created_at,
+          updatedAt: item.updated_at,
+        })),
+    );
+    const coworkResult = buildArtifactVaultFromCoworkArtifacts({
+      artifacts: coworkArtifacts,
+    });
+    res.json({
+      ok: true,
+      added: reportResult.added + coworkResult.added,
+      updated: reportResult.updated + coworkResult.updated,
+      total: coworkResult.total,
+      reports: reportResult,
+      cowork: coworkResult,
+    });
   },
 );
 

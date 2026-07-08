@@ -51,6 +51,16 @@
         <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('artifacts')">Artifacts</button>
         <button type="button" class="btn btn-sm btn-ghost" onclick="copyFileGroupBrief()">Copy group brief</button>`,
       },
+      artifacts: {
+        title: 'No group artifacts',
+        detail:
+          'Raw group artifacts wait here until promoted into a Cowork project.',
+        flow: ['Review', 'Promote', 'Continue'],
+        actions: `
+        <button type="button" class="btn btn-sm btn-primary" onclick="navigate('projects')">Cowork files</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('artifacts')">Artifact vault</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="copyFileGroupBrief()">Copy group brief</button>`,
+      },
       failed: {
         title: 'Failed to load file',
         detail:
@@ -89,6 +99,16 @@
         actions: `
         <button type="button" class="btn btn-sm btn-primary" onclick="selectGroup(window._fileGroupState?.folder)">Retry group</button>
         <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('artifacts')">Artifacts</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('projects')">Cowork</button>`,
+      },
+      'artifacts-unavailable': {
+        title: 'Artifact archive unavailable',
+        detail:
+          'Saved group artifacts did not load for this group. Retry before promoting outputs into Cowork project files.',
+        flow: ['Retry', 'Promote', 'Cowork'],
+        actions: `
+        <button type="button" class="btn btn-sm btn-primary" onclick="selectGroup(window._fileGroupState?.folder)">Retry group</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('artifacts')">Artifact vault</button>
         <button type="button" class="btn btn-sm btn-ghost" onclick="navigate('projects')">Cowork</button>`,
       },
     };

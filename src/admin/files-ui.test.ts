@@ -69,6 +69,9 @@ describe('Group Files context vault UI', () => {
       'Uploaded files and media from channels.',
     );
     expect(fileVaultStatesSource).toContain(
+      'Raw group artifacts wait here until promoted into a Cowork project.',
+    );
+    expect(fileVaultStatesSource).toContain(
       'Keep personal memory in the personal Memory space, group behavior in AGENTS.md, project work in Cowork projects, and raw channel uploads here until promoted into an artifact.',
     );
     expect(source).toContain('filePromotionChecklist()');
@@ -124,6 +127,10 @@ describe('Group Files context vault UI', () => {
     );
     expect(source).toContain('/download/conversations/');
     expect(source).toContain('/download/attachments/');
+    expect(source).toContain('/download/artifacts/');
+    expect(source).toContain('/artifacts/${encodeURIComponent');
+    expect(source).toContain('promoteGroupArtifactToCowork');
+    expect(source).toContain('Promote to Cowork');
     expect(source).toContain('files-viewer-card');
     expect(fileVaultStatesSource).toContain('Failed to load file');
   });
@@ -160,11 +167,15 @@ describe('Group Files context vault UI', () => {
     expect(fileVaultStatesSource).toContain('File vault unavailable');
     expect(fileVaultStatesSource).toContain('Conversation archive unavailable');
     expect(fileVaultStatesSource).toContain('Attachment archive unavailable');
+    expect(fileVaultStatesSource).toContain('Artifact archive unavailable');
     expect(source).toContain(
       "renderFilesEmptyState('conversations-unavailable')",
     );
     expect(source).toContain(
       "renderFilesEmptyState('attachments-unavailable')",
+    );
+    expect(source).toContain(
+      "renderFilesEmptyState('artifacts-unavailable')",
     );
     expect(source).toContain('Promise.allSettled');
     expect(source).not.toContain(
@@ -179,6 +190,7 @@ describe('Group Files context vault UI', () => {
     expect(source).toContain("renderFilesEmptyState('group-select')");
     expect(detail).toContain("renderFilesEmptyState('conversations')");
     expect(detail).toContain("renderFilesEmptyState('attachments')");
+    expect(detail).toContain("renderFilesEmptyState('artifacts')");
     expect(source).toContain("renderFilesEmptyState('failed')");
     expect(source).toContain("navigate('projects')");
     expect(source).toContain("navigate('memory')");
@@ -259,6 +271,7 @@ describe('Group Files context vault UI', () => {
     expect(detail).toContain('files-name-cell');
     expect(detail).toContain('files-action-cell');
     expect(detail).toContain('files-download-link');
+    expect(detail).toContain('files-artifact-promote');
     expect(detail).toContain('files-attachment-thumb');
     expect(appSource).toContain('files-conversation-preview');
     expect(detail).not.toContain(
@@ -276,6 +289,7 @@ describe('Group Files context vault UI', () => {
     expect(styleSource).toContain('.files-name-cell');
     expect(styleSource).toContain('.files-save-msg.is-success');
     expect(styleSource).toContain('.files-save-msg.is-error');
+    expect(styleSource).toContain('.files-artifact-promote');
     expect(styleSource).toContain('.files-attachment-thumb');
     expect(styleSource).toContain('.files-conversation-preview');
   });

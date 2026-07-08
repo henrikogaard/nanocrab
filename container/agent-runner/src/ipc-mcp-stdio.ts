@@ -1261,6 +1261,8 @@ server.tool(
     output_formats: z
       .array(z.enum(['markdown', 'html', 'docx', 'pdf']))
       .optional(),
+    design_system_id: z.string().optional(),
+    design_system_name: z.string().optional(),
     source_scopes: z
       .array(z.enum(['journal', 'memory', 'github', 'wiki', 'kdrive', 'web']))
       .optional(),
@@ -1273,6 +1275,8 @@ server.tool(
           request: args.request,
           outputFormats: args.output_formats,
           sourceScopes: args.source_scopes,
+          designSystemId: args.design_system_id,
+          designSystemName: args.design_system_name,
         }),
       );
     } catch (err) {

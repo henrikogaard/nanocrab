@@ -21,4 +21,16 @@ describe('agent provider coding capability', () => {
       'chat/local-task only',
     );
   });
+
+  it('only enables custom OpenAI-compatible coding jobs for code-capable models', () => {
+    expect(isCodingCapableProvider('openai-compatible', 'model-id')).toBe(
+      false,
+    );
+    expect(isCodingCapableProvider('openai-compatible', 'qwen3-coder')).toBe(
+      true,
+    );
+    expect(
+      codingProviderUnavailableReason('openai-compatible', 'model-id'),
+    ).toContain('code-capable OpenAI-compatible model');
+  });
 });

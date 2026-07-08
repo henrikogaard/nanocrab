@@ -410,6 +410,63 @@ describe('container-runner provider fallback metadata', () => {
   });
 });
 
+describe('container-runner custom OpenAI-compatible provider wiring', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(fs.writeFileSync).mockClear();
+    mockedReadEnvFile.mockImplementation((keys: string[]) => {
+      const values: Record<string, string> = {
+        OPENAI_COMPATIBLE_BASE_URL: 'https://custom.example/v1',
+        OPENAI_COMPATIBLE_API_KEY: 'sk-real-custom',
+        DEFAULT_OPENAI_COMPATIBLE_MODEL: 'qwen3-coder',
+      };
+      return Object.fromEntries(
+        keys.filter((key) => values[key]).map((key) => [key, values[key]]),
+      );
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('routes custom OpenAI-compatible containers through the credential proxy', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        provider: 'openai-compatible',
+        model: 'qwen3-coder',
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const envFileContent = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.filter((call) => call[0] === '/tmp/nanocrab-env-test/env')
+      .at(-1)?.[1]
+      ?.toString();
+    expect(envFileContent).toContain('AGENT_PROVIDER=openai-compatible');
+    expect(envFileContent).toContain('DEFAULT_MODEL=qwen3-coder');
+    expect(envFileContent).toContain(
+      'AGENT_PROVIDER_BASE_URL=http://host.docker.internal:3001/__nanocrab/providers/openai-compatible',
+    );
+    expect(envFileContent).toContain(
+      'OPENAI_COMPATIBLE_BASE_URL=http://host.docker.internal:3001/__nanocrab/providers/openai-compatible',
+    );
+    expect(envFileContent).toContain('AGENT_PROVIDER_API_KEY=placeholder');
+    expect(envFileContent).not.toContain('sk-real-custom');
+    expect(envFileContent).not.toContain('https://custom.example/v1');
+  });
+});
+
 describe('container-runner MCP env forwarding', () => {
   beforeEach(() => {
     vi.useFakeTimers();

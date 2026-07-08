@@ -49,12 +49,15 @@ describe('credential-proxy', () => {
   let proxyPort: number;
   let upstreamPort: number;
   let lastUpstreamHeaders: http.IncomingHttpHeaders;
+  let lastUpstreamPath: string;
 
   beforeEach(async () => {
     lastUpstreamHeaders = {};
+    lastUpstreamPath = '';
 
     upstreamServer = http.createServer((req, res) => {
       lastUpstreamHeaders = { ...req.headers };
+      lastUpstreamPath = req.url || '';
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     });
@@ -166,6 +169,54 @@ describe('credential-proxy', () => {
     // custom keep-alive and transfer-encoding must not be forwarded.
     expect(lastUpstreamHeaders['keep-alive']).toBeUndefined();
     expect(lastUpstreamHeaders['transfer-encoding']).toBeUndefined();
+  });
+
+  it('proxies authless custom OpenAI-compatible endpoints without injecting Anthropic credentials', async () => {
+    proxyPort = await startProxy({
+      ANTHROPIC_API_KEY: 'sk-ant-real-key',
+      DEFAULT_OPENAI_COMPATIBLE_BASE_URL: `http://127.0.0.1:${upstreamPort}/v1`,
+    });
+
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: 'GET',
+        path: '/__nanocrab/providers/openai-compatible/models',
+        headers: {
+          authorization: 'Bearer placeholder',
+          'x-api-key': 'placeholder',
+        },
+      },
+      '',
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(lastUpstreamPath).toBe('/v1/models');
+    expect(lastUpstreamHeaders.authorization).toBeUndefined();
+    expect(lastUpstreamHeaders['x-api-key']).toBeUndefined();
+  });
+
+  it('injects the custom OpenAI-compatible API key when configured', async () => {
+    proxyPort = await startProxy({
+      OPENAI_COMPATIBLE_API_KEY: 'sk-custom-real-key',
+      OPENAI_COMPATIBLE_BASE_URL: `http://127.0.0.1:${upstreamPort}/v1`,
+    });
+
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: 'GET',
+        path: '/__nanocrab/providers/openai-compatible/models',
+        headers: {
+          authorization: 'Bearer placeholder',
+        },
+      },
+      '',
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(lastUpstreamPath).toBe('/v1/models');
+    expect(lastUpstreamHeaders.authorization).toBe('Bearer sk-custom-real-key');
   });
 
   it('returns 502 when upstream is unreachable', async () => {

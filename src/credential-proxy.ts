@@ -37,6 +37,9 @@ export function startCredentialProxy(
     'GEMINI_API_KEY',
     'GOOGLE_API_KEY',
     'GOOGLE_OPENAI_BASE_URL',
+    'OPENAI_COMPATIBLE_API_KEY',
+    'OPENAI_COMPATIBLE_BASE_URL',
+    'DEFAULT_OPENAI_COMPATIBLE_BASE_URL',
   ]);
   const secret = (key: string): string | undefined =>
     process.env[key] || secrets[key];
@@ -48,16 +51,29 @@ export function startCredentialProxy(
   const upstreamUrl = new URL(
     secret('ANTHROPIC_BASE_URL') || 'https://api.anthropic.com',
   );
-  const providerRoutes: Record<string, { baseUrl: string; apiKey?: string }> = {
+  const providerRoutes: Record<
+    string,
+    { baseUrl: string; apiKey?: string; requiresApiKey: boolean }
+  > = {
     openrouter: {
       baseUrl: secret('OPENROUTER_BASE_URL') || 'https://openrouter.ai/api/v1',
       apiKey: secret('OPENROUTER_API_KEY'),
+      requiresApiKey: true,
     },
     google: {
       baseUrl:
         secret('GOOGLE_OPENAI_BASE_URL') ||
         'https://generativelanguage.googleapis.com/v1beta/openai',
       apiKey: secret('GEMINI_API_KEY') || secret('GOOGLE_API_KEY'),
+      requiresApiKey: true,
+    },
+    'openai-compatible': {
+      baseUrl:
+        secret('OPENAI_COMPATIBLE_BASE_URL') ||
+        secret('DEFAULT_OPENAI_COMPATIBLE_BASE_URL') ||
+        '',
+      apiKey: secret('OPENAI_COMPATIBLE_API_KEY'),
+      requiresApiKey: false,
     },
   };
 
@@ -73,14 +89,21 @@ export function startCredentialProxy(
         let targetUrl = upstreamUrl;
         let targetPath = req.url || '/';
         let providerApiKey: string | undefined;
+        let isProviderRoute = false;
         if (routeMatch) {
+          isProviderRoute = true;
           const route = providerRoutes[routeMatch[1]];
           if (!route) {
             res.writeHead(404);
             res.end('Unknown provider route');
             return;
           }
-          if (!route.apiKey) {
+          if (!route.baseUrl) {
+            res.writeHead(400);
+            res.end(`Provider ${routeMatch[1]} base URL is not configured`);
+            return;
+          }
+          if (route.requiresApiKey && !route.apiKey) {
             res.writeHead(401);
             res.end(`Provider ${routeMatch[1]} API key is not configured`);
             return;
@@ -104,10 +127,12 @@ export function startCredentialProxy(
         delete headers['keep-alive'];
         delete headers['transfer-encoding'];
 
-        if (providerApiKey) {
+        if (isProviderRoute) {
           delete headers.authorization;
           delete headers['x-api-key'];
-          headers.authorization = `Bearer ${providerApiKey}`;
+          if (providerApiKey) {
+            headers.authorization = `Bearer ${providerApiKey}`;
+          }
         } else if (authMode === 'api-key') {
           // API key mode: inject x-api-key on every request
           delete headers['x-api-key'];

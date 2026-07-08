@@ -682,7 +682,11 @@ function buildContainerArgs(
   ) {
     providerBaseUrl = `http://${CONTAINER_HOST_GATEWAY}:11434/v1`;
   }
-  if (effectiveProvider === 'openrouter' || effectiveProvider === 'google') {
+  if (
+    effectiveProvider === 'openrouter' ||
+    effectiveProvider === 'google' ||
+    (effectiveProvider === 'openai-compatible' && providerBaseUrl)
+  ) {
     providerBaseUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/${effectiveProvider}`;
   }
   if (providerBaseUrl) {

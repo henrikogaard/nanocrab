@@ -24,7 +24,10 @@ describe('Cowork Projects UI wiring', () => {
     expect(source).toContain("projects: 'renderProjects'");
     expect(source).toContain("'project-chat': 'renderProjectChatPage'");
     expect(source).toContain('parseProjectChatHash');
+    expect(source).toContain('parseProjectFileHash');
+    expect(source).toContain('window._pendingProjectFileRoute');
     expect(source).toContain("showShell('project-chat')");
+    expect(source).toContain("showShell('projects')");
     expect(source).toContain('Preparing Cowork chat');
     expect(source).toContain(
       'Loading project context, previous thread history, and approved MCP access',
@@ -52,6 +55,8 @@ describe('Cowork Projects UI wiring', () => {
     expect(source).toContain('Project file preview');
     expect(source).toContain('Preview source material, drafts, and artifacts.');
     expect(source).toContain('Use in prompt');
+    expect(source).toContain('Continue in chat');
+    expect(source).toContain('Use folder in prompt');
     expect(source).toContain('Create artifact');
     expect(source).toContain('Source -> document');
     expect(source).toContain('Reference path');
@@ -82,6 +87,13 @@ describe('Cowork Projects UI wiring', () => {
       '<div class="empty project-empty">No project chats yet. Use a quick start above to create the first working thread.</div>',
     );
     expect(source).toContain('window.previewProjectFile');
+    expect(source).toContain('window.previewProjectFolder');
+    expect(source).toContain('projectFileHash');
+    expect(source).toContain('project-file-tree');
+    expect(source).toContain('project-folder-row');
+    expect(source).toContain('continueProjectPathInChat');
+    expect(source).toContain('consumeProjectFileRoute');
+    expect(source).toContain('project-file-route-active');
     expect(source).toContain('/files/read?path=');
     expect(source).toContain('projectFileDownloadHref');
     expect(source).toContain('/files/download?path=');
@@ -101,6 +113,13 @@ describe('Cowork Projects UI wiring', () => {
     expect(source).toContain('project-settings-instructions');
     expect(source).toContain('Settings');
     expect(source).toContain('Save context');
+    expect(source).toContain('renderProjectDesignSystems');
+    expect(source).toContain('project-design-system-upload');
+    expect(source).toContain('project-design-system-default');
+    expect(source).toContain('uploadProjectDesignSystem');
+    expect(source).toContain('saveProjectDesignSystemDefault');
+    expect(source).toContain('Use project default design system');
+    expect(source).toContain('Design systems');
     expect(source).toContain('projectHandoffBriefText');
     expect(source).toContain('Cowork project handoff');
     expect(source).toContain('MCP status: ');
@@ -241,6 +260,15 @@ describe('Cowork Projects UI wiring', () => {
     expect(source).toContain('No context notebook items yet');
   });
 
+  it('validates context source URLs and selects exported citation ledgers', () => {
+    const source = fs.readFileSync(pagePath, 'utf8');
+
+    expect(source).toContain('safeProjectContextUrl');
+    expect(source).toContain('var sourceUrl = safeProjectContextUrl(item.url)');
+    expect(source).toContain('result.file && result.file.path');
+    expect(source).not.toContain('if (result.path)');
+  });
+
   it('offers productivity quick starts for project chats', () => {
     const source = fs.readFileSync(pagePath, 'utf8');
 
@@ -357,6 +385,9 @@ describe('Cowork Projects UI wiring', () => {
     expect(source).toContain('.project-file-preview');
     expect(source).toContain('.project-file-preview-content');
     expect(source).toContain('.project-file-preview-actions');
+    expect(source).toContain('.project-file-tree');
+    expect(source).toContain('.project-folder-row');
+    expect(source).toContain('.project-file-route-active');
     expect(source).toContain('.project-file-open');
     expect(source).toContain('.project-file-download');
     expect(source).toContain('.project-file-download:focus-visible');

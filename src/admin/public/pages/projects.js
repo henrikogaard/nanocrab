@@ -129,6 +129,15 @@
     );
   }
 
+  function projectFileHash(projectId, filePath) {
+    return (
+      '#/projects/' +
+      encodeURIComponent(String(projectId || activeProjectId || '')) +
+      '/files/' +
+      encodeURIComponent(String(filePath || ''))
+    );
+  }
+
   function fileIcon(kind) {
     if (kind === 'image') return 'IMG';
     if (kind === 'document') return 'DOC';
@@ -158,6 +167,17 @@
     return item.path || item.url || item.threadId || item.artifactId || item.type || 'manual';
   }
 
+  function safeProjectContextUrl(value) {
+    try {
+      var url = new URL(String(value || ''));
+      return url.protocol === 'http:' || url.protocol === 'https:'
+        ? url.href
+        : '';
+    } catch (err) {
+      return '';
+    }
+  }
+
   function projectContextFreshness(item) {
     var updated = Date.parse(item.updatedAt || item.createdAt || '');
     if (!Number.isFinite(updated)) {
@@ -181,9 +201,11 @@
       );
     }
     if (item.url) {
+      var sourceUrl = safeProjectContextUrl(item.url);
+      if (!sourceUrl) return '';
       return (
         '<a class="btn btn-sm btn-ghost" href="' +
-        esc(item.url) +
+        esc(sourceUrl) +
         '" target="_blank" rel="noopener">Open source</a>'
       );
     }
@@ -481,6 +503,131 @@
       .join('');
   }
 
+  function projectFileTree(files) {
+    var root = [];
+    var folders = {};
+    (files || []).forEach(function (file) {
+      if (!file || !file.path) return;
+      var parts = String(file.path).split('/').filter(Boolean);
+      var level = root;
+      var currentPath = '';
+      parts.forEach(function (part, index) {
+        currentPath = currentPath ? currentPath + '/' + part : part;
+        var isFile = index === parts.length - 1;
+        if (isFile) {
+          level.push({
+            type: 'file',
+            name: part,
+            path: file.path,
+            file: file,
+            children: [],
+          });
+          return;
+        }
+        var folder = folders[currentPath];
+        if (!folder) {
+          folder = {
+            type: 'folder',
+            name: part,
+            path: currentPath,
+            children: [],
+          };
+          folders[currentPath] = folder;
+          level.push(folder);
+        }
+        level = folder.children;
+      });
+    });
+
+    function sortNodes(nodes) {
+      nodes.sort(function (a, b) {
+        if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      nodes.forEach(function (node) {
+        if (node.children) sortNodes(node.children);
+      });
+      return nodes;
+    }
+
+    return sortNodes(root);
+  }
+
+  function renderProjectFileTreeNodes(nodes, depth) {
+    return (nodes || [])
+      .map(function (node) {
+        var indent = Math.min(Number(depth) || 0, 8);
+        if (node.type === 'folder') {
+          var isActiveFolder =
+            activeProjectFilePath === node.path ||
+            String(activeProjectFilePath || '').startsWith(node.path + '/');
+          return (
+            '<div class="project-file-tree-node is-folder" style="--depth:' +
+            indent +
+            '">' +
+            '<div class="project-folder-row' +
+            (isActiveFolder ? ' project-file-route-active' : '') +
+            '" data-folder-path="' +
+            esc(node.path) +
+            '">' +
+            '<button type="button" class="project-file-open" onclick="previewProjectFolder(' +
+            jsStringAttr(node.path) +
+            ')">' +
+            '<span class="project-file-kind">DIR</span>' +
+            '<span class="project-file-path">' +
+            esc(node.path) +
+            '</span>' +
+            '<span class="project-file-meta">' +
+            esc(String((node.children || []).length)) +
+            ' items</span>' +
+            '</button>' +
+            '<button type="button" class="btn btn-sm btn-ghost" onclick="continueProjectPathInChat(' +
+            jsStringAttr(node.path) +
+            ', \'folder\')">Continue in chat</button>' +
+            '</div>' +
+            renderProjectFileTreeNodes(node.children || [], indent + 1) +
+            '</div>'
+          );
+        }
+        var file = node.file || {};
+        var isActiveFile = activeProjectFilePath === file.path;
+        return (
+          '<div class="project-file-row' +
+          (isActiveFile ? ' active project-file-route-active' : '') +
+          '" data-file-path="' +
+          esc(file.path) +
+          '" style="--depth:' +
+          indent +
+          '">' +
+          '<a class="project-file-open" href="' +
+          esc(projectFileHash(activeProjectId, file.path)) +
+          '">' +
+          '<span class="project-file-kind">' +
+          fileIcon(file.kind) +
+          '</span>' +
+          '<span class="project-file-path">' +
+          esc(file.path) +
+          '</span>' +
+          '<span class="project-file-meta">' +
+          esc(file.kind || 'artifact') +
+          '</span>' +
+          '</a>' +
+          '<button type="button" class="btn btn-sm btn-ghost" onclick="continueProjectPathInChat(' +
+          jsStringAttr(file.path) +
+          ', \'file\')">Continue in chat</button>' +
+          '<a class="project-file-download" href="' +
+          esc(projectFileDownloadHref(file.path)) +
+          '" download="' +
+          esc(projectFileDownloadName(file.path)) +
+          '" title="Download ' +
+          esc(file.path) +
+          '">Download</a>' +
+          '</div>'
+        );
+      })
+      .join('');
+  }
+
   function renderFiles(files) {
     if (!files.length) {
       return (
@@ -496,37 +643,8 @@
       );
     }
     return (
-      '<div class="project-file-list">' +
-      files
-        .map(function (file) {
-          return (
-            '<div class="project-file-row" data-file-path="' +
-            esc(file.path) +
-            '">' +
-            '<button type="button" class="project-file-open" onclick="previewProjectFile(' +
-            jsStringAttr(file.path) +
-            ')">' +
-            '<span class="project-file-kind">' +
-            fileIcon(file.kind) +
-            '</span>' +
-            '<span class="project-file-path">' +
-            esc(file.path) +
-            '</span>' +
-            '<span class="project-file-meta">' +
-            esc(file.kind || 'artifact') +
-            '</span>' +
-            '</button>' +
-            '<a class="project-file-download" href="' +
-            esc(projectFileDownloadHref(file.path)) +
-            '" download="' +
-            esc(projectFileDownloadName(file.path)) +
-            '" title="Download ' +
-            esc(file.path) +
-            '">Download</a>' +
-            '</div>'
-          );
-        })
-        .join('') +
+      '<div class="project-file-list project-file-tree">' +
+      renderProjectFileTreeNodes(projectFileTree(files), 0) +
       '</div>'
     );
   }
@@ -686,6 +804,69 @@
         : '<li>Summarize source context.</li>') +
       '</ul>' +
       '<p>External writes require approval.</p>' +
+      '</div>'
+    );
+  }
+
+  function projectDesignSystems(project) {
+    return (project && project.designSystems) || {};
+  }
+
+  function renderProjectDesignSystemOptions(systems, selectedId) {
+    var options = [
+      '<option value="">Use project default design system</option>',
+    ];
+    systems.forEach(function (system) {
+      options.push(
+        '<option value="' +
+          esc(system.id) +
+          '"' +
+          (system.id === selectedId ? ' selected' : '') +
+          '>' +
+          esc(system.name) +
+          '</option>',
+      );
+    });
+    return options.join('');
+  }
+
+  function renderProjectDesignSystems(project) {
+    var state = projectDesignSystems(project);
+    var systems = Array.isArray(state.available) ? state.available : [];
+    var selectedId = state.projectDefaultId || '';
+    var current = state.default;
+    return (
+      '<div class="project-design-system-panel">' +
+      '<div class="project-rail-title">Design systems</div>' +
+      '<p>' +
+      esc(
+        current
+          ? 'Default: ' + current.name
+          : 'Upload a system before asking agents for branded documents or presentations.',
+      ) +
+      '</p>' +
+      '<label class="project-design-system-field">Default<select id="project-design-system-default" class="search-input">' +
+      renderProjectDesignSystemOptions(systems, selectedId) +
+      '</select></label>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="saveProjectDesignSystemDefault()">Save default</button>' +
+      '<div class="project-design-system-upload">' +
+      '<input id="project-design-system-name" class="search-input" placeholder="Design system name">' +
+      '<input id="project-design-system-description" class="search-input" placeholder="Short description">' +
+      '<input id="project-design-system-upload" type="file" accept=".md,.markdown,.txt,.json,.css">' +
+      '<textarea id="project-design-system-content" placeholder="Paste brand, document, presentation, typography, color, layout, and voice rules."></textarea>' +
+      '<label class="project-design-system-check"><input id="project-design-system-set-default" type="checkbox" checked> Set as project default</label>' +
+      '<button type="button" class="btn btn-sm btn-primary" onclick="uploadProjectDesignSystem()">Upload design system</button>' +
+      '</div>' +
+      (systems.length
+        ? '<div class="project-design-system-list">' +
+          systems
+            .slice(0, 6)
+            .map(function (system) {
+              return '<span>' + esc(system.name) + '</span>';
+            })
+            .join('') +
+          '</div>'
+        : '') +
       '</div>'
     );
   }
@@ -1264,6 +1445,9 @@
       '</div>' +
       '</div>' +
       '<div class="project-rail-card">' +
+      renderProjectDesignSystems(project) +
+      '</div>' +
+      '<div class="project-rail-card">' +
       '<div class="project-rail-title">Connectors</div>' +
       renderProjectMcpAccess(project) +
       renderToolLanes() +
@@ -1414,6 +1598,42 @@
     return api('/projects/' + encodeURIComponent(id));
   }
 
+  function consumeProjectFileRoute(projects) {
+    var route = window._pendingProjectFileRoute;
+    if (!route) return null;
+    if (
+      route.projectId &&
+      projects.some(function (project) {
+        return project.id === route.projectId;
+      })
+    ) {
+      activeProjectId = route.projectId;
+      activeProjectFilePath = route.filePath || null;
+    }
+    window._pendingProjectFileRoute = null;
+    return route;
+  }
+
+  function projectFileRouteKind(detail, targetPath) {
+    if (!detail || !targetPath) return 'none';
+    var files = Array.isArray(detail.files) ? detail.files : [];
+    if (
+      files.some(function (file) {
+        return file.path === targetPath;
+      })
+    ) {
+      return 'file';
+    }
+    if (
+      files.some(function (file) {
+        return String(file.path || '').startsWith(targetPath + '/');
+      })
+    ) {
+      return 'folder';
+    }
+    return 'missing';
+  }
+
   async function refreshProjects() {
     var el = document.getElementById('page-content');
     if (!el) return;
@@ -1429,6 +1649,7 @@
     if (focusedProjectId && projects.some(function (project) { return project.id === focusedProjectId; })) {
       activeProjectId = focusedProjectId;
     }
+    consumeProjectFileRoute(projects);
     if (!activeProjectId && projects.length) activeProjectId = projects[0].id;
     var detail = activeProjectId ? await loadProjectDetail(activeProjectId) : null;
     activeProjectDetail = detail;
@@ -1480,7 +1701,11 @@
       '</div>';
     if (detail && activeProjectFilePath) {
       setTimeout(function () {
-        previewProjectFile(activeProjectFilePath);
+        if (projectFileRouteKind(detail, activeProjectFilePath) === 'folder') {
+          previewProjectFolder(activeProjectFilePath, { updateHash: false });
+        } else {
+          previewProjectFile(activeProjectFilePath, { updateHash: false });
+        }
       }, 0);
     }
   }
@@ -1737,8 +1962,8 @@
       );
       if (result.error) throw new Error(result.error);
       toast('Citation ledger exported', 'success');
-      if (result.path) {
-        activeProjectFilePath = result.path;
+      if (result.file && result.file.path) {
+        activeProjectFilePath = result.file.path;
       }
       refreshProjects();
     } catch (err) {
@@ -1847,6 +2072,93 @@
     }
   };
 
+  function readDesignSystemUploadFile(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        resolve(String(reader.result || ''));
+      };
+      reader.onerror = function () {
+        reject(new Error('Could not read design system file'));
+      };
+      reader.readAsText(file);
+    });
+  }
+
+  window.saveProjectDesignSystemDefault = async function () {
+    if (!activeProjectId) return;
+    var selected =
+      document.getElementById('project-design-system-default')?.value || '';
+    try {
+      await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/design-system-default',
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ designSystemId: selected || null }),
+        },
+      );
+      toast('Design system default saved', 'success');
+      refreshProjects();
+    } catch (err) {
+      toast('Could not save design system default: ' + (err.message || 'unknown error'), 'error');
+    }
+  };
+
+  window.uploadProjectDesignSystem = async function () {
+    if (!activeProjectId) return;
+    var name = document.getElementById('project-design-system-name')?.value || '';
+    var description =
+      document.getElementById('project-design-system-description')?.value || '';
+    var content =
+      document.getElementById('project-design-system-content')?.value || '';
+    var fileInput = document.getElementById('project-design-system-upload');
+    var file = fileInput && fileInput.files ? fileInput.files[0] : null;
+    if (file) {
+      try {
+        content = await readDesignSystemUploadFile(file);
+        if (!name.trim()) name = file.name.replace(/\.[^.]+$/, '');
+      } catch (err) {
+        toast(err.message || 'Could not read design system file', 'error');
+        return;
+      }
+    }
+    if (!name.trim() || !content.trim()) {
+      toast('Design system name and content are required', 'error');
+      return;
+    }
+    try {
+      var result = await api('/projects/design-systems', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: name,
+          description: description,
+          content: content,
+          sourceFileName: file ? file.name : null,
+        }),
+      });
+      var designSystem = result.designSystem || {};
+      var setDefault =
+        document.getElementById('project-design-system-set-default')?.checked !== false;
+      if (setDefault && designSystem.id) {
+        await api(
+          '/projects/' +
+            encodeURIComponent(activeProjectId) +
+            '/design-system-default',
+          {
+            method: 'PATCH',
+            body: JSON.stringify({ designSystemId: designSystem.id }),
+          },
+        );
+      }
+      toast('Design system uploaded', 'success');
+      refreshProjects();
+    } catch (err) {
+      toast('Could not upload design system: ' + (err.message || 'unknown error'), 'error');
+    }
+  };
+
   async function updateProjectContextItem(itemId, patch) {
     if (!activeProjectId || !itemId) return;
     try {
@@ -1902,13 +2214,24 @@
     }
   };
 
-  window.previewProjectFile = async function (filePath) {
+  window.previewProjectFile = async function (filePath, options) {
     if (!activeProjectId || !filePath) return;
     activeProjectFilePath = filePath;
+    if (!options || options.updateHash !== false) {
+      var hash = projectFileHash(activeProjectId, filePath);
+      if (window.location.hash !== hash) {
+        window.location.hash = hash;
+        return;
+      }
+    }
     var preview = document.getElementById('project-file-preview');
     if (!preview) return;
     document.querySelectorAll('.project-file-row').forEach(function (row) {
       row.classList.toggle('active', row.dataset.filePath === filePath);
+      row.classList.toggle('project-file-route-active', row.dataset.filePath === filePath);
+    });
+    document.querySelectorAll('.project-folder-row').forEach(function (row) {
+      row.classList.toggle('project-file-route-active', false);
     });
     preview.innerHTML =
       '<div class="project-file-preview-loading">Loading ' + esc(filePath) + '</div>';
@@ -1937,6 +2260,9 @@
         '<button type="button" class="btn btn-sm btn-ghost" onclick="useProjectFileInPrompt(' +
         jsStringAttr(file.path || filePath) +
         ')">Use in prompt</button>' +
+        '<button type="button" class="btn btn-sm btn-ghost" onclick="continueProjectPathInChat(' +
+        jsStringAttr(file.path || filePath) +
+        ', \'file\')">Continue in chat</button>' +
         '<a class="btn btn-sm btn-ghost" href="' +
         esc(projectFileDownloadHref(file.path || filePath)) +
         '" download="' +
@@ -1958,6 +2284,82 @@
           'Could not load file preview: ' + (err.message || 'unknown error'),
         );
     }
+  };
+
+  window.previewProjectFolder = function (folderPath, options) {
+    if (!activeProjectId || !folderPath) return;
+    activeProjectFilePath = folderPath;
+    if (!options || options.updateHash !== false) {
+      var hash = projectFileHash(activeProjectId, folderPath);
+      if (window.location.hash !== hash) {
+        window.location.hash = hash;
+        return;
+      }
+    }
+    var preview = document.getElementById('project-file-preview');
+    if (!preview) return;
+    var files = (activeProjectDetail && activeProjectDetail.files) || [];
+    var folderFiles = files.filter(function (file) {
+      return String(file.path || '').startsWith(folderPath + '/');
+    });
+    document.querySelectorAll('.project-file-row').forEach(function (row) {
+      row.classList.toggle('active', false);
+      row.classList.toggle('project-file-route-active', false);
+    });
+    document.querySelectorAll('.project-folder-row').forEach(function (row) {
+      row.classList.toggle(
+        'project-file-route-active',
+        row.dataset.folderPath === folderPath,
+      );
+    });
+    preview.innerHTML =
+      '<div class="project-file-preview-head">' +
+      '<div><span>Folder preview</span><strong>' +
+      esc(folderPath) +
+      '</strong></div>' +
+      '<div class="project-file-preview-actions">' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="continueProjectPathInChat(' +
+      jsStringAttr(folderPath) +
+      ', \'folder\')">Continue in chat</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="continueProjectPathInChat(' +
+      jsStringAttr(folderPath) +
+      ', \'folder\')">Use folder in prompt</button>' +
+      '</div>' +
+      '</div>' +
+      '<div class="project-folder-preview-list">' +
+      (folderFiles.length
+        ? folderFiles
+            .slice(0, 40)
+            .map(function (file) {
+              return (
+                '<button type="button" class="project-folder-file" onclick="previewProjectFile(' +
+                jsStringAttr(file.path) +
+                ')"><span>' +
+                esc(file.path) +
+                '</span><small>' +
+                esc(file.kind || 'artifact') +
+                '</small></button>'
+              );
+            })
+            .join('')
+        : '<p>No files found under this folder.</p>') +
+      '</div>';
+  };
+
+  window.continueProjectPathInChat = function (targetPath, kind) {
+    var promptEl = document.getElementById('project-prompt');
+    if (!promptEl || !targetPath) return;
+    var label = kind === 'folder' ? 'folder' : 'file';
+    var instruction =
+      'Continue working on the project ' +
+      label +
+      ' "' +
+      targetPath +
+      '". Inspect its current contents, summarize what matters, and propose the next concrete change before editing.';
+    var existing = promptEl.value.trim();
+    promptEl.value = existing ? existing + '\n\n' + instruction : instruction;
+    promptEl.focus();
+    promptEl.dispatchEvent(new Event('input', { bubbles: true }));
   };
 
   window.useProjectFileInPrompt = function (filePath) {

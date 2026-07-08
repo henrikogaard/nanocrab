@@ -77,6 +77,10 @@ describe('Cowork artifact vault UI', () => {
     expect(source).toContain('artifact-source-line');
     expect(source).toContain('artifact-evidence-row');
     expect(source).toContain('artifactDownloadHref');
+    expect(source).toContain('artifactProjectHref');
+    expect(source).toContain('Open in project');
+    expect(source).toContain('Continue chat');
+    expect(source).toContain("record.sourceType === 'cowork-project'");
     expect(source).toContain('renderArtifactFacetChips');
     expect(source).toContain('artifact-facet-empty');
     expect(source).toContain('No artifact kinds indexed');
@@ -101,6 +105,7 @@ describe('Cowork artifact vault UI', () => {
     expect(source).toContain('MCP follow-up');
     expect(source).toContain('window.copyArtifactMcpFollowupPrompt');
     expect(source).toContain('Artifact MCP follow-up copied');
+    expect(source).toContain('Cowork artifact records preserve the owning project and selected project path.');
     expect(source).toContain(
       'Use this NanoCrab artifact for an MCP-backed Cowork follow-up.',
     );

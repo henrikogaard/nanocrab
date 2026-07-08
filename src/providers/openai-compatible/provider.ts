@@ -1,5 +1,8 @@
 import { readEnvFile } from '../../env.js';
-import { AGENT_PROVIDER_DEFINITIONS } from '../../agent-provider.js';
+import {
+  AGENT_PROVIDER_DEFINITIONS,
+  providerBaseUrlEnvKey,
+} from '../../agent-provider.js';
 
 const PROVIDER_ID = 'openai-compatible';
 const DEFINITION = AGENT_PROVIDER_DEFINITIONS[PROVIDER_ID];
@@ -68,9 +71,13 @@ function getApiKey(): string {
 
 function getBaseUrl(): string {
   const envKey = DEFINITION.baseUrlEnvKey;
-  if (!envKey) return '';
-  const env = readEnvFile([envKey]);
-  const url = process.env[envKey] || env[envKey] || '';
+  const defaultKey = providerBaseUrlEnvKey(PROVIDER_ID);
+  const env = readEnvFile([defaultKey, envKey].filter(Boolean) as string[]);
+  const url =
+    process.env[defaultKey] ||
+    env[defaultKey] ||
+    (envKey ? process.env[envKey] || env[envKey] : '') ||
+    '';
   return url ? url.replace(/\/+$/, '') : '';
 }
 

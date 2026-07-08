@@ -24,6 +24,7 @@ let ws = null;
 let wsReconnectTimer = null;
 let sessionToken = null;
 let botName = 'NanoCrab'; // Loaded dynamically from API
+window._pendingProjectFileRoute = window._pendingProjectFileRoute || null;
 
 // --- Theme ---
 const THEMES = ['dark', 'light', 'midnight', 'forest', 'amber'];
@@ -7374,6 +7375,24 @@ async function renderProviders(el) {
         .map((p, index) => {
           const isDefault = globalDefault === p.id;
           const isLast = index === providers.length - 1;
+          const isCustomOpenAiCompatible = p.id === 'openai-compatible';
+          const customEndpointFields = isCustomOpenAiCompatible
+            ? `<div class="provider-endpoint-fields">
+                <div class="form-group">
+                  <label>Base URL</label>
+                  <input class="search-input" id="provider-openai-compatible-base-url" value="${esc(p.baseUrl || '')}" placeholder="http://127.0.0.1:8080/v1">
+                </div>
+                <div class="form-group">
+                  <label>Model</label>
+                  <input class="search-input" id="provider-openai-compatible-model" value="${esc(p.defaultModel || 'model-id')}" placeholder="qwen3-coder">
+                </div>
+                <div class="form-group">
+                  <label>API key</label>
+                  <input class="search-input" id="provider-openai-compatible-api-key" type="password" placeholder="Optional">
+                </div>
+                <button class="btn btn-sm btn-primary" onclick="enableOpenAiCompatibleProvider(this)">${p.configured ? 'Save endpoint' : 'Enable endpoint'}</button>
+              </div>`
+            : '';
           return `
         <div class="provider-catalog-row ${isLast ? 'is-last' : ''}">
           <div class="provider-catalog-head">
@@ -7388,12 +7407,13 @@ async function renderProviders(el) {
             </div>
           </div>
           <div class="provider-catalog-actions">
-            ${!p.configured ? `<button class="btn btn-sm btn-primary" onclick="enableProvider('${esc(p.id)}','${esc(p.name)}','${esc(p.envKey)}',this)">Enable</button>` : ''}
+            ${!p.configured && !isCustomOpenAiCompatible ? `<button class="btn btn-sm btn-primary" onclick="enableProvider('${esc(p.id)}','${esc(p.name)}','${esc(p.envKey)}',this)">Enable</button>` : ''}
             ${p.configured && !p.envKey.startsWith('CODEX_') ? `<button class="btn btn-sm btn-ghost" onclick="disableProvider('${esc(p.id)}')">Disable</button>` : ''}
             ${p.configured && !isDefault ? `<button class="btn btn-sm btn-ghost" onclick="setDefaultProvider('${esc(cat)}','${esc(p.id)}')">Set as Default</button>` : ''}
             ${p.models && p.models.length > 0 ? `<span class="provider-model-list">Models: ${p.models.map((m) => `<code>${esc(m)}</code>`).join(', ')}</span>` : ''}
             <a href="${esc(p.website)}" target="_blank" class="provider-website-link">${esc(p.website.replace('https://', ''))}</a>
           </div>
+          ${customEndpointFields}
           ${p.configured && !p.envKey.startsWith('CODEX_') ? `<div class="provider-config-note">Key: <code>${esc(p.envKey)}</code></div>` : ''}
           ${p.envKey.startsWith('CODEX_') ? `<div class="provider-config-note">Auth: browser login via <code>codex login --device-auth</code></div>` : ''}
         </div>`;
@@ -7617,6 +7637,20 @@ window.enableProvider = async (id, name, envKey, btnEl) => {
       navigate('integrations');
     } else toast(providerActionErrorMessage('enable', r), 'error');
   });
+};
+
+window.enableOpenAiCompatibleProvider = async function () {
+  const baseUrl = document.getElementById('provider-openai-compatible-base-url')?.value?.trim();
+  const model = document.getElementById('provider-openai-compatible-model')?.value?.trim();
+  const apiKey = document.getElementById('provider-openai-compatible-api-key')?.value?.trim();
+  const r = await api('/providers/openai-compatible/enable', {
+    method: 'POST',
+    body: JSON.stringify({ baseUrl, model, apiKey }),
+  });
+  if (r.ok) {
+    toast(r.message || 'OpenAI-compatible endpoint saved', 'success');
+    navigate('providers');
+  } else toast(providerActionErrorMessage('enable', r), 'error');
 };
 
 window.disableProvider = async (id) => {
@@ -8431,9 +8465,20 @@ function artifactSize(bytes) {
 }
 
 function artifactDownloadHref(record) {
+  if (record.sourceType === 'cowork-project') {
+    if (!record.projectId || !record.projectFilePath) return '';
+    return `/api/projects/${encodeURIComponent(record.projectId)}/files/download?path=${encodeURIComponent(record.projectFilePath)}`;
+  }
   if (record.sourceType !== 'report-job') return '';
   if (typeof record.sourceArtifactIndex !== 'number') return '';
   return `/api/reports/jobs/${encodeURIComponent(record.sourceId)}/artifacts/${record.sourceArtifactIndex}/download`;
+}
+
+function artifactProjectHref(record) {
+  if (record.sourceType === 'cowork-project' && record.projectId && record.projectFilePath) {
+    return `#/projects/${encodeURIComponent(record.projectId)}/files/${encodeURIComponent(record.projectFilePath)}`;
+  }
+  return '';
 }
 
 function artifactExpiryBadge(record) {
@@ -8523,6 +8568,9 @@ function artifactHandoffBriefText(record) {
     `Path: ${record.path || 'unknown'}`,
     `Size: ${artifactSize(record.sizeBytes)}`,
     `Source: ${[record.sourceType, record.sourceId].filter(Boolean).join(' / ') || 'unknown'}`,
+    record.sourceType === 'cowork-project'
+      ? 'Cowork artifact records preserve the owning project and selected project path.'
+      : null,
     `Retention: ${record.retentionDays || 0} days`,
     `Expires: ${record.expiresAt ? record.expiresAt.slice(0, 10) : 'never'}`,
     `Evidence: ${evidence.length ? evidence.join(', ') : 'no source links recorded'}`,
@@ -8762,6 +8810,7 @@ function renderArtifactRecords(records) {
   return records
     .map((record, index) => {
       const href = artifactDownloadHref(record);
+      const projectHref = artifactProjectHref(record);
       return `
       <article class="artifact-record-card">
         <div class="artifact-record-main">
@@ -8791,8 +8840,10 @@ function renderArtifactRecords(records) {
         <div class="artifact-record-actions">
           <button class="btn btn-sm btn-ghost" onclick="copyArtifactHandoffBrief(${index})">Copy brief</button>
           <button class="btn btn-sm btn-ghost" onclick="copyArtifactResumePrompt(${index}, 'Cowork')">Cowork prompt</button>
+          ${record.sourceType === 'cowork-project' ? `<button class="btn btn-sm btn-ghost" onclick="copyArtifactResumePrompt(${index}, 'Cowork')">Continue chat</button>` : ''}
           <button class="btn btn-sm btn-ghost" onclick="copyArtifactMcpFollowupPrompt(${index})">MCP follow-up</button>
           <button class="btn btn-sm btn-ghost" onclick="copyArtifactResumePrompt(${index}, 'Reports')">Report prompt</button>
+          ${projectHref ? `<a class="btn btn-sm btn-ghost" href="${projectHref}">Open in project</a>` : ''}
           ${href ? `<a class="btn btn-sm btn-ghost" href="${href}" download>Download</a>` : ''}
           ${record.sourceType === 'report-job' ? `<button class="btn btn-sm btn-ghost" onclick="navigate('reports')">Report</button>` : ''}
         </div>
@@ -10352,6 +10403,7 @@ async function renderFiles(el) {
     agentFiles: groups.filter((group) => group.hasAgentsMd).length,
     conversations: groups.filter((group) => group.hasConversations).length,
     attachments: groups.filter((group) => group.hasAttachments).length,
+    artifacts: groups.filter((group) => group.hasArtifacts).length,
   };
   const contextCards = fileContextCards();
   window._fileVaultState = { groups, stats: fileStats, cards: contextCards, loadIssues };
@@ -10367,6 +10419,7 @@ async function renderFiles(el) {
         <div class="files-stat"><span>AGENTS.md</span><strong>${fileStats.agentFiles}</strong><small>instruction files</small></div>
         <div class="files-stat"><span>Threads</span><strong>${fileStats.conversations}</strong><small>with history</small></div>
         <div class="files-stat"><span>Uploads</span><strong>${fileStats.attachments}</strong><small>with media</small></div>
+        <div class="files-stat"><span>Artifacts</span><strong>${fileStats.artifacts}</strong><small>ready to promote</small></div>
         <div class="files-stat ${loadIssues.length ? 'is-warning' : 'is-ready'}"><span>Data health</span><strong>${loadIssues.length ? loadIssues.length : 'ok'}</strong><small>${loadIssues.length ? 'feed issue' : 'catalog ready'}</small></div>
       </div>
       <div class="files-command-actions">
@@ -10421,7 +10474,7 @@ async function renderFiles(el) {
                   (g) => `
               <a class="nav-link file-group-link" data-folder="${esc(g.name)}" onclick="selectGroup('${esc(g.name)}')">
                 <span>${esc(g.name)}</span>
-                <small>${[g.hasAgentsMd ? 'agents' : '', g.hasConversations ? 'threads' : '', g.hasAttachments ? 'uploads' : ''].filter(Boolean).join(' ') || 'empty'}</small>
+                <small>${[g.hasAgentsMd ? 'agents' : '', g.hasConversations ? 'threads' : '', g.hasAttachments ? 'uploads' : '', g.hasArtifacts ? 'artifacts' : ''].filter(Boolean).join(' ') || 'empty'}</small>
               </a>`,
                 )
                 .join('')
@@ -10447,12 +10500,19 @@ window.selectGroup = async (folder) => {
   detail.innerHTML = renderFilesLoadingState('group');
 
   const groupLoadIssues = [];
-  const [agentsMdResult, memoryMdResult, conversationsResult, attachmentsResult] =
+  const [
+    agentsMdResult,
+    memoryMdResult,
+    conversationsResult,
+    attachmentsResult,
+    artifactsResult,
+  ] =
     await Promise.allSettled([
       api(`/files/${encodeURIComponent(folder)}/agents-md`),
       folder === 'global' ? api('/files/memory') : Promise.resolve(null),
       api(`/files/${encodeURIComponent(folder)}/conversations`),
       api(`/files/${encodeURIComponent(folder)}/attachments`),
+      api(`/files/${encodeURIComponent(folder)}/artifacts`),
     ]);
   const agentsMd =
     agentsMdResult.status === 'fulfilled'
@@ -10470,12 +10530,17 @@ window.selectGroup = async (folder) => {
     attachmentsResult.status === 'fulfilled' && Array.isArray(attachmentsResult.value)
       ? attachmentsResult.value
       : (groupLoadIssues.push('Attachment archive unavailable'), []);
+  const artifacts =
+    artifactsResult.status === 'fulfilled' && Array.isArray(artifactsResult.value)
+      ? artifactsResult.value
+      : (groupLoadIssues.push('Artifact archive unavailable'), []);
   window._fileGroupState = {
     folder,
     agentsMd,
     memoryMd,
     conversations,
     attachments,
+    artifacts,
     loadIssues: groupLoadIssues,
   };
 
@@ -10563,6 +10628,33 @@ window.selectGroup = async (folder) => {
       </table></div>`
       }
     </div>
+    <div class="files-table-card">
+      <div class="card-title">Artifacts <span class="badge badge-muted">${artifacts.length}</span></div>
+      ${
+        groupLoadIssues.includes('Artifact archive unavailable')
+          ? renderFilesEmptyState('artifacts-unavailable')
+          : artifacts.length === 0
+            ? renderFilesEmptyState('artifacts')
+          : `
+      <div class="table-wrap"><table>
+        <thead><tr><th>File</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
+        <tbody>${artifacts
+          .map(
+            (f) => `<tr>
+          <td class="files-name-cell">${esc(f.name)}</td>
+          <td>${formatBytes(f.size)}</td>
+          <td>${formatTime(f.modified)}</td>
+          <td class="files-action-cell">
+            <a class="btn btn-sm btn-ghost" href="/api/files/${encodeURIComponent(folder)}/download/artifacts/${encodeURIComponent(f.name)}" target="_blank">Open</a>
+            <a class="btn btn-sm btn-ghost files-download-link" href="/api/files/${encodeURIComponent(folder)}/download/artifacts/${encodeURIComponent(f.name)}" download>Download</a>
+            <button type="button" class="btn btn-sm btn-primary files-artifact-promote" onclick="promoteGroupArtifactToCowork('${esc(folder)}','${esc(f.name)}')">Promote to Cowork</button>
+          </td>
+        </tr>`,
+          )
+          .join('')}</tbody>
+      </table></div>`
+      }
+    </div>
     <div id="conv-viewer"></div>`;
 };
 
@@ -10589,9 +10681,36 @@ function fileSaveActionErrorMessage(kind, err) {
       'Private memory file was not saved. Keep the editor text, then decide whether this is durable personal Memory, project context for Cowork, or a reusable Skill before retrying.',
     agents:
       'Group instructions were not saved. Keep the AGENTS.md draft, then check the group folder, channel ownership, and whether this behavior belongs in group instructions or a Skill.',
+    artifact:
+      'Group artifact promotion was not completed. Keep the raw artifact in place, then check the target Cowork project id and destination path before retrying.',
   };
   return `${messages[kind] || 'File save was not completed.'}${suffix}`;
 }
+
+window.promoteGroupArtifactToCowork = async (folder, filename) => {
+  const projectId = window.prompt('Cowork project id');
+  if (!projectId) return;
+  const defaultPath = `artifacts/${filename || 'artifact.md'}`;
+  const targetPath = window.prompt('Destination project file path', defaultPath);
+  if (!targetPath) return;
+  try {
+    const result = await api(
+      `/files/${encodeURIComponent(folder)}/artifacts/${encodeURIComponent(filename)}/promote`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ projectId, path: targetPath }),
+      },
+    );
+    if (result?.file) {
+      toast('Artifact promoted to Cowork', 'success');
+      selectGroup(folder);
+    } else {
+      toast(fileSaveActionErrorMessage('artifact', result), 'error');
+    }
+  } catch (err) {
+    toast(fileSaveActionErrorMessage('artifact', err), 'error');
+  }
+};
 
 window.saveMemoryFromFiles = async () => {
   const content = document.getElementById('memory-file-editor').value;
@@ -23308,6 +23427,20 @@ function parseProjectChatHash(hash) {
   return null;
 }
 
+function parseProjectFileHash(hash) {
+  if (!hash) return null;
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  const parts = raw.split('/').filter(Boolean);
+  if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'files') {
+    return {
+      isProjectFileRoute: true,
+      projectId: decodeURIComponent(parts[1]),
+      filePath: decodeURIComponent(parts[3]),
+    };
+  }
+  return null;
+}
+
 window.addEventListener('hashchange', () => {
   const hash = window.location.hash;
   const chatRoute = parseChatHash(hash);
@@ -23322,6 +23455,15 @@ window.addEventListener('hashchange', () => {
   if (projectChatRoute) {
     if (window.WebChat) WebChat.setActiveThreadId(projectChatRoute.threadId);
     showShell('project-chat');
+    return;
+  }
+  const projectFileRoute = parseProjectFileHash(hash);
+  if (projectFileRoute) {
+    window._pendingProjectFileRoute = {
+      projectId: projectFileRoute.projectId,
+      filePath: projectFileRoute.filePath,
+    };
+    showShell('projects');
     return;
   }
   const requestedPage = hash.replace('#/', '');
@@ -23339,6 +23481,7 @@ window.addEventListener('hashchange', () => {
     const hash = window.location.hash;
     const chatRoute = parseChatHash(hash);
     const projectChatRoute = parseProjectChatHash(hash);
+    const projectFileRoute = parseProjectFileHash(hash);
     if (chatRoute) {
       // Deep link into a chat thread. If WebChat is ready, set the active id and
       // let showShell render the conversation once (one WS handler install).
@@ -23380,6 +23523,12 @@ window.addEventListener('hashchange', () => {
           }
         }, 0);
       }
+    } else if (projectFileRoute) {
+      window._pendingProjectFileRoute = {
+        projectId: projectFileRoute.projectId,
+        filePath: projectFileRoute.filePath,
+      };
+      showShell('projects');
     } else {
       const requestedPage = hash.replace('#/', '');
       pendingPageTabAlias = tabAliasForPage(requestedPage);

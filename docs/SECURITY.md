@@ -94,7 +94,7 @@ When an agent runtime requires a whole MCP server to be configured, NanoCrab doe
 
 Every container invocation also resolves an agent boundary from the group identity before runtime assembly. The boundary declares channel scopes, filesystem scopes, skill scopes, provider profile permissions, allowed connector ids, and external write permissions. Container mounts, runtime skill snapshots, provider fallback profile selection, channel capability metadata, connector tool exposure, and MCP credential forwarding are derived from that boundary. Unauthorized channel agents therefore cannot receive private skills, out-of-scope connector credentials, coding-only provider profiles, broad channel scopes, or write-capable external tools.
 
-Cowork project runs follow the same default: source-backed reads and local project artifacts can be recorded in the project workspace, but external writes such as document publishing, channel sends, uploads, repo writes, calendar edits, webhooks, file delivery, or connector mutations create or reuse a run-scoped approval record before execution. New Cowork context writes normalize provenance and sensitivity to canonical labels while keeping legacy stored strings readable, and approval prompts consume the normalized sensitivity signal.
+Cowork project runs follow the same default: source-backed reads and local project artifacts can be recorded in the project workspace, but external writes such as document publishing, channel sends, uploads, repo writes, calendar edits, webhooks, file delivery, or connector mutations create or reuse a run-scoped approval record before execution. Uploaded design systems are stored as local admin/project metadata and injected only as prompt context for generated documents, presentations, and artifacts unless a separate approval-gated external write is requested. New Cowork context writes normalize provenance and sensitivity to canonical labels while keeping legacy stored strings readable, and approval prompts consume the normalized sensitivity signal.
 
 ### 3d. Scheduled Task And Webhook Delivery Controls
 
@@ -138,7 +138,18 @@ Provider credentials should stay behind NanoCrab's built-in credential proxy whe
 5. For proxied providers, agents cannot discover real credentials — not in environment, stdin, files, or `/proc`.
 
 **Provider routes:**
-Claude, OpenRouter, and Google Gemini API traffic can be proxied this way. OpenRouter coding jobs also use the proxy URL plus a placeholder key. Ollama normally uses a local or LAN endpoint without a secret. NanoCrab has provider profiles for chat, coding, automations, memory, journal extraction, skill factory, reports, documents, and vision. Write-capable profiles should keep `approval-required` tool policy unless the deployment is explicitly trusted. Live per-model capability probes, per-model coding capability metadata, and fallback enforcement are implemented; Agents and Autofix coding selectors use that metadata instead of hardcoded provider exceptions.
+Claude, OpenRouter, Google Gemini, and custom OpenAI-compatible API traffic can
+be proxied this way. OpenRouter and custom OpenAI-compatible coding jobs also
+use the proxy URL plus a placeholder key when a key is configured. Authless
+local custom endpoints are allowed through the provider route without injecting
+Anthropic credentials. Ollama normally uses a local or LAN endpoint without a
+secret. NanoCrab has provider profiles for chat, coding, automations, memory,
+journal extraction, skill factory, reports, documents, and vision. Write-capable
+profiles should keep `approval-required` tool policy unless the deployment is
+explicitly trusted. Live per-model capability probes, per-model coding
+capability metadata, and fallback enforcement are implemented; Agents and
+Autofix coding selectors use that metadata instead of hardcoded provider
+exceptions.
 
 **Explicit Runtime Secret Exceptions:**
 

@@ -22,6 +22,7 @@ vi.mock('./memory-store.js', () => ({
 }));
 
 const {
+  buildArtifactVaultFromCoworkArtifacts,
   buildArtifactVaultFromReports,
   listArtifactVault,
   pruneArtifactVault,
@@ -101,6 +102,60 @@ describe('artifact vault', () => {
 
     expect(result.removed).toBe(1);
     expect(listArtifactVault()).toEqual([]);
+    expect(fs.existsSync(artifactPath)).toBe(true);
+  });
+
+  it('indexes Cowork project artifacts as active project records', () => {
+    const projectDir = path.join(STORE_DIR, 'projects', 'aurora-docs');
+    const artifactPath = path.join(projectDir, 'artifacts', 'brief.md');
+    fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
+    fs.writeFileSync(artifactPath, '# Brief\n\nSource-backed draft.\n');
+
+    const result = buildArtifactVaultFromCoworkArtifacts({
+      artifacts: [
+        {
+          projectId: 'project-aurora',
+          projectName: 'Aurora Docs',
+          projectSlug: 'aurora-docs',
+          title: 'Launch brief',
+          filePath: 'artifacts/brief.md',
+          hostPath: artifactPath,
+          artifactId: 'run:run-1:artifacts/brief.md',
+          sourceLinks: [
+            {
+              label: 'Run source ledger',
+              source: 'cowork-run:run-1',
+            },
+          ],
+          createdAt: '2026-07-08T10:00:00.000Z',
+          updatedAt: '2026-07-08T10:15:00.000Z',
+        },
+      ],
+      now: new Date('2026-07-08T10:20:00.000Z'),
+    });
+
+    expect(result.added).toBe(1);
+    expect(searchArtifactVault({ query: 'Aurora Docs' })).toContainEqual(
+      expect.objectContaining({
+        title: 'Launch brief',
+        kind: 'cowork-artifact',
+        sourceType: 'cowork-project',
+        sourceId: 'project-aurora',
+        projectId: 'project-aurora',
+        projectSlug: 'aurora-docs',
+        projectFilePath: 'artifacts/brief.md',
+        retentionDays: 0,
+        expiresAt: null,
+        sourceLinks: expect.arrayContaining([
+          expect.objectContaining({ source: 'cowork-run:run-1' }),
+        ]),
+      }),
+    );
+
+    const pruneResult = pruneArtifactVault({
+      now: new Date('2027-07-08T10:20:00.000Z'),
+    });
+    expect(pruneResult.removed).toBe(0);
     expect(fs.existsSync(artifactPath)).toBe(true);
   });
 });

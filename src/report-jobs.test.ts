@@ -24,6 +24,7 @@ const {
   createReportJob,
   getReportJob,
 } = await import('./report-jobs.js');
+const { createDesignSystem } = await import('./design-systems.js');
 const { listApprovals, reviewApproval } = await import('./approvals.js');
 
 function approvalFor(kind: string, targetId: string) {
@@ -90,5 +91,33 @@ describe('report jobs', () => {
     expect(approveReportDelivery(job.id)).toMatchObject({
       status: 'delivered',
     });
+  });
+
+  it('injects a selected design system into generated report artifacts', async () => {
+    const designSystem = createDesignSystem({
+      name: 'Executive Memo',
+      description: 'Decision-first document system.',
+      content: 'Lead with the decision, use compact headings, and cite sources.',
+    });
+    const job = createReportJob({
+      title: 'Design System Memo',
+      request: 'Draft a board update memo.',
+      designSystemId: designSystem.id,
+      outputFormats: ['markdown'],
+      requireOutlineApproval: false,
+      requireDeliveryApproval: false,
+    });
+
+    const outlined = await approveReportOutline(job.id);
+
+    expect(outlined.designSystemId).toBe(designSystem.id);
+    expect(outlined.markdown).toContain('## Design System');
+    expect(outlined.markdown).toContain('Executive Memo');
+    expect(outlined.markdown).toContain(
+      'Lead with the decision, use compact headings, and cite sources.',
+    );
+    expect(fs.readFileSync(outlined.artifacts[0].path, 'utf-8')).toContain(
+      '## Design System',
+    );
   });
 });

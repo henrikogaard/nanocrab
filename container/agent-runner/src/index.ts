@@ -42,7 +42,8 @@ interface ContainerInput {
     | 'opencode'
     | 'ollama'
     | 'openrouter'
-    | 'google';
+    | 'google'
+    | 'openai-compatible';
   model?: string;
 }
 
@@ -74,7 +75,12 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
-const OPENAI_COMPATIBLE_PROVIDERS = new Set(['ollama', 'openrouter', 'google']);
+const OPENAI_COMPATIBLE_PROVIDERS = new Set([
+  'ollama',
+  'openrouter',
+  'google',
+  'openai-compatible',
+]);
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -260,10 +266,14 @@ function readDashboardWorkspaceContext(): string {
   ].join('\n');
 }
 
-function readRuntimeRestrictionsContext(restrictions?: string): string | undefined {
+function readRuntimeRestrictionsContext(
+  restrictions?: string,
+): string | undefined {
   const trimmed = restrictions?.trim();
   if (!trimmed) return undefined;
-  return ['Runtime dashboard instructions and restrictions:', trimmed].join('\n');
+  return ['Runtime dashboard instructions and restrictions:', trimmed].join(
+    '\n',
+  );
 }
 
 function joinSystemContext(
@@ -1124,18 +1134,31 @@ async function runQueryCodex(
   });
 }
 
-function openAiCompatibleBaseUrl(provider: string): string {
-  const providerKey = provider.toUpperCase();
+export function isOpenAiCompatibleAgentProvider(provider: string): boolean {
+  return OPENAI_COMPATIBLE_PROVIDERS.has(provider);
+}
+
+function providerEnvSlug(provider: string): string {
+  return provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+}
+
+export function openAiCompatibleBaseUrl(provider: string): string {
+  const providerKey = providerEnvSlug(provider);
+  const legacyProviderKey = provider.toUpperCase();
   const fallback =
     provider === 'ollama'
       ? 'http://127.0.0.1:11434/v1'
       : provider === 'openrouter'
         ? 'https://openrouter.ai/api/v1'
-        : 'https://generativelanguage.googleapis.com/v1beta/openai';
+        : provider === 'google'
+          ? 'https://generativelanguage.googleapis.com/v1beta/openai'
+          : '';
   return (
     process.env.AGENT_PROVIDER_BASE_URL ||
     process.env[`DEFAULT_${providerKey}_BASE_URL`] ||
+    process.env[`DEFAULT_${legacyProviderKey}_BASE_URL`] ||
     process.env[`${providerKey}_BASE_URL`] ||
+    process.env[`${legacyProviderKey}_BASE_URL`] ||
     fallback
   ).replace(/\/+$/, '');
 }
@@ -1147,6 +1170,9 @@ function openAiCompatibleApiKey(provider: string): string | undefined {
   if (provider === 'openrouter') return process.env.OPENROUTER_API_KEY;
   if (provider === 'google') {
     return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  }
+  if (provider === 'openai-compatible') {
+    return process.env.OPENAI_COMPATIBLE_API_KEY;
   }
   return process.env.OPENAI_API_KEY;
 }
@@ -1181,7 +1207,13 @@ async function runQueryOpenAiCompatible(
   const baseUrl = openAiCompatibleBaseUrl(provider);
   const apiKey = openAiCompatibleApiKey(provider);
 
-  if (provider !== 'ollama' && !apiKey) {
+  if (!baseUrl) {
+    throw new Error(
+      `${provider} requires AGENT_PROVIDER_BASE_URL or its provider base URL environment variable`,
+    );
+  }
+
+  if (provider !== 'ollama' && provider !== 'openai-compatible' && !apiKey) {
     throw new Error(
       `${provider} requires AGENT_PROVIDER_API_KEY or its provider API key environment variable`,
     );
@@ -1472,7 +1504,7 @@ async function main(): Promise<void> {
     await runQueryOpenCode(prompt, containerInput, mcpServerPath);
     return;
   }
-  if (OPENAI_COMPATIBLE_PROVIDERS.has(provider)) {
+  if (isOpenAiCompatibleAgentProvider(provider)) {
     log(`Using OpenAI-compatible provider: ${provider}`);
     try {
       await runQueryOpenAiCompatible(prompt, containerInput);

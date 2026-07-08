@@ -4,10 +4,7 @@ import path from 'path';
 import { Router, Request, Response } from 'express';
 
 import { STORE_DIR } from '../../config.js';
-import {
-  createApproval,
-  findPendingApprovalForTarget,
-} from '../../approvals.js';
+import { createApproval, listApprovals } from '../../approvals.js';
 import { estimateCoworkRun } from '../../cowork-run-estimator.js';
 import {
   classifyCoworkProjectFile,
@@ -30,6 +27,17 @@ import {
   createResearchJob,
   updateResearchJobMetadata,
 } from '../../research-jobs.js';
+import {
+  buildDesignSystemPromptContext,
+  createDesignSystem,
+  deleteDesignSystem,
+  designSystemSelectionSummary,
+  listDesignSystems,
+  setDefaultDesignSystem,
+  setProjectDefaultDesignSystem,
+  updateDesignSystem,
+  type DesignSystem,
+} from '../../design-systems.js';
 import { listSkillRegistry } from '../../skill-registry.js';
 import { getPlugins, isPluginEnabled } from '../plugins/registry.js';
 import type {
@@ -260,6 +268,96 @@ const PROJECT_MCP_EXAMPLES = [
   'Create a project artifact with source ledger, assumptions, and approval notes',
 ];
 
+function serializeDesignSystem(
+  system: DesignSystem,
+  options: { includeContent?: boolean } = {},
+) {
+  const serialized: {
+    id: string;
+    name: string;
+    description: string | null;
+    content?: string;
+    sourceFileName: string | null;
+    createdAt: string;
+    updatedAt: string;
+  } = {
+    id: system.id,
+    name: system.name,
+    description: system.description,
+    sourceFileName: system.sourceFileName,
+    createdAt: system.createdAt,
+    updatedAt: system.updatedAt,
+  };
+  if (options.includeContent) {
+    serialized.content = system.content;
+  }
+  return serialized;
+}
+
+function designSystemState(projectId?: string | null) {
+  const store = listDesignSystems();
+  const selection = designSystemSelectionSummary({ projectId });
+  return {
+    available: store.systems.map((system) => serializeDesignSystem(system)),
+    default: selection.selected ? serializeDesignSystem(selection.selected) : null,
+    defaultSource: selection.source,
+    globalDefaultId: store.defaultDesignSystemId,
+    projectDefaultId: projectId
+      ? store.projectDefaults[
+          projectId
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '')
+        ] || null
+      : null,
+  };
+}
+
+function designSystemManifest(): string {
+  const systems = listDesignSystems().systems;
+  if (!systems.length) {
+    return 'Available design systems: none uploaded yet. Ask the user to upload a design system before claiming a specific brand, document, or presentation style is configured.';
+  }
+  return [
+    'Available design systems for generated documents, presentations, and artifacts:',
+    ...systems.map(
+      (system) =>
+        `- ${system.name} (id: ${system.id})${system.description ? ` - ${system.description}` : ''}`,
+    ),
+    'Use the project default design system unless the user names a specific system. If the user names a system that is not listed, ask them to upload or select it first.',
+  ].join('\n');
+}
+
+function requestedDesignSystem(value: {
+  designSystemId?: unknown;
+  designSystemName?: unknown;
+}): string | null {
+  return (
+    trimmed(value.designSystemId) ||
+    trimmed(value.designSystemName) ||
+    null
+  );
+}
+
+function selectedDesignSystemForProject(
+  projectId: string,
+  input: {
+    designSystemId?: unknown;
+    designSystemName?: unknown;
+  },
+) {
+  const requested = requestedDesignSystem(input);
+  const selection = designSystemSelectionSummary({
+    projectId,
+    requestedDesignSystem: requested,
+  });
+  if (requested && !selection.selected) {
+    throw new Error('Design system not found');
+  }
+  return selection;
+}
+
 function projectSummary(project: CoworkProject) {
   const files = listCoworkProjectFiles(project);
   const threads = projectThreads(project.id);
@@ -272,6 +370,7 @@ function projectSummary(project: CoworkProject) {
     fileCount: files.length,
     chatCount: threads.length,
     updatedAt: project.updated_at,
+    designSystems: designSystemState(project.id),
     mcpAccess: {
       enabled: servers.length > 0,
       scope: servers.length > 0 ? 'configured' : 'nanocrab-only',
@@ -329,6 +428,17 @@ function validHttpUrl(value: unknown): string | null {
   } catch {
     return null;
   }
+}
+
+function requestUrlOrNull(value: unknown): {
+  url: string | null;
+  invalid: boolean;
+} {
+  if (typeof value !== 'string' || !value.trim()) {
+    return { url: null, invalid: false };
+  }
+  const url = validHttpUrl(value);
+  return { url, invalid: !url };
 }
 
 function coworkRunIntent(run: CoworkRun) {
@@ -512,6 +622,26 @@ function workflowPreviewContent(input: {
   ]
     .filter((line) => line !== '')
     .join('\n');
+}
+
+function matchingPendingExternalWriteApproval(input: {
+  runId: string;
+  action: string;
+  actionPreview: string | null;
+  resourceSummary: string;
+}) {
+  return listApprovals({
+    status: 'pending',
+    kind: 'tool-action',
+    targetType: 'cowork-run',
+    targetId: input.runId,
+  }).find(
+    (approval) =>
+      approval.policyDecisionId === 'cowork-external-write-approval' &&
+      approval.payload?.action === input.action &&
+      approval.actionPreview === input.actionPreview &&
+      approval.resourceSummary === input.resourceSummary,
+  );
 }
 
 function serializeCoworkRun(run: CoworkRun) {
@@ -714,6 +844,79 @@ function appendCoworkRunEvent(
   });
 }
 
+router.get('/design-systems', (_req: Request, res: Response) => {
+  res.json({ designSystems: designSystemState() });
+});
+
+router.post('/design-systems', (req: Request, res: Response) => {
+  try {
+    const designSystem = createDesignSystem({
+      name: req.body.name,
+      description: req.body.description,
+      content: req.body.content,
+      sourceFileName: req.body.sourceFileName,
+    });
+    res.json({
+      designSystem: serializeDesignSystem(designSystem, {
+        includeContent: true,
+      }),
+      designSystems: designSystemState(),
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.patch('/design-systems/default', (req: Request, res: Response) => {
+  try {
+    const designSystemId = trimmed(req.body.designSystemId);
+    setDefaultDesignSystem(designSystemId);
+    res.json({ designSystems: designSystemState() });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.patch('/design-systems/:designSystemId', (req: Request, res: Response) => {
+  try {
+    const designSystem = updateDesignSystem(
+      String(req.params.designSystemId),
+      {
+        name: req.body.name,
+        description: req.body.description,
+        content: req.body.content,
+        sourceFileName: req.body.sourceFileName,
+      },
+    );
+    res.json({
+      designSystem: serializeDesignSystem(designSystem, {
+        includeContent: true,
+      }),
+      designSystems: designSystemState(),
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.delete(
+  '/design-systems/:designSystemId',
+  (req: Request, res: Response) => {
+    const removed = deleteDesignSystem(String(req.params.designSystemId));
+    if (!removed) {
+      res.status(404).json({ error: 'Design system not found' });
+      return;
+    }
+    res.json({ removed: true, designSystems: designSystemState() });
+  },
+);
+
 router.get('/', (_req: Request, res: Response) => {
   try {
     res.json({ projects: getCoworkProjects().map(projectSummary) });
@@ -791,6 +994,27 @@ router.patch('/:id', (req: Request, res: Response) => {
   }
 });
 
+router.patch('/:id/design-system-default', (req: Request, res: Response) => {
+  const project = getCoworkProject(String(req.params.id));
+  if (!project) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  try {
+    const designSystemId = trimmed(req.body.designSystemId);
+    setProjectDefaultDesignSystem(project.id, designSystemId);
+    touchCoworkProject(project.id, new Date().toISOString());
+    res.json({
+      project: projectSummary(getCoworkProject(project.id) || project),
+    });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 router.post('/:id/estimate', (req: Request, res: Response) => {
   const project = getCoworkProject(String(req.params.id));
   if (!project) {
@@ -838,6 +1062,7 @@ router.post('/:id/runs', (req: Request, res: Response) => {
 
   try {
     const now = new Date().toISOString();
+    const designSelection = selectedDesignSystemForProject(project.id, req.body);
     const estimate = estimateCoworkRun({
       ...req.body,
       connectorIds: configuredExternalMcpServers(),
@@ -867,6 +1092,13 @@ router.post('/:id/runs', (req: Request, res: Response) => {
         toolClasses: estimate.toolClasses,
         warnings: estimate.warnings,
         context: estimate.context,
+        designSystem: designSelection.selected
+          ? {
+              id: designSelection.selected.id,
+              name: designSelection.selected.name,
+              source: designSelection.source,
+            }
+          : null,
       }),
       created_at: now,
       updated_at: now,
@@ -901,6 +1133,21 @@ router.post('/:id/runs', (req: Request, res: Response) => {
       }),
       created_at: now,
     });
+    if (designSelection.selected) {
+      createCoworkRunEvent({
+        id: randomUUID(),
+        run_id: run.id,
+        event_order: 2,
+        kind: 'design_system_selected',
+        message: 'Design system selected for generated artifacts.',
+        metadata_json: JSON.stringify({
+          designSystemId: designSelection.selected.id,
+          name: designSelection.selected.name,
+          source: designSelection.source,
+        }),
+        created_at: now,
+      });
+    }
     touchCoworkProject(project.id, now);
     res.json({ run: serializeCoworkRun(run) });
   } catch (err) {
@@ -1649,41 +1896,46 @@ router.post(
       typeof req.body.action === 'string' && req.body.action.trim()
         ? req.body.action.trim()
         : 'external-write';
-    const pending = findPendingApprovalForTarget(
-      'tool-action',
-      'cowork-run',
-      run.id,
-    );
+    const title =
+      typeof req.body.title === 'string' && req.body.title.trim()
+        ? req.body.title.trim()
+        : `Approve ${action}`;
+    const summary =
+      typeof req.body.summary === 'string' && req.body.summary.trim()
+        ? req.body.summary.trim()
+        : 'Approve a Cowork external write before execution.';
+    const actionPreview =
+      typeof req.body.actionPreview === 'string' &&
+      req.body.actionPreview.trim()
+        ? req.body.actionPreview.trim()
+        : null;
+    const resourceSummary =
+      typeof req.body.resourceSummary === 'string' &&
+      req.body.resourceSummary.trim()
+        ? req.body.resourceSummary.trim()
+        : `${project.name}: ${run.title}`;
+    const pending = matchingPendingExternalWriteApproval({
+      runId: run.id,
+      action,
+      actionPreview,
+      resourceSummary,
+    });
     const now = new Date().toISOString();
     try {
       const approval =
         pending ||
         createApproval({
           kind: 'tool-action',
-          title:
-            typeof req.body.title === 'string' && req.body.title.trim()
-              ? req.body.title.trim()
-              : `Approve ${action}`,
-          summary:
-            typeof req.body.summary === 'string' && req.body.summary.trim()
-              ? req.body.summary.trim()
-              : 'Approve a Cowork external write before execution.',
+          title,
+          summary,
           risk: 'high',
           requester: req.user?.username || 'dashboard',
           targetType: 'cowork-run',
           targetId: run.id,
           source: 'cowork-project',
           correlationId: run.id,
-          actionPreview:
-            typeof req.body.actionPreview === 'string' &&
-            req.body.actionPreview.trim()
-              ? req.body.actionPreview.trim()
-              : null,
-          resourceSummary:
-            typeof req.body.resourceSummary === 'string' &&
-            req.body.resourceSummary.trim()
-              ? req.body.resourceSummary.trim()
-              : `${project.name}: ${run.title}`,
+          actionPreview,
+          resourceSummary,
           policyDecisionId: 'cowork-external-write-approval',
           payload: {
             ...(req.body.payload && typeof req.body.payload === 'object'
@@ -1826,6 +2078,11 @@ router.post('/:id/context', (req: Request, res: Response) => {
     res.status(400).json({ error: 'Invalid project file path' });
     return;
   }
+  const sourceUrl = requestUrlOrNull(req.body.url);
+  if (sourceUrl.invalid) {
+    res.status(400).json({ error: 'Context URL must be http:// or https://' });
+    return;
+  }
 
   try {
     const now = new Date().toISOString();
@@ -1835,10 +2092,7 @@ router.post('/:id/context', (req: Request, res: Response) => {
       type,
       title,
       path: relPath,
-      url:
-        typeof req.body.url === 'string' && req.body.url.trim()
-          ? req.body.url.trim()
-          : null,
+      url: sourceUrl.url,
       thread_id:
         typeof req.body.threadId === 'string' && req.body.threadId.trim()
           ? req.body.threadId.trim()
@@ -1892,6 +2146,11 @@ router.patch('/:id/context/:itemId', (req: Request, res: Response) => {
     res.status(400).json({ error: 'Invalid project file path' });
     return;
   }
+  const sourceUrl = requestUrlOrNull(req.body.url);
+  if (sourceUrl.invalid) {
+    res.status(400).json({ error: 'Context URL must be http:// or https://' });
+    return;
+  }
   const now = new Date().toISOString();
   const updated = updateCoworkContextItem(project.id, current.id, {
     type:
@@ -1905,7 +2164,7 @@ router.patch('/:id/context/:itemId', (req: Request, res: Response) => {
     path: relPath,
     url:
       typeof req.body.url === 'string' && req.body.url.trim()
-        ? req.body.url.trim()
+        ? sourceUrl.url || undefined
         : undefined,
     thread_id:
       typeof req.body.threadId === 'string' && req.body.threadId.trim()
@@ -2139,6 +2398,15 @@ router.post('/:id/threads', (req: Request, res: Response) => {
   ensureCoworkProjectFolder(project);
   const files = listCoworkProjectFiles(project);
   const contextItems = getCoworkContextItems(project.id);
+  let designSelection: ReturnType<typeof selectedDesignSystemForProject>;
+  try {
+    designSelection = selectedDesignSystemForProject(project.id, req.body);
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
   const allowedMcpServers = projectThreadMcpServers();
   ensureProjectThreadMcpPermissions(allowedMcpServers);
   const mcpServerContext = allowedMcpServers.length
@@ -2149,6 +2417,12 @@ router.post('/:id/threads', (req: Request, res: Response) => {
     `Project files are mounted read/write at /workspace/extra/project-${project.slug}.`,
     projectFileManifest(files),
     projectContextNotebookManifest(contextItems),
+    designSystemManifest(),
+    designSelection.selected
+      ? buildDesignSystemPromptContext(designSelection.selected, {
+          source: designSelection.source,
+        })
+      : 'No design system default is selected for this project. If the user asks for a branded or styled artifact, ask which uploaded design system to use before generating final output.',
     mcpServerContext,
     'This is a Cowork project chat. You may call approved MCP servers when they help the task, including mail, calendar, document, storage, and custom MCP servers allowed by connector permissions.',
     'For requests like creating a document or summary from the latest emails, checking all emails from a sender, generating a source-backed document, or turning external context into a project artifact, call the relevant approved MCP tools and save durable drafts or summaries in the project workspace. If the relevant MCP tool is not exposed, say what is missing instead of inventing external source results.',

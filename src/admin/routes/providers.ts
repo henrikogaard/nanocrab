@@ -5,7 +5,14 @@ import { readEnvFile } from '../../env.js';
 import { removeEnvVar, updateEnvVar } from '../auth.js';
 import { auditLog } from '../security.js';
 import { getCodexAuthStatus } from '../../codex-auth.js';
-import { isAgentProvider } from '../../agent-provider.js';
+import {
+  DEFAULT_AGENT_MODELS,
+  type AgentProvider,
+  isAgentProvider,
+  isValidAgentModel,
+  providerBaseUrlEnvKey,
+  providerModelEnvKey,
+} from '../../agent-provider.js';
 import { createApproval } from '../../approvals.js';
 import {
   getProviderProfile,
@@ -42,10 +49,13 @@ interface Provider {
   description: string;
   website: string;
   envKey: string; // env var name for the API key
+  baseUrlEnvKey?: string;
   skillFlag?: string; // flag value used by the skill (e.g., --provider fal)
   models?: string[]; // available models
   defaultModel?: string;
   free?: boolean; // has a free tier
+  requiresApiKey?: boolean;
+  agentProviderId?: AgentProvider;
 }
 
 const PROVIDERS: Provider[] = [
@@ -171,6 +181,20 @@ const PROVIDERS: Provider[] = [
     ],
     defaultModel: 'claude-sonnet-4-6',
   },
+  {
+    id: 'openai-compatible',
+    name: 'Custom OpenAI-Compatible',
+    category: 'LLM',
+    description:
+      'User-configured /v1 chat-completions endpoint for local models, self-hosted gateways, or OpenAI-compatible providers.',
+    website: 'https://platform.openai.com/docs/api-reference/chat',
+    envKey: 'OPENAI_COMPATIBLE_API_KEY',
+    baseUrlEnvKey: 'OPENAI_COMPATIBLE_BASE_URL',
+    models: ['model-id', 'qwen3-coder', 'codestral'],
+    defaultModel: DEFAULT_AGENT_MODELS['openai-compatible'],
+    requiresApiKey: false,
+    agentProviderId: 'openai-compatible',
+  },
 
   // OpenAI OAuth (Codex only)
   {
@@ -230,20 +254,55 @@ function savePreferences(prefs: ProviderPreferences): void {
 
 // List all providers with status
 router.get('/', (_req: Request, res: Response) => {
-  const allEnvKeys = [...new Set(PROVIDERS.map((p) => p.envKey))];
+  const allEnvKeys = [
+    ...new Set(
+      PROVIDERS.flatMap((p) => [
+        p.envKey,
+        p.baseUrlEnvKey,
+        p.agentProviderId ? providerModelEnvKey(p.agentProviderId) : undefined,
+        p.agentProviderId
+          ? providerBaseUrlEnvKey(p.agentProviderId)
+          : undefined,
+      ]).filter((key): key is string => Boolean(key)),
+    ),
+  ];
   const envVars = readEnvFile(allEnvKeys);
   const codexAuth = getCodexAuthStatus();
 
-  const providers = PROVIDERS.map((p) => ({
-    ...p,
-    configured:
+  const providers = PROVIDERS.map((p) => {
+    const baseUrl =
+      (p.agentProviderId &&
+        (process.env[providerBaseUrlEnvKey(p.agentProviderId)] ||
+          envVars[providerBaseUrlEnvKey(p.agentProviderId)])) ||
+      (p.baseUrlEnvKey
+        ? process.env[p.baseUrlEnvKey] || envVars[p.baseUrlEnvKey]
+        : '') ||
+      '';
+    const configuredModel =
+      (p.agentProviderId &&
+        (process.env[providerModelEnvKey(p.agentProviderId)] ||
+          envVars[providerModelEnvKey(p.agentProviderId)])) ||
+      p.defaultModel;
+    const models = [
+      ...new Set([configuredModel, ...(p.models || [])].filter(Boolean)),
+    ] as string[];
+    const configured =
       p.id === 'openai-oauth'
         ? codexAuth.configured
         : p.id === 'openai-codex'
           ? codexAuth.configured ||
             !!(process.env[p.envKey] || envVars[p.envKey])
-          : !!(process.env[p.envKey] || envVars[p.envKey]),
-  }));
+          : p.requiresApiKey === false
+            ? Boolean(baseUrl)
+            : !!(process.env[p.envKey] || envVars[p.envKey]);
+    return {
+      ...p,
+      configured,
+      baseUrl,
+      models,
+      defaultModel: configuredModel,
+    };
+  });
 
   const prefs = loadPreferences();
   const categories = groupByCategory(providers);
@@ -261,6 +320,48 @@ router.post('/:id/enable', (req: Request, res: Response) => {
   }
 
   const { apiKey } = req.body;
+  if (provider.id === 'openai-compatible') {
+    const baseUrl =
+      typeof req.body.baseUrl === 'string' ? req.body.baseUrl.trim() : '';
+    const model =
+      typeof req.body.model === 'string' && req.body.model.trim()
+        ? req.body.model.trim()
+        : DEFAULT_AGENT_MODELS['openai-compatible'];
+    if (!baseUrl) {
+      res.status(400).json({ error: 'Base URL required' });
+      return;
+    }
+    try {
+      const parsed = new URL(baseUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        throw new Error('Base URL must use http or https');
+      }
+    } catch {
+      res.status(400).json({ error: 'Base URL must be a valid URL' });
+      return;
+    }
+    if (!isValidAgentModel('openai-compatible', model)) {
+      res.status(400).json({ error: 'Model contains unsupported characters' });
+      return;
+    }
+
+    updateEnvVar('OPENAI_COMPATIBLE_BASE_URL', baseUrl.replace(/\/+$/, ''));
+    updateEnvVar(providerModelEnvKey('openai-compatible'), model);
+    if (typeof apiKey === 'string' && apiKey.trim()) {
+      updateEnvVar(provider.envKey, apiKey.trim());
+    }
+    auditLog(
+      req,
+      'provider_enabled',
+      `${id} (${baseUrl.replace(/\/+$/, '')}, ${model})`,
+    );
+    res.json({
+      ok: true,
+      message: `${provider.name} endpoint saved. Restart active sessions or switch provider to use it.`,
+    });
+    return;
+  }
+
   if (!apiKey) {
     res.status(400).json({ error: 'API key required' });
     return;
@@ -290,6 +391,11 @@ router.post('/:id/disable', (req: Request, res: Response) => {
   }
 
   removeEnvVar(provider.envKey);
+  if (provider.id === 'openai-compatible') {
+    removeEnvVar('OPENAI_COMPATIBLE_BASE_URL');
+    removeEnvVar(providerModelEnvKey('openai-compatible'));
+    removeEnvVar(providerBaseUrlEnvKey('openai-compatible'));
+  }
   auditLog(req, 'provider_disabled', `${id} (${provider.envKey})`);
   res.json({ ok: true, message: `${provider.name} disabled.` });
 });

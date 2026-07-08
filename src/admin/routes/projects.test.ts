@@ -177,6 +177,138 @@ describe('/api/projects', () => {
     ]);
   });
 
+  it('uploads design systems and applies global, project, and run selections', async () => {
+    const result = await withServer(async (base) => {
+      const designRes = await fetch(`${base}/api/projects/design-systems`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Investor Deck',
+          description: 'Presentation system for board-ready decks.',
+          content:
+            '# Investor Deck\n\nUse sparse slides, restrained color, and source-backed claims.',
+          sourceFileName: 'investor-deck.md',
+        }),
+      });
+      expect(designRes.status).toBe(200);
+      const designPayload = (await designRes.json()) as {
+        designSystem: { id: string; name: string };
+      };
+
+      const globalDefaultRes = await fetch(
+        `${base}/api/projects/design-systems/default`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            designSystemId: designPayload.designSystem.id,
+          }),
+        },
+      );
+      expect(globalDefaultRes.status).toBe(200);
+
+      const createRes = await fetch(`${base}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Deck Project' }),
+      });
+      const { project } = (await createRes.json()) as {
+        project: { id: string };
+      };
+
+      const projectDefaultRes = await fetch(
+        `${base}/api/projects/${project.id}/design-system-default`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            designSystemId: designPayload.designSystem.id,
+          }),
+        },
+      );
+      expect(projectDefaultRes.status).toBe(200);
+
+      const chatRes = await fetch(
+        `${base}/api/projects/${project.id}/threads`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: 'Deck draft' }),
+        },
+      );
+      expect(chatRes.status).toBe(200);
+      const chat = (await chatRes.json()) as { id: string };
+
+      const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Create investor deck',
+          prompt: 'Create the presentation artifact.',
+          designSystemId: designPayload.designSystem.id,
+        }),
+      });
+      expect(runRes.status).toBe(200);
+      const runPayload = (await runRes.json()) as {
+        run: {
+          stats: { designSystem?: { id: string; name: string; source: string } };
+          events: Array<{
+            kind: string;
+            metadata: { designSystemId?: string; name?: string };
+          }>;
+        };
+      };
+
+      const detailRes = await fetch(`${base}/api/projects/${project.id}`);
+      expect(detailRes.status).toBe(200);
+      const detail = (await detailRes.json()) as {
+        project: {
+          designSystems: {
+            default: { id: string; name: string } | null;
+            globalDefaultId: string | null;
+            projectDefaultId: string | null;
+            available: Array<{ id: string; name: string }>;
+          };
+        };
+      };
+
+      return {
+        designSystem: designPayload.designSystem,
+        detail,
+        chat,
+        run: runPayload.run,
+      };
+    });
+
+    expect(result.detail.project.designSystems).toMatchObject({
+      default: {
+        id: result.designSystem.id,
+        name: 'Investor Deck',
+      },
+      globalDefaultId: result.designSystem.id,
+      projectDefaultId: result.designSystem.id,
+      available: [expect.objectContaining({ id: result.designSystem.id })],
+    });
+    expect(result.run.stats.designSystem).toMatchObject({
+      id: result.designSystem.id,
+      name: 'Investor Deck',
+      source: 'explicit',
+    });
+    expect(result.run.events).toContainEqual(
+      expect.objectContaining({
+        kind: 'design_system_selected',
+        metadata: expect.objectContaining({
+          designSystemId: result.designSystem.id,
+          name: 'Investor Deck',
+        }),
+      }),
+    );
+    expect(getRegisteredGroup(result.chat.id)?.containerConfig?.restrictions)
+      .toContain('<design_system source="project-default"');
+    expect(getRegisteredGroup(result.chat.id)?.containerConfig?.restrictions)
+      .toContain('Investor Deck');
+  });
+
   it('lists files and project chat history in project detail', async () => {
     const result = await withServer(async (base) => {
       const createRes = await fetch(`${base}/api/projects`, {
@@ -677,6 +809,68 @@ describe('/api/projects', () => {
     );
   });
 
+  it('rejects unsafe project context source URLs', async () => {
+    await withServer(async (base) => {
+      const createRes = await fetch(`${base}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Unsafe Context URL Project' }),
+      });
+      const { project } = (await createRes.json()) as {
+        project: { id: string };
+      };
+
+      const unsafeCreateRes = await fetch(
+        `${base}/api/projects/${project.id}/context`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            type: 'source-link',
+            title: 'Unsafe source',
+            url: 'javascript:alert(1)',
+          }),
+        },
+      );
+      expect(unsafeCreateRes.status).toBe(400);
+      await expect(unsafeCreateRes.json()).resolves.toEqual(
+        expect.objectContaining({
+          error: expect.stringContaining('http:// or https://'),
+        }),
+      );
+
+      const safeCreateRes = await fetch(
+        `${base}/api/projects/${project.id}/context`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            type: 'source-link',
+            title: 'Safe source',
+            url: 'https://example.com/source',
+          }),
+        },
+      );
+      expect(safeCreateRes.status).toBe(200);
+      const safePayload = (await safeCreateRes.json()) as {
+        item: { id: string; url: string };
+      };
+      expect(safePayload.item.url).toBe('https://example.com/source');
+
+      const unsafePatchRes = await fetch(
+        `${base}/api/projects/${project.id}/context/${safePayload.item.id}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            url: 'data:text/html,<script>alert(1)</script>',
+          }),
+        },
+      );
+      expect(unsafePatchRes.status).toBe(400);
+    });
+  });
+
   it('removes context notebook entries without deleting source files', async () => {
     const result = await withServer(async (base) => {
       const createRes = await fetch(`${base}/api/projects`, {
@@ -1075,6 +1269,80 @@ describe('/api/projects', () => {
         }),
       }),
     ]);
+  });
+
+  it('does not reuse pending external-write approvals for different actions', async () => {
+    const result = await withServer(async (base) => {
+      const createRes = await fetch(`${base}/api/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Distinct Approval Project' }),
+      });
+      const { project } = (await createRes.json()) as {
+        project: { id: string };
+      };
+
+      const runRes = await fetch(`${base}/api/projects/${project.id}/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'External delivery',
+          prompt: 'Prepare external writes but keep them approval-gated.',
+        }),
+      });
+      const { run } = (await runRes.json()) as { run: { id: string } };
+
+      const firstRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${run.id}/approvals/external-write`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            action: 'publish-document',
+            title: 'Publish document',
+            resourceSummary: 'draft.md -> Docs',
+            actionPreview: 'docs.create({ path: "draft.md" })',
+          }),
+        },
+      );
+      expect(firstRes.status).toBe(200);
+      const first = (await firstRes.json()) as {
+        approval: { id: string };
+        reused: boolean;
+      };
+
+      const secondRes = await fetch(
+        `${base}/api/projects/${project.id}/runs/${run.id}/approvals/external-write`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            action: 'send-email',
+            title: 'Send email',
+            resourceSummary: 'brief.md -> customer@example.com',
+            actionPreview: 'gmail.send({ to: "customer@example.com" })',
+          }),
+        },
+      );
+      expect(secondRes.status).toBe(200);
+      const second = (await secondRes.json()) as {
+        approval: { id: string };
+        reused: boolean;
+      };
+
+      return { run, first, second };
+    });
+
+    expect(result.first.reused).toBe(false);
+    expect(result.second.reused).toBe(false);
+    expect(result.second.approval.id).not.toBe(result.first.approval.id);
+    expect(
+      listApprovals({
+        kind: 'tool-action',
+        targetType: 'cowork-run',
+        targetId: result.run.id,
+      }),
+    ).toHaveLength(2);
   });
 
   it('scopes project chat MCP access to configured connector servers', async () => {

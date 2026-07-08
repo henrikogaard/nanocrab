@@ -46,10 +46,16 @@ const CODING_JOB_PROVIDERS = new Set<AgentProvider>([
   'opencode',
   'openrouter',
   'ollama',
+  'openai-compatible',
 ]);
 type CodingProvider = Extract<
   AgentProvider,
-  'claude' | 'codex' | 'opencode' | 'openrouter' | 'ollama'
+  | 'claude'
+  | 'codex'
+  | 'opencode'
+  | 'openrouter'
+  | 'ollama'
+  | 'openai-compatible'
 >;
 
 export type CodingJobStatus =
@@ -817,6 +823,9 @@ function buildCodingContainerEnv(
     'OPENROUTER_API_KEY',
     'OPENROUTER_BASE_URL',
     'OLLAMA_BASE_URL',
+    'OPENAI_COMPATIBLE_API_KEY',
+    'OPENAI_COMPATIBLE_BASE_URL',
+    'DEFAULT_OPENAI_COMPATIBLE_BASE_URL',
   ]);
   const env: Record<string, string> = {
     TZ: TIMEZONE,
@@ -873,6 +882,42 @@ function buildCodingContainerEnv(
     env.OLLAMA_BASE_URL =
       envValue(envFileValues, 'OLLAMA_BASE_URL') ||
       'http://host.docker.internal:11434/v1';
+  }
+  if (job.provider === 'openai-compatible') {
+    const customBaseUrl =
+      envValue(envFileValues, 'OPENAI_COMPATIBLE_BASE_URL') ||
+      envValue(envFileValues, 'DEFAULT_OPENAI_COMPATIBLE_BASE_URL');
+    if (customBaseUrl) {
+      const customProxyUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/openai-compatible`;
+      env.OPENAI_COMPATIBLE_BASE_URL = customProxyUrl;
+      env.AGENT_PROVIDER_BASE_URL = customProxyUrl;
+      if (envValue(envFileValues, 'OPENAI_COMPATIBLE_API_KEY')) {
+        env.OPENAI_COMPATIBLE_API_KEY = 'placeholder';
+        env.AGENT_PROVIDER_API_KEY = 'placeholder';
+      }
+      const modelId = job.model.replace(/^openai-compatible\//, '');
+      env.OPENCODE_CONFIG_CONTENT = JSON.stringify({
+        $schema: 'https://opencode.ai/config.json',
+        model: `openai-compatible/${modelId}`,
+        share: 'disabled',
+        autoupdate: 'notify',
+        provider: {
+          'openai-compatible': {
+            npm: '@ai-sdk/openai-compatible',
+            name: 'Custom OpenAI-Compatible',
+            options: {
+              apiKey: env.OPENAI_COMPATIBLE_API_KEY
+                ? '{env:OPENAI_COMPATIBLE_API_KEY}'
+                : undefined,
+              baseURL: '{env:OPENAI_COMPATIBLE_BASE_URL}',
+            },
+            models: {
+              [modelId]: { name: modelId },
+            },
+          },
+        },
+      });
+    }
   }
 
   return env;
@@ -948,6 +993,14 @@ function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
       '      *) OLLAMA_JOB_MODEL="ollama/$OLLAMA_JOB_MODEL" ;;',
       '    esac',
       '    opencode run --model "$OLLAMA_JOB_MODEL" "$PROMPT"',
+      '    ;;',
+      '  openai-compatible)',
+      '    OPENAI_COMPATIBLE_JOB_MODEL="$JOB_MODEL"',
+      '    case "$OPENAI_COMPATIBLE_JOB_MODEL" in',
+      '      openai-compatible/*) ;;',
+      '      *) OPENAI_COMPATIBLE_JOB_MODEL="openai-compatible/$OPENAI_COMPATIBLE_JOB_MODEL" ;;',
+      '    esac',
+      '    opencode run --model "$OPENAI_COMPATIBLE_JOB_MODEL" "$PROMPT"',
       '    ;;',
       '  claude)',
       '    claude -p --model "$JOB_MODEL" --output-format text --dangerously-skip-permissions --max-budget-usd "$CODING_JOB_MAX_BUDGET_USD" "$PROMPT"',

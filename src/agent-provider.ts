@@ -223,18 +223,19 @@ const CODING_PROVIDER_IDS = new Set<AgentProvider>([
   'opencode',
   'openrouter',
   'ollama',
+  'openai-compatible',
 ]);
 
-const OLLAMA_CODING_MODEL_PATTERNS = [/^codestral(?::|$)/i, /code/i, /coder/i];
+const CODE_CAPABLE_MODEL_PATTERNS = [/^codestral(?::|$)/i, /code/i, /coder/i];
 
 export function isCodingCapableProvider(
   provider: AgentProvider,
   model?: string,
 ): boolean {
   if (!CODING_PROVIDER_IDS.has(provider)) return false;
-  if (provider !== 'ollama') return true;
-  const selectedModel = model || DEFAULT_AGENT_MODELS.ollama;
-  return OLLAMA_CODING_MODEL_PATTERNS.some((pattern) =>
+  if (provider !== 'ollama' && provider !== 'openai-compatible') return true;
+  const selectedModel = model || DEFAULT_AGENT_MODELS[provider];
+  return CODE_CAPABLE_MODEL_PATTERNS.some((pattern) =>
     pattern.test(selectedModel),
   );
 }
@@ -247,6 +248,10 @@ export function codingProviderUnavailableReason(
   if (provider === 'ollama') {
     const selectedModel = model || DEFAULT_AGENT_MODELS.ollama;
     return `Ollama model "${selectedModel}" is chat/local-task only. Choose a code-capable local model such as codestral for coding jobs.`;
+  }
+  if (provider === 'openai-compatible') {
+    const selectedModel = model || DEFAULT_AGENT_MODELS['openai-compatible'];
+    return `OpenAI-compatible model "${selectedModel}" is chat/local-task only. Choose a code-capable OpenAI-compatible model such as qwen3-coder or codestral for coding jobs.`;
   }
   return `${provider} is not a coding-job runtime`;
 }
@@ -264,12 +269,24 @@ export function getAgentProviderDefinition(
   return AGENT_PROVIDER_DEFINITIONS[provider];
 }
 
-export function providerModelEnvKey(provider: AgentProvider): string {
+function providerEnvSlug(provider: AgentProvider): string {
+  return provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
+}
+
+function legacyProviderModelEnvKey(provider: AgentProvider): string {
   return `DEFAULT_${provider.toUpperCase()}_MODEL`;
 }
 
-export function providerBaseUrlEnvKey(provider: AgentProvider): string {
+function legacyProviderBaseUrlEnvKey(provider: AgentProvider): string {
   return `DEFAULT_${provider.toUpperCase()}_BASE_URL`;
+}
+
+export function providerModelEnvKey(provider: AgentProvider): string {
+  return `DEFAULT_${providerEnvSlug(provider)}_MODEL`;
+}
+
+export function providerBaseUrlEnvKey(provider: AgentProvider): string {
+  return `DEFAULT_${providerEnvSlug(provider)}_BASE_URL`;
 }
 
 export function providerApiKeyEnvKey(
@@ -308,8 +325,14 @@ export function getAgentProviderConfig(): {
   const keys = [
     'DEFAULT_PROVIDER',
     'DEFAULT_MODEL',
-    ...AGENT_PROVIDERS.map(providerModelEnvKey),
-    ...AGENT_PROVIDERS.map(providerBaseUrlEnvKey),
+    ...AGENT_PROVIDERS.flatMap((provider) => [
+      providerModelEnvKey(provider),
+      legacyProviderModelEnvKey(provider),
+    ]),
+    ...AGENT_PROVIDERS.flatMap((provider) => [
+      providerBaseUrlEnvKey(provider),
+      legacyProviderBaseUrlEnvKey(provider),
+    ]),
     ...AGENT_PROVIDERS.flatMap((provider) => {
       const definition = AGENT_PROVIDER_DEFINITIONS[provider];
       return [definition.baseUrlEnvKey].filter(Boolean) as string[];
@@ -323,7 +346,10 @@ export function getAgentProviderConfig(): {
 
   for (const p of AGENT_PROVIDERS) {
     const providerSpecific =
-      env[providerModelEnvKey(p)] || process.env[providerModelEnvKey(p)];
+      env[providerModelEnvKey(p)] ||
+      process.env[providerModelEnvKey(p)] ||
+      env[legacyProviderModelEnvKey(p)] ||
+      process.env[legacyProviderModelEnvKey(p)];
     const legacy =
       p === provider ? env.DEFAULT_MODEL || process.env.DEFAULT_MODEL : '';
     const candidate = providerSpecific || legacy || DEFAULT_AGENT_MODELS[p];
@@ -335,6 +361,8 @@ export function getAgentProviderConfig(): {
     const baseUrl =
       env[providerBaseUrlEnvKey(p)] ||
       process.env[providerBaseUrlEnvKey(p)] ||
+      env[legacyProviderBaseUrlEnvKey(p)] ||
+      process.env[legacyProviderBaseUrlEnvKey(p)] ||
       (definition.baseUrlEnvKey
         ? env[definition.baseUrlEnvKey] || process.env[definition.baseUrlEnvKey]
         : '') ||
@@ -395,6 +423,14 @@ export function getProviderAvailability(): Record<AgentProvider, boolean> {
 
     if (provider === 'ollama') {
       availability[provider] = Boolean(config.baseUrlsByProvider.ollama);
+      continue;
+    }
+
+    if (
+      definition.runtime === 'openai-compatible' &&
+      definition.requiresAuth === false
+    ) {
+      availability[provider] = Boolean(config.baseUrlsByProvider[provider]);
       continue;
     }
 

@@ -42,6 +42,25 @@ describe('workspace intent resolver', () => {
     });
   });
 
+  it('does not treat project wording as a PR code target', () => {
+    const result = resolveWorkspaceIntent({
+      prompt: 'Check Cowork for project AuroraDocs and send me the brief.',
+      channel: 'signal',
+      projects,
+      threads,
+    });
+
+    expect(result).toMatchObject({
+      kind: 'cowork',
+      confidence: 'high',
+      target: {
+        projectId: 'project-auroradocs',
+        projectName: 'AuroraDocs',
+      },
+      clarificationPrompt: null,
+    });
+  });
+
   it('routes repository issue prompts to Code with approval risk noted', () => {
     const result = resolveWorkspaceIntent({
       prompt: 'Fix GitHub issue #104 in nanocrab and prepare the PR plan.',

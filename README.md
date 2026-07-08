@@ -139,16 +139,18 @@ stored in `store/coding-jobs.json`, registered repos live in
 `store/coding-repos.json`, and workspaces live under
 `data/coding-workspaces/jobs/`.
 
-Coding jobs support `claude`, `codex`, `opencode`, `openrouter`, and
-code-capable Ollama models. `/api/agents/providers` is the source of truth for
-provider/model coding capability, so Agents and Autofix selectors rely on
-per-model `codingCapable` metadata instead of provider-name allow/deny lists.
-OpenRouter and local Ollama coding jobs run through the agentic OpenCode shell
+Coding jobs support `claude`, `codex`, `opencode`, `openrouter`,
+code-capable Ollama models, and code-capable custom OpenAI-compatible models.
+`/api/agents/providers` is the source of truth for provider/model coding
+capability, so Agents and Autofix selectors rely on per-model `codingCapable`
+metadata instead of provider-name allow/deny lists. OpenRouter, local Ollama,
+and custom OpenAI-compatible coding jobs run through the agentic OpenCode shell
 so repository work still edits files in the isolated job workspace. Ollama's
-default chat models remain chat/local-task oriented; choose an explicit code
-model such as `codestral` before assigning local coding work. Google and other
-OpenAI-compatible chat providers stay in the normal agent path unless a
-dedicated coding runtime is added.
+default chat models and generic custom model ids remain chat/local-task
+oriented; choose an explicit code model such as `codestral` or `qwen3-coder`
+before assigning local/custom coding work. The AI Providers dashboard can save
+a custom `/v1` base URL, optional key, and model, then Settings can make
+`openai-compatible` the active default for new agent sessions.
 
 ### Agent Profiles
 

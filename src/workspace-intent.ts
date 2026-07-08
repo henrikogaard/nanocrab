@@ -98,7 +98,14 @@ function parseFilePath(prompt: string): string | null {
 }
 
 function hasAny(promptText: string, terms: string[]): boolean {
-  return terms.some((term) => promptText.includes(term));
+  return terms.some((term) => {
+    const normalizedTerm = normalizeText(term);
+    if (!normalizedTerm) return false;
+    if (normalizedTerm.length <= 2) {
+      return ` ${promptText} `.includes(` ${normalizedTerm} `);
+    }
+    return promptText.includes(normalizedTerm);
+  });
 }
 
 function clarification(

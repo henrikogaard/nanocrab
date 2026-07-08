@@ -75,6 +75,8 @@ router.post('/jobs', requireRole('admin'), (req: Request, res: Response) => {
       outputFormats: Array.isArray(req.body.outputFormats)
         ? req.body.outputFormats
         : undefined,
+      designSystemId: req.body.designSystemId,
+      designSystemName: req.body.designSystemName,
       deliverablesDir: req.body.deliverablesDir,
       requireOutlineApproval: req.body.requireOutlineApproval,
       requireDeliveryApproval: req.body.requireDeliveryApproval,

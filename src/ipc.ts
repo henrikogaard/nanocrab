@@ -402,6 +402,8 @@ export async function processTaskIpc(
     request?: string;
     outputFormats?: string[];
     sourceScopes?: string[];
+    designSystemId?: string;
+    designSystemName?: string;
     urls?: string[];
     projectId?: string;
     projectSlug?: string;
@@ -894,6 +896,8 @@ export async function processTaskIpc(
           requester: sourceGroup,
           outputFormats: data.outputFormats,
           sourceScopes: data.sourceScopes,
+          designSystemId: data.designSystemId,
+          designSystemName: data.designSystemName,
         });
         writeIpcOk(sourceGroup, data.requestId, job);
       } catch (err) {

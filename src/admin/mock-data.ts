@@ -1219,6 +1219,15 @@ const providerDefinitions = {
     defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
     envKey: 'GEMINI_API_KEY',
   },
+  'openai-compatible': {
+    id: 'openai-compatible',
+    name: 'Custom OpenAI-Compatible',
+    description: 'OpenAI-compatible endpoint with a configurable base URL.',
+    runtime: 'openai-compatible',
+    defaultBaseUrl: 'http://127.0.0.1:8080/v1',
+    envKey: 'OPENAI_COMPATIBLE_API_KEY',
+    requiresAuth: false,
+  },
 };
 
 const providerInfo = {
@@ -1231,11 +1240,13 @@ const providerInfo = {
     ollama: 'gemma4:e2b',
     openrouter: 'openrouter/auto',
     google: 'gemini-2.5-flash',
+    'openai-compatible': 'qwen3-coder',
   },
   baseUrlsByProvider: {
     ollama: 'http://127.0.0.1:11434/v1',
     openrouter: 'https://openrouter.ai/api/v1',
     google: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    'openai-compatible': 'http://127.0.0.1:8080/v1',
   },
   definitions: providerDefinitions,
   models: {
@@ -1245,6 +1256,7 @@ const providerInfo = {
     ollama: ['gemma4:e2b', 'llama3.1', 'mistral'],
     openrouter: ['openrouter/auto', 'anthropic/claude-sonnet-4.5'],
     google: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+    'openai-compatible': ['qwen3-coder', 'codestral', 'model-id'],
   },
   available: {
     claude: true,
@@ -1253,6 +1265,7 @@ const providerInfo = {
     ollama: true,
     openrouter: true,
     google: true,
+    'openai-compatible': true,
   },
   purposes: [
     { id: 'default_chat', label: 'Chat', toolPolicy: 'read-only' },
@@ -1975,6 +1988,20 @@ function providers(): JsonValue {
       website: 'https://ollama.com',
       free: true,
       models: ['gemma4:e2b', 'llama3.1'],
+    },
+    {
+      id: 'openai-compatible',
+      name: 'Custom OpenAI-Compatible',
+      category: 'LLM',
+      description: 'Bring any OpenAI-compatible endpoint for agents and coding.',
+      configured: true,
+      envKey: 'OPENAI_COMPATIBLE_API_KEY',
+      baseUrlEnvKey: 'OPENAI_COMPATIBLE_BASE_URL',
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      defaultModel: 'qwen3-coder',
+      website: 'https://platform.openai.com/docs/api-reference',
+      free: true,
+      models: ['qwen3-coder', 'codestral', 'model-id'],
     },
     {
       id: 'whisper',
@@ -5933,6 +5960,17 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         name: 'Ollama',
         available: true,
         models: [{ id: 'gemma4:e2b', label: 'Gemma e2b' }],
+      },
+      {
+        id: 'openai-compatible',
+        name: 'Custom OpenAI-Compatible',
+        available: true,
+        codingCapable: true,
+        defaultModel: 'qwen3-coder',
+        models: [
+          { id: 'qwen3-coder', label: 'qwen3-coder', codingCapable: true },
+          { id: 'codestral', label: 'codestral', codingCapable: true },
+        ],
       },
     ];
   }

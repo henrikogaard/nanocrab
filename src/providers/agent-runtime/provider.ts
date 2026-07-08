@@ -1,6 +1,7 @@
 import {
   AGENT_PROVIDER_DEFINITIONS,
   isValidAgentModel,
+  providerBaseUrlEnvKey,
   type AgentProvider,
 } from '../../agent-provider.js';
 import { readEnvFile } from '../../env.js';
@@ -143,7 +144,7 @@ function envValue(key?: string): string {
 
 function providerBaseUrl(provider: AgentProvider): string {
   const definition = AGENT_PROVIDER_DEFINITIONS[provider];
-  const specificKey = `DEFAULT_${provider.toUpperCase()}_BASE_URL`;
+  const specificKey = providerBaseUrlEnvKey(provider);
   return (
     envValue(specificKey) ||
     envValue(definition.baseUrlEnvKey) ||

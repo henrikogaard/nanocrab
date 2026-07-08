@@ -14,6 +14,10 @@ import {
 import { listJournalEntryRecords, findJournalEvents } from './journal-store.js';
 import { listMemoryRecords } from './memory-store.js';
 import { ProviderPurpose } from './provider-router.js';
+import {
+  designSystemSelectionSummary,
+  type DesignSystem,
+} from './design-systems.js';
 
 export type ReportJobStatus =
   | 'outline_ready'
@@ -31,6 +35,7 @@ export interface ReportJob {
   providerProfileId: ProviderPurpose;
   sourceScopes: string[];
   outputFormats: string[];
+  designSystemId: string | null;
   deliverablesDir: string;
   requireOutlineApproval: boolean;
   requireDeliveryApproval: boolean;
@@ -51,6 +56,8 @@ export interface CreateReportJobInput {
   providerProfileId?: ProviderPurpose;
   sourceScopes?: string[];
   outputFormats?: string[];
+  designSystemId?: string;
+  designSystemName?: string;
   deliverablesDir?: string;
   requireOutlineApproval?: boolean;
   requireDeliveryApproval?: boolean;
@@ -173,6 +180,11 @@ function ensureReportApproval(job: ReportJob, kind: ApprovalKind): void {
 function composeMarkdown(job: ReportJob): void {
   const collected = collectSources(job);
   job.citations = collected.citations;
+  const designSystem = job.designSystemId
+    ? designSystemSelectionSummary({
+        requestedDesignSystem: job.designSystemId,
+      }).selected
+    : null;
   const citations = collected.citations.length
     ? collected.citations
         .map(
@@ -192,6 +204,7 @@ function composeMarkdown(job: ReportJob): void {
     job.request,
     '',
     ...collected.sections,
+    ...designSystemMarkdownSection(designSystem),
     '',
     '## Recommended Follow-Up',
     '',
@@ -202,6 +215,19 @@ function composeMarkdown(job: ReportJob): void {
       ? `## Sources\n\n${citations}`
       : '## Sources\n\nNo citations available.',
   ].join('\n');
+}
+
+function designSystemMarkdownSection(system: DesignSystem | null): string[] {
+  if (!system) return [];
+  return [
+    '',
+    '## Design System',
+    '',
+    `Selected: ${system.name}`,
+    system.description ? `Description: ${system.description}` : '',
+    '',
+    system.content,
+  ].filter((line) => line !== '');
 }
 
 async function writeDocx(filePath: string, markdown: string): Promise<void> {
@@ -266,6 +292,15 @@ export function getReportJob(id: string): ReportJob | undefined {
 
 export function createReportJob(input: CreateReportJobInput): ReportJob {
   const now = new Date().toISOString();
+  const designSystemSelection = designSystemSelectionSummary({
+    requestedDesignSystem: input.designSystemId || input.designSystemName,
+  });
+  if (
+    (input.designSystemId || input.designSystemName) &&
+    !designSystemSelection.selected
+  ) {
+    throw new Error('Design system not found');
+  }
   const job: ReportJob = {
     id: `report-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
     title:
@@ -281,6 +316,7 @@ export function createReportJob(input: CreateReportJobInput): ReportJob {
     outputFormats: input.outputFormats?.length
       ? input.outputFormats
       : ['markdown'],
+    designSystemId: designSystemSelection.selected?.id || null,
     deliverablesDir:
       input.deliverablesDir || path.join(STORE_DIR, 'deliverables'),
     requireOutlineApproval: input.requireOutlineApproval !== false,

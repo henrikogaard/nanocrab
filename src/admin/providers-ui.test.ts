@@ -161,6 +161,26 @@ describe('AI Providers routing cockpit UI', () => {
     expect(actionBlock).not.toContain("toast(r.error || 'Failed', 'error')");
   });
 
+  it('surfaces custom OpenAI-compatible endpoint controls in the provider catalog', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const catalog = providerCatalogSource(source);
+    const actionBlock = source.slice(
+      source.indexOf('window.copyProviderRoutingBrief'),
+      source.indexOf('function reportStatusBadge'),
+    );
+
+    expect(catalog).toContain("p.id === 'openai-compatible'");
+    expect(catalog).toContain('provider-endpoint-fields');
+    expect(catalog).toContain('provider-openai-compatible-base-url');
+    expect(catalog).toContain('provider-openai-compatible-model');
+    expect(catalog).toContain('provider-openai-compatible-api-key');
+    expect(catalog).toContain('enableOpenAiCompatibleProvider');
+    expect(actionBlock).toContain('window.enableOpenAiCompatibleProvider');
+    expect(actionBlock).toContain('baseUrl');
+    expect(actionBlock).toContain('model');
+    expect(actionBlock).toContain('apiKey');
+  });
+
   it('uses class-based provider catalog rows', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
@@ -176,6 +196,7 @@ describe('AI Providers routing cockpit UI', () => {
     expect(catalog).not.toContain('style="display:flex;gap:6px');
     expect(styleSource).toContain('.provider-catalog-row');
     expect(styleSource).toContain('.provider-catalog-row.is-last');
+    expect(styleSource).toContain('.provider-endpoint-fields');
     expect(styleSource).toContain('.provider-website-link:hover');
   });
 

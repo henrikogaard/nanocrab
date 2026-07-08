@@ -107,6 +107,7 @@ Common examples:
 ```bash
 npx tsx setup/index.ts --step provider -- --provider=codex --model=gpt-5.4
 npx tsx setup/index.ts --step provider -- --provider=ollama --model=gemma4:e2b --base-url=http://127.0.0.1:11434/v1
+npx tsx setup/index.ts --step provider -- --provider=openai-compatible --model=qwen3-coder --base-url=http://127.0.0.1:8080/v1
 npx tsx setup/index.ts --step admin -- --username admin --password 'change-me' --domain nanocrab.example.com --port 9743
 npx tsx setup/index.ts --step verify
 ```

@@ -968,7 +968,7 @@ router.get(
       const envKey = providerApiKeyEnvKey(provider);
       const envFileValues = envKey ? readEnvFile([envKey]) : {};
       const apiKey = envKey ? process.env[envKey] || envFileValues[envKey] : '';
-      if (envKey) {
+      if (envKey && definition.requiresAuth !== false) {
         checks.push({
           id: 'api-key',
           label: `${definition.name} API key`,
@@ -979,7 +979,7 @@ router.get(
         });
       }
 
-      if (baseUrl && (provider === 'ollama' || apiKey)) {
+      if (baseUrl && (provider === 'ollama' || apiKey || definition.requiresAuth === false)) {
         const modelsCheck = await fetchProviderModels(baseUrl, apiKey);
         checks.push({
           id: 'models-endpoint',
