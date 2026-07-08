@@ -1,14 +1,13 @@
 // NanoCrab Admin - Dashboard Page
 
 function dashboardOperatingBriefText(data) {
-  const priorityItems = data.priorityItems || [];
   const workspaceLaneItems = data.workspaceLaneItems || [];
   const dailyBriefStats = data.dailyBriefStats || [];
   const loadIssues = data.loadIssues || [];
   const lines = [
-    'NanoCrab operating brief',
+    'NanoCrab workspace brief',
     '',
-    'Next action: ' + (data.dailyBriefTitle || 'Review dashboard'),
+    'Next action: ' + (data.dailyBriefTitle || 'Pick the most useful surface'),
     'Why: ' + (data.dailyBriefDetail || 'No detail available'),
     'Action: ' + (data.dailyBriefActionLabel || 'Open'),
     '',
@@ -20,18 +19,7 @@ function dashboardOperatingBriefText(data) {
       : '- No dashboard counts available',
     `Data health: ${loadIssues.length ? loadIssues.join('; ') : 'Dashboard feeds loaded without known fallback.'}`,
     '',
-    'Priority queue',
-    priorityItems.length
-      ? priorityItems
-          .slice(0, 6)
-          .map(
-            (item) =>
-              `- ${item.label}: ${item.title} — ${item.detail || 'Open the related workspace.'}`,
-          )
-          .join('\n')
-      : '- No urgent approvals, runs, or schedules need attention',
-    '',
-    'Workspace lanes',
+    'Workspace surfaces',
     workspaceLaneItems.length
       ? workspaceLaneItems
           .map(
@@ -41,25 +29,15 @@ function dashboardOperatingBriefText(data) {
           .join('\n')
       : '- Workspace lane data unavailable',
     '',
-    'Use this brief to decide whether to start in Copilot, Cowork, Code, Approvals, or Routines.',
+    'Use this brief to decide whether to start in Chat, Cowork, Code, or More.',
   ];
   return lines.join('\n');
 }
 
 function dashboardKickoffPromptText(data) {
-  const priorityItems = data.priorityItems || [];
   const workspaceLaneItems = data.workspaceLaneItems || [];
   const loadIssues = data.loadIssues || [];
   const routeHint = data.dailyBriefActionLabel || 'Open the right workspace';
-  const priorityLines = priorityItems.length
-    ? priorityItems
-        .slice(0, 5)
-        .map(
-          (item) =>
-            `- ${item.label}: ${item.title} — ${item.detail || 'Open the related workspace.'}`,
-        )
-        .join('\n')
-    : '- No urgent queue items. Pick the most valuable project, routine, or quick answer.';
   const laneLines = workspaceLaneItems.length
     ? workspaceLaneItems
         .map(
@@ -75,9 +53,6 @@ function dashboardKickoffPromptText(data) {
     `Reason: ${data.dailyBriefDetail || 'No current dashboard detail was available.'}`,
     `Open route: ${routeHint}`,
     '',
-    'Priority queue',
-    priorityLines,
-    '',
     'Workspace choice',
     laneLines,
     '',
@@ -87,13 +62,14 @@ function dashboardKickoffPromptText(data) {
       : '- Dashboard feeds loaded without known fallback.',
     '',
     'Instructions',
-    '- Decide whether this belongs in Copilot, Cowork, Code, Approvals, or Routines.',
+    '- Decide whether this belongs in Chat, Cowork, Code, or More.',
     '- If it needs files, documents, MCP/email/calendar context, or artifacts, use Cowork and save the draft in a project first.',
     '- If it needs repository changes, tests, GitHub Copilot, snippets, or review rules, use Code.',
-    '- If it only needs thinking, drafting, or a quick answer, use Copilot.',
+    '- If it only needs thinking, drafting, or a quick answer, use Chat.',
+    '- Use More for settings, credentials, monitoring, channels, audits, memory, and other administration.',
     '- Ask before external writes such as sending email, publishing documents, changing calendars, webhooks, or repo-changing actions.',
     '',
-    'Return a short plan with the first workspace to open, the exact first prompt to send, and any approval or credential checks needed.',
+    'Return the first surface to open, the exact first prompt to send, and any approval or credential checks needed.',
   ].join('\n');
 }
 
@@ -342,62 +318,6 @@ async function renderDashboard(el) {
       const wBtn = (id) =>
         `<button class="widget-hide-btn dash-widget-hide is-hidden" data-widget="${id}" onclick="hideWidget('${id}')" aria-label="Hide widget">x</button>`;
 
-      const metricItems = [
-        {
-          label: 'Uptime',
-          value: d.uptimeFormatted || '-',
-          detail: 'Current process',
-        },
-        {
-          label: 'Channels',
-          value: `${onlineCh}/${totalCh}`,
-          detail: `${healthScore}% online`,
-        },
-        {
-          label: 'Agents',
-          value: containers.length,
-          detail: `${groups.length} registered`,
-        },
-        {
-          label: 'Today',
-          value: todayMsgs,
-          detail: `${conversationCount} threads`,
-        },
-        {
-          label: 'Failed',
-          value: failedLogins,
-          detail: 'Login attempts',
-          tone: failedLogins > 0 ? 'warn' : 'good',
-          action: "navigate('security')",
-        },
-        {
-          label: 'Blocked',
-          value: blockedIps,
-          detail: 'IP addresses',
-          tone: blockedIps > 0 ? 'bad' : 'good',
-          action: "navigate('security')",
-        },
-      ];
-
-      const quickActions = [
-        ['Terminal', 'Open shell', "navigate('devhub')"],
-        ['Editor', 'Edit files', "navigate('gitcode')"],
-        ['Logs', 'Inspect events', "navigate('monitoring')"],
-        ['Messages', 'Review chat', "navigate('messages')"],
-        ['Security', 'Check access', "navigate('security')"],
-        ['Usage', 'Track spend', "navigate('usage')"],
-        ['Restart', 'Confirm service', 'restartService(this)'],
-      ];
-
-      const featureActions = [
-        ['Operation Schedules', 'Create group reminders', "navigate('tasks')"],
-        ['Model Metrics', 'Latency and reliability', "navigate('monitoring')"],
-        ['Connector Catalog', 'Setup and permissions', "navigate('integrations')"],
-        ['Assistant Profile', 'Avatar and identity', "navigate('settings')"],
-        ['Assign task', 'Tasks, issues, auto-pickup', "navigate('agents')"],
-        ['Connector Skills', 'Review enabled skills', "navigate('skills')"],
-      ];
-
       const channelRows =
         channels
           .map((ch, index) => {
@@ -560,31 +480,6 @@ async function renderDashboard(el) {
           secondaryAction: "navigate('messages')",
           secondaryLabel: 'Open messages',
         });
-
-      const actionRows = quickActions
-        .map(
-          ([label, detail, action], index) => `
-            <button class="dash-action dash-reveal" ${dashRevealStyle(index)} onclick="${action}">
-              <span class="dash-action-mark"></span>
-              <span>
-                <strong>${label}</strong>
-                <small>${detail}</small>
-              </span>
-            </button>`,
-        )
-        .join('');
-      const featureRows = featureActions
-        .map(
-          ([label, detail, action], index) => `
-            <button class="dash-action dash-feature-action dash-reveal" ${dashRevealStyle(index)} onclick="${action}">
-              <span class="dash-action-mark"></span>
-              <span>
-                <strong>${label}</strong>
-                <small>${detail}</small>
-              </span>
-            </button>`,
-        )
-        .join('');
 
       const selectedCockpitId =
         window._selectedCockpitSessionId ||
@@ -766,35 +661,35 @@ async function renderDashboard(el) {
       const dailyBriefTitle = nextBest
         ? nextBest.title
         : loadIssues.length > 0
-          ? 'Review dashboard data confidence'
+          ? 'Review workspace data confidence'
         : cockpitCounts.active > 0
           ? 'Keep an eye on active agent work'
           : projects.length > 0
-            ? 'Pick a project and move it forward'
-            : 'Start with Copilot or a project';
+            ? 'Pick the most useful surface'
+            : 'Start in Chat, Cowork, or Code';
       const dailyBriefDetail = nextBest
         ? `${nextBest.label}: ${nextBest.detail || 'Open the related workspace.'}`
         : loadIssues.length > 0
-          ? `${loadIssues.length} dashboard feed${loadIssues.length === 1 ? '' : 's'} did not load. Open Monitoring or retry before assuming the day is quiet.`
+          ? `${loadIssues.length} dashboard feed${loadIssues.length === 1 ? '' : 's'} did not load. Open More for monitoring before assuming the day is quiet.`
         : cockpitCounts.active > 0
           ? 'There are active agent runs. Inspect the cockpit if you want to review progress or artifacts.'
           : projects.length > 0
             ? 'No urgent queue items are waiting. Open Cowork and use a project brief, email summary, or document draft.'
-            : 'No urgent queue items are waiting. Start in Copilot for quick thinking or create a Cowork project for durable work.';
+            : 'No urgent queue items are waiting. Start in Chat for quick thinking, Cowork for project context, or Code for repository work.';
       const dailyBriefAction = nextBest
         ? nextBest.action
         : loadIssues.length > 0
-          ? "navigate('monitoring')"
+          ? 'toggleMoreDrawer()'
         : projects.length > 0
           ? "navigate('projects')"
           : "navigate('chat')";
       const dailyBriefActionLabel = nextBest
         ? nextBest.actionLabel || 'Open'
         : loadIssues.length > 0
-          ? 'Open monitoring'
+          ? 'Open More'
         : projects.length > 0
           ? 'Open projects'
-          : 'Start Copilot';
+          : 'Open Chat';
       const dailyBriefStats = [
         {
           label: 'attention',
@@ -821,20 +716,21 @@ async function renderDashboard(el) {
         humanMessages.length > 0
           ? `${humanMessages.length} member messages in the current window`
           : 'No member messages in this window';
+      const moreStatusCopy = `${todayMsgs} message${todayMsgs === 1 ? '' : 's'} today across ${conversationCount} thread${conversationCount === 1 ? '' : 's'}. ${humanCopy}. ${securityState} security posture.`;
       const activeTasks = tasks.filter((task) => task.status === 'active');
       const mcpApprovalCount = approvals.filter(
         (approval) => approval.kind === 'tool-action',
       ).length;
       const workspaceLaneItems = [
         {
-          id: 'copilot',
-          label: 'Copilot',
-          title: 'Copilot chat',
+          id: 'chat',
+          label: 'Chat',
+          title: 'Plain chat',
           detail:
             'Quick thinking, writing, planning, and direct AI conversation without project context.',
           metric: `${conversationCount} thread${conversationCount === 1 ? '' : 's'}`,
           action: "navigate('chat')",
-          actionLabel: 'Start Copilot',
+          actionLabel: 'Open Chat',
         },
         {
           id: 'cowork',
@@ -864,7 +760,7 @@ async function renderDashboard(el) {
       const workspaceLaneRows = workspaceLaneItems
         .map(
           (lane, index) => `
-            <button class="dash-workspace-lane is-${lane.id} dash-reveal" ${dashRevealStyle(index)} onclick="${lane.action}">
+            <button class="dash-workspace-lane dash-primary-lane is-${lane.id} dash-reveal" ${dashRevealStyle(index)} onclick="${lane.action}">
               <span class="dash-workspace-label">${esc(lane.label)}</span>
               <strong>${esc(lane.title)}</strong>
               <p>${esc(lane.detail)}</p>
@@ -900,216 +796,69 @@ async function renderDashboard(el) {
       };
 
       el.innerHTML = `
-        <div class="dashboard-shell">
-          <div class="dashboard-toolbar">
+        <div class="dashboard-shell dash-home-shell">
+          <section class="dash-home-hero">
             <div>
-              <div class="dash-kicker">Command surface</div>
+              <span class="dash-kicker">Workspace home</span>
               <h2>${esc(botName)}</h2>
-              <p>${humanCopy}. ${securityState} security posture.</p>
+              <p>Start with the right surface. Use Chat for quick thinking, Cowork for durable project context, Code for repository work, and More for administration.</p>
             </div>
             <div class="dashboard-toolbar-actions">
               ${renderDashboardDataHealthChip(loadIssues)}
-              <button class="btn btn-sm btn-ghost" id="dashboard-customize-btn" onclick="toggleDashboardEditMode()">Customize</button>
-              <button class="btn btn-sm btn-ghost ${hiddenWidgets.length > 0 ? '' : 'is-hidden'}" id="dashboard-reset-btn" onclick="resetDashboardWidgets()">Reset</button>
+              <button class="btn btn-sm btn-ghost" onclick="copyDashboardOperatingBrief()">Copy brief</button>
+              <button class="btn btn-sm btn-ghost" onclick="copyDashboardKickoffPrompt()">Copy kickoff prompt</button>
             </div>
-          </div>
+          </section>
 
-          <section class="dash-daily-brief is-${dailyBriefTone} dashboard-widget${wHiddenClass('daily-brief')}" data-widget-id="daily-brief">
-            ${wBtn('daily-brief')}
-            <div class="dash-daily-main">
-              <span class="dash-kicker">Daily brief</span>
+          <section class="dash-next-action is-${dailyBriefTone}">
+            <div>
+              <span class="dash-kicker">Next action</span>
               <h3>${esc(dailyBriefTitle)}</h3>
               <p>${esc(truncate(dailyBriefDetail, 180))}</p>
             </div>
-            <div class="dash-daily-stats">
+            <div class="dash-next-stats">
               ${dailyBriefStats
                 .map(
                   (stat) => `<span><strong>${esc(String(stat.value))}</strong><small>${esc(stat.label)}</small></span>`,
                 )
                 .join('')}
             </div>
-            <div class="dash-daily-actions">
-              <button class="btn btn-sm btn-ghost" onclick="copyDashboardOperatingBrief()">Copy brief</button>
-              <button class="btn btn-sm btn-ghost" onclick="copyDashboardKickoffPrompt()">Copy kickoff prompt</button>
-              <button class="btn btn-sm btn-primary dash-daily-action" onclick="${dailyBriefAction}">${esc(dailyBriefActionLabel)}</button>
-            </div>
+            <button class="btn btn-primary" onclick="${dailyBriefAction}">${esc(dailyBriefActionLabel)}</button>
           </section>
 
-          <section class="dash-panel dash-priority-panel dashboard-widget${wHiddenClass('priorities')}" data-widget-id="priorities">
-            ${wBtn('priorities')}
-            <div class="dash-panel-header">
-              <div>
-                <span class="dash-kicker">Today</span>
-                <h3>Priority queue</h3>
-              </div>
-              <span class="dash-panel-count">${priorityItems.length}</span>
-            </div>
-            <div class="dash-priority-list">${priorityRows}</div>
+          <section class="dash-primary-lanes" aria-label="Primary workspace surfaces">
+            ${workspaceLaneRows}
           </section>
 
-          <section class="dash-workspace-lanes dashboard-widget${wHiddenClass('workspace-lanes')}" data-widget-id="workspace-lanes">
-            ${wBtn('workspace-lanes')}
-            <div class="dash-panel-header">
-              <div>
-                <span class="dash-kicker">Workspace lanes</span>
-                <h3>Choose the right focus before launching work</h3>
-              </div>
-              <span class="dash-panel-count">3</span>
+          <section class="dash-more-strip">
+            <div>
+              <span class="dash-kicker">More</span>
+              <strong>Settings, channels, approvals, monitoring, memory, credentials, and recovery stay out of the main path.</strong>
+              <p>${esc(moreStatusCopy)}</p>
             </div>
-            <div class="dash-workspace-grid">${workspaceLaneRows}</div>
+            <button class="btn btn-ghost" onclick="toggleMoreDrawer()">Open More</button>
           </section>
 
-          <section class="dash-hero dashboard-widget${wHiddenClass('stats')}" data-widget-id="stats">
-            ${wBtn('stats')}
-            <div class="dash-hero-media" aria-hidden="true">
-              <img src="/static/banner.png" alt="" onerror="this.classList.add('is-hidden')">
-            </div>
-            <div class="dash-hero-content">
-              <div class="dash-kicker">Live operations</div>
-              <h3>${esc(window._editionShort || 'NanoCrab')} control room</h3>
-              <p>${latestCopy}</p>
-              <div class="dash-channel-ribbon">
-                ${channels
-                  .map(
-                    (ch) => `
-                      <span class="dash-channel-chip">
-                        <span class="status-dot ${ch.connected ? 'online' : 'offline'}"></span>
-                        ${esc(ch.name || 'channel')}
-                      </span>`,
-                  )
-                  .join('')}
-              </div>
-            </div>
-            <div class="dash-hero-status">
-              <span class="dash-live-badge"><span class="live-dot"></span> Live</span>
-              ${alertCount > 0 ? `<span class="dash-pill is-bad">${alertCount} alerts</span>` : ''}
-              ${failedLogins > 0 ? `<span class="dash-pill is-warn">${failedLogins} failed logins</span>` : ''}
-              ${blockedIps > 0 ? `<span class="dash-pill is-bad">${blockedIps} blocked</span>` : ''}
-              ${unregCount > 0 ? `<span class="dash-pill is-muted">${unregCount} unregistered</span>` : ''}
-            </div>
+          <section class="dash-quiet-state">
+            ${priorityItems.length
+              ? `<div class="dash-quiet-list">${priorityRows}</div>`
+              : dashEmptyState({
+                  tone: 'ready',
+                  kicker: 'Ready',
+                  title: 'No urgent workspace action is waiting.',
+                  detail:
+                    'Start in Chat for a quick answer. Open Cowork when files or project context matter. Open Code for repository work.',
+                  action: "navigate('chat')",
+                  actionLabel: 'Open Chat',
+                  secondaryAction: "navigate('projects')",
+                  secondaryLabel: 'Open Cowork',
+                })}
           </section>
-
-          <section class="dash-metric-rail dashboard-widget${wHiddenClass('security')}" data-widget-id="security">
-            ${wBtn('security')}
-            ${metricItems
-              .map(
-                (item, index) => `
-                  <button class="dash-metric ${item.tone ? `is-${item.tone}` : ''} dash-reveal" ${dashRevealStyle(index)} ${item.action ? `onclick="${item.action}"` : 'disabled'}>
-                    <span>${item.label}</span>
-                    <strong>${esc(String(item.value))}</strong>
-                    <small>${item.detail}</small>
-                  </button>`,
-              )
-              .join('')}
-          </section>
-
-          <div class="dash-bento">
-            <section class="dash-panel dash-panel-cockpit dashboard-widget${wHiddenClass('cockpit')}" data-widget-id="cockpit">
-              ${wBtn('cockpit')}
-              <div class="dash-panel-header">
-                <div>
-                  <span class="dash-kicker">Cockpit</span>
-                  <h3><span class="live-dot ${cockpitCounts.active > 0 ? '' : 'is-hidden'}"></span> Agent runs</h3>
-                </div>
-                <div class="cockpit-status-strip">
-                  <span class="dash-pill is-good">${cockpitCounts.active} active</span>
-                  <span class="dash-pill ${cockpitCounts.waiting > 0 ? 'is-warn' : 'is-muted'}">${cockpitCounts.waiting} approvals</span>
-                  <span class="dash-pill ${cockpitCounts.failed > 0 ? 'is-bad' : 'is-muted'}">${cockpitCounts.failed} failed</span>
-                </div>
-              </div>
-              <div class="cockpit-grid">
-                <div class="cockpit-list" id="cockpit-session-list">${cockpitRows}</div>
-                <div class="cockpit-detail" id="cockpit-detail">
-                  ${renderCockpitDetailShell(selectedCockpit)}
-                </div>
-              </div>
-            </section>
-
-            <section class="dash-panel dash-panel-channels dashboard-widget${wHiddenClass('channels')}" data-widget-id="channels">
-              ${wBtn('channels')}
-              <div class="dash-panel-header">
-                <div>
-                  <span class="dash-kicker">Channels</span>
-                  <h3>Signal map</h3>
-                </div>
-                <span class="dash-panel-count">${onlineCh}/${totalCh}</span>
-              </div>
-              <div class="dash-lines">${channelRows}</div>
-              <div class="dash-agent-list">
-                <div class="dash-section-label">Registered agents</div>
-                ${agentRows}
-              </div>
-            </section>
-
-            <section class="dash-panel dash-panel-actions">
-              <div class="dash-panel-header">
-                <div>
-                  <span class="dash-kicker">Tools</span>
-                  <h3>Quick actions</h3>
-                </div>
-              </div>
-              <div class="dash-section-label">New surfaces</div>
-              <div class="dash-action-grid dash-feature-grid">${featureRows}</div>
-              <div class="dash-section-label dash-tool-label">Operator tools</div>
-              <div class="dash-action-grid">${actionRows}</div>
-            </section>
-
-            <section class="dash-panel dash-panel-activity dashboard-widget${wHiddenClass('containers')}" data-widget-id="containers">
-              ${wBtn('containers')}
-              <div class="dash-panel-header">
-                <div>
-                  <span class="dash-kicker">Agents</span>
-                  <h3><span class="live-dot ${containers.length > 0 ? '' : 'is-hidden'}"></span> Activity queue</h3>
-                </div>
-                <span class="dash-panel-count">${containers.length}</span>
-              </div>
-              <div class="dash-activity-list">${activityRows}</div>
-              <div class="dash-response-list">
-                <div class="dash-section-label">Recent bot responses</div>
-                ${responseRows}
-              </div>
-            </section>
-
-            <section id="weather-widget-slot" class="dashboard-widget dash-weather-slot${wHiddenClass('weather')}" data-widget-id="weather">
-              ${wBtn('weather')}
-              <div class="dash-weather-content">
-                <div class="dash-panel dash-weather-panel">
-                  <div class="dash-skeleton dash-skeleton-weather"></div>
-                </div>
-              </div>
-            </section>
-
-            <section class="dash-panel dash-panel-chart dashboard-widget${wHiddenClass('chart')}" data-widget-id="chart">
-              ${wBtn('chart')}
-              <div class="dash-panel-header">
-                <div>
-                  <span class="dash-kicker">Volume</span>
-                  <h3>Messages over 30 days</h3>
-                </div>
-                <span class="dash-panel-count">${todayMsgs}</span>
-              </div>
-              ${renderChart(stats.daily)}
-            </section>
-
-            <section class="dash-panel dash-panel-feed dashboard-widget${wHiddenClass('feed')}" data-widget-id="feed">
-              ${wBtn('feed')}
-              <div class="dash-panel-header">
-                <div>
-                  <span class="dash-kicker">Journal feed</span>
-                  <h3><span class="live-dot"></span> Recent messages</h3>
-                </div>
-                <span class="dash-panel-count">${messages.length}</span>
-              </div>
-              <div id="live-feed" class="dash-feed-list">${feedRows}</div>
-            </section>
-          </div>
         </div>`;
 
       window._cockpitSessions = cockpitSessions;
       window._cockpitDetailById = window._cockpitDetailById || {};
       window._selectedCockpitSessionId = selectedCockpit?.id || '';
-      if (selectedCockpit) loadCockpitDetail(selectedCockpit.id);
-      loadDashboardWeather();
     } catch (e) {
       el.innerHTML = `
         <div class="dashboard-shell">

@@ -116,6 +116,31 @@ describe('App shell accessibility UI', () => {
     expect(styleSource).toContain('.alert-compact');
   });
 
+  it('keeps the primary shell focused on Chat, Cowork, and Code while gating tools behind More', () => {
+    const modesSource = fs.readFileSync(
+      path.join(process.cwd(), 'src/admin/public/modes.js'),
+      'utf8',
+    );
+    const appSource = fs.readFileSync(appPath, 'utf8');
+
+    expect(modesSource).toContain("pages: ['chat']");
+    expect(modesSource).toContain("pages: ['projects']");
+    expect(modesSource).toContain("pages: ['gitcode']");
+    expect(modesSource).toContain("'agents'");
+    expect(modesSource).toContain("'tasks'");
+    expect(modesSource).toContain("'workflows'");
+    expect(modesSource).toContain("'reports'");
+    expect(modesSource).toContain("'artifacts'");
+    expect(modesSource).toContain("'approvals'");
+    expect(modesSource).toContain("'devhub'");
+    expect(modesSource).toContain("'autofix'");
+    expect(modesSource).toContain("'copilot'");
+    expect(appSource).toContain('<span class="nav-label">More</span>');
+    expect(appSource).not.toContain(
+      '<span class="nav-label">Settings</span></a>',
+    );
+  });
+
   it('restores chat thread deep links without double-prefixing legacy web ids', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const shellNavigationSource = fs.readFileSync(
@@ -309,12 +334,23 @@ describe('App shell accessibility UI', () => {
     );
 
     expect(shellNavigationSource).toContain('const MORE_DRAWER_SECTIONS = [');
+    expect(shellNavigationSource).toContain("title: 'Cowork'");
+    expect(shellNavigationSource).toContain("title: 'Code'");
     expect(shellNavigationSource).toContain("title: 'Operate'");
     expect(shellNavigationSource).toContain("title: 'Connect'");
     expect(shellNavigationSource).toContain("title: 'Personal'");
     expect(shellNavigationSource).toContain("title: 'Govern'");
     for (const id of [
       'channels',
+      'agents',
+      'tasks',
+      'workflows',
+      'reports',
+      'artifacts',
+      'approvals',
+      'devhub',
+      'autofix',
+      'copilot',
       'integrations',
       'webhooks',
       'credentials',
@@ -342,7 +378,9 @@ describe('App shell accessibility UI', () => {
     expect(appSource).toContain('MCP, channels, credentials');
     expect(appSource).toContain('Recovery');
     expect(appSource).toContain('Backups, monitoring, audit');
-    expect(appSource).toContain('<span class="nav-label">Settings</span>');
+    expect(appSource).not.toContain(
+      '<span class="nav-label">Settings</span></a>',
+    );
     expect(appSource).toContain('moreDrawerSections(moreDrawerIds)');
     expect(shellNavigationSource).toContain(
       "channels: { label: 'Channels', icon: 'messages' }",

@@ -513,54 +513,26 @@ function showLogin() {
     <div class="login-container">
       <div class="login-card">
         <div class="login-brand">
-          ${brandLogo('brand-logo-lockup', 'lockup')}
+          ${brandLogo('login-brand-mark')}
           <div class="login-brand-copy">
-            <h1 class="sr-only">NanoCrab</h1>
-            <p>${esc(botName)} Admin</p>
+            <h1>${esc(botName)}</h1>
+            <p>Admin console</p>
           </div>
         </div>
-        <section class="login-product-brief">
-          <span>Personal AI workspace</span>
-          <h2>Pick up chats, projects, code work, and operations from one local dashboard.</h2>
-          <div class="login-lane-grid">
-            <span>Copilot</span>
-            <span>Cowork</span>
-            <span>Code</span>
-          </div>
-          <div class="login-entry-checklist" aria-label="Before sign-in checklist">
-            <span>Before sign-in</span>
-            <ul>
-              <li>Use Copilot for quick questions after login.</li>
-              <li>Use Cowork when files, MCP tools, or documents need project context.</li>
-              <li>Use Code when repository agents, tests, or GitHub Copilot should own the work.</li>
-            </ul>
-          </div>
-          <div class="login-resume-strip" aria-label="After sign-in resume path">
-            <span>After sign-in</span>
-            <div>
-              <strong>Dashboard</strong>
-              <small>Daily brief and next action</small>
-            </div>
-            <div>
-              <strong>Approvals</strong>
-              <small>External writes waiting</small>
-            </div>
-            <div>
-              <strong>Projects</strong>
-              <small>Cowork artifacts and MCP context</small>
-            </div>
-            <div>
-              <strong>Code</strong>
-              <small>Repository agents and checks</small>
-            </div>
-          </div>
-        </section>
+        <p class="login-context">Sign in to manage local agents, channels, approvals, and workspace state.</p>
         <div class="login-error" id="login-error"></div>
         <form id="login-form">
-          <input type="text" id="login-username" placeholder="Username" autocomplete="username" autofocus>
-          <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+          <label class="login-field" for="login-username">
+            <span>Username</span>
+            <input type="text" id="login-username" autocomplete="username" autofocus>
+          </label>
+          <label class="login-field" for="login-password">
+            <span>Password</span>
+            <input type="password" id="login-password" autocomplete="current-password">
+          </label>
           <button type="submit" class="btn btn-primary login-submit">Log in</button>
         </form>
+        <div class="login-service-note">Local dashboard · private runtime</div>
       </div>
     </div>`;
   document.getElementById('login-form').onsubmit = async (e) => {
@@ -588,7 +560,7 @@ function showLogin() {
           const totpGroup = document.createElement('div');
           totpGroup.className = 'login-totp-group';
           totpGroup.innerHTML =
-            '<input class="login-totp-input" type="text" id="login-totp" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" inputmode="numeric">';
+            '<label class="login-field" for="login-totp"><span>Two-factor code</span><input class="login-totp-input" type="text" id="login-totp" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" inputmode="numeric"></label>';
           document
             .getElementById('login-form')
             .insertBefore(
@@ -843,7 +815,6 @@ function showShell(page) {
         <div class="sidebar-nav">${navHtml}</div>
         <div class="sidebar-pinned">
           <a class="nav-link" onclick="toggleMoreDrawer()">${navIcon('menu')}<span class="nav-label">More</span></a>
-          <a class="nav-link ${page === 'settings' ? 'active' : ''}" onclick="navigate('settings')">${navIcon('settings')}<span class="nav-label">Settings</span></a>
         </div>
         <div class="sidebar-footer">
           <div class="sidebar-footer-actions">

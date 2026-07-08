@@ -40,8 +40,25 @@
 
   const MORE_DRAWER_SECTIONS = [
     {
+      title: 'Cowork',
+      detail: 'Project setup, agent work, drafts, and approvals.',
+      pages: [
+        'agents',
+        'tasks',
+        'workflows',
+        'reports',
+        'artifacts',
+        'approvals',
+      ],
+    },
+    {
+      title: 'Code',
+      detail: 'Repos, terminals, delegated fixes, and Copilot jobs.',
+      pages: ['devhub', 'autofix', 'copilot'],
+    },
+    {
       title: 'Operate',
-      detail: 'Health, delivery, recovery, and costs.',
+      detail: 'Home, health, delivery, recovery, and costs.',
       pages: [
         'dashboard',
         'messages',

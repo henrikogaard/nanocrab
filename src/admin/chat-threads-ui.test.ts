@@ -8,28 +8,36 @@ const scriptPath = path.join(
 );
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
 
-describe('WebChat new conversation modal', () => {
-  it('creates plain chat threads from provider/model selection, not agent templates', () => {
+describe('WebChat new conversation start surface', () => {
+  it('creates plain chat threads from the configured model picker, not agent templates', () => {
     const source = fs.readFileSync(scriptPath, 'utf8');
 
     expect(source).toContain("api('/system/provider')");
-    expect(source).toContain('id="wc-provider-select"');
-    expect(source).toContain('id="wc-model-select"');
+    expect(source).toContain('loadWebChatProviderChoices');
+    expect(source).toContain('available[p.id] !== false');
+    expect(source).toContain('id="webchat-start-model-select"');
+    expect(source).toContain('provider.id + ');
+    expect(source).toContain("localStorage.setItem('webchat_last_provider'");
     expect(source).not.toContain('Agent template');
     expect(source).not.toContain('/threads/agent-templates');
     expect(source).not.toContain('templateAgentId');
   });
 
-  it('offers starter prompts without converting them into conversation titles or templates', () => {
+  it('offers starter prompts through the inline start composer', () => {
     const source = fs.readFileSync(scriptPath, 'utf8');
+    const style = fs.readFileSync(stylePath, 'utf8');
 
     expect(source).toContain('var CHAT_STARTERS = [');
-    expect(source).toContain('webchat-starter-grid');
+    expect(source).toContain('webchat-start-suggestions');
+    expect(source).toContain('webchat-start-row');
     expect(source).toContain('startFromPrompt');
     expect(source).toContain(
       "'/threads/' + encodeURIComponent(resp.id) + '/messages'",
     );
-    expect(source).toContain('message: selectedStarter.prompt');
+    expect(source).toContain('message: prompt');
+    expect(source).toContain('How can I help you?');
+    expect(style).toContain('.webchat-start-composer');
+    expect(style).toContain('#webchat-start-model-select');
     expect(source).not.toContain('body.title = selectedStarter');
   });
 
@@ -109,7 +117,7 @@ describe('WebChat new conversation modal', () => {
     expect(source).toContain('Web chat thread brief');
     expect(source).toContain('copyTextWithFallback');
     expect(source).not.toContain("window.prompt('Copy web chat thread brief:'");
-    expect(source).toContain('openNewConversationModal(starter)');
+    expect(source).toContain('openNewConversationSurface()');
     expect(source).toContain('function openConfirmModal(options)');
     expect(source).toContain('function openInputModal(options)');
     expect(source).toContain("title: 'Rename conversation'");
@@ -200,6 +208,12 @@ describe('WebChat new conversation modal', () => {
     const source = fs.readFileSync(scriptPath, 'utf8');
 
     expect(source).toContain('renderThreadContextBanner');
+    expect(source).toContain('renderProjectThreadStartState');
+    expect(source).toContain('webchat-project-start');
+    expect(source).toContain('Work from ');
+    expect(source).toContain(
+      'Ask for a project brief, source-backed summary, document draft, or next action.',
+    );
     expect(source).toContain(
       'Project chat can use Cowork context, approved MCP tools, and project artifacts.',
     );
@@ -210,6 +224,10 @@ describe('WebChat new conversation modal', () => {
     expect(source).toContain('renderProjectToolStarters');
     expect(source).toContain('renderProjectMcpServerRibbon');
     expect(source).toContain('id="thread-context-banner"');
+    expect(source).toContain('renderEmptyThreadState(threadMeta)');
+    expect(source).toContain(
+      'if (threadMeta && threadMeta.projectId) return renderProjectThreadStartState(threadMeta)',
+    );
     expect(source).toContain("api('/threads/' + encodeURIComponent(threadId))");
     expect(source).toContain('Cowork project');
     expect(source).toContain('toolsAvailable');
@@ -339,6 +357,9 @@ describe('WebChat new conversation modal', () => {
     expect(source).toContain('Back to project');
     expect(source).toContain('openProjectContext');
     expect(source).toContain('data-project-id="');
+    expect(source).not.toContain(
+      "'</div>' +\n      (toolsAvailable ? renderProjectToolStarters(threadMeta) : '')",
+    );
     expect(source).not.toContain('function jsStringAttr');
     expect(source).not.toContain(".replace(/\"/g, '&quot;')");
     expect(source).toContain("sessionStorage.setItem('project_focus_id'");

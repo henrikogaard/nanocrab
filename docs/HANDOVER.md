@@ -7,14 +7,14 @@ Last updated: 2026-06-17
 - Canonical repository: `https://github.com/henrikogaard/nanocrab.git`
 - Main branch: `main`
 - Functional baseline before this note: `51ee219` (`chore: apply formatting cleanup`)
-- NanoCrab version: `2.0.0-rc.6`
+- NanoCrab version: `2.0.0-rc.8`
 - The repo is standalone. Do not use the old `nanoclaw` upstream as a source of truth.
 
 ## What Is Ready
 
 - Local workstation changes are committed and pushed through `origin/main`.
 - The GitHub issue tracker has a roadmap index plus milestones, epics, and child issues for the Hermes/OpenClaw expansion.
-- README, command docs, user guide, roadmap, and repository agent instructions describe the 2.0-RC6 direction and the completed non-epic P0 closure sweep.
+- README, command docs, user guide, roadmap, and repository agent instructions describe the 2.0-RC8 direction and the completed non-epic P0 closure sweep.
 - Skills are provider-neutral and managed through the skill registry.
 - Runtime memories and generated `MEMORY.md` files are private state and gitignored.
 

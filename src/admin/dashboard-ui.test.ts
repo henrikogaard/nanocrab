@@ -8,39 +8,45 @@ const dashboardPath = path.join(
 );
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
 
-describe('Dashboard priority queue UI', () => {
-  it('pulls cross-surface work into the command dashboard', () => {
+describe('Dashboard workspace home UI', () => {
+  it('pulls only enough state to choose between Chat, Cowork, Code, and More', () => {
     const source = fs.readFileSync(dashboardPath, 'utf8');
 
     expect(source).toContain("api('/approvals?status=pending&limit=5')");
     expect(source).toContain("api('/projects')");
     expect(source).toContain("api('/tasks')");
-    expect(source).toContain('Priority queue');
-    expect(source).toContain('MCP approval');
-    expect(source).toContain('Cowork project');
-    expect(source).toContain("actionLabel: 'Cowork'");
-    expect(source).toContain("['Editor', 'Edit files'");
-    expect(source).toContain("['Assign task', 'Tasks, issues, auto-pickup'");
-    expect(source).toContain("navigate('approvals')");
-    expect(source).toContain("navigate('tasks')");
+    expect(source).toContain('Workspace home');
+    expect(source).toContain('Start with the right surface');
+    expect(source).toContain('Chat');
+    expect(source).toContain('Cowork');
+    expect(source).toContain('Code');
+    expect(source).toContain('More');
+    expect(source).toContain('dash-next-action');
+    expect(source).toContain('dash-primary-lanes');
+    expect(source).toContain('dash-more-strip');
+    expect(source).toContain('toggleMoreDrawer()');
+    expect(source).toContain("navigate('chat')");
     expect(source).toContain("navigate('projects')");
-    expect(source).toContain("sessionStorage.setItem('project_focus_id'");
+    expect(source).toContain("navigate('gitcode')");
+    expect(source).not.toContain("['Editor', 'Edit files'");
+    expect(source).not.toContain(
+      "['Assign task', 'Tasks, issues, auto-pickup'",
+    );
   });
 
-  it('adds a daily operating brief with the next best action', () => {
+  it('keeps copy helpers focused on selecting the right workspace surface', () => {
     const source = fs.readFileSync(dashboardPath, 'utf8');
 
-    expect(source).toContain('dash-daily-brief');
-    expect(source).toContain('Daily brief');
+    expect(source).toContain('dashboardOperatingBriefText');
+    expect(source).toContain('dashboardKickoffPromptText');
     expect(source).toContain('dailyBriefTone');
     expect(source).toContain('dailyBriefTitle');
     expect(source).toContain('dailyBriefAction');
-    expect(source).toContain('nextBest');
-    expect(source).toContain('Pick a project and move it forward');
-    expect(source).toContain('Start with Copilot or a project');
+    expect(source).toContain('Pick the most useful surface');
+    expect(source).toContain('Start in Chat, Cowork, or Code');
     expect(source).toContain('dailyBriefStats');
     expect(source).toContain('dashboardOperatingBriefText');
-    expect(source).toContain('NanoCrab operating brief');
+    expect(source).toContain('NanoCrab workspace brief');
     expect(source).toContain('window._dashboardOperatingBrief');
     expect(source).toContain('window._dashboardDataHealthState');
     expect(source).toContain('Data health:');
@@ -64,16 +70,14 @@ describe('Dashboard priority queue UI', () => {
     expect(source).toContain('Copy kickoff prompt');
     expect(source).toContain('Dashboard kickoff prompt copied');
     expect(source).toContain('Copy dashboard kickoff prompt');
-    expect(source).toContain(
-      'Return a short plan with the first workspace to open',
-    );
+    expect(source).toContain('Return the first surface to open');
     expect(source).toContain('copyTextWithFallback');
     expect(source).not.toContain("window.prompt('Copy dashboard brief:'");
     expect(source).not.toContain(
       "window.prompt('Copy dashboard kickoff prompt:'",
     );
     expect(source).toContain(
-      'Use this brief to decide whether to start in Copilot, Cowork, Code, Approvals, or Routines.',
+      'Use this brief to decide whether to start in Chat, Cowork, Code, or More.',
     );
   });
 
@@ -92,10 +96,10 @@ describe('Dashboard priority queue UI', () => {
     expect(source).toContain(
       "loadIssues.push('Copilot job queue unavailable')",
     );
-    expect(source).toContain('Review dashboard data confidence');
+    expect(source).toContain('Review workspace data confidence');
     expect(source).toContain('dashboard feed${loadIssues.length === 1 ?');
-    expect(source).toContain("navigate('monitoring')");
-    expect(source).toContain('Open monitoring');
+    expect(source).toContain('toggleMoreDrawer()');
+    expect(source).toContain('Open More');
     expect(source).toContain('dash-data-health is-warning');
     expect(source).toContain('dash-data-health is-ready');
     expect(source).toContain('feedsReady: loadIssues.length === 0');
@@ -143,16 +147,17 @@ describe('Dashboard priority queue UI', () => {
     expect(source).not.toContain("toast(r.error || 'Failed', 'error')");
   });
 
-  it('turns empty dashboard panels into guided next actions', () => {
+  it('turns empty dashboard panels into guided workspace starts', () => {
     const source = fs.readFileSync(dashboardPath, 'utf8');
 
     expect(source).toContain('function dashEmptyState');
     expect(source).toContain('dash-empty-state is-');
-    expect(source).toContain('Connect a place where NanoCrab can listen.');
-    expect(source).toContain('Register the first assistant workspace.');
-    expect(source).toContain('No agent work is running right now.');
-    expect(source).toContain('No recent assistant replies yet.');
-    expect(source).toContain('No recent conversation sample yet.');
+    expect(source).toContain('No urgent workspace action is waiting.');
+    expect(source).toContain('Start in Chat for a quick answer.');
+    expect(source).toContain(
+      'Open Cowork when files or project context matter.',
+    );
+    expect(source).toContain('Open Code for repository work.');
     expect(source).toContain(
       'When Cowork, Code, Copilot, or scheduled tasks launch agent work',
     );
@@ -165,12 +170,9 @@ describe('Dashboard priority queue UI', () => {
     expect(source).toContain(
       'Start in Copilot, connect a channel, or review Messages',
     );
-    expect(source).toContain("navigate('channels')");
-    expect(source).toContain("navigate('integrations')");
     expect(source).toContain("navigate('projects')");
-    expect(source).toContain("navigate('tasks')");
     expect(source).toContain("navigate('chat')");
-    expect(source).toContain("navigate('sessions')");
+    expect(source).toContain("navigate('gitcode')");
     expect(source).not.toContain(
       '<div class="dash-empty">No channels configured yet.</div>',
     );
@@ -203,14 +205,11 @@ describe('Dashboard priority queue UI', () => {
   it('styles the priority queue as a dense triage surface', () => {
     const source = fs.readFileSync(stylePath, 'utf8');
 
-    expect(source).toContain('.dash-daily-brief');
-    expect(source).toContain('.dash-daily-stats');
-    expect(source).toContain('.dash-daily-actions');
-    expect(source).toContain('.dash-daily-brief.is-attention');
-    expect(source).toContain('.dash-priority-panel');
-    expect(source).toContain('.dash-priority-list');
-    expect(source).toContain('.dash-priority-item');
-    expect(source).toContain('.dash-priority-action');
+    expect(source).toContain('.dash-home-shell');
+    expect(source).toContain('.dash-next-action');
+    expect(source).toContain('.dash-primary-lanes');
+    expect(source).toContain('.dash-primary-lane');
+    expect(source).toContain('.dash-more-strip');
     expect(source).toContain('.dash-empty-state');
     expect(source).toContain('.dash-empty-actions');
     expect(source).toContain('.dash-empty-state.is-ready');
@@ -343,27 +342,16 @@ describe('Dashboard priority queue UI', () => {
     );
   });
 
-  it('keeps dashboard widget visibility and edit controls class-based', () => {
+  it('keeps legacy widget visibility helpers class-based for routed detail panels', () => {
     const source = fs.readFileSync(dashboardPath, 'utf8');
     const style = fs.readFileSync(stylePath, 'utf8');
 
     expect(source).toContain('wHiddenClass');
-    expect(source).toContain("dashboard-widget${wHiddenClass('daily-brief')}");
-    expect(source).toContain("dashboard-widget${wHiddenClass('priorities')}");
-    expect(source).toContain(
-      "dashboard-widget${wHiddenClass('workspace-lanes')}",
-    );
-    expect(source).toContain("dashboard-widget${wHiddenClass('cockpit')}");
     expect(source).toContain('dash-widget-hide is-hidden');
-    expect(source).toContain("hiddenWidgets.length > 0 ? '' : 'is-hidden'");
     expect(source).toContain("b.classList.add('is-hidden')");
     expect(source).toContain("b.classList.remove('is-hidden')");
     expect(source).toContain("widget.classList.add('is-hidden')");
     expect(source).toContain("resetBtn.classList.remove('is-hidden')");
-    expect(source).toContain(
-      "live-dot ${cockpitCounts.active > 0 ? '' : 'is-hidden'}",
-    );
-    expect(source).toContain('onerror="this.classList.add(\'is-hidden\')"');
     expect(source).toContain("slot.classList.add('is-hidden')");
     expect(source).not.toContain('const wVis =');
     expect(source).not.toContain('style="${wVis(');
@@ -377,7 +365,6 @@ describe('Dashboard priority queue UI', () => {
       "hideBtns.forEach((b) => (b.style.display = 'block'))",
     );
     expect(source).not.toContain("if (widget) widget.style.display = 'none'");
-    expect(source).not.toContain("if (resetBtn) resetBtn.style.display = ''");
     expect(source).not.toContain('onerror="this.style.display=\'none\'"');
     expect(source).not.toContain("slot.style.display = 'none'");
     expect(style).toContain('.dashboard-widget.is-hidden');
@@ -411,15 +398,14 @@ describe('Dashboard priority queue UI', () => {
     expect(style).toContain('height: var(--bar-h)');
   });
 
-  it('adds live workspace lanes for Copilot, Cowork, and Code routing', () => {
+  it('adds live workspace lanes for Chat, Cowork, and Code routing', () => {
     const source = fs.readFileSync(dashboardPath, 'utf8');
 
     expect(source).toContain("api('/copilot/jobs')");
-    expect(source).toContain('Workspace lanes');
-    expect(source).toContain('Choose the right focus before launching work');
-    expect(source).toContain('dash-workspace-lanes');
+    expect(source).toContain('Start with the right surface');
+    expect(source).toContain('dash-primary-lanes');
     expect(source).toContain('workspaceLaneItems');
-    expect(source).toContain('Copilot chat');
+    expect(source).toContain('Plain chat');
     expect(source).toContain('Projects and agent work');
     expect(source).toContain('Repository automation');
     expect(source).toContain("navigate('chat')");
@@ -434,7 +420,7 @@ describe('Dashboard priority queue UI', () => {
       'If it needs repository changes, tests, GitHub Copilot, snippets, or review rules, use Code.',
     );
     expect(source).toContain(
-      'If it only needs thinking, drafting, or a quick answer, use Copilot.',
+      'If it only needs thinking, drafting, or a quick answer, use Chat.',
     );
     expect(source).toContain(
       'Ask before external writes such as sending email, publishing documents, changing calendars, webhooks, or repo-changing actions.',
@@ -444,12 +430,12 @@ describe('Dashboard priority queue UI', () => {
   it('styles workspace lanes as a responsive first-screen routing strip', () => {
     const source = fs.readFileSync(stylePath, 'utf8');
 
-    expect(source).toContain('.dash-workspace-lanes');
-    expect(source).toContain('.dash-workspace-grid');
+    expect(source).toContain('.dash-primary-lanes');
+    expect(source).toContain('.dash-primary-lane');
     expect(source).toContain('.dash-workspace-lane');
     expect(source).toContain('.dash-workspace-lane:focus-visible');
     expect(source).toContain(
-      '.dash-workspace-grid {\n    grid-template-columns: 1fr;',
+      '.dash-primary-lanes {\n    grid-template-columns: 1fr;',
     );
   });
 });

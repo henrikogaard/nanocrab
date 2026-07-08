@@ -16,22 +16,14 @@
       label: 'Cowork',
       icon: 'agents',
       guidance: 'Projects, files, artifacts, chats, and approved tools.',
-      pages: [
-        'projects',
-        'agents',
-        'tasks',
-        'workflows',
-        'reports',
-        'artifacts',
-        'approvals',
-      ],
+      pages: ['projects'],
     },
     code: {
       id: 'code',
       label: 'Code',
       icon: 'gitcode',
       guidance: 'Repositories, Copilot, tests, PRs, and handoffs.',
-      pages: ['gitcode', 'devhub', 'autofix', 'copilot'],
+      pages: ['gitcode'],
     },
   };
   const MODE_ORDER = ['chat', 'cowork', 'code'];
@@ -42,6 +34,15 @@
   // Admin / operations pages — reachable via the "More" drawer, not a mode.
   const MORE_IDS = [
     'dashboard',
+    'agents',
+    'tasks',
+    'workflows',
+    'reports',
+    'artifacts',
+    'approvals',
+    'devhub',
+    'autofix',
+    'copilot',
     'channels',
     'messages',
     'pipelines',

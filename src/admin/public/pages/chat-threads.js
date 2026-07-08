@@ -272,11 +272,15 @@
       if (!action) return;
       event.preventDefault();
       if (action === 'open-new-conversation') {
-        openNewConversationModal();
+        openNewConversationSurface();
       } else if (action === 'start-from-prompt') {
         startFromPrompt(target.dataset.starterIndex);
       } else if (action === 'use-starter') {
         useStarterPrompt(target.dataset.starterIndex);
+      } else if (action === 'fill-start-prompt') {
+        fillStartPrompt(target);
+      } else if (action === 'send-start-prompt') {
+        startConversationFromComposer();
       } else if (action === 'focus-chat-input') {
         var input = document.getElementById('chat-msg-input');
         if (input) input.focus();
@@ -305,6 +309,18 @@
     });
   }
 
+  function openNewConversationSurface() {
+    closeModal();
+    _activeThreadId = null;
+    _activeThreadTitle = null;
+    if (location.hash === '#/chat') {
+      var el = conversationRoot();
+      if (el) renderConversation(el, null);
+      return;
+    }
+    location.hash = '#/chat';
+  }
+
   function renderStarterCards() {
     return CHAT_STARTERS.map(function (starter, index) {
       return (
@@ -320,6 +336,226 @@
         '</button>'
       );
     }).join('');
+  }
+
+  function renderStartSuggestionRows() {
+    return CHAT_STARTERS.map(function (starter, index) {
+      return (
+        '<button type="button" class="webchat-start-row" data-webchat-action="fill-start-prompt" data-starter-index="' +
+        index +
+        '">' +
+        esc(starter.title) +
+        '</button>'
+      );
+    }).join('');
+  }
+
+  function fallbackProviderDefinitions() {
+    return {
+      claude: { id: 'claude', name: 'Claude' },
+      codex: { id: 'codex', name: 'Codex' },
+      ollama: { id: 'ollama', name: 'Ollama' },
+      openrouter: { id: 'openrouter', name: 'OpenRouter' },
+      'openai-responses': { id: 'openai-responses', name: 'OpenAI' },
+      'anthropic-messages': { id: 'anthropic-messages', name: 'Anthropic' },
+      gemini: { id: 'gemini', name: 'Gemini' },
+      mistral: { id: 'mistral', name: 'Mistral' },
+      'openai-compatible': { id: 'openai-compatible', name: 'OpenAI-compatible' },
+    };
+  }
+
+  async function loadWebChatProviderChoices() {
+    var providerInfo = {};
+    try {
+      providerInfo = await api('/system/provider');
+    } catch (_) {
+      providerInfo = {};
+    }
+
+    var fallbackDefinitions = fallbackProviderDefinitions();
+    var providerDefinitions = providerInfo.definitions || fallbackDefinitions;
+    var providerModels = providerInfo.models || {};
+    var providerDefaults = providerInfo.defaults || {};
+    var available = providerInfo.available || {};
+    var rawProviders = Object.values(providerDefinitions)
+      .filter(function (p) { return p && p.selectable !== false; })
+      .map(function (p) {
+        return {
+          id: p.id,
+          name: p.name || p.id,
+          available: available[p.id] !== false,
+        };
+      });
+    if (!rawProviders.length) {
+      rawProviders = Object.values(fallbackDefinitions).map(function (p) {
+        return { id: p.id, name: p.name || p.id, available: true };
+      });
+    }
+
+    var configuredProviders = rawProviders.filter(function (p) { return p.available; });
+    var providerOptions = configuredProviders.length ? configuredProviders : rawProviders;
+
+    function modelsFor(providerId) {
+      var models = providerModels[providerId] || [];
+      if (models.length) return models;
+      if (providerDefaults[providerId]) return [providerDefaults[providerId]];
+      if (providerId === providerInfo.provider && providerInfo.model) return [providerInfo.model];
+      return ['model-id'];
+    }
+
+    var lastProvider = localStorage.getItem('webchat_last_provider') || providerInfo.provider || providerOptions[0].id;
+    if (!providerOptions.some(function (p) { return p.id === lastProvider; })) {
+      lastProvider = providerOptions[0].id;
+    }
+    var lastModel =
+      localStorage.getItem('webchat_last_model_' + lastProvider) ||
+      providerDefaults[lastProvider] ||
+      providerInfo.model ||
+      modelsFor(lastProvider)[0];
+    if (!modelsFor(lastProvider).includes(lastModel)) {
+      lastModel = modelsFor(lastProvider)[0];
+    }
+
+    var modelOptions = [];
+    providerOptions.forEach(function (provider) {
+      modelsFor(provider.id).forEach(function (model) {
+        modelOptions.push({
+          providerId: provider.id,
+          providerName: provider.name,
+          model: model,
+          value: provider.id + '::' + model,
+          selected: provider.id === lastProvider && model === lastModel,
+        });
+      });
+    });
+    if (!modelOptions.some(function (option) { return option.selected; }) && modelOptions[0]) {
+      modelOptions[0].selected = true;
+    }
+
+    return {
+      providerInfo: providerInfo,
+      providerDefinitions: providerDefinitions,
+      providerModels: providerModels,
+      providerDefaults: providerDefaults,
+      available: available,
+      providerOptions: providerOptions,
+      modelOptions: modelOptions,
+      modelsFor: modelsFor,
+    };
+  }
+
+  function renderStartModelOptions(choices) {
+    return choices.modelOptions
+      .map(function (option) {
+        return (
+          '<option value="' +
+          esc(option.value) +
+          '"' +
+          (option.selected ? ' selected' : '') +
+          '>' +
+          esc(option.providerName + ' · ' + option.model) +
+          '</option>'
+        );
+      })
+      .join('');
+  }
+
+  function renderNewConversationStart(choices) {
+    return (
+      '<section class="webchat-start" aria-label="Start a chat">' +
+      '<div class="webchat-start-main">' +
+      '<h2>How can I help you?</h2>' +
+      '<div class="webchat-start-modes" aria-label="Prompt categories">' +
+      '<button type="button" data-webchat-action="fill-start-prompt" data-start-prompt="Help me create something useful. Ask for the goal, audience, constraints, and desired format before drafting.">Create</button>' +
+      '<button type="button" data-webchat-action="fill-start-prompt" data-start-prompt="Help me explore this topic. Start with clarifying questions, then map the important angles, risks, and next checks.">Explore</button>' +
+      '<button type="button" data-webchat-action="fill-start-prompt" data-start-prompt="Help me with code. Ask for the repo, target behavior, and failure evidence, then propose the smallest verified change.">Code</button>' +
+      '<button type="button" data-webchat-action="fill-start-prompt" data-start-prompt="Help me learn this. Explain it plainly, show examples, and check what I already know before going deeper.">Learn</button>' +
+      '</div>' +
+      '<div class="webchat-start-suggestions">' +
+      renderStartSuggestionRows() +
+      '</div>' +
+      '</div>' +
+      '<div class="webchat-start-composer" role="group" aria-label="New chat composer">' +
+      '<textarea id="webchat-start-input" rows="1" placeholder="Type your message here..." autocomplete="off"></textarea>' +
+      '<div class="webchat-start-toolbar">' +
+      '<select id="webchat-start-model-select" aria-label="Model">' +
+      renderStartModelOptions(choices) +
+      '</select>' +
+      '<button type="button" id="webchat-start-send" class="btn btn-primary" data-webchat-action="send-start-prompt" aria-label="Send message" title="Send message">Send</button>' +
+      '</div>' +
+      '</div>' +
+      '</section>'
+    );
+  }
+
+  function parseStartModelValue(value) {
+    var parts = String(value || '').split('::');
+    return {
+      provider: parts[0] || '',
+      model: parts.slice(1).join('::') || '',
+    };
+  }
+
+  function fillStartPrompt(target) {
+    var input = document.getElementById('webchat-start-input');
+    if (!input) return;
+    var starter = getStarter(target.dataset.starterIndex);
+    input.value = starter ? starter.prompt : target.dataset.startPrompt || '';
+    resizeChatInput(input);
+    input.focus();
+  }
+
+  async function startConversationFromComposer() {
+    var input = document.getElementById('webchat-start-input');
+    var select = document.getElementById('webchat-start-model-select');
+    var btn = document.getElementById('webchat-start-send');
+    if (!input || !select || !btn || btn.disabled) return;
+    var prompt = input.value.trim();
+    if (!prompt) {
+      input.focus();
+      return;
+    }
+
+    var selected = parseStartModelValue(select.value);
+    var body = {};
+    if (selected.provider) {
+      body.provider = selected.provider;
+      localStorage.setItem('webchat_last_provider', selected.provider);
+    }
+    if (selected.model) {
+      body.model = selected.model;
+      if (selected.provider) {
+        localStorage.setItem('webchat_last_model_' + selected.provider, selected.model);
+      }
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Starting...';
+    try {
+      var resp = await api('/threads', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      var sendError = null;
+      try {
+        await api('/threads/' + encodeURIComponent(resp.id) + '/messages', {
+          method: 'POST',
+          body: JSON.stringify({ message: prompt }),
+        });
+      } catch (e) {
+        sendError = e;
+      }
+      refreshThreadList();
+      openThread(resp.id);
+      if (sendError) {
+        toast(chatActionErrorMessage('starter', sendError), 'error');
+      }
+    } catch (e) {
+      toast(chatActionErrorMessage('create', e), 'error');
+      btn.disabled = false;
+      btn.textContent = 'Send';
+      input.focus();
+    }
   }
 
   function renderWebchatLoadingState() {
@@ -340,7 +576,72 @@
     );
   }
 
-  function renderEmptyThreadState() {
+  function renderProjectThreadStartState(threadMeta) {
+    var projectName = (threadMeta && threadMeta.projectName) || 'this Cowork project';
+    var mcpSummary = formatMcpAccessSummary(threadMeta);
+    var toolsAvailable = mcpSummary.enabled;
+    return (
+      '<section class="webchat-project-start" aria-label="Start Cowork project chat">' +
+      '<div class="webchat-project-start-copy">' +
+      '<span>Cowork chat</span>' +
+      '<h3>Work from ' +
+      esc(projectName) +
+      '</h3>' +
+      '<p>Ask for a project brief, source-backed summary, document draft, or next action. Files, prior project chats, and approved tools stay attached to this thread.</p>' +
+      '</div>' +
+      '<div class="webchat-project-start-actions">' +
+      (toolsAvailable
+        ? '<button type="button" class="btn btn-sm btn-primary" data-webchat-action="use-project-runbook">Use MCP runbook</button>'
+        : '') +
+      '<button type="button" class="btn btn-sm btn-ghost" data-webchat-action="focus-chat-input">Write custom prompt</button>' +
+      '</div>' +
+      '<div class="webchat-project-start-meta">' +
+      '<span>' +
+      esc(toolsAvailable ? mcpSummary.projectScope : 'Project files and chat history only') +
+      '</span>' +
+      '<span>' +
+      esc(mcpSummary.writeGuard) +
+      '</span>' +
+      '</div>' +
+      '<div class="webchat-project-start-grid">' +
+      PROJECT_TOOL_STARTERS.slice(0, 4)
+        .map(function (starter, index) {
+          return (
+            '<button type="button" data-webchat-action="use-project-tool" data-starter-index="' +
+            index +
+            '">' +
+            '<strong>' +
+            esc(starter.title) +
+            '</strong>' +
+            '<small>' +
+            esc(starter.description) +
+            '</small>' +
+            '</button>'
+          );
+        })
+        .join('') +
+      '</div>' +
+      (toolsAvailable
+        ? '<div class="webchat-project-command-row">' +
+          PROJECT_MCP_COMMANDS.slice(0, 3)
+            .map(function (command, index) {
+              return (
+                '<button type="button" data-webchat-action="use-project-mcp-command" data-command-index="' +
+                index +
+                '">' +
+                esc(command.title) +
+                '</button>'
+              );
+            })
+            .join('') +
+          '</div>'
+        : '') +
+      '</section>'
+    );
+  }
+
+  function renderEmptyThreadState(threadMeta) {
+    if (threadMeta && threadMeta.projectId) return renderProjectThreadStartState(threadMeta);
     return (
       '<section class="webchat-thread-empty-state">' +
       '<div class="webchat-thread-empty-copy">' +
@@ -483,8 +784,7 @@
       '<button type="button" class="btn btn-sm btn-ghost" data-project-id="' +
       esc(threadMeta.projectId) +
       '" data-webchat-action="open-project-context">Back to project</button>' +
-      '</div>' +
-      (toolsAvailable ? renderProjectToolStarters(threadMeta) : '')
+      '</div>'
     );
   }
 
@@ -918,18 +1218,24 @@
     }
 
     if (!threadId) {
-      el.innerHTML =
-        '<section class="webchat-empty">' +
-        '<div class="webchat-empty-kicker">Chat</div>' +
-        '<h2>What can I help with?</h2>' +
-        '<p>Start a plain AI conversation for questions, writing, planning, and quick thinking.</p>' +
-        '<div class="webchat-empty-actions">' +
-        '<button class="btn btn-primary" data-webchat-action="open-new-conversation">＋ New conversation</button>' +
-        '</div>' +
-        '<div class="webchat-starter-grid">' +
-        renderStarterCards() +
-        '</div>' +
-        '</section>';
+      var choices = await loadWebChatProviderChoices();
+      el.innerHTML = renderNewConversationStart(choices);
+      var startInput = document.getElementById('webchat-start-input');
+      if (startInput) {
+        startInput.oninput = function () {
+          resizeChatInput(startInput);
+        };
+        startInput.onkeydown = function (e) {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            startConversationFromComposer();
+          }
+        };
+        resizeChatInput(startInput);
+        setTimeout(function () {
+          if (document.activeElement === document.body) startInput.focus();
+        }, 0);
+      }
       return;
     }
 
@@ -981,7 +1287,7 @@
         return;
       }
       if (chatMessages.length === 0) {
-        messagesArea.innerHTML = renderEmptyThreadState();
+        messagesArea.innerHTML = renderEmptyThreadState(threadMeta);
         return;
       }
       messagesArea.innerHTML = chatMessages
@@ -1044,6 +1350,7 @@
       threadMeta = null;
     }
     updateThreadBriefState(threadMeta);
+    renderMessages();
     var contextBanner = document.getElementById('thread-context-banner');
     if (contextBanner) {
       contextBanner.innerHTML =
@@ -1402,17 +1709,7 @@
       providerInfo = {};
     }
 
-    var fallbackDefinitions = {
-      claude: { id: 'claude', name: 'Claude' },
-      codex: { id: 'codex', name: 'Codex' },
-      ollama: { id: 'ollama', name: 'Ollama' },
-      openrouter: { id: 'openrouter', name: 'OpenRouter' },
-      'openai-responses': { id: 'openai-responses', name: 'OpenAI' },
-      'anthropic-messages': { id: 'anthropic-messages', name: 'Anthropic' },
-      gemini: { id: 'gemini', name: 'Gemini' },
-      mistral: { id: 'mistral', name: 'Mistral' },
-      'openai-compatible': { id: 'openai-compatible', name: 'OpenAI-compatible' },
-    };
+    var fallbackDefinitions = fallbackProviderDefinitions();
     var providerDefinitions = providerInfo.definitions || fallbackDefinitions;
     var providerModels = providerInfo.models || {};
     var providerDefaults = providerInfo.defaults || {};
@@ -1587,7 +1884,21 @@
   function startFromPrompt(index) {
     var starter = getStarter(index);
     if (!starter) return;
-    openNewConversationModal(starter);
+    var input = document.getElementById('webchat-start-input');
+    if (!input) {
+      openNewConversationSurface();
+      setTimeout(function () {
+        var nextInput = document.getElementById('webchat-start-input');
+        if (!nextInput) return;
+        nextInput.value = starter.prompt;
+        resizeChatInput(nextInput);
+        nextInput.focus();
+      }, 0);
+      return;
+    }
+    input.value = starter.prompt;
+    resizeChatInput(input);
+    input.focus();
   }
 
   function useProjectToolPrompt(index) {
@@ -1637,7 +1948,14 @@
     if (!starter) return;
     var input = document.getElementById('chat-msg-input');
     if (!input) {
-      openNewConversationModal(starter);
+      openNewConversationSurface();
+      setTimeout(function () {
+        var nextInput = document.getElementById('webchat-start-input');
+        if (!nextInput) return;
+        nextInput.value = starter.prompt;
+        resizeChatInput(nextInput);
+        nextInput.focus();
+      }, 0);
       return;
     }
     input.value = starter.prompt;

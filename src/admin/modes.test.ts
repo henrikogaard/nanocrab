@@ -37,19 +37,19 @@ describe('resolveMode', () => {
   it('maps a chat page to the chat mode', () => {
     expect(M().resolveMode('chat')).toBe('chat');
   });
-  it('maps a cowork page to the cowork mode', () => {
-    expect(M().resolveMode('approvals')).toBe('cowork');
+  it('keeps cowork tools behind More instead of the primary Cowork route', () => {
+    expect(M().resolveMode('approvals')).toBeNull();
+    expect(M().MORE_IDS).toContain('approvals');
   });
   it('maps Projects to the cowork mode', () => {
     expect(M().resolveMode('projects')).toBe('cowork');
   });
-  it('maps document outputs to the cowork mode', () => {
-    expect(M().resolveMode('reports')).toBe('cowork');
-    expect(M().resolveMode('artifacts')).toBe('cowork');
-    expect(M().navPagesForMode('cowork')).toContain('reports');
-    expect(M().navPagesForMode('cowork')).toContain('artifacts');
-    expect(M().MORE_IDS).not.toContain('reports');
-    expect(M().MORE_IDS).not.toContain('artifacts');
+  it('keeps document outputs in More while preserving Cowork access', () => {
+    expect(M().resolveMode('reports')).toBeNull();
+    expect(M().resolveMode('artifacts')).toBeNull();
+    expect(M().navPagesForMode('cowork')).toEqual(['projects']);
+    expect(M().MORE_IDS).toContain('reports');
+    expect(M().MORE_IDS).toContain('artifacts');
   });
   it('maps hidden project chat routes to the cowork mode', () => {
     expect(M().resolveMode('project-chat')).toBe('cowork');
@@ -58,8 +58,10 @@ describe('resolveMode', () => {
   it('maps a code page to the code mode', () => {
     expect(M().resolveMode('gitcode')).toBe('code');
   });
-  it('maps GitHub Copilot to the code mode', () => {
-    expect(M().resolveMode('copilot')).toBe('code');
+  it('keeps GitHub Copilot behind More while Code stays focused on the repo workspace', () => {
+    expect(M().resolveMode('copilot')).toBeNull();
+    expect(M().navPagesForMode('code')).toEqual(['gitcode']);
+    expect(M().MORE_IDS).toContain('copilot');
   });
   it('returns null for an admin/ops (More) page', () => {
     expect(M().resolveMode('security')).toBeNull();
