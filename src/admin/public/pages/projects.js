@@ -1,6 +1,7 @@
 (function () {
   var activeProjectId = null;
   var activeProjectFilePath = null;
+  var activeProjectRunId = null;
   var activeProjectDetail = null;
   var projectProviderState = null;
   var PROJECT_ACTIONS = [
@@ -776,6 +777,7 @@
       items
         .map(function (run) {
           var risk = run.approvalRisk || 'low';
+          var active = run.id === activeProjectRunId ? ' active' : '';
           var blocked =
             run.status === 'waiting_for_approval' || risk === 'high'
               ? ' approval-blocked'
@@ -783,6 +785,7 @@
           return (
             '<article class="project-run-row' +
             blocked +
+            active +
             '">' +
             '<div>' +
             '<span>' +
@@ -798,6 +801,9 @@
             '<strong>Approval risk: ' +
             esc(risk) +
             '</strong>' +
+            '<button type="button" class="btn btn-sm btn-ghost" onclick="selectProjectRun(' +
+            jsStringAttr(run.id || '') +
+            ')">Open details</button>' +
             '<button type="button" class="btn btn-sm btn-ghost" onclick="exportProjectRunCitationLedger(' +
             jsStringAttr(run.id || '') +
             ')">Export citation ledger</button>' +
@@ -806,6 +812,162 @@
           );
         })
         .join('') +
+      '</div>'
+    );
+  }
+
+  function projectRunById(runId) {
+    var runs = activeProjectDetail?.runs || [];
+    return runs.find(function (run) { return run.id === runId; }) || null;
+  }
+
+  function projectRunHandoffText(run) {
+    if (!run) return '';
+    var steps = Array.isArray(run.steps) ? run.steps : [];
+    var events = Array.isArray(run.events) ? run.events : [];
+    var approvals = Array.isArray(run.approvals) ? run.approvals : [];
+    var outputs = Array.isArray(run.outputs) ? run.outputs : [];
+    return [
+      'Cowork run handoff',
+      '',
+      'Run: ' + (run.title || run.id || 'Untitled run'),
+      'Status: ' + (run.status || 'draft'),
+      'Provider/model: ' + [run.provider, run.model].filter(Boolean).join(' / '),
+      'Approval risk: ' + (run.approvalRisk || 'low'),
+      'Complexity: ' + (run.complexity || 'quick'),
+      '',
+      'Plan steps',
+      steps.length
+        ? steps
+            .map(function (step) {
+              return '- ' + (step.title || 'Step') + ' (' + (step.status || 'pending') + ')';
+            })
+            .join('\n')
+        : '- No plan steps recorded',
+      '',
+      'Approval checkpoints',
+      approvals.length
+        ? approvals
+            .map(function (approval) {
+              return '- ' + (approval.title || approval.id || 'Approval') + ' (' + (approval.status || 'pending') + ')';
+            })
+            .join('\n')
+        : '- No blocking approvals recorded',
+      '',
+      'Generated output',
+      outputs.length
+        ? outputs
+            .map(function (output) {
+              return '- ' + (output.title || output.path || output.kind || 'Output');
+            })
+            .join('\n')
+        : run.summary || '- No generated output recorded',
+      '',
+      'Recent events',
+      events.length
+        ? events
+            .slice(-8)
+            .map(function (event) {
+              return '- ' + (event.kind || 'event') + ': ' + (event.message || '');
+            })
+            .join('\n')
+        : '- No run events recorded',
+    ]
+      .filter(function (line) { return line !== null; })
+      .join('\n');
+  }
+
+  function renderProjectRunOutputs(run) {
+    var outputs = Array.isArray(run.outputs) ? run.outputs : [];
+    if (!outputs.length && !run.summary) {
+      return '<p>No generated output recorded yet.</p>';
+    }
+    return (
+      '<ul>' +
+      (outputs.length
+        ? outputs
+            .map(function (output) {
+              var label = output.title || output.path || output.kind || 'Output';
+              var link = output.path
+                ? ' <a href="' +
+                  esc(projectFileDownloadHref(output.path)) +
+                  '" download="' +
+                  esc(projectFileDownloadName(output.path)) +
+                  '">Open file</a>'
+                : '';
+              return '<li>' + esc(label) + link + '</li>';
+            })
+            .join('')
+        : '<li>' + esc(run.summary || 'Output recorded') + '</li>') +
+      '</ul>'
+    );
+  }
+
+  function renderProjectRunDetail(runs) {
+    var items = Array.isArray(runs) ? runs : [];
+    if (!items.length) return '';
+    var run =
+      items.find(function (item) { return item.id === activeProjectRunId; }) ||
+      items[0];
+    if (!run) return '';
+    activeProjectRunId = run.id || activeProjectRunId;
+    var steps = Array.isArray(run.steps) ? run.steps : [];
+    var events = Array.isArray(run.events) ? run.events : [];
+    var approvals = Array.isArray(run.approvals) ? run.approvals : [];
+    return (
+      '<div class="project-run-detail">' +
+      '<div class="project-run-header">' +
+      '<div><span class="project-run-title">' +
+      esc(run.title || 'Untitled run') +
+      '</span><small class="project-run-meta">' +
+      esc(run.status || 'draft') +
+      ' &middot; ' +
+      esc(run.provider || 'default provider') +
+      (run.model ? ' / ' + esc(run.model) : '') +
+      '</small></div>' +
+      '<div class="project-run-actions">' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="copyProjectRunHandoff(' +
+      jsStringAttr(run.id || '') +
+      ')">Copy run handoff</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="retryProjectRun(' +
+      jsStringAttr(run.id || '') +
+      ')">Retry</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="cancelProjectRun(' +
+      jsStringAttr(run.id || '') +
+      ')">Cancel</button>' +
+      '</div>' +
+      '</div>' +
+      '<div class="project-run-section"><span>Plan steps</span><ul>' +
+      (steps.length
+        ? steps
+            .map(function (step) {
+              return '<li>' + esc(step.title || 'Step') + ' - ' + esc(step.status || 'pending') + '</li>';
+            })
+            .join('')
+        : '<li>No plan steps recorded yet.</li>') +
+      '</ul></div>' +
+      '<div class="project-run-section"><span>Approval checkpoints</span><ul>' +
+      (approvals.length
+        ? approvals
+            .map(function (approval) {
+              return '<li>' + esc(approval.title || approval.id || 'Approval') + ' - ' + esc(approval.status || 'pending') + '</li>';
+            })
+            .join('')
+        : '<li>No blocking approvals recorded.</li>') +
+      '</ul></div>' +
+      '<div class="project-run-section"><span>Generated output</span>' +
+      renderProjectRunOutputs(run) +
+      '</div>' +
+      '<div class="project-run-section"><span>Run events</span><ul>' +
+      (events.length
+        ? events
+            .slice(-8)
+            .map(function (event) {
+              return '<li>' + esc(event.kind || 'event') + ': ' + esc(event.message || '') + '</li>';
+            })
+            .join('')
+        : '<li>No run events recorded yet.</li>') +
+      '</ul></div>' +
       '</div>'
     );
   }
@@ -1229,6 +1391,7 @@
       '<div class="project-section">' +
       '<div class="project-section-title">Runs</div>' +
       renderProjectRuns(detail.runs || []) +
+      renderProjectRunDetail(detail.runs || []) +
       '</div>' +
       '<div class="project-section">' +
       '<div class="project-section-title">Context notebook</div>' +
@@ -1269,6 +1432,14 @@
     if (!activeProjectId && projects.length) activeProjectId = projects[0].id;
     var detail = activeProjectId ? await loadProjectDetail(activeProjectId) : null;
     activeProjectDetail = detail;
+    var detailRuns = detail && Array.isArray(detail.runs) ? detail.runs : [];
+    if (
+      detailRuns.length &&
+      !detailRuns.some(function (run) { return run.id === activeProjectRunId; })
+    ) {
+      activeProjectRunId = detailRuns[0].id || null;
+    }
+    if (!detailRuns.length) activeProjectRunId = null;
     if (
       detail &&
       !activeProjectFilePath &&
@@ -1324,6 +1495,7 @@
   window.selectProject = function (id) {
     activeProjectId = id;
     activeProjectFilePath = null;
+    activeProjectRunId = null;
     refreshProjects();
   };
 
@@ -1489,6 +1661,64 @@
       'Source pack prompt copied',
       'Copy source pack prompt',
     );
+  };
+
+  window.selectProjectRun = function (runId) {
+    activeProjectRunId = runId;
+    refreshProjects();
+  };
+
+  window.copyProjectRunHandoff = async function (runId) {
+    var run = projectRunById(runId || activeProjectRunId);
+    if (!run) {
+      toast('Select a Cowork run before copying a handoff', 'error');
+      return;
+    }
+    await copyTextWithFallback(
+      projectRunHandoffText(run),
+      'Run handoff copied',
+      'Copy run handoff',
+    );
+  };
+
+  window.retryProjectRun = async function (runId) {
+    if (!activeProjectId || !runId) return;
+    try {
+      var result = await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/runs/' +
+          encodeURIComponent(runId) +
+          '/retry',
+        { method: 'POST' },
+      );
+      if (result.error) throw new Error(result.error);
+      toast('Run moved back to draft', 'success');
+      activeProjectRunId = runId;
+      refreshProjects();
+    } catch (err) {
+      toast('Could not retry run: ' + (err.message || 'unknown error'), 'error');
+    }
+  };
+
+  window.cancelProjectRun = async function (runId) {
+    if (!activeProjectId || !runId) return;
+    try {
+      var result = await api(
+        '/projects/' +
+          encodeURIComponent(activeProjectId) +
+          '/runs/' +
+          encodeURIComponent(runId) +
+          '/cancel',
+        { method: 'POST' },
+      );
+      if (result.error) throw new Error(result.error);
+      toast('Run cancelled', 'success');
+      activeProjectRunId = runId;
+      refreshProjects();
+    } catch (err) {
+      toast('Could not cancel run: ' + (err.message || 'unknown error'), 'error');
+    }
   };
 
   window.exportProjectRunCitationLedger = async function (runId) {

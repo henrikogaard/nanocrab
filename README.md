@@ -57,7 +57,7 @@ Channel agents use the same workspace map. From WhatsApp, Signal, Telegram, or a
 
 - **Dashboard** — live stats, weather, channel status, message feed, cockpit, smart refresh, and workspace route guidance
 - **Copilot chat** — pure web conversations with thread history, provider/model selection, optional title, generated title fallback, inline progress/tool visibility, and no agent templates
-- **Cowork Projects** — virtual project folders with files, artifacts, documents, project chats, previous thread history, instructions, context notebook inclusion controls, MCP source workflows, and local draft-first output
+- **Cowork Projects** — virtual project folders with files, artifacts, documents, project chats, previous thread history, instructions, run detail panels with plan/events/approvals/output, context notebook inclusion controls, MCP source workflows, and local draft-first output
 - **Agents** — assignment flows for delegated tasks, GitHub issue pickup, Autofix auto-pickup setup, coding-job output, and bot agents
 - **Agent Profiles** — named identities such as `@RepoFixer` or `@ManualHost` with provider/model choices, skills, memory scopes, connector limits, subscriptions, and approval-aware write policies managed from the Agents cockpit
 - **Tasks & Workflows** — routine blueprints, schedule builder, missions, runbooks, delivery modes, run history, heartbeat checks, and run-now controls

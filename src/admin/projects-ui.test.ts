@@ -202,10 +202,20 @@ describe('Cowork Projects UI wiring', () => {
     const source = fs.readFileSync(pagePath, 'utf8');
 
     expect(source).toContain('renderProjectRuns');
+    expect(source).toContain('renderProjectRunDetail');
     expect(source).toContain('renderProjectContextNotebook');
     expect(source).toContain('renderProjectCapabilities');
     expect(source).toContain('renderProjectComplexity');
     expect(source).toContain('project-run-list');
+    expect(source).toContain('project-run-detail');
+    expect(source).toContain('selectProjectRun');
+    expect(source).toContain('retryProjectRun');
+    expect(source).toContain('cancelProjectRun');
+    expect(source).toContain('copyProjectRunHandoff');
+    expect(source).toContain('Copy run handoff');
+    expect(source).toContain('Approval checkpoints');
+    expect(source).toContain('Run events');
+    expect(source).toContain('Generated output');
     expect(source).toContain('project-context-notebook');
     expect(source).toContain('project-capability-panel');
     expect(source).toContain('project-complexity-panel');
