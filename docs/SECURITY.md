@@ -70,6 +70,11 @@ Memory and skills are treated as provenance-tracked runtime context:
 - Skill visibility is explicit: `shared`, `private`, or `system`.
 - Skill scope is explicit: `all`, `main`, or `channels`.
 - Visibility and scope changes are only accepted through admin-authorized routes.
+- Skills.sh catalog search is a server-side read to `SKILLS_SH_API_BASE_URL`
+  and install is an explicit admin action. NanoCrab downloads `SKILL.md`
+  content, writes it locally under `container/skills`, records a version
+  snapshot, and applies the same scope/visibility router controls; it does not
+  execute `npx skills` or run downloaded code during installation.
 
 Skill injection is bounded before a container starts. The router clamps relevance scores, excludes score `<= 0`, caps the number of injected skills, caps total skill context bytes, and records why each skill was injected or excluded. Channel agents do not receive `private` or `system` skills; those are reserved for the main/admin context. Runtime skill registry snapshots include only the skills that survived this selection step.
 

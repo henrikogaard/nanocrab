@@ -32408,7 +32408,8 @@ select {
 .skills-empty-state,
 .skill-suggestion-card,
 .skill-draft-card,
-.skill-registry-row {
+.skill-registry-row,
+.skills-sh-result-card {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
@@ -32530,6 +32531,39 @@ select {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.skills-sh-search-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.skills-sh-install-options {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skills-sh-results {
+  display: grid;
+  gap: 10px;
+}
+
+.skills-sh-result-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 13px;
+  background: color-mix(in srgb, var(--surface2) 24%, var(--surface));
+}
+
+.skills-sh-empty {
+  background: color-mix(in srgb, var(--surface2) 28%, var(--surface));
 }
 
 .skills-form-panel.is-hidden,
@@ -32941,6 +32975,7 @@ select {
   .skills-section-head,
   .skill-suggestion-card,
   .skill-draft-card,
+  .skills-sh-result-card,
   .skill-registry-row,
   .skills-page .channel-card {
     flex-direction: column;
@@ -32948,6 +32983,7 @@ select {
   }
 
   .skills-command-actions,
+  .skills-sh-install-options,
   .skill-row-actions,
   .skills-page .channel-card > div:last-child {
     justify-content: flex-start;
@@ -33023,6 +33059,10 @@ select {
 
   .report-create-form textarea {
     min-height: 160px;
+  }
+
+  .skills-sh-search-panel {
+    grid-template-columns: 1fr;
   }
 
   .knowledge-timeline {

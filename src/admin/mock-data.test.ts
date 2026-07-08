@@ -195,6 +195,56 @@ describe('mock admin data', () => {
     });
   });
 
+  it('serves Skills.sh catalog and install mocks without live network or mutation', async () => {
+    await withServer(async (baseUrl) => {
+      const searchResponse = await fetch(
+        `${baseUrl}/api/skills/skills-sh/search?query=github`,
+      );
+      const search = (await searchResponse.json()) as {
+        skills: Array<{ skillId: string; owner: string; repo: string }>;
+      };
+      expect(search.skills).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            skillId: 'github-issue-helper',
+            owner: 'skills-sh',
+            repo: 'agent-workflows',
+          }),
+        ]),
+      );
+
+      const installResponse = await fetch(
+        `${baseUrl}/api/skills/skills-sh/install`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            owner: 'skills-sh',
+            repo: 'agent-workflows',
+            skillId: 'github-issue-helper',
+            enabled: true,
+            scope: 'main',
+            visibility: 'private',
+          }),
+        },
+      );
+      const installed = (await installResponse.json()) as {
+        ok: boolean;
+        mock: boolean;
+        skill: { path: string; enabled: boolean };
+      };
+
+      expect(installed).toMatchObject({
+        ok: true,
+        mock: true,
+        skill: {
+          path: 'github-issue-helper',
+          enabled: true,
+        },
+      });
+    });
+  });
+
   it('serves operation schedules in mock mode without live mutation', async () => {
     await withServer(async (baseUrl) => {
       const listResponse = await fetch(`${baseUrl}/api/tasks`);

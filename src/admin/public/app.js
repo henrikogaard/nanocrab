@@ -9295,8 +9295,81 @@ function skillActionErrorMessage(kind, err) {
       'Skill rollback was not applied. Check the selected version, current skill content, and active agents before replacing instructions.',
     delete:
       'Skill was not deleted. Check active routines, Cowork projects, reports, and agents that may still depend on this capability.',
+    skillsShSearch:
+      'Skills.sh search did not finish. Check the catalog connection, query, and whether the skill should be drafted locally instead.',
+    skillsShInstall:
+      'Skills.sh skill was not installed. Review the catalog source, existing local skills, scope, visibility, and tool boundary before enabling it.',
   };
   return `${messages[kind] || 'Skill action failed.'}${suffix}`;
+}
+
+function renderSkillsShEmptyState(kind = 'idle', detail = '') {
+  const copy = {
+    idle: {
+      title: 'Search Skills.sh for installable agent skills.',
+      body:
+        detail ||
+        'Catalog results stay external until an admin downloads a skill into the local registry.',
+    },
+    loading: {
+      title: 'Searching Skills.sh',
+      body: 'Looking up installable SKILL.md packages from the external catalog.',
+    },
+    empty: {
+      title: 'No Skills.sh results found.',
+      body:
+        detail ||
+        'Try a workflow, repository owner, skill name, or tool family.',
+    },
+    error: {
+      title: 'Skills.sh catalog unavailable.',
+      body:
+        detail ||
+        'Keep local skills unchanged and retry after checking the catalog route.',
+    },
+  }[kind];
+  return `
+    <section class="skills-empty-guidance skills-sh-empty is-${esc(kind)}">
+      <div>
+        <span>Skills.sh</span>
+        <strong>${esc(copy.title)}</strong>
+        <p>${esc(copy.body)}</p>
+      </div>
+    </section>`;
+}
+
+function renderSkillsShCatalog(data = {}) {
+  const skills = Array.isArray(data.skills) ? data.skills : [];
+  window._skillsShCatalog = skills;
+  if (!skills.length) {
+    return renderSkillsShEmptyState(
+      data.query ? 'empty' : 'idle',
+      data.query ? `No Skills.sh matches for "${data.query}".` : '',
+    );
+  }
+  return skills
+    .map(
+      (skill, index) => `
+      <article class="skills-sh-result-card">
+        <div class="skill-row-main">
+          <div class="skill-row-title">
+            <strong>${esc(skill.name || skill.skillId)}</strong>
+            <span class="badge badge-info">${esc(skill.owner)}/${esc(skill.repo)}</span>
+            ${
+              skill.downloads !== undefined
+                ? `<span class="badge badge-muted">${esc(String(skill.downloads))} downloads</span>`
+                : ''
+            }
+          </div>
+          <p>${esc(skill.description || 'Downloaded from Skills.sh')}</p>
+          <small>${esc(skill.skillId || '')}${skill.updatedAt ? ` &middot; ${esc(skill.updatedAt)}` : ''}</small>
+        </div>
+        <div class="skill-row-actions">
+          <button type="button" class="btn btn-sm btn-primary" onclick="installSkillsShSkill(${index},this)">Download & enable</button>
+        </div>
+      </article>`,
+    )
+    .join('');
 }
 
 async function renderSkills(el, options = {}) {
@@ -9396,6 +9469,35 @@ async function renderSkills(el, options = {}) {
         )
         .join('')}
     </section>
+    <div class="skills-panel skills-sh-panel">
+      <div class="skills-section-head">
+        <div>
+          <div class="card-title">Skills.sh catalog <span class="badge badge-info">External</span></div>
+          <p class="skills-panel-note">Download reviewed Skills.sh packages into the local registry, then apply the same enabled, scope, and visibility controls as any other skill.</p>
+        </div>
+      </div>
+      <form id="skills-sh-search-form" class="skills-sh-search-panel">
+        <div class="form-group">
+          <label>Search Skills.sh</label>
+          <input id="skills-sh-query" class="search-input" placeholder="github issues, reports, code review">
+        </div>
+        <div class="skills-sh-install-options">
+          <label class="skill-active-toggle"><input type="checkbox" id="skills-sh-enabled" checked> Enable after download</label>
+          <select id="skills-sh-scope" class="input-sm skill-row-select">
+            <option value="all">All agents</option>
+            <option value="main">Main only</option>
+            <option value="channels">Channels</option>
+          </select>
+          <select id="skills-sh-visibility" class="input-sm skill-row-select is-wide">
+            <option value="shared">Shared</option>
+            <option value="private">Private</option>
+            <option value="system">System</option>
+          </select>
+          <button type="submit" class="btn btn-sm btn-primary">Search Skills.sh</button>
+        </div>
+      </form>
+      <div id="skills-sh-results" class="skills-sh-results">${renderSkillsShCatalog()}</div>
+    </div>
     <div class="skills-form-panel is-hidden" id="new-skill-draft-form">
       <div class="card-title">Draft Skill From Instructions <span class="badge badge-info">Approval required</span></div>
       <p class="skills-panel-note">Create a provider-neutral skill draft from task instructions. It stays inactive until you review and approve it.</p>
@@ -9549,6 +9651,11 @@ async function renderSkills(el, options = {}) {
       </div>`
     }
     </div>`;
+
+  document.getElementById('skills-sh-search-form').onsubmit = async (e) => {
+    e.preventDefault();
+    await loadSkillsShCatalog();
+  };
 
   // Create form handler
   document.getElementById('skill-draft-create-form').onsubmit = async (e) => {
@@ -9742,6 +9849,72 @@ window.updateSkillState = async (skillPath, patch) => {
     } else toast(skillActionErrorMessage('state', r), 'error');
   } catch (e) {
     toast(skillActionErrorMessage('state', e), 'error');
+  }
+};
+
+window.loadSkillsShCatalog = async () => {
+  const query = document.getElementById('skills-sh-query')?.value?.trim() || '';
+  const target = document.getElementById('skills-sh-results');
+  if (!target) return;
+  if (!query) {
+    target.innerHTML = renderSkillsShCatalog({ skills: [], query: '' });
+    return;
+  }
+  target.innerHTML = renderSkillsShEmptyState('loading');
+  const params = new URLSearchParams({ query, pageSize: '12' });
+  try {
+    const data = await api(`/skills/skills-sh/search?${params.toString()}`);
+    target.innerHTML = renderSkillsShCatalog({ ...data, query });
+  } catch (err) {
+    target.innerHTML = renderSkillsShEmptyState(
+      'error',
+      err?.message || 'Skills.sh search failed.',
+    );
+    toast(skillActionErrorMessage('skillsShSearch', err), 'error');
+  }
+};
+
+window.installSkillsShSkill = async (index, btnEl) => {
+  const skill = window._skillsShCatalog?.[index];
+  if (!skill) {
+    toast('Skills.sh result is no longer available', 'error');
+    return;
+  }
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.textContent = 'Downloading...';
+  }
+  try {
+    const r = await api('/skills/skills-sh/install', {
+      method: 'POST',
+      body: JSON.stringify({
+        owner: skill.owner,
+        repo: skill.repo,
+        skillId: skill.skillId,
+        enabled: document.getElementById('skills-sh-enabled')?.checked !== false,
+        scope: document.getElementById('skills-sh-scope')?.value || 'all',
+        visibility:
+          document.getElementById('skills-sh-visibility')?.value || 'shared',
+      }),
+    });
+    if (r.ok) {
+      toast(
+        r.skill?.enabled
+          ? 'Skills.sh skill installed and enabled'
+          : 'Skills.sh skill installed',
+        'success',
+      );
+      navigate('skills');
+    } else {
+      toast(skillActionErrorMessage('skillsShInstall', r), 'error');
+    }
+  } catch (err) {
+    toast(skillActionErrorMessage('skillsShInstall', err), 'error');
+  } finally {
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.textContent = 'Download & enable';
+    }
   }
 };
 

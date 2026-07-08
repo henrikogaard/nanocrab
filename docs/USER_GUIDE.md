@@ -345,6 +345,9 @@ Use **Memory** to control what NanoCrab learns.
 - **Journal events** answer "when did that happen?" questions with citations.
 - **Skill drafts** let agents propose reusable workflows as `SKILL.md`
   packages. Review the diff before approval.
+- **Skills.sh catalog** lets admins search external Skills.sh packages from the
+  Skills page, download a selected `SKILL.md`, and enable it with the normal
+  local scope and visibility controls.
 - **Skill registry** controls enabled state, scope, visibility, trigger hints,
   and risk level.
 
@@ -353,6 +356,7 @@ Good practice:
 - Approve durable preferences and facts.
 - Reject casual guesses, secrets, or temporary details.
 - Mark stale or contradicted memories instead of deleting history blindly.
+- Review third-party Skills.sh content before enabling it for unattended agents.
 - Keep private/system skills scoped away from normal channel agents.
 
 ## Reports, Research, And Artifacts

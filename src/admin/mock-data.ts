@@ -1825,6 +1825,31 @@ const skills = [
   ...skill,
 }));
 
+const skillsShCatalog = [
+  {
+    id: 'skills-sh/agent-workflows/github-issue-helper',
+    skillId: 'github-issue-helper',
+    name: 'GitHub Issue Helper',
+    description:
+      'Downloaded from Skills.sh for turning GitHub issues into implementation-ready plans.',
+    owner: 'skills-sh',
+    repo: 'agent-workflows',
+    downloads: 128,
+    updatedAt: iso(64),
+  },
+  {
+    id: 'skills-sh/agent-workflows/release-reviewer',
+    skillId: 'release-reviewer',
+    name: 'Release Reviewer',
+    description:
+      'Checklist-driven release review with tests, docs, and operator handoff evidence.',
+    owner: 'skills-sh',
+    repo: 'agent-workflows',
+    downloads: 87,
+    updatedAt: iso(120),
+  },
+];
+
 const wikiPages = [
   {
     name: 'game-manual-notes',
@@ -3093,6 +3118,34 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       mockThreads = mockThreads.filter((t) => t.id !== threadId);
       return { ok: true };
     }
+  }
+
+  if (method === 'POST' && pathname === '/skills/skills-sh/install') {
+    const skillId = String(req.body?.skillId || 'github-issue-helper');
+    const enabled = req.body?.enabled !== false;
+    return ok({
+      message: 'Mock Skills.sh install accepted. No live files changed.',
+      skill: {
+        name: skillId,
+        description: 'Mock Skills.sh installed skill.',
+        path: skillId,
+        category: 'custom',
+        enabled,
+        scope: req.body?.scope || 'all',
+        visibility: req.body?.visibility || 'shared',
+      },
+      state: {
+        enabled,
+        scope: req.body?.scope || 'all',
+        visibility: req.body?.visibility || 'shared',
+      },
+      source: {
+        source: 'skills.sh',
+        owner: req.body?.owner || 'skills-sh',
+        repo: req.body?.repo || 'agent-workflows',
+        skillId,
+      },
+    });
   }
 
   if (method !== 'GET') return writeResponse(pathname);
@@ -4637,6 +4690,22 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   }
   if (pathname === '/sessions/terminal/active') {
     return terminalHistory;
+  }
+  if (pathname === '/skills/skills-sh/search') {
+    const query = String(req.query.query || req.query.q || '').toLowerCase();
+    const matches = query
+      ? skillsShCatalog.filter((skill) =>
+          `${skill.name} ${skill.description} ${skill.skillId}`
+            .toLowerCase()
+            .includes(query),
+        )
+      : skillsShCatalog;
+    return {
+      skills: matches,
+      total: matches.length,
+      page: 1,
+      pageSize: 12,
+    };
   }
   if (pathname === '/skills') return { installed: skills, available: [] };
   if (pathname === '/skills/search') {

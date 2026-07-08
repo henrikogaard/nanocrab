@@ -11,6 +11,7 @@ const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
   'TZ',
+  'SKILLS_SH_API_BASE_URL',
 ]);
 
 export const ASSISTANT_NAME =
@@ -52,6 +53,10 @@ export const CONTAINER_SKILLS_DIR = path.resolve(
   'container',
   'skills',
 );
+export const SKILLS_SH_API_BASE_URL =
+  process.env.SKILLS_SH_API_BASE_URL ||
+  envConfig.SKILLS_SH_API_BASE_URL ||
+  'https://www.skills.sh/api';
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanocrab-agent:latest';

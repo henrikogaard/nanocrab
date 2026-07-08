@@ -40,6 +40,11 @@ import {
   recordSkillVersion,
   rollbackSkillVersion,
 } from '../../skill-versions.js';
+import {
+  installSkillsShSkill,
+  searchSkillsSh,
+  SkillsShError,
+} from '../../skills-sh.js';
 
 const router = Router();
 const PROJECT_ROOT = process.cwd();
@@ -325,6 +330,61 @@ router.get('/search', (req: Request, res: Response) => {
     }),
   );
 });
+
+router.get('/skills-sh/search', async (req: Request, res: Response) => {
+  try {
+    res.json(
+      await searchSkillsSh({
+        query: String(req.query.query || req.query.q || ''),
+        owner: String(req.query.owner || ''),
+        repo: String(req.query.repo || ''),
+        page: Number(req.query.page || 1),
+        pageSize: Number(req.query.pageSize || 12),
+      }),
+    );
+  } catch (err) {
+    const status = err instanceof SkillsShError ? err.statusCode : 502;
+    res.status(status).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.post(
+  '/skills-sh/install',
+  requireRole('admin'),
+  async (req: Request, res: Response) => {
+    try {
+      const result = await installSkillsShSkill({
+        owner: String(req.body?.owner || ''),
+        repo: String(req.body?.repo || ''),
+        skillId: String(req.body?.skillId || ''),
+        enabled:
+          typeof req.body?.enabled === 'boolean' ? req.body.enabled : true,
+        scope: req.body?.scope,
+        visibility: req.body?.visibility,
+      });
+      auditLog(
+        req,
+        'skill_skills_sh_installed',
+        `${result.source.owner}/${result.source.repo}/${result.source.skillId}`,
+      );
+      res.status(201).json({
+        ok: true,
+        skill: result.skill,
+        state: result.state,
+        version: result.version,
+        source: result.source,
+        message: 'Skills.sh skill installed. Rebuild container to apply.',
+      });
+    } catch (err) {
+      const status = err instanceof SkillsShError ? err.statusCode : 400;
+      res.status(status).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
 
 router.get('/drafts', (req: Request, res: Response) => {
   const status =

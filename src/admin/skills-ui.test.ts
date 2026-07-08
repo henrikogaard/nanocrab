@@ -302,6 +302,36 @@ describe('Skills capability library UI', () => {
     );
   });
 
+  it('wires a Skills.sh catalog view for downloading and enabling skills', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const styleSource = fs.readFileSync(stylePath, 'utf8');
+    const skills = skillsSource(source);
+    const actions = actionSource(source);
+
+    expect(source).toContain('Skills.sh catalog');
+    expect(source).toContain('Search Skills.sh');
+    expect(source).toContain('id="skills-sh-query"');
+    expect(source).toContain('id="skills-sh-results"');
+    expect(source).toContain('id="skills-sh-scope"');
+    expect(source).toContain('id="skills-sh-visibility"');
+    expect(source).toContain('id="skills-sh-enabled"');
+    expect(source).toContain('loadSkillsShCatalog');
+    expect(source).toContain('renderSkillsShCatalog');
+    expect(source).toContain('installSkillsShSkill');
+    expect(source).toContain('api(`/skills/skills-sh/search?');
+    expect(source).toContain("api('/skills/skills-sh/install'");
+    expect(source).toContain('Download & enable');
+    expect(source).toContain('Downloaded from Skills.sh');
+    expect(source).toContain('Skills.sh skill installed and enabled');
+    expect(actions).toContain('Skills.sh search did not finish.');
+    expect(actions).toContain('Skills.sh skill was not installed.');
+    expect(skills).toContain('class="skills-sh-search-panel"');
+    expect(skills).toContain('class="skills-sh-results"');
+    expect(styleSource).toContain('.skills-sh-search-panel');
+    expect(styleSource).toContain('.skills-sh-result-card');
+    expect(styleSource).toContain('.skills-sh-install-options');
+  });
+
   it('uses class-based review, edit, and version panels', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
