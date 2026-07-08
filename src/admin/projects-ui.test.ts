@@ -5,12 +5,22 @@ import path from 'path';
 const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
 const pagePath = path.join(process.cwd(), 'src/admin/public/pages/projects.js');
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
+const shellNavigationUiPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/shell-navigation.js',
+);
 
 describe('Cowork Projects UI wiring', () => {
   it('registers the Projects page in the dashboard shell', () => {
     const source = fs.readFileSync(appPath, 'utf8');
+    const shellNavigationSource = fs.readFileSync(
+      shellNavigationUiPath,
+      'utf8',
+    );
 
-    expect(source).toContain("projects: { label: 'Cowork Projects'");
+    expect(shellNavigationSource).toContain(
+      "projects: { label: 'Cowork Projects'",
+    );
     expect(source).toContain("projects: 'renderProjects'");
     expect(source).toContain("'project-chat': 'renderProjectChatPage'");
     expect(source).toContain('parseProjectChatHash');

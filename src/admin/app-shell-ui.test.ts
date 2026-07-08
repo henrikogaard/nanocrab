@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'fs';
+import * as vm from 'node:vm';
 import path from 'path';
 
 const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
@@ -12,6 +13,10 @@ const feedbackUiPath = path.join(
 const shellUiPath = path.join(
   process.cwd(),
   'src/admin/public/ui/shell-states.js',
+);
+const shellNavigationUiPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/shell-navigation.js',
 );
 const recoveryUiPath = path.join(
   process.cwd(),
@@ -29,6 +34,17 @@ const fileVaultStatesUiPath = path.join(
   process.cwd(),
   'src/admin/public/ui/file-vault-states.js',
 );
+
+function loadShellNavigation(role = 'owner') {
+  const context = {
+    window: {
+      _userRole: role,
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(shellNavigationUiPath, 'utf8'), context);
+  return (context.window as any).NanoShellNavigation;
+}
 
 describe('App shell accessibility UI', () => {
   it('adds a keyboard skip link and main content landmark to the dashboard shell', () => {
@@ -102,8 +118,14 @@ describe('App shell accessibility UI', () => {
 
   it('restores chat thread deep links without double-prefixing legacy web ids', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
+    const shellNavigationSource = fs.readFileSync(
+      shellNavigationUiPath,
+      'utf8',
+    );
 
-    expect(appSource).toContain("chat: { label: 'Chat', icon: 'chat' }");
+    expect(shellNavigationSource).toContain(
+      "chat: { label: 'Chat', icon: 'chat' }",
+    );
     expect(appSource).toContain('function parseChatHash(hash)');
     expect(appSource).toContain(
       "decoded.startsWith('web:') ? decoded : 'web:' + decoded",
@@ -138,6 +160,7 @@ describe('App shell accessibility UI', () => {
     expect(indexSource).toContain('/ui/data-health.js');
     expect(indexSource).toContain('/ui/feedback.js');
     expect(indexSource).toContain('/ui/shell-states.js');
+    expect(indexSource).toContain('/ui/shell-navigation.js');
     expect(indexSource).toContain('/ui/recovery.js');
     expect(indexSource).toContain('/ui/provider-parity.js');
     expect(indexSource).toContain('/ui/routine-states.js');
@@ -161,6 +184,9 @@ describe('App shell accessibility UI', () => {
       indexSource.indexOf('/ui/shell-states.js'),
     );
     expect(indexSource.indexOf('/ui/shell-states.js')).toBeLessThan(
+      indexSource.indexOf('/ui/shell-navigation.js'),
+    );
+    expect(indexSource.indexOf('/ui/shell-navigation.js')).toBeLessThan(
       indexSource.indexOf('/ui/recovery.js'),
     );
     expect(indexSource.indexOf('/ui/recovery.js')).toBeLessThan(
@@ -193,6 +219,40 @@ describe('App shell accessibility UI', () => {
     expect(styleSource).toContain('.sidebar-data-health');
     expect(appSource).not.toContain("api('/plugins').catch(() => [])");
     expect(appSource).not.toContain('alert-${a.type}');
+    expect(appSource).toContain('} = window.NanoShellNavigation;');
+    expect(appSource).not.toContain('const PAGE_META = {');
+  });
+
+  it('exposes shell navigation metadata as a runtime module for the app shell', () => {
+    const navigation = loadShellNavigation();
+
+    expect(navigation.metaLabel('projects')).toBe('Cowork Projects');
+    expect(navigation.metaIcon('projects')).toBe('agents');
+    expect(navigation.metaLabel('unknown-route')).toBe('unknown-route');
+    expect(navigation.metaIcon('unknown-route')).toBe('integrations');
+    expect(navigation.PAGE_META['session-detail']).toEqual({
+      label: 'Session Detail',
+      icon: 'sessions',
+    });
+    expect(
+      navigation
+        .moreDrawerSections(['dashboard', 'memory', 'skills', 'audit'])
+        .map((section: any) => ({
+          title: section.title,
+          pages: section.pages,
+        })),
+    ).toEqual([
+      { title: 'Operate', pages: ['dashboard'] },
+      { title: 'Personal', pages: ['memory', 'skills'] },
+      { title: 'Govern', pages: ['audit'] },
+    ]);
+    expect(navigation.isVisibleForRole('gitcode')).toBe(true);
+
+    const viewerNavigation = loadShellNavigation('viewer');
+
+    expect(viewerNavigation.isVisibleForRole('chat')).toBe(true);
+    expect(viewerNavigation.isVisibleForRole('gitcode')).toBe(false);
+    expect(viewerNavigation.isVisibleForRole('security')).toBe(false);
   });
 
   it('styles shared shell loading states as route-shaped placeholders', () => {
@@ -243,19 +303,34 @@ describe('App shell accessibility UI', () => {
   it('groups More drawer tools by operator intent instead of one flat admin list', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
+    const shellNavigationSource = fs.readFileSync(
+      shellNavigationUiPath,
+      'utf8',
+    );
 
-    expect(appSource).toContain('const MORE_DRAWER_SECTIONS = [');
-    expect(appSource).toContain("title: 'Operate'");
-    expect(appSource).toContain("title: 'Connect'");
-    expect(appSource).toContain("title: 'Personal'");
-    expect(appSource).toContain("title: 'Govern'");
-    expect(appSource).toContain(
-      "pages: ['channels', 'integrations', 'webhooks', 'credentials', 'containers', 'groups', 'sessions']",
-    );
-    expect(appSource).toContain(
-      "pages: ['memory', 'skills', 'settings', 'timeline', 'marketplace', 'help']",
-    );
-    expect(appSource).toContain('function moreDrawerSections(ids)');
+    expect(shellNavigationSource).toContain('const MORE_DRAWER_SECTIONS = [');
+    expect(shellNavigationSource).toContain("title: 'Operate'");
+    expect(shellNavigationSource).toContain("title: 'Connect'");
+    expect(shellNavigationSource).toContain("title: 'Personal'");
+    expect(shellNavigationSource).toContain("title: 'Govern'");
+    for (const id of [
+      'channels',
+      'integrations',
+      'webhooks',
+      'credentials',
+      'containers',
+      'groups',
+      'sessions',
+      'memory',
+      'skills',
+      'settings',
+      'timeline',
+      'marketplace',
+      'help',
+    ]) {
+      expect(shellNavigationSource).toContain(`'${id}'`);
+    }
+    expect(shellNavigationSource).toContain('function moreDrawerSections(ids)');
     expect(appSource).toContain(
       '<div class="more-drawer-header"><span>Workspace tools</span>',
     );
@@ -269,7 +344,7 @@ describe('App shell accessibility UI', () => {
     expect(appSource).toContain('Backups, monitoring, audit');
     expect(appSource).toContain('<span class="nav-label">Settings</span>');
     expect(appSource).toContain('moreDrawerSections(moreDrawerIds)');
-    expect(appSource).toContain(
+    expect(shellNavigationSource).toContain(
       "channels: { label: 'Channels', icon: 'messages' }",
     );
     expect(styleSource).not.toContain('.more-drawer-intro');
@@ -284,8 +359,12 @@ describe('App shell accessibility UI', () => {
 
   it('keeps built-in route metadata complete for recovery and hidden detail pages', () => {
     const source = fs.readFileSync(appPath, 'utf8');
+    const shellNavigationSource = fs.readFileSync(
+      shellNavigationUiPath,
+      'utf8',
+    );
 
-    expect(source).toContain(
+    expect(shellNavigationSource).toContain(
       "'session-detail': { label: 'Session Detail', icon: 'sessions' }",
     );
     expect(source).toContain("'session-detail': 'renderSessionDetail'");
@@ -299,9 +378,9 @@ describe('App shell accessibility UI', () => {
       "'review-rules': { page: 'gitcode', container: 'gc-tabs', tab: 'rules' }",
     );
 
-    const pageMetaBlock = source.slice(
-      source.indexOf('const PAGE_META = {'),
-      source.indexOf('function metaLabel'),
+    const pageMetaBlock = shellNavigationSource.slice(
+      shellNavigationSource.indexOf('const PAGE_META = {'),
+      shellNavigationSource.indexOf('const MORE_DRAWER_SECTIONS = ['),
     );
     const pageMapBlock = source.slice(
       source.indexOf('const _pageMap = {'),
@@ -316,7 +395,7 @@ describe('App shell accessibility UI', () => {
       source.indexOf('};', source.indexOf('const PAGE_TAB_ALIASES = {')),
     );
     const pageMetaIds = new Set(
-      [...pageMetaBlock.matchAll(/^ {2}['"]?([a-zA-Z0-9_-]+)['"]?:/gm)].map(
+      [...pageMetaBlock.matchAll(/^ +['"]?([a-zA-Z0-9_-]+)['"]?:/gm)].map(
         (match) => match[1],
       ),
     );
