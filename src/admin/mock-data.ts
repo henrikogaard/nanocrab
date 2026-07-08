@@ -1993,7 +1993,8 @@ function providers(): JsonValue {
       id: 'openai-compatible',
       name: 'Custom OpenAI-Compatible',
       category: 'LLM',
-      description: 'Bring any OpenAI-compatible endpoint for agents and coding.',
+      description:
+        'Bring any OpenAI-compatible endpoint for agents and coding.',
       configured: true,
       envKey: 'OPENAI_COMPATIBLE_API_KEY',
       baseUrlEnvKey: 'OPENAI_COMPATIBLE_BASE_URL',

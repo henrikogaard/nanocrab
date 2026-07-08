@@ -138,7 +138,10 @@ function normalizeLookup(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function findSystem(store: DesignSystemStore, value: string): DesignSystem | null {
+function findSystem(
+  store: DesignSystemStore,
+  value: string,
+): DesignSystem | null {
   const lookup = normalizeLookup(value);
   return (
     store.systems.find(

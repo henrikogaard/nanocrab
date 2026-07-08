@@ -75,8 +75,8 @@ router.post(
                   source: `cowork-provenance:${item.provenance}`,
                 }
               : null,
-          ].filter(
-            (link): link is { label: string; source: string } => Boolean(link),
+          ].filter((link): link is { label: string; source: string } =>
+            Boolean(link),
           ),
           createdAt: item.created_at,
           updatedAt: item.updated_at,

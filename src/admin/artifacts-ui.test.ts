@@ -105,7 +105,9 @@ describe('Cowork artifact vault UI', () => {
     expect(source).toContain('MCP follow-up');
     expect(source).toContain('window.copyArtifactMcpFollowupPrompt');
     expect(source).toContain('Artifact MCP follow-up copied');
-    expect(source).toContain('Cowork artifact records preserve the owning project and selected project path.');
+    expect(source).toContain(
+      'Cowork artifact records preserve the owning project and selected project path.',
+    );
     expect(source).toContain(
       'Use this NanoCrab artifact for an MCP-backed Cowork follow-up.',
     );

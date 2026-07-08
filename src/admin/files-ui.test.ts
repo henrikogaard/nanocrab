@@ -174,9 +174,7 @@ describe('Group Files context vault UI', () => {
     expect(source).toContain(
       "renderFilesEmptyState('attachments-unavailable')",
     );
-    expect(source).toContain(
-      "renderFilesEmptyState('artifacts-unavailable')",
-    );
+    expect(source).toContain("renderFilesEmptyState('artifacts-unavailable')");
     expect(source).toContain('Promise.allSettled');
     expect(source).not.toContain(
       'api(`/files/${encodeURIComponent(folder)}/conversations`).catch(() => [])',

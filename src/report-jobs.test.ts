@@ -97,7 +97,8 @@ describe('report jobs', () => {
     const designSystem = createDesignSystem({
       name: 'Executive Memo',
       description: 'Decision-first document system.',
-      content: 'Lead with the decision, use compact headings, and cite sources.',
+      content:
+        'Lead with the decision, use compact headings, and cite sources.',
     });
     const job = createReportJob({
       title: 'Design System Memo',

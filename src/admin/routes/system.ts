@@ -979,7 +979,10 @@ router.get(
         });
       }
 
-      if (baseUrl && (provider === 'ollama' || apiKey || definition.requiresAuth === false)) {
+      if (
+        baseUrl &&
+        (provider === 'ollama' || apiKey || definition.requiresAuth === false)
+      ) {
         const modelsCheck = await fetchProviderModels(baseUrl, apiKey);
         checks.push({
           id: 'models-endpoint',

@@ -299,7 +299,9 @@ function designSystemState(projectId?: string | null) {
   const selection = designSystemSelectionSummary({ projectId });
   return {
     available: store.systems.map((system) => serializeDesignSystem(system)),
-    default: selection.selected ? serializeDesignSystem(selection.selected) : null,
+    default: selection.selected
+      ? serializeDesignSystem(selection.selected)
+      : null,
     defaultSource: selection.source,
     globalDefaultId: store.defaultDesignSystemId,
     projectDefaultId: projectId
@@ -334,9 +336,7 @@ function requestedDesignSystem(value: {
   designSystemName?: unknown;
 }): string | null {
   return (
-    trimmed(value.designSystemId) ||
-    trimmed(value.designSystemName) ||
-    null
+    trimmed(value.designSystemId) || trimmed(value.designSystemName) || null
   );
 }
 
@@ -881,29 +881,32 @@ router.patch('/design-systems/default', (req: Request, res: Response) => {
   }
 });
 
-router.patch('/design-systems/:designSystemId', (req: Request, res: Response) => {
-  try {
-    const designSystem = updateDesignSystem(
-      String(req.params.designSystemId),
-      {
-        name: req.body.name,
-        description: req.body.description,
-        content: req.body.content,
-        sourceFileName: req.body.sourceFileName,
-      },
-    );
-    res.json({
-      designSystem: serializeDesignSystem(designSystem, {
-        includeContent: true,
-      }),
-      designSystems: designSystemState(),
-    });
-  } catch (err) {
-    res.status(400).json({
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-});
+router.patch(
+  '/design-systems/:designSystemId',
+  (req: Request, res: Response) => {
+    try {
+      const designSystem = updateDesignSystem(
+        String(req.params.designSystemId),
+        {
+          name: req.body.name,
+          description: req.body.description,
+          content: req.body.content,
+          sourceFileName: req.body.sourceFileName,
+        },
+      );
+      res.json({
+        designSystem: serializeDesignSystem(designSystem, {
+          includeContent: true,
+        }),
+        designSystems: designSystemState(),
+      });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
 
 router.delete(
   '/design-systems/:designSystemId',
@@ -1062,7 +1065,10 @@ router.post('/:id/runs', (req: Request, res: Response) => {
 
   try {
     const now = new Date().toISOString();
-    const designSelection = selectedDesignSystemForProject(project.id, req.body);
+    const designSelection = selectedDesignSystemForProject(
+      project.id,
+      req.body,
+    );
     const estimate = estimateCoworkRun({
       ...req.body,
       connectorIds: configuredExternalMcpServers(),

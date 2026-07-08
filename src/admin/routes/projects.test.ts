@@ -251,7 +251,9 @@ describe('/api/projects', () => {
       expect(runRes.status).toBe(200);
       const runPayload = (await runRes.json()) as {
         run: {
-          stats: { designSystem?: { id: string; name: string; source: string } };
+          stats: {
+            designSystem?: { id: string; name: string; source: string };
+          };
           events: Array<{
             kind: string;
             metadata: { designSystemId?: string; name?: string };
@@ -303,10 +305,12 @@ describe('/api/projects', () => {
         }),
       }),
     );
-    expect(getRegisteredGroup(result.chat.id)?.containerConfig?.restrictions)
-      .toContain('<design_system source="project-default"');
-    expect(getRegisteredGroup(result.chat.id)?.containerConfig?.restrictions)
-      .toContain('Investor Deck');
+    expect(
+      getRegisteredGroup(result.chat.id)?.containerConfig?.restrictions,
+    ).toContain('<design_system source="project-default"');
+    expect(
+      getRegisteredGroup(result.chat.id)?.containerConfig?.restrictions,
+    ).toContain('Investor Deck');
   });
 
   it('lists files and project chat history in project detail', async () => {
