@@ -12,7 +12,9 @@ describe('current capability documentation', () => {
 
     expect(source).toContain('# NanoCrab Capabilities');
     expect(source).toContain('Last updated: 2026-07-09');
-    expect(source).toContain('| Capability | UI route | Backend/API | Command or MCP path | Status |');
+    expect(source).toContain(
+      '| Capability | UI route | Backend/API | Command or MCP path | Status |',
+    );
     expect(source).toContain('Copilot chat');
     expect(source).toContain('Cowork projects');
     expect(source).toContain('Git & Code workspace');
@@ -25,7 +27,9 @@ describe('current capability documentation', () => {
     expect(source).toContain('Integrations, MCP, and Credentials');
     expect(source).toContain('Monitoring, Backup, and Usage');
     expect(source).toContain('Route hygiene');
-    expect(source).toContain('WhatsApp, Telegram, Signal, Slack, Discord, web threads');
+    expect(source).toContain(
+      'WhatsApp, Telegram, Signal, Slack, Discord, web threads',
+    );
     expect(source).toContain('Slack Socket Mode');
     expect(source).toContain('Discord gateway');
     expect(source).toContain('Hermes alignment');
@@ -40,8 +44,14 @@ describe('current capability documentation', () => {
     expect(userGuide).toContain('Capability overview');
     expect(userGuide).toContain('See [CAPABILITIES.md](CAPABILITIES.md)');
     expect(userGuide).toContain('ChatGPT-style plain conversations');
-    expect(userGuide).toContain('durable project, document, MCP, and artifact work');
-    expect(userGuide).toContain('repository automation, tests, PRs, snippets, and coding-agent handoffs');
-    expect(readme).toContain('For a current route-by-route capability matrix, see [docs/CAPABILITIES.md](docs/CAPABILITIES.md).');
+    expect(userGuide).toContain(
+      'durable project, document, MCP, and artifact work',
+    );
+    expect(userGuide).toContain(
+      'repository automation, tests, PRs, snippets, and coding-agent handoffs',
+    );
+    expect(readme).toContain(
+      'For a current route-by-route capability matrix, see [docs/CAPABILITIES.md](docs/CAPABILITIES.md).',
+    );
   });
 });

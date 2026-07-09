@@ -28,10 +28,12 @@ function fakeDiscordClient() {
     channels: {
       fetch: vi.fn(async () => textChannel),
     },
-    on: vi.fn((name: string, handler: (...args: any[]) => Promise<void> | void) => {
-      handlers.set(name, handler);
-      return client;
-    }),
+    on: vi.fn(
+      (name: string, handler: (...args: any[]) => Promise<void> | void) => {
+        handlers.set(name, handler);
+        return client;
+      },
+    ),
     login: vi.fn(async () => 'discord-token'),
     destroy: vi.fn(async () => {}),
   };
@@ -41,7 +43,11 @@ function fakeDiscordClient() {
 describe('DiscordChannel', () => {
   it('owns Discord channel JIDs and reports connection state', async () => {
     const { client } = fakeDiscordClient();
-    const channel = createDiscordChannel('discord-token', opts(() => ({})), () => client);
+    const channel = createDiscordChannel(
+      'discord-token',
+      opts(() => ({})),
+      () => client,
+    );
 
     expect(channel.name).toBe('discord');
     expect(channel.ownsJid('dc:123')).toBe(true);
@@ -74,7 +80,11 @@ describe('DiscordChannel', () => {
       },
     };
     const channelOpts = opts(() => groups);
-    const channel = createDiscordChannel('discord-token', channelOpts, () => client);
+    const channel = createDiscordChannel(
+      'discord-token',
+      channelOpts,
+      () => client,
+    );
     await channel.connect();
 
     await client.handlers.get('messageCreate')?.({
@@ -91,7 +101,14 @@ describe('DiscordChannel', () => {
       guild: { name: 'NanoCrab HQ' },
       channel: { name: 'engineering' },
       attachments: new Map([
-        ['a1', { name: 'brief.pdf', contentType: 'application/pdf', url: 'https://cdn.example/brief.pdf' }],
+        [
+          'a1',
+          {
+            name: 'brief.pdf',
+            contentType: 'application/pdf',
+            url: 'https://cdn.example/brief.pdf',
+          },
+        ],
       ]),
       reference: { messageId: 'm0' },
       fetchReference: vi.fn(async () => ({
@@ -115,7 +132,8 @@ describe('DiscordChannel', () => {
         chat_jid: 'dc:123',
         sender: 'U123',
         sender_name: 'Henrik',
-        content: '@NanoCrab check this\n[Attachment: brief.pdf (application/pdf)] https://cdn.example/brief.pdf',
+        content:
+          '@NanoCrab check this\n[Attachment: brief.pdf (application/pdf)] https://cdn.example/brief.pdf',
         reply_to_message_id: 'm0',
         reply_to_message_content: 'previous context',
         reply_to_sender_name: 'Laura',
@@ -126,7 +144,11 @@ describe('DiscordChannel', () => {
   it('ignores bot messages and unregistered Discord channels', async () => {
     const { client } = fakeDiscordClient();
     const channelOpts = opts(() => ({}));
-    const channel = createDiscordChannel('discord-token', channelOpts, () => client);
+    const channel = createDiscordChannel(
+      'discord-token',
+      channelOpts,
+      () => client,
+    );
     await channel.connect();
 
     await client.handlers.get('messageCreate')?.({
@@ -156,7 +178,11 @@ describe('DiscordChannel', () => {
 
   it('sends Discord replies in platform-sized chunks and supports typing', async () => {
     const { client, textChannel } = fakeDiscordClient();
-    const channel = createDiscordChannel('discord-token', opts(() => ({})), () => client);
+    const channel = createDiscordChannel(
+      'discord-token',
+      opts(() => ({})),
+      () => client,
+    );
 
     await channel.connect();
     await channel.sendMessage('dc:123', 'x'.repeat(2001));
@@ -170,19 +196,17 @@ describe('DiscordChannel', () => {
 
 describe('Discord helpers', () => {
   it('normalizes direct bot mentions to the registered group trigger', () => {
-    expect(normalizeDiscordBotMention('<@BOT123> hello', 'BOT123', '@NanoCrab')).toBe(
-      '@NanoCrab hello',
-    );
-    expect(normalizeDiscordBotMention('<@!BOT123> hello', 'BOT123', '@NanoCrab')).toBe(
-      '@NanoCrab hello',
-    );
+    expect(
+      normalizeDiscordBotMention('<@BOT123> hello', 'BOT123', '@NanoCrab'),
+    ).toBe('@NanoCrab hello');
+    expect(
+      normalizeDiscordBotMention('<@!BOT123> hello', 'BOT123', '@NanoCrab'),
+    ).toBe('@NanoCrab hello');
   });
 
   it('keeps Discord message chunks within the configured platform limit', () => {
-    expect(splitDiscordText('x'.repeat(4001)).map((chunk) => chunk.length)).toEqual([
-      2000,
-      2000,
-      1,
-    ]);
+    expect(
+      splitDiscordText('x'.repeat(4001)).map((chunk) => chunk.length),
+    ).toEqual([2000, 2000, 1]);
   });
 });

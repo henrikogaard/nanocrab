@@ -11,7 +11,9 @@ describe('Help productivity manual UI', () => {
 
     expect(source).toContain('Productivity manual');
     expect(source).toContain('Current capability map');
-    expect(source).toContain('Every supported capability has a UI route, a documented command/MCP path, or both.');
+    expect(source).toContain(
+      'Every supported capability has a UI route, a documented command/MCP path, or both.',
+    );
     expect(source).toContain("navigate('help')");
     expect(source).toContain('Open capability docs');
     expect(source).toContain('Capability map');

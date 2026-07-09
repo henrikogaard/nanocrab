@@ -26,7 +26,10 @@ interface DiscordClientLike {
   channels: {
     fetch: (id: string) => Promise<DiscordTextChannelLike | null>;
   };
-  on(event: string, handler: (...args: any[]) => Promise<void> | void): DiscordClientLike;
+  on(
+    event: string,
+    handler: (...args: any[]) => Promise<void> | void,
+  ): DiscordClientLike;
   login(token: string): Promise<unknown>;
   destroy(): Promise<unknown> | void;
 }
@@ -103,13 +106,18 @@ function discordAttachments(message: any): string[] {
   });
 }
 
-async function discordReplyContext(message: any): Promise<
+async function discordReplyContext(
+  message: any,
+): Promise<
   Pick<
     NewMessage,
     'reply_to_message_id' | 'reply_to_message_content' | 'reply_to_sender_name'
   >
 > {
-  if (!message.reference?.messageId || typeof message.fetchReference !== 'function') {
+  if (
+    !message.reference?.messageId ||
+    typeof message.fetchReference !== 'function'
+  ) {
     return {};
   }
   try {
@@ -279,7 +287,8 @@ export function createDiscordChannel(
 
 registerChannel('discord', (opts: ChannelOpts) => {
   const envVars = readEnvFile(['DISCORD_BOT_TOKEN']);
-  const token = process.env.DISCORD_BOT_TOKEN || envVars.DISCORD_BOT_TOKEN || '';
+  const token =
+    process.env.DISCORD_BOT_TOKEN || envVars.DISCORD_BOT_TOKEN || '';
   if (!token) {
     logger.warn('Discord: DISCORD_BOT_TOKEN not set');
     return null;

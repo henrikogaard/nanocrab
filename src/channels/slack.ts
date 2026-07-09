@@ -13,14 +13,24 @@ import { registerChannel, type ChannelOpts } from './registry.js';
 const SLACK_JID_PREFIX = 'slack:';
 const SLACK_MESSAGE_LIMIT = 4000;
 
-type SlackEventHandler = (payload: { event: any; client?: SlackClientLike }) => Promise<void>;
+type SlackEventHandler = (payload: {
+  event: any;
+  client?: SlackClientLike;
+}) => Promise<void>;
 
 interface SlackClientLike {
   auth?: { test?: () => Promise<{ user_id?: string }> };
-  chat?: { postMessage?: (args: { channel: string; text: string }) => Promise<unknown> };
+  chat?: {
+    postMessage?: (args: { channel: string; text: string }) => Promise<unknown>;
+  };
   conversations?: {
     info?: (args: { channel: string }) => Promise<{
-      channel?: { id?: string; name?: string; is_im?: boolean; is_group?: boolean };
+      channel?: {
+        id?: string;
+        name?: string;
+        is_im?: boolean;
+        is_group?: boolean;
+      };
     }>;
   };
   users?: {
@@ -43,7 +53,10 @@ interface SlackAppLike {
 
 type SlackAppFactory = (botToken: string, appToken: string) => SlackAppLike;
 
-function defaultSlackAppFactory(botToken: string, appToken: string): SlackAppLike {
+function defaultSlackAppFactory(
+  botToken: string,
+  appToken: string,
+): SlackAppLike {
   return new App({
     token: botToken,
     appToken,
@@ -71,7 +84,12 @@ function slackTsToIso(ts: unknown): string {
 function formatSlackFiles(files: unknown): string[] {
   if (!Array.isArray(files)) return [];
   return files.map((file) => {
-    const item = file as { name?: string; title?: string; mimetype?: string; filetype?: string };
+    const item = file as {
+      name?: string;
+      title?: string;
+      mimetype?: string;
+      filetype?: string;
+    };
     const name = item.name || item.title || 'Slack file';
     const type = item.mimetype || item.filetype || 'unknown type';
     return `[File: ${name} (${type})]`;
@@ -95,7 +113,10 @@ async function slackChannelInfo(
   }
 }
 
-async function slackUserName(client: SlackClientLike, user: string): Promise<string> {
+async function slackUserName(
+  client: SlackClientLike,
+  user: string,
+): Promise<string> {
   try {
     const info = await client.users?.info?.({ user });
     return (
@@ -123,7 +144,10 @@ export class SlackChannel implements Channel {
     private readonly botToken: string,
     private readonly appToken: string,
     private readonly opts: ChannelOpts,
-    private readonly app: SlackAppLike = defaultSlackAppFactory(botToken, appToken),
+    private readonly app: SlackAppLike = defaultSlackAppFactory(
+      botToken,
+      appToken,
+    ),
   ) {}
 
   async connect(): Promise<void> {
@@ -158,7 +182,8 @@ export class SlackChannel implements Channel {
     const channel = jid.replace(SLACK_JID_PREFIX, '');
     if (!channel) throw new Error(`Invalid Slack JID: ${jid}`);
     const postMessage = this.app.client.chat?.postMessage;
-    if (!postMessage) throw new Error('Slack chat.postMessage API is unavailable');
+    if (!postMessage)
+      throw new Error('Slack chat.postMessage API is unavailable');
 
     for (const chunk of splitSlackText(text)) {
       await postMessage({ channel, text: chunk });
@@ -193,7 +218,10 @@ export class SlackChannel implements Channel {
     };
   }
 
-  private async handleMessage(event: any, client: SlackClientLike): Promise<void> {
+  private async handleMessage(
+    event: any,
+    client: SlackClientLike,
+  ): Promise<void> {
     if (!event || typeof event.channel !== 'string') return;
     if (event.bot_id || event.user === this.botUserId) return;
     if (event.subtype && event.subtype !== 'file_share') return;
@@ -232,7 +260,8 @@ export class SlackChannel implements Channel {
       content,
       timestamp,
       is_from_me: false,
-      thread_id: typeof event.thread_ts === 'string' ? event.thread_ts : undefined,
+      thread_id:
+        typeof event.thread_ts === 'string' ? event.thread_ts : undefined,
     };
     this.opts.onMessage(jid, message);
   }
@@ -244,7 +273,12 @@ export function createSlackChannel(
   opts: ChannelOpts,
   appFactory: SlackAppFactory = defaultSlackAppFactory,
 ): SlackChannel {
-  return new SlackChannel(botToken, appToken, opts, appFactory(botToken, appToken));
+  return new SlackChannel(
+    botToken,
+    appToken,
+    opts,
+    appFactory(botToken, appToken),
+  );
 }
 
 registerChannel('slack', (opts: ChannelOpts) => {

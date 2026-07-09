@@ -47,7 +47,12 @@ function fakeSlackApp() {
 describe('SlackChannel', () => {
   it('owns slack JIDs and reports connection state', async () => {
     const app = fakeSlackApp();
-    const channel = createSlackChannel('xoxb-token', 'xapp-token', opts(() => ({})), () => app);
+    const channel = createSlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      opts(() => ({})),
+      () => app,
+    );
 
     expect(channel.name).toBe('slack');
     expect(channel.ownsJid('slack:C123')).toBe(true);
@@ -79,7 +84,12 @@ describe('SlackChannel', () => {
       },
     };
     const channelOpts = opts(() => groups);
-    const channel = createSlackChannel('xoxb-token', 'xapp-token', channelOpts, () => app);
+    const channel = createSlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      channelOpts,
+      () => app,
+    );
 
     await channel.connect();
     await app.handlers.get('message')?.({
@@ -116,7 +126,12 @@ describe('SlackChannel', () => {
   it('ignores unregistered Slack chats after metadata discovery', async () => {
     const app = fakeSlackApp();
     const channelOpts = opts(() => ({}));
-    const channel = createSlackChannel('xoxb-token', 'xapp-token', channelOpts, () => app);
+    const channel = createSlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      channelOpts,
+      () => app,
+    );
 
     await channel.connect();
     await app.handlers.get('message')?.({
@@ -141,7 +156,12 @@ describe('SlackChannel', () => {
 
   it('sends long Slack replies in bounded chunks', async () => {
     const app = fakeSlackApp();
-    const channel = createSlackChannel('xoxb-token', 'xapp-token', opts(() => ({})), () => app);
+    const channel = createSlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      opts(() => ({})),
+      () => app,
+    );
     await channel.connect();
 
     await channel.sendMessage('slack:C123', 'x'.repeat(4100));
@@ -156,10 +176,8 @@ describe('SlackChannel', () => {
 
 describe('splitSlackText', () => {
   it('keeps Slack message chunks within the configured platform limit', () => {
-    expect(splitSlackText('x'.repeat(8001)).map((chunk) => chunk.length)).toEqual([
-      4000,
-      4000,
-      1,
-    ]);
+    expect(
+      splitSlackText('x'.repeat(8001)).map((chunk) => chunk.length),
+    ).toEqual([4000, 4000, 1]);
   });
 });
