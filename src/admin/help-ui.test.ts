@@ -10,6 +10,19 @@ describe('Help productivity manual UI', () => {
     const source = fs.readFileSync(helpPath, 'utf8');
 
     expect(source).toContain('Productivity manual');
+    expect(source).toContain('Current capability map');
+    expect(source).toContain('Every supported capability has a UI route, a documented command/MCP path, or both.');
+    expect(source).toContain("navigate('help')");
+    expect(source).toContain('Open capability docs');
+    expect(source).toContain('Capability map');
+    expect(source).toContain('UI route');
+    expect(source).toContain('Command or MCP path');
+    expect(source).toContain('Chat threads');
+    expect(source).toContain('Cowork projects');
+    expect(source).toContain('Provider profiles');
+    expect(source).toContain('Governed memory');
+    expect(source).toContain('Skill registry');
+    expect(source).toContain('Route hygiene');
     expect(source).toContain('Copilot');
     expect(source).toContain('Cowork');
     expect(source).toContain('Code');
@@ -215,6 +228,10 @@ describe('Help productivity manual UI', () => {
     expect(source).toContain('.help-action-head');
     expect(source).toContain('.help-action-grid');
     expect(source).toContain('.help-action-card');
+    expect(source).toContain('.help-capability-map');
+    expect(source).toContain('.help-capability-head');
+    expect(source).toContain('.help-capability-grid');
+    expect(source).toContain('.help-capability-card');
     expect(source).toContain('.help-decision-strip');
     expect(source).toContain('.help-decision-grid');
     expect(source).toContain('.help-decision-card');
@@ -251,8 +268,9 @@ describe('Help productivity manual UI', () => {
     expect(source).toContain('.help-empty-searches button:focus-visible');
     expect(source).toContain('.help-toc.visible');
     expect(source).toContain(
-      '.help-path-grid,\n  .help-action-grid,\n  .help-decision-grid,\n  .help-workspace-prompt-grid,\n  .help-empty-route-grid,\n  .help-stuck-grid,\n  .help-mcp-step-grid,\n  .help-mcp-recipe-grid,\n  .help-layout',
+      '.help-path-grid,\n  .help-action-grid,\n  .help-capability-grid,\n  .help-decision-grid,\n  .help-workspace-prompt-grid,\n  .help-empty-route-grid,\n  .help-stuck-grid,\n  .help-mcp-step-grid,\n  .help-mcp-recipe-grid,\n  .help-layout',
     );
+    expect(source).toContain('.help-capability-grid,');
     expect(source).toContain('.help-workspace-prompt-grid,');
     expect(source).toContain('.help-empty-route-grid,');
     expect(source).toContain('.help-stuck-grid,');

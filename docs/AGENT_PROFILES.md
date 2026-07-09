@@ -129,8 +129,9 @@ This MVP does not include:
 
 - A visual office control plane. A visual office can be added later as a
   read-only view of profiles, activity, and approvals.
-- Slack or Discord adapters. The routing contract is channel-neutral so those
-  can be added later.
+- Additional Slack or Discord-specific profile routing beyond the shared channel
+  contract. The base Slack and Discord channel adapters use the same mention and
+  approval boundaries as other channels.
 - Role templates for common profile types.
 - Additional subscription sources beyond the initial GitHub and channel mention
   sources.

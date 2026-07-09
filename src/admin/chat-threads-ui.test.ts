@@ -16,6 +16,9 @@ describe('WebChat new conversation start surface', () => {
     expect(source).toContain('loadWebChatProviderChoices');
     expect(source).toContain('available[p.id] !== false');
     expect(source).toContain('id="webchat-start-model-select"');
+    expect(source).toContain('id="webchat-start-model-search"');
+    expect(source).toContain('filterStartModelOptions');
+    expect(source).toContain('data-model-search-text');
     expect(source).toContain('provider.id + ');
     expect(source).toContain("localStorage.setItem('webchat_last_provider'");
     expect(source).not.toContain('Agent template');
@@ -39,6 +42,21 @@ describe('WebChat new conversation start surface', () => {
     expect(style).toContain('.webchat-start-composer');
     expect(style).toContain('#webchat-start-model-select');
     expect(source).not.toContain('body.title = selectedStarter');
+  });
+
+  it('supports virtual Chat projects for grouping conversations', () => {
+    const source = fs.readFileSync(scriptPath, 'utf8');
+    const style = fs.readFileSync(stylePath, 'utf8');
+
+    expect(source).toContain("api('/threads/projects'");
+    expect(source).toContain('chatProjectId');
+    expect(source).toContain('data-webchat-action="create-chat-project"');
+    expect(source).toContain('data-webchat-action="assign-chat-project"');
+    expect(source).toContain('renderChatProjectSections');
+    expect(source).toContain('Virtual folders for related chats');
+    expect(source).toContain('id="webchat-start-project-select"');
+    expect(style).toContain('.webchat-project-section');
+    expect(style).toContain('.webchat-project-create');
   });
 
   it('renders an active plain-chat brief with reusable starter prompts', () => {

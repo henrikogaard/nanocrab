@@ -60,6 +60,8 @@ describe('channel enabled state from registered groups', () => {
   it('infers a channel id from registered group JIDs', () => {
     expect(channelIdForRegisteredGroup('tg:123')).toBe('telegram');
     expect(channelIdForRegisteredGroup('sig:123')).toBe('signal');
+    expect(channelIdForRegisteredGroup('slack:C123')).toBe('slack');
+    expect(channelIdForRegisteredGroup('dc:123')).toBe('discord');
     expect(
       channelIdForRegisteredGroup('signal_main', {
         name: 'Henrik Signal',
@@ -68,6 +70,22 @@ describe('channel enabled state from registered groups', () => {
         added_at: '2026-06-13T00:00:00.000Z',
       }),
     ).toBe('signal');
+    expect(
+      channelIdForRegisteredGroup('folder-only', {
+        name: 'Engineering',
+        folder: 'slack_engineering',
+        trigger: '',
+        added_at: '2026-06-13T00:00:00.000Z',
+      }),
+    ).toBe('slack');
+    expect(
+      channelIdForRegisteredGroup('folder-only', {
+        name: 'General',
+        folder: 'discord_general',
+        trigger: '',
+        added_at: '2026-06-13T00:00:00.000Z',
+      }),
+    ).toBe('discord');
     expect(channelIdForRegisteredGroup('123@g.us')).toBe('whatsapp');
   });
 

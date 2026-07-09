@@ -14,6 +14,7 @@ export function newWebJid(): string {
 export interface BuildThreadInput {
   jid: string;
   title?: string;
+  chatProjectId?: string;
   addedAt: string;
   config?: ContainerConfig;
 }
@@ -31,6 +32,7 @@ export function buildThreadGroup(input: BuildThreadInput): RegisteredGroup {
   return {
     name: 'Web Conversation',
     ...(title ? { title } : {}),
+    ...(input.chatProjectId ? { chatProjectId: input.chatProjectId } : {}),
     kind: 'web',
     folder: `web-${id}`,
     trigger: '^', // unused: requiresTrigger is false, so every message is processed

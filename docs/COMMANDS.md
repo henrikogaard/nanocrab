@@ -2,7 +2,7 @@
 
 NanoCrab has three command surfaces:
 
-- **Chat commands** typed directly in WhatsApp, Telegram, Signal, or dashboard chat.
+- **Chat commands** typed directly in WhatsApp, Telegram, Signal, Slack, Discord, or dashboard chat.
 - **Host/operator commands** run from a shell in the NanoCrab repo.
 - **Agent MCP tools** called by the agent when you ask for tasks like scheduling, reports, coding jobs, memories, or artifacts.
 

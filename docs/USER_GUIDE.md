@@ -1,6 +1,6 @@
 # NanoCrab User Guide
 
-Last updated: 2026-06-27
+Last updated: 2026-07-09
 
 Applies to: NanoCrab 2.0-RC8
 
@@ -12,7 +12,7 @@ maintenance tasks.
 
 - **Main group**: your trusted owner/control chat. It can register groups,
   manage scheduled tasks, approve risky actions, and start coding jobs.
-- **Channel groups**: normal WhatsApp, Telegram, Signal, or dashboard chats.
+- **Channel groups**: normal WhatsApp, Telegram, Signal, Slack, Discord, or dashboard chats.
   They can ask NanoCrab for help in their own context but cannot manage other
   groups.
 - **Dashboard**: the owner UI for setup, approvals, coding jobs, routines,
@@ -26,20 +26,21 @@ maintenance tasks.
 
 ## Dashboard Map
 
-| Page | Use It For |
+NanoCrab opens around **Copilot / Cowork / Code / More**.
+
+| Focus | Use It For |
 | ---- | ---------- |
-| Dashboard | Live service overview, recent messages, weather, and channel health. |
-| Agents | Assign one-off coding work, pick GitHub issues, configure Autofix pickup, manage Agent Profiles, and inspect agent runs. |
-| Tasks | Create routines, scheduled tasks, webhook deliveries, heartbeat checks, and run-now jobs. |
-| Approvals | Review, approve, deny, filter, or audit risky actions. |
-| Messages | Search, filter, and export conversation history. |
-| Groups | Register groups, review channel settings, and manage provider overrides. |
-| Memory | Review proposed memories, approved shared context, journal entries, wiki pages, and skill activity. |
-| Integrations | Configure providers, connectors, MCP presets, GitHub, and external service readiness. |
-| Monitoring | Check inference health, containers, model probes, uptime, and production diagnostics. |
-| Security | Review audit data, policy decisions, tokens, sessions, and safety controls. |
-| Settings | Configure admin auth, 2FA, assistant profile, provider defaults, themes, plugins, and backups. |
-| Marketplace | Install optional plugins or keep personal plugins local. |
+| Copilot | ChatGPT-style plain conversations with provider/model selection, optional title, generated title fallback, and thread history. |
+| Cowork | durable project, document, MCP, and artifact work with project files, project chats, source context, reports, approvals, and local drafts. |
+| Code | repository automation, tests, PRs, snippets, and coding-agent handoffs through Git & Code, Autofix, GitHub Copilot, and terminal/developer tools. |
+| More | Platform operations: dashboard, agents, tasks, workflows, reports, artifacts, approvals, channels, messages, integrations, webhooks, credentials, security, audit, monitoring, backup, usage, groups, sessions, marketplace, and help. |
+
+### Capability overview
+
+See [CAPABILITIES.md](CAPABILITIES.md) for the current feature matrix, including
+UI routes, backend/API routes, and command or MCP paths. Use that file as the
+source of truth when checking whether a capability is user-facing, command-only,
+MCP-only, or still partial.
 
 ## First Run
 
@@ -74,9 +75,13 @@ maintenance tasks.
    npx tsx setup/index.ts --step provider -- --provider=codex --model=gpt-5.4
    ```
 
-5. Configure a channel such as Telegram, WhatsApp, or Signal. Use
+5. Configure a channel such as Telegram, WhatsApp, Signal, Slack, or Discord. Use
    **Settings -> First-Run Preflight** to confirm that credentials, ports,
    runtime directories, provider checks, and channel checks are ready.
+
+   Slack needs `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` for Socket Mode.
+   Discord needs `DISCORD_BOT_TOKEN` and the Message Content gateway intent.
+   Add these in **Credentials** or `.env`, then restart NanoCrab.
 
 6. Open the dashboard, set up 2FA, and send a test message from the main group.
 

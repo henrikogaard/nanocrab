@@ -153,6 +153,43 @@ describe('mock admin data', () => {
     });
   });
 
+  it('serves Slack and Discord credentials in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/credentials`);
+      const data = (await response.json()) as {
+        credentials: Array<{
+          key: string;
+          label: string;
+          configured: boolean;
+          source: string;
+        }>;
+      };
+
+      expect(data.credentials).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            key: 'SLACK_BOT_TOKEN',
+            label: 'Slack Bot Token',
+            configured: false,
+            source: 'missing',
+          }),
+          expect.objectContaining({
+            key: 'SLACK_APP_TOKEN',
+            label: 'Slack App Token',
+            configured: false,
+            source: 'missing',
+          }),
+          expect.objectContaining({
+            key: 'DISCORD_BOT_TOKEN',
+            label: 'Discord Bot Token',
+            configured: false,
+            source: 'missing',
+          }),
+        ]),
+      );
+    });
+  });
+
   it('serves default connector skills in mock mode', async () => {
     await withServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/skills`);

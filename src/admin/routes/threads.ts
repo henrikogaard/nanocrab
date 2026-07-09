@@ -15,6 +15,9 @@ import {
   type ConnectorPermission,
 } from '../../connector-permissions.js';
 import {
+  createChatProject,
+  listChatProjects,
+  getChatProject,
   getWebThreads,
   getRegisteredGroup,
   getCoworkProject,
@@ -46,6 +49,32 @@ const WEB_MCP_THREAD_EXAMPLES = [
   'Search configured storage or document sources',
   'Use external MCP context in this chat',
 ];
+
+function newChatProjectId(): string {
+  return `chat-project-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
+function threadSummary(
+  jid: string,
+  group: ReturnType<typeof getRegisteredGroup>,
+) {
+  if (!group) return null;
+  const latest = getLatestStoredMessage(jid);
+  const chatProject = group.chatProjectId
+    ? getChatProject(group.chatProjectId)
+    : undefined;
+  return {
+    id: jid,
+    title: group.title ?? 'New conversation',
+    addedAt: group.added_at,
+    lastMessage: latest?.content ?? null,
+    lastMessageAt: latest?.timestamp ?? null,
+    chatProjectId: group.chatProjectId ?? null,
+    chatProjectName: chatProject?.name ?? null,
+  };
+}
 
 function readConfiguredExternalMcpServers(): string[] {
   try {
@@ -216,16 +245,8 @@ router.get('/', (_req: Request, res: Response) => {
     const threads = getWebThreads();
     const list = Object.entries(threads)
       .filter(([, g]) => !g.projectId)
-      .map(([jid, g]) => {
-        const latest = getLatestStoredMessage(jid);
-        return {
-          id: jid,
-          title: g.title ?? 'New conversation',
-          addedAt: g.added_at,
-          lastMessage: latest?.content ?? null,
-          lastMessageAt: latest?.timestamp ?? null,
-        };
-      })
+      .map(([jid, g]) => threadSummary(jid, { ...g, jid }))
+      .filter((thread): thread is NonNullable<typeof thread> => Boolean(thread))
       .sort((a, b) => b.addedAt.localeCompare(a.addedAt));
     res.json(list);
   } catch (err) {
@@ -234,15 +255,74 @@ router.get('/', (_req: Request, res: Response) => {
   }
 });
 
+router.get('/projects', (_req: Request, res: Response) => {
+  try {
+    const threads = getWebThreads();
+    const plainThreads = Object.entries(threads)
+      .filter(([, g]) => !g.projectId)
+      .map(([jid, g]) => threadSummary(jid, { ...g, jid }))
+      .filter((thread): thread is NonNullable<typeof thread> =>
+        Boolean(thread),
+      );
+    const projects = listChatProjects().map((project) => {
+      const projectThreads = plainThreads
+        .filter((thread) => thread.chatProjectId === project.id)
+        .sort((a, b) => b.addedAt.localeCompare(a.addedAt));
+      return {
+        id: project.id,
+        name: project.name,
+        createdAt: project.created_at,
+        updatedAt: project.updated_at,
+        threadCount: projectThreads.length,
+        threads: projectThreads,
+      };
+    });
+    res.json({ projects });
+  } catch (err) {
+    logger.error({ err }, 'Failed to list chat projects');
+    res.status(500).json({ error: 'Failed to list chat projects' });
+  }
+});
+
+router.post('/projects', (req: Request, res: Response) => {
+  try {
+    const incoming = (req.body as { name?: unknown })?.name;
+    const name = typeof incoming === 'string' ? incoming.trim() : '';
+    if (!name) {
+      res.status(400).json({ error: 'name is required' });
+      return;
+    }
+    const now = new Date().toISOString();
+    const project = createChatProject({
+      id: newChatProjectId(),
+      name,
+      created_at: now,
+      updated_at: now,
+    });
+    res.json({
+      id: project.id,
+      name: project.name,
+      createdAt: project.created_at,
+      updatedAt: project.updated_at,
+      threadCount: 0,
+    });
+  } catch (err) {
+    logger.error({ err }, 'Failed to create chat project');
+    res.status(500).json({ error: 'Failed to create chat project' });
+  }
+});
+
 // POST / — create a new web thread
 router.post('/', (req: Request, res: Response) => {
   try {
-    const { templateAgentId, provider, model, title } = req.body as {
-      templateAgentId?: string;
-      provider?: string;
-      model?: string;
-      title?: string;
-    };
+    const { templateAgentId, provider, model, title, chatProjectId } =
+      req.body as {
+        templateAgentId?: string;
+        provider?: string;
+        model?: string;
+        title?: string;
+        chatProjectId?: string;
+      };
     const cleanTitle =
       typeof title === 'string' && title.trim() ? title.trim() : undefined;
 
@@ -254,6 +334,15 @@ router.post('/', (req: Request, res: Response) => {
       res.status(400).json({
         error: 'Agent templates are not supported for chat threads',
       });
+      return;
+    }
+
+    const cleanChatProjectId =
+      typeof chatProjectId === 'string' && chatProjectId.trim()
+        ? chatProjectId.trim()
+        : undefined;
+    if (cleanChatProjectId && !getChatProject(cleanChatProjectId)) {
+      res.status(400).json({ error: 'Unknown chat project' });
       return;
     }
 
@@ -273,6 +362,7 @@ router.post('/', (req: Request, res: Response) => {
     const group = buildThreadGroup({
       jid,
       title: cleanTitle,
+      chatProjectId: cleanChatProjectId,
       addedAt: new Date().toISOString(),
       config,
     });
@@ -327,6 +417,10 @@ router.get('/:id', (req: Request, res: Response) => {
     projectId: group.projectId ?? null,
     projectSlug: group.projectSlug ?? project?.slug ?? null,
     projectName: project?.name ?? null,
+    chatProjectId: group.chatProjectId ?? null,
+    chatProjectName: group.chatProjectId
+      ? (getChatProject(group.chatProjectId)?.name ?? null)
+      : null,
     mcpAccess: {
       enabled: hasMcpAccess,
       scope:
@@ -464,12 +558,29 @@ router.patch('/:id', (req: Request, res: Response) => {
     return;
   }
   try {
-    const incoming = (req.body as { title?: unknown })?.title;
+    const body = req.body as { title?: unknown; chatProjectId?: unknown };
+    const incoming = body?.title;
     const newTitle =
       typeof incoming === 'string' && incoming.trim()
         ? incoming.trim()
         : (group.title ?? '');
-    const updatedGroup = { ...group, title: newTitle };
+    let nextChatProjectId = group.chatProjectId;
+    if (Object.prototype.hasOwnProperty.call(body || {}, 'chatProjectId')) {
+      if (typeof body.chatProjectId === 'string' && body.chatProjectId.trim()) {
+        nextChatProjectId = body.chatProjectId.trim();
+        if (!getChatProject(nextChatProjectId)) {
+          res.status(400).json({ error: 'Unknown chat project' });
+          return;
+        }
+      } else {
+        nextChatProjectId = undefined;
+      }
+    }
+    const updatedGroup = {
+      ...group,
+      title: newTitle,
+      chatProjectId: nextChatProjectId,
+    };
     setRegisteredGroup(id, updatedGroup);
     updateChatName(id, newTitle.trim() || 'New conversation');
     try {

@@ -3659,17 +3659,17 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
           id: 'discord',
           name: 'Discord',
           icon: 'DC',
-          description: 'Sample unconfigured Discord bot channel.',
-          envVars: ['DISCORD_BOT_TOKEN', 'DISCORD_GUILD_ID'],
-          skill: 'container/skills/discord/SKILL.md',
+          description: 'Discord gateway bot channel.',
+          envVars: ['DISCORD_BOT_TOKEN'],
+          skill: '/add-discord',
         },
         {
           id: 'slack',
           name: 'Slack',
           icon: 'SL',
-          description: 'Sample workplace channel placeholder.',
-          envVars: ['SLACK_BOT_TOKEN'],
-          skill: 'container/skills/slack/SKILL.md',
+          description: 'Slack Socket Mode channel.',
+          envVars: ['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN'],
+          skill: '/add-slack',
         },
       ],
     };
@@ -3749,9 +3749,42 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname === '/credentials') {
     return {
       credentials: [
-        { key: 'OPENROUTER_API_KEY', configured: true, source: 'env' },
-        { key: 'GITHUB_TOKEN', configured: true, source: 'env' },
-        { key: 'KDRIVE_TOKEN', configured: false, source: 'missing' },
+        {
+          key: 'OPENROUTER_API_KEY',
+          label: 'OpenRouter API Key',
+          configured: true,
+          source: 'env',
+        },
+        {
+          key: 'GITHUB_TOKEN',
+          label: 'GitHub Token',
+          configured: true,
+          source: 'env',
+        },
+        {
+          key: 'SLACK_BOT_TOKEN',
+          label: 'Slack Bot Token',
+          configured: false,
+          source: 'missing',
+        },
+        {
+          key: 'SLACK_APP_TOKEN',
+          label: 'Slack App Token',
+          configured: false,
+          source: 'missing',
+        },
+        {
+          key: 'DISCORD_BOT_TOKEN',
+          label: 'Discord Bot Token',
+          configured: false,
+          source: 'missing',
+        },
+        {
+          key: 'KDRIVE_TOKEN',
+          label: 'kDrive Token',
+          configured: false,
+          source: 'missing',
+        },
       ],
     };
   }

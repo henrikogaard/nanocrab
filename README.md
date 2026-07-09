@@ -16,6 +16,8 @@ NanoCrab is a standalone personal assistant platform for running AI agents in is
 
 NanoCrab is its own product now. It is not an upstream-compatible fork of any upstream project. NanoCrab 2.0-RC8 uses NanoCrab-native container images, MCP names, config paths, cookies, logs, and service identifiers.
 
+For a current route-by-route capability matrix, see [docs/CAPABILITIES.md](docs/CAPABILITIES.md).
+
 ## Learning, Memory, And Skills
 
 NanoCrab 2.0-RC8 is a major step toward a long-running personal agent. It can learn over time, keep memories, reuse those memories across channels, and grow its own provider-neutral skills, but it does this with review and provenance instead of silently absorbing everything it sees.
@@ -53,7 +55,7 @@ The dashboard is **mode-first**: the sidebar leads with three top-level focus mo
 
 Memory and Skills are intentionally not buried in Cowork. They live in the personal/shared tooling area because durable memories, learned preferences, reusable skills, assistant identity, provider profiles, credentials, and access controls can affect Copilot, Cowork, Code, scheduled tasks, and channel agents. The app reopens whichever focus mode you used last, migrates the previous `work` saved mode to `cowork`, and existing `#/<page>` deep links keep working by selecting the mode that owns the route. On mobile the bottom bar is Copilot / Cowork / Code / More.
 
-Channel agents use the same workspace map. From WhatsApp, Signal, Telegram, or another registered channel, prompts such as "check Cowork for project Aurora Docs, update the summary, and send me the file" can resolve Cowork projects, read or write project files, and send the selected project file back through the current channel when that adapter supports file delivery.
+Channel agents use the same workspace map. From WhatsApp, Signal, Telegram, Slack, Discord, or another registered channel, prompts such as "check Cowork for project Aurora Docs, update the summary, and send me the file" can resolve Cowork projects, read or write project files, and send the selected project file back through the current channel when that adapter supports file delivery.
 
 - **Dashboard** — live stats, weather, channel status, message feed, cockpit, smart refresh, and workspace route guidance
 - **Copilot chat** — pure web conversations with thread history, provider/model selection, optional title, generated title fallback, inline progress/tool visibility, and no agent templates

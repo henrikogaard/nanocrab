@@ -19,6 +19,7 @@ import {
   AgentSubscription,
   AgentSubscriptionEvent,
   RegisteredGroup,
+  ChatProject,
   CoworkProject,
   CoworkContextItem,
   CoworkRun,
@@ -125,7 +126,14 @@ function createSchema(database: Database.Database): void {
       kind TEXT,
       title TEXT,
       project_id TEXT,
-      project_slug TEXT
+      project_slug TEXT,
+      chat_project_id TEXT
+    );
+    CREATE TABLE IF NOT EXISTS chat_projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS agent_profiles (
       id TEXT PRIMARY KEY,
@@ -497,6 +505,13 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN chat_project_id TEXT`,
+    );
+  } catch {
+    /* column already exists */
+  }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
   try {
@@ -511,6 +526,9 @@ function createSchema(database: Database.Database): void {
     );
     database.exec(
       `UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`,
+    );
+    database.exec(
+      `UPDATE chats SET channel = 'slack', is_group = 1 WHERE jid LIKE 'slack:%'`,
     );
     database.exec(
       `UPDATE chats SET channel = 'telegram', is_group = 0 WHERE jid LIKE 'tg:%'`,
@@ -1673,6 +1691,7 @@ export function getRegisteredGroup(
         title: string | null;
         project_id: string | null;
         project_slug: string | null;
+        chat_project_id: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -1701,6 +1720,7 @@ export function getRegisteredGroup(
     title: row.title ?? undefined,
     projectId: row.project_id ?? undefined,
     projectSlug: row.project_slug ?? undefined,
+    chatProjectId: row.chat_project_id ?? undefined,
   };
 }
 
@@ -1709,8 +1729,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, enabled, is_primary, kind, title, project_id, project_slug)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, enabled, is_primary, kind, title, project_id, project_slug, chat_project_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -1726,6 +1746,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.title ?? null,
     group.projectId ?? null,
     group.projectSlug ?? null,
+    group.chatProjectId ?? null,
   );
 }
 
@@ -1745,6 +1766,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     title: string | null;
     project_id: string | null;
     project_slug: string | null;
+    chat_project_id: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -1772,9 +1794,32 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       title: row.title ?? undefined,
       projectId: row.project_id ?? undefined,
       projectSlug: row.project_slug ?? undefined,
+      chatProjectId: row.chat_project_id ?? undefined,
     };
   }
   return result;
+}
+
+export function createChatProject(project: ChatProject): ChatProject {
+  db.prepare(
+    `INSERT INTO chat_projects (id, name, created_at, updated_at)
+     VALUES (?, ?, ?, ?)`,
+  ).run(project.id, project.name, project.created_at, project.updated_at);
+  return project;
+}
+
+export function getChatProject(id: string): ChatProject | undefined {
+  return db.prepare('SELECT * FROM chat_projects WHERE id = ?').get(id) as
+    | ChatProject
+    | undefined;
+}
+
+export function listChatProjects(): ChatProject[] {
+  return db
+    .prepare(
+      'SELECT * FROM chat_projects ORDER BY updated_at DESC, created_at DESC',
+    )
+    .all() as ChatProject[];
 }
 
 export function deleteRegisteredGroup(jid: string): void {

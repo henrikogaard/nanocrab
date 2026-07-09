@@ -60,6 +60,58 @@ function renderHelp(el) {
     },
   ];
 
+  const capabilityRoutes = [
+    {
+      capability: 'Chat threads',
+      route: 'Chat',
+      ui: "navigate('chat')",
+      command: 'Dashboard composer',
+      status: 'Ready',
+    },
+    {
+      capability: 'Cowork projects',
+      route: 'Cowork',
+      ui: "navigate('projects')",
+      command: 'Project chat and workspace-intent routing',
+      status: 'Ready',
+    },
+    {
+      capability: 'Code automation',
+      route: 'Code',
+      ui: "navigate('gitcode')",
+      command: '/code and coding-job MCP tools',
+      status: 'Ready',
+    },
+    {
+      capability: 'Provider profiles',
+      route: 'Integrations',
+      ui: "navigate('integrations')",
+      command: 'Provider/profile/model selectors',
+      status: 'Ready',
+    },
+    {
+      capability: 'Governed memory',
+      route: 'Memory',
+      ui: "navigate('memory')",
+      command: 'propose_memory and journal MCP tools',
+      status: 'Ready',
+    },
+    {
+      capability: 'Skill registry',
+      route: 'Skills',
+      ui: "navigate('skills')",
+      command: 'list_skills, search_skills, skill drafts',
+      status: 'Ready',
+    },
+    {
+      capability: 'Route hygiene',
+      route: 'Docs',
+      ui: 'openHelpCapabilities()',
+      command: 'docs/CAPABILITIES.md plus route-wiring tests',
+      status: 'Guarded',
+    },
+  ];
+
   const mcpWorkflowSteps = [
     {
       step: 'Workspace',
@@ -174,6 +226,15 @@ function renderHelp(el) {
     );
   };
 
+  window.openHelpCapabilities = function () {
+    navigate('help');
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById('help-capabilities')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
   const actionLadder = [
     {
       label: 'Answer',
@@ -247,6 +308,10 @@ function renderHelp(el) {
     const decisionLines = decisionCards.map(
       (card) => `- ${card.intent}: use ${card.place}. ${card.detail}`,
     );
+    const capabilityLines = capabilityRoutes.map(
+      (item) =>
+        `- ${item.capability}: UI route ${item.route}; command or MCP path ${item.command}; status ${item.status}.`,
+    );
     const ladderLines = actionLadder.map(
       (item) => `- ${item.label}: ${item.title}. ${item.detail}`,
     );
@@ -280,6 +345,9 @@ function renderHelp(el) {
       'Decision guide',
       decisionLines.join('\n'),
       '',
+      'Capability map',
+      capabilityLines.join('\n'),
+      '',
       'Default rule',
       'Use the smallest workspace that fits the job: Copilot for plain chat answers, Cowork for durable project/document/MCP work, Code for repositories, and Settings when the platform needs setup first.',
     ].join('\n');
@@ -309,6 +377,30 @@ function renderHelp(el) {
   }
 
   const sections = [
+    {
+      title: 'Capability map',
+      id: 'help-capabilities',
+      description:
+        'Every supported capability has a UI route, a documented command/MCP path, or both.',
+      items: [
+        {
+          name: 'Capability map',
+          desc: 'Use this Help page for in-app routing and docs/CAPABILITIES.md for the current durable capability matrix.',
+        },
+        {
+          name: 'UI route',
+          desc: 'Dashboard routes expose Chat, Cowork, Code, operations, governance, setup, monitoring, and recovery surfaces.',
+        },
+        {
+          name: 'Command or MCP path',
+          desc: 'Some owner and agent workflows are intentionally command or MCP driven, including mobile code control, scheduled tasks, memories, reports, and artifacts.',
+        },
+        {
+          name: 'Route hygiene',
+          desc: 'Backend route modules must be mounted by the dashboard server or removed when superseded so backend capability claims stay honest.',
+        },
+      ],
+    },
     {
       title: 'Workspace modes',
       id: 'help-overview',
@@ -677,9 +769,24 @@ function renderHelp(el) {
           <div>
             <span>${esc(card.place)}</span>
             <h3>${esc(card.intent)}</h3>
-            <p>${esc(card.detail)}</p>
-          </div>
-          <button class="btn btn-sm btn-ghost" onclick="${card.action}">Go</button>
+          <p>${esc(card.detail)}</p>
+        </div>
+        <button class="btn btn-sm btn-ghost" onclick="${card.action}">Go</button>
+      </article>`,
+    )
+    .join('');
+
+  const capabilityMapHtml = capabilityRoutes
+    .map(
+      (item) => `
+        <article class="help-capability-card">
+          <span>${esc(item.status)}</span>
+          <strong>${esc(item.capability)}</strong>
+          <dl>
+            <div><dt>UI route</dt><dd>${esc(item.route)}</dd></div>
+            <div><dt>Command or MCP path</dt><dd>${esc(item.command)}</dd></div>
+          </dl>
+          <button class="btn btn-sm btn-ghost" onclick="${item.ui}">${esc(item.capability === 'Route hygiene' ? 'Open capability docs' : 'Open route')}</button>
         </article>`,
     )
     .join('');
@@ -768,6 +875,14 @@ function renderHelp(el) {
       </div>
     </div>
     <div class="help-path-grid">${quickPathHtml}</div>
+    <section class="help-capability-map" aria-label="Current capability map">
+      <div class="help-capability-head">
+        <span class="eyebrow">Current capability map</span>
+        <h3>Every supported capability has a route or command path</h3>
+        <p>Every supported capability has a UI route, a documented command/MCP path, or both. Use the durable docs file when checking whether a feature is user-facing, command-only, MCP-only, or still partial.</p>
+      </div>
+      <div class="help-capability-grid">${capabilityMapHtml}</div>
+    </section>
     <section class="help-action-ladder" aria-label="Turn manual guidance into work">
       <div class="help-action-head">
         <span class="eyebrow">Action ladder</span>

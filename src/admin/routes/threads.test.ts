@@ -43,6 +43,9 @@ const {
   getRegisteredGroup,
   getWebThreads,
   getAllChats,
+  getChatProject,
+  listChatProjects,
+  createChatProject,
   createCoworkProject,
 } = await import('../../db.js');
 
@@ -268,6 +271,168 @@ describe('/api/threads CRUD', () => {
     });
 
     expect(getRegisteredGroup(result.id)!.title).toBeUndefined();
+  });
+
+  it('POST /projects creates a virtual Chat project for grouping conversations', async () => {
+    const project = await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Weather and fishing' }),
+      });
+      expect(res.status).toBe(200);
+      return res.json() as Promise<{
+        id: string;
+        name: string;
+        createdAt: string;
+        updatedAt: string;
+        threadCount: number;
+      }>;
+    });
+
+    expect(project.name).toBe('Weather and fishing');
+    expect(project.threadCount).toBe(0);
+    expect(getChatProject(project.id)?.name).toBe('Weather and fishing');
+  });
+
+  it('POST / can assign a plain Chat thread to a virtual project', async () => {
+    const created = await withServer('admin', async (base) => {
+      const projectRes = await fetch(`${base}/api/threads/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Home planning' }),
+      });
+      expect(projectRes.status).toBe(200);
+      const project = (await projectRes.json()) as { id: string };
+
+      const threadRes = await fetch(`${base}/api/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: 'Paint colors',
+          chatProjectId: project.id,
+        }),
+      });
+      expect(threadRes.status).toBe(200);
+      return {
+        project,
+        thread: (await threadRes.json()) as { id: string },
+      };
+    });
+
+    const stored = getRegisteredGroup(created.thread.id);
+    expect(stored?.projectId).toBeUndefined();
+    expect(stored?.chatProjectId).toBe(created.project.id);
+  });
+
+  it('PATCH /:id moves an existing Chat thread into a virtual project', async () => {
+    const moved = await withServer('admin', async (base) => {
+      const projectRes = await fetch(`${base}/api/threads/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Trip planning' }),
+      });
+      expect(projectRes.status).toBe(200);
+      const project = (await projectRes.json()) as { id: string };
+
+      const threadRes = await fetch(`${base}/api/threads`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Flights' }),
+      });
+      expect(threadRes.status).toBe(200);
+      const thread = (await threadRes.json()) as { id: string };
+
+      const moveRes = await fetch(
+        `${base}/api/threads/${encodeURIComponent(thread.id)}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ chatProjectId: project.id }),
+        },
+      );
+      expect(moveRes.status).toBe(200);
+      return { project, thread };
+    });
+
+    expect(getRegisteredGroup(moved.thread.id)?.chatProjectId).toBe(
+      moved.project.id,
+    );
+  });
+
+  it('PATCH /:id can remove a Chat thread from its virtual project', async () => {
+    setRegisteredGroup('web:loose-thread', {
+      name: 'Web Conversation',
+      title: 'Loose',
+      kind: 'web',
+      folder: 'web-loose-thread',
+      trigger: '^',
+      added_at: '2026-07-09T09:00:00.000Z',
+      requiresTrigger: false,
+      chatProjectId: 'chat-project-old',
+    });
+
+    await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads/web%3Aloose-thread`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chatProjectId: null }),
+      });
+      expect(res.status).toBe(200);
+    });
+
+    expect(
+      getRegisteredGroup('web:loose-thread')?.chatProjectId,
+    ).toBeUndefined();
+  });
+
+  it('GET /projects includes Chat projects with their virtual-folder threads', async () => {
+    const now = '2026-07-09T09:00:00.000Z';
+    const project = {
+      id: 'chat-project-weather',
+      name: 'Weather',
+      created_at: now,
+      updated_at: now,
+    };
+    createChatProject(project);
+    setRegisteredGroup('web:weather-thread', {
+      name: 'Web Conversation',
+      title: 'Vaeret i Stavanger',
+      kind: 'web',
+      folder: 'web-weather-thread',
+      trigger: '^',
+      added_at: now,
+      requiresTrigger: false,
+      chatProjectId: project.id,
+    });
+
+    await withServer('admin', async (base) => {
+      const res = await fetch(`${base}/api/threads/projects`);
+      expect(res.status).toBe(200);
+      const list = (await res.json()) as {
+        projects: Array<{
+          id: string;
+          name: string;
+          threadCount: number;
+          threads: Array<{ id: string; title: string; chatProjectId: string }>;
+        }>;
+      };
+
+      expect(list.projects).toEqual([
+        expect.objectContaining({
+          id: 'chat-project-weather',
+          name: 'Weather',
+          threadCount: 1,
+          threads: [
+            expect.objectContaining({
+              id: 'web:weather-thread',
+              title: 'Vaeret i Stavanger',
+              chatProjectId: 'chat-project-weather',
+            }),
+          ],
+        }),
+      ]);
+    });
   });
 
   it('GET /:id reports Cowork project MCP access, including restricted connector scopes', async () => {

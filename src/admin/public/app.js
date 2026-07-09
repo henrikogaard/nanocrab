@@ -5871,7 +5871,11 @@ function credentialCategory(credential) {
   if (/openai|anthropic|claude|gemini|ollama|openrouter|provider/.test(key))
     return 'Providers';
   if (/github|copilot|git|repo/.test(key)) return 'Code';
-  if (/mail|email|gmail|calendar|drive|mcp|slack|telegram|whatsapp/.test(key))
+  if (
+    /mail|email|gmail|calendar|drive|mcp|slack|discord|telegram|signal|whatsapp/.test(
+      key,
+    )
+  )
     return 'Cowork';
   return 'System';
 }

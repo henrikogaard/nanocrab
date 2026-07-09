@@ -71,6 +71,15 @@ export interface RegisteredGroup {
   projectId?: string;
   // Sanitized project folder slug used for internal project workspace mounts.
   projectSlug?: string;
+  // Optional Chat-mode virtual folder for grouping plain web conversations.
+  chatProjectId?: string;
+}
+
+export interface ChatProject {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CoworkProject {

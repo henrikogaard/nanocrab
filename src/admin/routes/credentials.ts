@@ -31,6 +31,24 @@ const CREDENTIAL_KEYS = [
     mcp: null,
     editable: true,
   },
+  {
+    key: 'SLACK_BOT_TOKEN',
+    label: 'Slack Bot Token',
+    mcp: null,
+    editable: true,
+  },
+  {
+    key: 'SLACK_APP_TOKEN',
+    label: 'Slack App Token',
+    mcp: null,
+    editable: true,
+  },
+  {
+    key: 'DISCORD_BOT_TOKEN',
+    label: 'Discord Bot Token',
+    mcp: null,
+    editable: true,
+  },
   { key: 'FAL_KEY', label: 'fal.ai Key', mcp: null, editable: true },
   { key: 'OPENAI_API_KEY', label: 'OpenAI API Key', mcp: null, editable: true },
   {

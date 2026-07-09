@@ -54,6 +54,7 @@ describe('Credentials access cockpit UI', () => {
     expect(source).toContain(
       'Security, webhooks, OAuth, custom secrets, and platform access',
     );
+    expect(source).toContain('slack|discord|telegram|signal|whatsapp');
     expect(source).toContain("return 'Cowork'");
     expect(source).toContain("return 'Code'");
   });

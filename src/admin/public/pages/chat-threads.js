@@ -8,6 +8,7 @@
   var _modalEl = null;
   var _threadListHandlersInstalled = false;
   var _webChatActionHandlersInstalled = false;
+  var _chatProjects = [];
   function setProgressFill(el, pct) {
     if (!el) return;
     el.style.setProperty('--progress-pct', Math.min(Number(pct) || 0, 100) + '%');
@@ -299,6 +300,10 @@
         useProjectMcpCommand(target.dataset.commandIndex);
       } else if (action === 'retry-thread-list') {
         refreshThreadList();
+      } else if (action === 'create-chat-project') {
+        createChatProject();
+      } else if (action === 'assign-chat-project') {
+        assignChatProject(target.dataset.threadId, target.dataset.chatProjectId || null);
       } else if (action === 'toggle-progress-history') {
         if (typeof window.toggleProgressHistory === 'function') {
           window.toggleProgressHistory();
@@ -450,6 +455,8 @@
         return (
           '<option value="' +
           esc(option.value) +
+          '" data-model-search-text="' +
+          esc((option.providerName + ' ' + option.providerId + ' ' + option.model).toLowerCase()) +
           '"' +
           (option.selected ? ' selected' : '') +
           '>' +
@@ -477,7 +484,9 @@
       '</div>' +
       '<div class="webchat-start-composer" role="group" aria-label="New chat composer">' +
       '<textarea id="webchat-start-input" rows="1" placeholder="Type your message here..." autocomplete="off"></textarea>' +
+      renderStartProjectSelect() +
       '<div class="webchat-start-toolbar">' +
+      '<input id="webchat-start-model-search" type="search" autocomplete="off" placeholder="Search models" aria-label="Search models">' +
       '<select id="webchat-start-model-select" aria-label="Model">' +
       renderStartModelOptions(choices) +
       '</select>' +
@@ -486,6 +495,51 @@
       '</div>' +
       '</section>'
     );
+  }
+
+  function renderStartProjectSelect() {
+    var projects = Array.isArray(_chatProjects) ? _chatProjects : [];
+    return (
+      '<label class="webchat-start-project">' +
+      '<span>Project</span>' +
+      '<select id="webchat-start-project-select" aria-label="Chat project">' +
+      '<option value="">No project</option>' +
+      projects
+        .map(function (project) {
+          return '<option value="' + esc(project.id) + '">' + esc(project.name) + '</option>';
+        })
+        .join('') +
+      '</select>' +
+      '</label>'
+    );
+  }
+
+  async function loadChatProjects() {
+    try {
+      var projectsPayload = await api('/threads/projects');
+      _chatProjects = Array.isArray(projectsPayload.projects) ? projectsPayload.projects : [];
+    } catch (_) {
+      _chatProjects = [];
+    }
+    return _chatProjects;
+  }
+
+  function filterStartModelOptions() {
+    var search = document.getElementById('webchat-start-model-search');
+    var select = document.getElementById('webchat-start-model-select');
+    if (!search || !select) return;
+    var query = search.value.trim().toLowerCase();
+    var firstVisible = null;
+    Array.prototype.forEach.call(select.options, function (option) {
+      var text = option.dataset.modelSearchText || option.textContent.toLowerCase();
+      var visible = !query || text.indexOf(query) !== -1;
+      option.hidden = !visible;
+      option.disabled = !visible;
+      if (visible && !firstVisible) firstVisible = option;
+    });
+    if (firstVisible && (select.selectedOptions[0] || {}).disabled) {
+      select.value = firstVisible.value;
+    }
   }
 
   function parseStartModelValue(value) {
@@ -508,6 +562,7 @@
   async function startConversationFromComposer() {
     var input = document.getElementById('webchat-start-input');
     var select = document.getElementById('webchat-start-model-select');
+    var projectSelect = document.getElementById('webchat-start-project-select');
     var btn = document.getElementById('webchat-start-send');
     if (!input || !select || !btn || btn.disabled) return;
     var prompt = input.value.trim();
@@ -527,6 +582,9 @@
       if (selected.provider) {
         localStorage.setItem('webchat_last_model_' + selected.provider, selected.model);
       }
+    }
+    if (projectSelect && projectSelect.value) {
+      body.chatProjectId = projectSelect.value;
     }
 
     btn.disabled = true;
@@ -1095,6 +1153,7 @@
 
   async function loadThreads() {
     installWebChatActionHandlers();
+    await loadChatProjects();
     try {
       var t = await api('/threads');
       window._webchatThreadListLoadIssue = '';
@@ -1111,6 +1170,7 @@
     installThreadListHandlers();
     if (!Array.isArray(threads)) threads = [];
     var newBtn =
+      '<button type="button" class="webchat-project-create" data-webchat-action="create-chat-project">＋ Project</button>' +
       '<a class="nav-link" data-webchat-action="open-new-conversation">' +
       navIcon('chat') +
       '<span class="nav-label">&#xFE0E;＋ New conversation</span></a>';
@@ -1122,29 +1182,126 @@
       );
     } else {
       threadItems =
+        renderChatProjectSections(threads, currentId) +
         '<div class="thread-list">' +
         threads
+          .filter(function (t) { return !t.chatProjectId; })
           .map(function (t) {
             var isActive = t.id === currentId;
-            return (
-              '<a class="nav-link webchat-thread-link' +
-              (isActive ? ' active' : '') +
-              '" data-thread-id="' +
-              esc(t.id) +
-              '" data-thread-title="' +
-              esc(t.title || t.id) +
-              '">' +
-              navIcon('messages') +
-              '<span class="nav-label">' +
-              esc(t.title || t.id) +
-              '</span></a>'
-            );
+            return renderThreadListItem(t, isActive);
           })
           .join('') +
         '</div>';
     }
 
     return newBtn + threadItems;
+  }
+
+  function renderThreadListItem(t, isActive) {
+    var projectButtons = (_chatProjects || [])
+      .map(function (project) {
+        if (project.id === t.chatProjectId) return '';
+        return (
+          '<button type="button" data-webchat-action="assign-chat-project" data-thread-id="' +
+          esc(t.id) +
+          '" data-chat-project-id="' +
+          esc(project.id) +
+          '" title="Move to ' +
+          esc(project.name) +
+          '">Move to ' +
+          esc(project.name) +
+          '</button>'
+        );
+      })
+      .join('');
+    var ungroupButton = t.chatProjectId
+      ? '<button type="button" data-webchat-action="assign-chat-project" data-thread-id="' +
+        esc(t.id) +
+        '" data-chat-project-id="" title="Remove from project">Remove from project</button>'
+      : '';
+    return (
+      '<div class="webchat-thread-row">' +
+      '<a class="nav-link webchat-thread-link' +
+      (isActive ? ' active' : '') +
+      '" data-thread-id="' +
+      esc(t.id) +
+      '" data-thread-title="' +
+      esc(t.title || t.id) +
+      '">' +
+      navIcon('messages') +
+      '<span class="nav-label">' +
+      esc(t.title || t.id) +
+      '</span></a>' +
+      '<div class="webchat-thread-move" aria-label="Move chat">' +
+      ungroupButton +
+      projectButtons +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  function renderChatProjectSections(threads, currentId) {
+    var projects = Array.isArray(_chatProjects) ? _chatProjects : [];
+    if (!projects.length) return '';
+    return projects
+      .map(function (project) {
+        var projectThreads = threads.filter(function (thread) {
+          return thread.chatProjectId === project.id;
+        });
+        return (
+          '<section class="webchat-project-section" aria-label="' +
+          esc(project.name) +
+          '">' +
+          '<div class="webchat-project-section-head">' +
+          '<span>' +
+          esc(project.name) +
+          '</span>' +
+          '<small>' +
+          projectThreads.length +
+          '</small>' +
+          '</div>' +
+          (projectThreads.length
+            ? projectThreads
+                .map(function (thread) {
+                  return renderThreadListItem(thread, thread.id === currentId);
+                })
+                .join('')
+            : '<p>Virtual folders for related chats</p>') +
+          '</section>'
+        );
+      })
+      .join('');
+  }
+
+  function createChatProject() {
+    openInputModal({
+      title: 'New chat project',
+      body: 'Create a virtual folder for related Chat conversations.',
+      label: 'Project name',
+      actionLabel: 'Create',
+      emptyMessage: 'Enter a project name',
+      errorPrefix: 'Project creation failed',
+      onSubmit: async function (name) {
+        await api('/threads/projects', {
+          method: 'POST',
+          body: JSON.stringify({ name: name }),
+        });
+        refreshThreadList();
+      },
+    });
+  }
+
+  async function assignChatProject(threadId, chatProjectId) {
+    if (!threadId) return;
+    try {
+      await api('/threads/' + encodeURIComponent(threadId), {
+        method: 'PATCH',
+        body: JSON.stringify({ chatProjectId: chatProjectId || null }),
+      });
+      refreshThreadList();
+    } catch (e) {
+      toast('Could not move chat: ' + e.message, 'error');
+    }
   }
 
   function installThreadListHandlers() {
@@ -1218,8 +1375,11 @@
     }
 
     if (!threadId) {
+      await loadChatProjects();
       var choices = await loadWebChatProviderChoices();
       el.innerHTML = renderNewConversationStart(choices);
+      var modelSearch = document.getElementById('webchat-start-model-search');
+      if (modelSearch) modelSearch.oninput = filterStartModelOptions;
       var startInput = document.getElementById('webchat-start-input');
       if (startInput) {
         startInput.oninput = function () {

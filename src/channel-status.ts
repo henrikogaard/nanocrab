@@ -8,6 +8,10 @@ export function channelIdForRegisteredGroup(
   const hints = [jid, group?.folder, group?.name]
     .filter((value): value is string => !!value)
     .map((value) => value.toLowerCase());
+  if (hints.some((hint) => hint.startsWith('slack:') || hint.includes('slack')))
+    return 'slack';
+  if (hints.some((hint) => hint.startsWith('dc:') || hint.includes('discord')))
+    return 'discord';
   if (hints.some((hint) => hint.startsWith('tg:') || hint.includes('telegram')))
     return 'telegram';
   if (hints.some((hint) => hint.startsWith('sig:') || hint.includes('signal')))
