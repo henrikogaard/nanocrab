@@ -12,16 +12,57 @@ const OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 const REPOSITORY_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
 
-function requireOpaqueId(value: string, field: string): void {
+export function requireOpaqueId(value: string, field: string): void {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error(`${field} must be a non-empty GitHub id`);
   }
 }
 
+function requireTimestamp(value: string | null, field: string): void {
+  if (value === null) return;
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`${field} must be a valid timestamp`);
+  }
+}
+
+function validateProfileForStage(
+  agentProfileId: string,
+  stage: PipelineStage,
+  repositories: string[],
+): void {
+  requireOpaqueId(agentProfileId, 'agentProfileId');
+  const profile = getAgentProfile(agentProfileId);
+  if (!profile)
+    throw new Error(`agent profile ${agentProfileId} was not found`);
+  if (!profile.enabled)
+    throw new Error(`agent profile ${agentProfileId} is disabled`);
+  if (!profile.stageRoles.includes(stage.stageKind)) {
+    throw new Error(
+      `agent profile ${agentProfileId} lacks the ${stage.stageKind} role`,
+    );
+  }
+  if (
+    repositories.some(
+      (repository) => !profile.repositoryScopes.includes(repository),
+    )
+  ) {
+    throw new Error(
+      `agent profile ${agentProfileId} does not include the pipeline repository scope`,
+    );
+  }
+}
+
 export function validatePipeline(candidate: PipelineWithStages): void {
   const { pipeline, stages } = candidate;
+  requireOpaqueId(pipeline.id, 'pipelineId');
   requireOpaqueId(pipeline.githubProjectId, 'githubProjectId');
   requireOpaqueId(pipeline.workflowFieldId, 'workflowFieldId');
+  if (typeof pipeline.name !== 'string' || pipeline.name.trim().length === 0) {
+    throw new Error('pipeline name is required');
+  }
+  requireTimestamp(pipeline.createdAt, 'createdAt');
+  requireTimestamp(pipeline.updatedAt, 'updatedAt');
+  requireTimestamp(pipeline.lastSyncedAt, 'lastSyncedAt');
   if (!OWNER_PATTERN.test(pipeline.githubOwner)) {
     throw new Error('githubOwner must be a valid GitHub owner');
   }
@@ -66,29 +107,35 @@ export function validatePipeline(candidate: PipelineWithStages): void {
   }
 
   for (const stage of stages) {
+    requireOpaqueId(stage.id, 'stageId');
     requireOpaqueId(stage.githubFieldOptionId, 'githubFieldOptionId');
+    if (
+      typeof stage.githubFieldOptionName !== 'string' ||
+      !stage.githubFieldOptionName.trim()
+    ) {
+      throw new Error('githubFieldOptionName is required');
+    }
     if (stage.pipelineId !== pipeline.id) {
       throw new Error('pipeline stage must belong to its pipeline');
     }
-    const profile = getAgentProfile(stage.agentProfileId);
-    if (!profile)
-      throw new Error(`agent profile ${stage.agentProfileId} was not found`);
-    if (!profile.enabled)
-      throw new Error(`agent profile ${stage.agentProfileId} is disabled`);
-    if (!profile.stageRoles.includes(stage.stageKind)) {
-      throw new Error(
-        `agent profile ${stage.agentProfileId} lacks the ${stage.stageKind} role`,
-      );
-    }
+    const allowedEvidence = [
+      'plan',
+      'tests',
+      'pushed_branch',
+      'open_pr',
+      'review',
+    ];
     if (
-      pipeline.repositoryScopes.some(
-        (repository) => !profile.repositoryScopes.includes(repository),
-      )
+      !Array.isArray(stage.requiredEvidence) ||
+      stage.requiredEvidence.some((item) => !allowedEvidence.includes(item))
     ) {
-      throw new Error(
-        `agent profile ${stage.agentProfileId} does not include the pipeline repository scope`,
-      );
+      throw new Error('requiredEvidence contains an unsupported value');
     }
+    validateProfileForStage(
+      stage.agentProfileId,
+      stage,
+      pipeline.repositoryScopes,
+    );
   }
 }
 
@@ -100,18 +147,43 @@ export function createPipeline(
 }
 
 export function resolveStageAssignment(
-  stage: PipelineStage,
+  candidate: PipelineWithStages,
+  stageId: string,
   issueNodeId: string,
   assignments: StageAssignment[],
 ): string {
-  return (
-    assignments.find(
-      (assignment) =>
-        assignment.pipelineId === stage.pipelineId &&
-        assignment.stageId === stage.id &&
-        assignment.issueNodeId === issueNodeId,
-    )?.agentProfileId ?? stage.agentProfileId
+  validatePipeline(candidate);
+  requireOpaqueId(stageId, 'stageId');
+  requireOpaqueId(issueNodeId, 'issueNodeId');
+  const effective = new Map(
+    candidate.stages.map((stage) => {
+      const override = assignments.find(
+        (assignment) =>
+          assignment.pipelineId === stage.pipelineId &&
+          assignment.stageId === stage.id &&
+          assignment.issueNodeId === issueNodeId,
+      );
+      const agentProfileId = override?.agentProfileId ?? stage.agentProfileId;
+      validateProfileForStage(
+        agentProfileId,
+        stage,
+        candidate.pipeline.repositoryScopes,
+      );
+      return [stage.id, agentProfileId] as const;
+    }),
   );
+  const implement = candidate.stages.find(
+    (stage) => stage.stageKind === 'implement',
+  )!;
+  const review = candidate.stages.find(
+    (stage) => stage.stageKind === 'review',
+  )!;
+  if (effective.get(implement.id) === effective.get(review.id)) {
+    throw new Error('implement and review agents must differ');
+  }
+  const resolved = effective.get(stageId);
+  if (!resolved) throw new Error(`stage ${stageId} was not found in pipeline`);
+  return resolved;
 }
 
 export function buildStageDispatchKey(input: {
@@ -122,6 +194,12 @@ export function buildStageDispatchKey(input: {
   agentProfileId: string;
   githubFieldUpdatedAt: string;
 }): string {
+  requireOpaqueId(input.pipelineId, 'pipelineId');
+  requireOpaqueId(input.projectItemId, 'projectItemId');
+  requireOpaqueId(input.issueNodeId, 'issueNodeId');
+  requireOpaqueId(input.stageId, 'stageId');
+  requireOpaqueId(input.agentProfileId, 'agentProfileId');
+  requireTimestamp(input.githubFieldUpdatedAt, 'githubFieldUpdatedAt');
   return [
     input.pipelineId,
     input.projectItemId,
