@@ -192,7 +192,7 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function getGitHubToken(): string | null {
+export function getGitHubToken(): string | null {
   const env = readEnvFile(['GITHUB_TOKEN']);
   return process.env.GITHUB_TOKEN || env.GITHUB_TOKEN || null;
 }
@@ -314,7 +314,7 @@ export async function githubApi(
   return response.json();
 }
 
-async function githubGraphql<T>(
+export async function githubGraphql<T>(
   query: string,
   variables: Record<string, unknown>,
 ): Promise<T> {
