@@ -668,7 +668,7 @@ export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
 router.get('/', async (_req: Request, res: Response) => {
   try {
     res.json(listCockpitSessions());
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: 'Failed to list sessions' });
   }
 });
@@ -767,7 +767,7 @@ router.get(
         (b.createdAt || '').localeCompare(a.createdAt || ''),
       );
       res.json(history);
-    } catch (err) {
+    } catch (_err) {
       res.status(500).json({ error: 'Failed to read session history' });
     }
   },
@@ -790,7 +790,7 @@ router.get(
         return;
       }
       res.json({ id: sessionId, content });
-    } catch (err) {
+    } catch (_err) {
       res.status(500).json({ error: 'Failed to read session transcript' });
     }
   },
@@ -863,7 +863,7 @@ router.post(
       }
 
       res.json({ results });
-    } catch (err) {
+    } catch (_err) {
       res.status(500).json({ error: 'Search failed' });
     }
   },
@@ -1065,7 +1065,7 @@ router.get('/:group/:sessionId/detail', async (req: Request, res: Response) => {
       },
       messages,
     });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: 'Failed to read session detail' });
   }
 });
@@ -1178,7 +1178,7 @@ router.get('/:group/:sessionId', async (req: Request, res: Response) => {
     }
 
     res.json(messages);
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: 'Failed to read session' });
   }
 });

@@ -1,16 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
+import _os from 'os';
 import { WebSocket } from 'ws';
 
 type WatchFileListener = (curr: fs.Stats, prev: fs.Stats) => void;
 
-const TEST_DIR = vi.hoisted(() => {
-  const os = require('os');
-  const p = require('path');
-  return p.join(os.tmpdir(), `nanocrab-term-test-${Date.now()}`);
-});
+const TEST_DIR = vi.hoisted(() => require('os').tmpdir() + `/nanocrab-term-test-${Date.now()}`);
 
 vi.mock('../config.js', () => ({
   SESSIONS_DIR: TEST_DIR,

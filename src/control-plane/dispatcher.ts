@@ -13,7 +13,7 @@ import {
   insertDecision,
   getDecision as getDecisionRecord,
   updateDecisionApprovalId,
-  updateDecisionDispatchResult,
+  updateDecisionDispatchResult as _updateDecisionDispatchResult,
 } from './store.js';
 import type { StageDispatchCandidate } from './sync.js';
 import type { ControlPlaneDecision, PipelineStageKind } from './types.js';
@@ -115,7 +115,7 @@ export function requestRuntimeFallback(
   fallbackRuntime: AgentRuntimeSelection,
   options: RequestRuntimeFallbackOptions = {},
 ): ControlPlaneDecision {
-  const { pipeline, stage } = validateCandidate(candidate);
+  const { pipeline: _pipeline, stage } = validateCandidate(candidate);
   const profile = getAgentProfile(candidate.agentProfileId);
   if (!profile)
     throw new Error(`agent profile ${candidate.agentProfileId} was not found`);
@@ -208,7 +208,7 @@ export async function dispatchCandidate(
   candidate: StageDispatchCandidate,
   options: DispatchCandidateOptions = {},
 ): Promise<DispatchCandidateResult> {
-  const { pipeline, stage } = validateCandidate(candidate);
+  const { pipeline: _pipeline, stage } = validateCandidate(candidate);
 
   if (options.decisionId) {
     const existing = getDecisionRecord(options.decisionId);

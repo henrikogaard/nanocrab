@@ -72,7 +72,7 @@ router.put('/', (req: Request, res: Response) => {
       `${allowedRoots.length} roots, ${blockedPatterns.length} blocked patterns`,
     );
     res.json({ ok: true });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: 'Failed to write allowlist' });
   }
 });

@@ -41,7 +41,7 @@ router.post('/approve', (req: Request, res: Response) => {
 
     broadcastApprovalResult({ id: approvalId, groupJid, approved });
     res.json({ ok: true, approved });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: 'Failed to process approval' });
   }
 });

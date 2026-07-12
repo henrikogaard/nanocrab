@@ -94,7 +94,9 @@ router.post('/install', async (req: Request, res: Response) => {
             stdio: 'pipe',
             timeout: 60000,
           });
-        } catch {}
+        } catch {
+          // intentional
+        }
       }
     }
 
@@ -104,7 +106,9 @@ router.post('/install', async (req: Request, res: Response) => {
     if (fs.existsSync(pluginJsonPath)) {
       try {
         meta = JSON.parse(fs.readFileSync(pluginJsonPath, 'utf-8'));
-      } catch {}
+      } catch {
+        // intentional
+      }
     }
 
     // Save install record
@@ -130,7 +134,9 @@ router.post('/install', async (req: Request, res: Response) => {
     // Clean up on failure
     try {
       fs.rmSync(pluginDir, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      // intentional
+    }
     logger.error({ err: err.message, url }, 'Plugin install failed');
     res.status(500).json({ error: `Install failed: ${err.message}` });
   }

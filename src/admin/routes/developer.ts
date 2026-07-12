@@ -7,7 +7,7 @@ import path from 'path';
 
 import { STORE_DIR } from '../../config.js';
 import { auditLog } from '../security.js';
-import { getState } from '../state.js';
+import { getState as _getState } from '../state.js';
 import { getAllRegisteredGroups } from '../../db.js';
 
 const router = Router();

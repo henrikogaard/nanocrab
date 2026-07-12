@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import type { AgentCliId } from '../../types.js';
 import { listAgentProfiles } from '../../agent-profiles.js';
 import { probeAllAgentRuntimes } from '../../agent-runtime-registry.js';
-import { loadCodingJobs, getCodingJob } from '../../coding-jobs.js';
+import { loadCodingJobs, getCodingJob as _getCodingJob } from '../../coding-jobs.js';
 import {
   DefaultGitHubProjectClient,
   StageConflictError,

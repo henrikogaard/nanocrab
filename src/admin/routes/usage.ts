@@ -419,7 +419,7 @@ router.get('/', async (_req: Request, res: Response) => {
       byProvider: providers.byProvider,
       modelMetrics: providers.modelMetrics,
     });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: 'Failed to scan usage data' });
   }
 });

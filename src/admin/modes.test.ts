@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 // modes.js is a classic-script IIFE that assigns globalThis.NanoModes.
 // Importing it for its side effect populates the global.
 beforeAll(async () => {
-  // @ts-ignore -- classic browser script, no type declarations; imported for its side effect
+  // @ts-expect-error -- classic browser script, no type declarations; imported for its side effect
   await import('./public/modes.js');
 });
 

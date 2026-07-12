@@ -2,7 +2,7 @@ import { getAgentProfile, getAgentProfileByHandle } from '../agent-profiles.js';
 import {
   getApproval,
   reviewApproval,
-  type ApprovalRequest,
+  type ApprovalRequest as _ApprovalRequest,
 } from '../approvals.js';
 import { logAuditEvent } from '../audit-log.js';
 import {
@@ -12,7 +12,7 @@ import {
   insertDecision,
   setDecisionStatus,
   setStageAssignment,
-  updateDecisionApprovalId,
+  updateDecisionApprovalId as _updateDecisionApprovalId,
   updateDecisionDispatchResult,
   updateDecisionStatus,
 } from './store.js';

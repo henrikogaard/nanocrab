@@ -14,7 +14,7 @@ import {
   isChannelEnabledForRegisteredGroups,
 } from '../channel-status.js';
 import { getState, nonWebGroups } from './state.js';
-import { validateSession, getSessionUser, AdminUser } from './auth.js';
+import { validateSession, getSessionUser, AdminUser as _AdminUser } from './auth.js';
 import { SESSIONS_DIR, TERMINAL_IDLE_TIMEOUT_MS } from '../config.js';
 
 interface WsMessage {
@@ -137,7 +137,9 @@ export function finalizeSessionFile(sessionId: string): void {
     const logPath = sessionLogPath(sessionId);
     try {
       entry.bytes = logPath ? fs.statSync(logPath).size : 0;
-    } catch {}
+    } catch {
+      // intentional
+    }
     saveSessionIndex(index);
   }
 }

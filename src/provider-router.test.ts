@@ -345,7 +345,6 @@ describe('provider-router persistence', () => {
     const {
       loadProviderProfiles,
       resolveProviderFallbackForAction,
-      saveProviderProfile,
     } = await import('./provider-router.js');
     const { listApprovals } = await import('./approvals.js');
     fs.mkdirSync('/tmp/nanocrab-provider-router-test/store', {

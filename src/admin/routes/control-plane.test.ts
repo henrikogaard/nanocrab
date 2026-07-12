@@ -135,7 +135,7 @@ vi.mock('../../control-plane/github-projects.js', () => {
 
 const { _closeDatabase, _initTestDatabase } = await import('../../db.js');
 const { createAgentProfile } = await import('../../agent-profiles.js');
-const { saveProjectItemSnapshot } =
+const { saveProjectItemSnapshot: _saveProjectItemSnapshot } =
   await import('../../control-plane/store.js');
 const { default: controlPlaneRouter } = await import('./control-plane.js');
 
@@ -296,7 +296,7 @@ describe('/api/control-plane', () => {
         ]),
       );
       expect(create.res.status).toBe(201);
-      const pipelineId = create.body.pipeline.pipeline.id;
+      const _pipelineId = create.body.pipeline.pipeline.id;
 
       const res = await fetch(`${base}/api/control-plane/overview`);
       expect(res.status).toBe(200);
@@ -447,7 +447,7 @@ describe('/api/control-plane', () => {
   });
 
   it('POST /api/control-plane/pipelines/:id/sync returns 200 with candidates', async () => {
-    const { DefaultGitHubProjectClient } =
+    const { DefaultGitHubProjectClient: _DefaultGitHubProjectClient } =
       await import('../../control-plane/github-projects.js');
     await withServer(async (base) => {
       const atlas = createAgentProfile(

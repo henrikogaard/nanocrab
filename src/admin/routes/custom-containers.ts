@@ -3,7 +3,7 @@
  * Config stored in store/custom-containers.json (gitignored, private to this instance).
  */
 import { Router, Request, Response } from 'express';
-import { execFileSync, spawn, ChildProcess } from 'child_process';
+import { execFileSync, spawn as _spawn, ChildProcess as _ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';

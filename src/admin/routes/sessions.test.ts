@@ -4,7 +4,7 @@ import path from 'path';
 import os from 'os';
 import express from 'express';
 
-const TEST_DIR = path.join(os.tmpdir(), `nanocrab-sessions-test-${Date.now()}`);
+const _TEST_DIR = path.join(os.tmpdir(), `nanocrab-sessions-test-${Date.now()}`);
 
 vi.mock('../../config.js', () => ({
   SESSIONS_DIR: path.join(os.tmpdir(), `nanocrab-sessions-test-${Date.now()}`),
@@ -181,7 +181,7 @@ describe('terminal session API', () => {
   });
 
   it('filters by date', () => {
-    const query = 'running';
+    const _query = 'running';
     const dateFrom = '2026-06-02T00:00:00Z';
     const index = JSON.parse(
       fs.readFileSync(path.join(SESSIONS_DIR, 'index.json'), 'utf-8'),

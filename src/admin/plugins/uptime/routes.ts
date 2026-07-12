@@ -263,7 +263,7 @@ async function checkMonitor(monitor: Monitor): Promise<CheckResult> {
           ? undefined
           : `File is ${Math.round(ageMinutes)} min old (max ${maxAge})`,
       };
-    } catch (err: any) {
+    } catch (_err: any) {
       return {
         monitorId: monitor.id,
         timestamp: new Date().toISOString(),
@@ -414,7 +414,7 @@ async function sendAlert(
 
 // --- Periodic checker (called from index.ts) ---
 
-let checkTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const checkTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export function startUptimeChecker(): void {
   const monitors = loadMonitors();

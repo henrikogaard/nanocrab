@@ -137,7 +137,7 @@ router.post('/download-encrypted/:filename', (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${encName}"`);
     res.send(output);
-  } catch (err: any) {
+  } catch (_err: any) {
     res.status(500).json({ error: 'Encryption failed' });
   }
 });

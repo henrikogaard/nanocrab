@@ -239,10 +239,10 @@ export class SignalChannel implements Channel {
   }
 
   private startMemoryWatchdog(): void {
-    setInterval(() => {
+    setInterval(async () => {
       if (!this.daemon?.pid) return;
       try {
-        const { execSync } = require('child_process');
+        const { execSync } = await import('child_process');
         const rss = execSync(`ps -o rss= -p ${this.daemon.pid}`, {
           encoding: 'utf-8',
         }).trim();
@@ -255,7 +255,9 @@ export class SignalChannel implements Channel {
           this.daemon.kill('SIGTERM');
           // handleDaemonCrash will restart it
         }
-      } catch {}
+      } catch {
+        // intentional
+      }
     }, DAEMON_MEMORY_CHECK_INTERVAL);
   }
 

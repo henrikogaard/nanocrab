@@ -13,7 +13,7 @@ import {
   getSessionCookieMaxAge,
   changePassword,
   getAuthDb,
-  isMultiUserMode,
+  _isMultiUserMode,
 } from '../auth.js';
 import { getSessionToken, requireAuth, requireRole } from '../middleware.js';
 import {

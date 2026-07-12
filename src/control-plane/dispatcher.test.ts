@@ -59,7 +59,7 @@ import {
   dispatchCandidate,
   requestRuntimeFallback,
   runtime,
-  type DispatchCandidateResult,
+  type DispatchCandidateResult as _DispatchCandidateResult,
 } from './dispatcher.js';
 import type { StageDispatchCandidate } from './sync.js';
 import type { AgentRuntimeSelection } from '../types.js';

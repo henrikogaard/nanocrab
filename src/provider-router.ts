@@ -830,7 +830,7 @@ export async function runLiveCapabilityProbe(
 ): Promise<ProviderProbeResult> {
   const probe = await liveProbeService.probeModel(providerId, model);
   const capabilities = probeCapabilitiesToRouter(probe.capabilities);
-  const definition = AGENT_PROVIDER_DEFINITIONS[providerId as AgentProvider];
+  const _definition = AGENT_PROVIDER_DEFINITIONS[providerId as AgentProvider];
 
   const checks: ProviderProbeCheck[] = [
     {

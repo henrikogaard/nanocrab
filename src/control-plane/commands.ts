@@ -2,7 +2,7 @@ import { getAgentProfileByHandle } from '../agent-profiles.js';
 import {
   cancelCodingJob,
   loadCodingJobs,
-  type CodingJob,
+  type CodingJob as _CodingJob,
 } from '../coding-jobs.js';
 import { getTriggerPattern } from '../config.js';
 import {

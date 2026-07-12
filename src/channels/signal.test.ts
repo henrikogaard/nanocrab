@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execSync, spawn } from 'child_process';
+import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
 
 import { parseControlPlaneCommand } from '../control-plane/commands.js';
 
@@ -13,8 +15,6 @@ vi.mock('../logger.js', () => ({
 
 vi.mock('child_process', () => ({
   spawn: vi.fn(() => {
-    const { EventEmitter } = require('events');
-    const { PassThrough } = require('stream');
     const proc = new EventEmitter();
     proc.stdout = new PassThrough();
     proc.stderr = new PassThrough();
