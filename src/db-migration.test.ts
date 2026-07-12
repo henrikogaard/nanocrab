@@ -61,6 +61,7 @@ describe('database migrations', () => {
         )
         .all() as Array<{ name: string }>;
       expect(tables.map((row) => row.name).sort()).toEqual([
+        'control_plane_decisions',
         'control_plane_dispatches',
         'control_plane_item_snapshots',
         'control_plane_pipelines',
