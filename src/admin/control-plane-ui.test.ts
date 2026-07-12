@@ -7,10 +7,7 @@ const pagePath = path.join(
   'src/admin/public/pages/control-plane.js',
 );
 const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
-const indexHtmlPath = path.join(
-  process.cwd(),
-  'src/admin/public/index.html',
-);
+const indexHtmlPath = path.join(process.cwd(), 'src/admin/public/index.html');
 const modesPath = path.join(process.cwd(), 'src/admin/public/modes.js');
 const navPath = path.join(
   process.cwd(),
@@ -75,7 +72,7 @@ describe('Control Plane UI', () => {
     const modes = fs.readFileSync(modesPath, 'utf8');
     expect(modes).toContain("'control-plane'");
     const nav = fs.readFileSync(navPath, 'utf8');
-    expect(nav).toContain("control-plane");
+    expect(nav).toContain('control-plane');
     expect(nav).toContain('Control Plane');
   });
 

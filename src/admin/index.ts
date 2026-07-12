@@ -256,7 +256,12 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/threads', requireAuth, threadsRoutes);
   app.use('/api/projects', requireAuth, projectsRoutes);
   app.use('/api/assistant-profile', requireAuth, assistantProfileRoutes);
-  app.use('/api/control-plane', requireAuth, requireRole('admin'), controlPlaneRoutes);
+  app.use(
+    '/api/control-plane',
+    requireAuth,
+    requireRole('admin'),
+    controlPlaneRoutes,
+  );
 
   // Admin role required
   app.use('/api/mcp', requireAuth, requireRole('admin'), mcpRoutes);

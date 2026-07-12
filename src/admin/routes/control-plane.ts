@@ -66,7 +66,7 @@ function isRuntimeUnavailable(err: unknown): boolean {
     message.includes('cli is missing') ||
     message.includes('cli is unavailable') ||
     message.includes('no healthy fallback is available') ||
-    message.includes('primary cli') && message.includes('is missing') ||
+    (message.includes('primary cli') && message.includes('is missing')) ||
     message.includes('not a coding-job runtime')
   );
 }
@@ -149,9 +149,8 @@ function buildBoardCards() {
       issueDecisions.find((d) => d.status === 'pending') || issueDecisions[0];
 
     const run = activeDecision
-      ? jobs.get(
-          activeDecision.runId || activeDecision.dispatchJobId || '',
-        ) || null
+      ? jobs.get(activeDecision.runId || activeDecision.dispatchJobId || '') ||
+        null
       : null;
 
     const actualRuntime =
@@ -230,17 +229,26 @@ function buildPipelineWithStages(body: unknown): {
   validationError: string | null;
 } {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    return { candidate: null, validationError: 'pipeline body must be an object' };
+    return {
+      candidate: null,
+      validationError: 'pipeline body must be an object',
+    };
   }
   const record = body as Record<string, unknown>;
   const pipelineBody = record.pipeline;
   const stagesBody = record.stages;
 
   if (typeof pipelineBody !== 'object' || pipelineBody === null) {
-    return { candidate: null, validationError: 'pipeline.pipeline must be an object' };
+    return {
+      candidate: null,
+      validationError: 'pipeline.pipeline must be an object',
+    };
   }
   if (!Array.isArray(stagesBody)) {
-    return { candidate: null, validationError: 'pipeline.stages must be an array' };
+    return {
+      candidate: null,
+      validationError: 'pipeline.stages must be an array',
+    };
   }
 
   const pipelineInput = pipelineBody as Record<string, unknown>;
@@ -254,7 +262,9 @@ function buildPipelineWithStages(body: unknown): {
     githubProjectId: String(pipelineInput.githubProjectId || ''),
     workflowFieldId: String(pipelineInput.workflowFieldId || ''),
     repositoryScopes: Array.isArray(pipelineInput.repositoryScopes)
-      ? pipelineInput.repositoryScopes.filter((s): s is string => typeof s === 'string')
+      ? pipelineInput.repositoryScopes.filter(
+          (s): s is string => typeof s === 'string',
+        )
       : [],
     enabled: pipelineInput.enabled !== false,
     syncCursor: null,
@@ -276,7 +286,9 @@ function buildPipelineWithStages(body: unknown): {
       stageKind: String(stage.stageKind || '') as any,
       agentProfileId: String(stage.agentProfileId || ''),
       requiredEvidence: Array.isArray(stage.requiredEvidence)
-        ? stage.requiredEvidence.filter((s): s is string => typeof s === 'string')
+        ? stage.requiredEvidence.filter(
+            (s): s is string => typeof s === 'string',
+          )
         : [],
       position,
     };
@@ -387,17 +399,25 @@ async function handleDecisionAction(
       sendError(res, 404, `decision ${id} was not found`);
       return;
     }
-    const decision = await resolveDecision(id, {
-      action,
-      actor: userActor(req),
-      note: typeof body.note === 'string' ? body.note : undefined,
-      agentHandle:
-        typeof body.agentHandle === 'string' ? body.agentHandle : undefined,
-      source: 'control-plane-ui',
-    }, client);
+    const decision = await resolveDecision(
+      id,
+      {
+        action,
+        actor: userActor(req),
+        note: typeof body.note === 'string' ? body.note : undefined,
+        agentHandle:
+          typeof body.agentHandle === 'string' ? body.agentHandle : undefined,
+        source: 'control-plane-ui',
+      },
+      client,
+    );
     auditLog(req, `control_plane.decision.${action}`, id);
     if (decisionDispatchUnavailable(decision)) {
-      sendError(res, 503, decision.dispatchError || 'GitHub/runtime unavailable');
+      sendError(
+        res,
+        503,
+        decision.dispatchError || 'GitHub/runtime unavailable',
+      );
       return;
     }
     res.status(200).json({ ok: true, decision });
@@ -411,7 +431,10 @@ async function handleDecisionAction(
       err instanceof DecisionStaleError ||
       err instanceof StageConflictError
     ) {
-      if (err instanceof DecisionStaleError || err instanceof StageConflictError) {
+      if (
+        err instanceof DecisionStaleError ||
+        err instanceof StageConflictError
+      ) {
         sendError(res, 409, err);
         return;
       }
@@ -443,13 +466,14 @@ router.post('/decisions/:id/reassign', (req: Request, res: Response) =>
 
 router.get('/overview', async (_req: Request, res: Response) => {
   try {
-    const [pipelines, decisions, snapshots, runtimes, agents] = await Promise.all([
-      Promise.resolve(listPipelines()),
-      Promise.resolve(listDecisions()),
-      Promise.resolve(listProjectItemSnapshots()),
-      probeAllAgentRuntimes(),
-      Promise.resolve(listAgentProfiles()),
-    ]);
+    const [pipelines, decisions, snapshots, runtimes, agents] =
+      await Promise.all([
+        Promise.resolve(listPipelines()),
+        Promise.resolve(listDecisions()),
+        Promise.resolve(listProjectItemSnapshots()),
+        probeAllAgentRuntimes(),
+        Promise.resolve(listAgentProfiles()),
+      ]);
     const jobs = loadCodingJobs();
     const boardCards = buildBoardCards();
     const pendingDecisions = decisions.filter((d) => d.status === 'pending');

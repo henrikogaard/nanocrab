@@ -61,9 +61,7 @@ vi.mock('../../coding-jobs.js', () => {
     githubGraphql: vi.fn().mockImplementation(async () => {
       throw new Error('not mocked');
     }),
-    getCodingJob: vi.fn((id: string) =>
-      jobs.find((j) => j.id === id),
-    ) as any,
+    getCodingJob: vi.fn((id: string) => jobs.find((j) => j.id === id)) as any,
     loadCodingJobs: vi.fn(() => jobs) as any,
     startCodingJob: vi.fn(async (input: any) => {
       const job = {
@@ -128,12 +126,17 @@ vi.mock('../../control-plane/github-projects.js', () => {
     fieldUpdatedAt: '2026-07-12T12:00:01Z',
   });
 
-  return { StageConflictError, DefaultGitHubProjectClient, updateProjectItemStage };
+  return {
+    StageConflictError,
+    DefaultGitHubProjectClient,
+    updateProjectItemStage,
+  };
 });
 
 const { _closeDatabase, _initTestDatabase } = await import('../../db.js');
 const { createAgentProfile } = await import('../../agent-profiles.js');
-const { saveProjectItemSnapshot } = await import('../../control-plane/store.js');
+const { saveProjectItemSnapshot } =
+  await import('../../control-plane/store.js');
 const { default: controlPlaneRouter } = await import('./control-plane.js');
 
 function buildApp() {
@@ -226,7 +229,9 @@ function makeAgentInput(
   };
 }
 
-function makePipelineInput(stages: { agentProfileId: string; stageKind: string }[]) {
+function makePipelineInput(
+  stages: { agentProfileId: string; stageKind: string }[],
+) {
   return {
     pipeline: {
       name: 'NanoCrab Delivery',
@@ -271,9 +276,15 @@ describe('/api/control-plane', () => {
 
   it('GET /api/control-plane/overview returns board cards and stats', async () => {
     await withServer(async (base) => {
-      const atlas = createAgentProfile(makeAgentInput('atlas', 'planning', 'claude'));
-      const forge = createAgentProfile(makeAgentInput('forge', 'implement', 'codex'));
-      const lens = createAgentProfile(makeAgentInput('lens', 'review', 'devin'));
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
+      const forge = createAgentProfile(
+        makeAgentInput('forge', 'implement', 'codex'),
+      );
+      const lens = createAgentProfile(
+        makeAgentInput('lens', 'review', 'devin'),
+      );
 
       const create = await postJson<PipelineResponse>(
         base,
@@ -305,7 +316,9 @@ describe('/api/control-plane', () => {
     await withServer(async (base) => {
       const res = await fetch(`${base}/api/control-plane/runtimes`);
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { runtimes: Array<{ cli: string; health: { status: string } | null }> };
+      const body = (await res.json()) as {
+        runtimes: Array<{ cli: string; health: { status: string } | null }>;
+      };
       expect(body.runtimes.length).toBeGreaterThan(0);
       expect(body.runtimes.map((r) => r.cli)).toContain('claude');
     });
@@ -313,9 +326,15 @@ describe('/api/control-plane', () => {
 
   it('POST /api/control-plane/pipelines creates a pipeline with 201', async () => {
     await withServer(async (base) => {
-      const atlas = createAgentProfile(makeAgentInput('atlas', 'planning', 'claude'));
-      const forge = createAgentProfile(makeAgentInput('forge', 'implement', 'codex'));
-      const lens = createAgentProfile(makeAgentInput('lens', 'review', 'devin'));
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
+      const forge = createAgentProfile(
+        makeAgentInput('forge', 'implement', 'codex'),
+      );
+      const lens = createAgentProfile(
+        makeAgentInput('lens', 'review', 'devin'),
+      );
 
       const { res, body } = await postJson<PipelineResponse>(
         base,
@@ -334,7 +353,9 @@ describe('/api/control-plane', () => {
 
   it('POST /api/control-plane/pipelines returns 400 for invalid stages', async () => {
     await withServer(async (base) => {
-      const atlas = createAgentProfile(makeAgentInput('atlas', 'planning', 'claude'));
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
       const { res, body } = await postJson<{ error: string }>(
         base,
         '/api/control-plane/pipelines',
@@ -351,15 +372,25 @@ describe('/api/control-plane', () => {
 
   it('GET /api/control-plane/pipelines lists created pipelines', async () => {
     await withServer(async (base) => {
-      const atlas = createAgentProfile(makeAgentInput('atlas', 'planning', 'claude'));
-      const forge = createAgentProfile(makeAgentInput('forge', 'implement', 'codex'));
-      const lens = createAgentProfile(makeAgentInput('lens', 'review', 'devin'));
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
+      const forge = createAgentProfile(
+        makeAgentInput('forge', 'implement', 'codex'),
+      );
+      const lens = createAgentProfile(
+        makeAgentInput('lens', 'review', 'devin'),
+      );
 
-      await postJson(base, '/api/control-plane/pipelines', makePipelineInput([
-        { agentProfileId: atlas.id, stageKind: 'planning' },
-        { agentProfileId: forge.id, stageKind: 'implement' },
-        { agentProfileId: lens.id, stageKind: 'review' },
-      ]));
+      await postJson(
+        base,
+        '/api/control-plane/pipelines',
+        makePipelineInput([
+          { agentProfileId: atlas.id, stageKind: 'planning' },
+          { agentProfileId: forge.id, stageKind: 'implement' },
+          { agentProfileId: lens.id, stageKind: 'review' },
+        ]),
+      );
 
       const res = await fetch(`${base}/api/control-plane/pipelines`);
       expect(res.status).toBe(200);
@@ -370,9 +401,15 @@ describe('/api/control-plane', () => {
 
   it('PUT /api/control-plane/pipelines/:id updates and returns 200', async () => {
     await withServer(async (base) => {
-      const atlas = createAgentProfile(makeAgentInput('atlas', 'planning', 'claude'));
-      const forge = createAgentProfile(makeAgentInput('forge', 'implement', 'codex'));
-      const lens = createAgentProfile(makeAgentInput('lens', 'review', 'devin'));
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
+      const forge = createAgentProfile(
+        makeAgentInput('forge', 'implement', 'codex'),
+      );
+      const lens = createAgentProfile(
+        makeAgentInput('lens', 'review', 'devin'),
+      );
 
       const create = await postJson<PipelineResponse>(
         base,
@@ -400,19 +437,28 @@ describe('/api/control-plane', () => {
 
   it('PUT /api/control-plane/pipelines/:id returns 404 for unknown id', async () => {
     await withServer(async (base) => {
-      const { res } = await putJson(base, '/api/control-plane/pipelines/pipeline_unknown', { pipeline: { name: 'Renamed' } });
+      const { res } = await putJson(
+        base,
+        '/api/control-plane/pipelines/pipeline_unknown',
+        { pipeline: { name: 'Renamed' } },
+      );
       expect(res.status).toBe(404);
     });
   });
 
   it('POST /api/control-plane/pipelines/:id/sync returns 200 with candidates', async () => {
-    const { DefaultGitHubProjectClient } = await import(
-      '../../control-plane/github-projects.js'
-    );
+    const { DefaultGitHubProjectClient } =
+      await import('../../control-plane/github-projects.js');
     await withServer(async (base) => {
-      const atlas = createAgentProfile(makeAgentInput('atlas', 'planning', 'claude'));
-      const forge = createAgentProfile(makeAgentInput('forge', 'implement', 'codex'));
-      const lens = createAgentProfile(makeAgentInput('lens', 'review', 'devin'));
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
+      const forge = createAgentProfile(
+        makeAgentInput('forge', 'implement', 'codex'),
+      );
+      const lens = createAgentProfile(
+        makeAgentInput('lens', 'review', 'devin'),
+      );
 
       const create = await postJson<PipelineResponse>(
         base,
@@ -425,22 +471,34 @@ describe('/api/control-plane', () => {
       );
       const id = create.body.pipeline.pipeline.id;
 
-      const res = await fetch(`${base}/api/control-plane/pipelines/${id}/sync`, { method: 'POST' });
+      const res = await fetch(
+        `${base}/api/control-plane/pipelines/${id}/sync`,
+        { method: 'POST' },
+      );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean; candidates: unknown[]; configurationErrors: unknown[] };
+      const body = (await res.json()) as {
+        ok: boolean;
+        candidates: unknown[];
+        configurationErrors: unknown[];
+      };
       expect(body.ok).toBe(true);
       expect(Array.isArray(body.candidates)).toBe(true);
     });
   });
 
   it('POST /api/control-plane/pipelines/:id/sync returns 503 when GitHub is unavailable', async () => {
-    const { DefaultGitHubProjectClient } = await import(
-      '../../control-plane/github-projects.js'
-    );
+    const { DefaultGitHubProjectClient } =
+      await import('../../control-plane/github-projects.js');
     await withServer(async (base) => {
-      const atlas = createAgentProfile(makeAgentInput('atlas', 'planning', 'claude'));
-      const forge = createAgentProfile(makeAgentInput('forge', 'implement', 'codex'));
-      const lens = createAgentProfile(makeAgentInput('lens', 'review', 'devin'));
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
+      const forge = createAgentProfile(
+        makeAgentInput('forge', 'implement', 'codex'),
+      );
+      const lens = createAgentProfile(
+        makeAgentInput('lens', 'review', 'devin'),
+      );
 
       const create = await postJson<PipelineResponse>(
         base,
@@ -458,7 +516,10 @@ describe('/api/control-plane', () => {
         new Error('GITHUB_TOKEN is not configured'),
       );
 
-      const res = await fetch(`${base}/api/control-plane/pipelines/${id}/sync`, { method: 'POST' });
+      const res = await fetch(
+        `${base}/api/control-plane/pipelines/${id}/sync`,
+        { method: 'POST' },
+      );
       expect(res.status).toBe(503);
       const body = (await res.json()) as { error: string };
       expect(body.error).toMatch(/github/i);
@@ -485,14 +546,19 @@ describe('/api/control-plane', () => {
 
   it('POST /api/control-plane/decisions/:id/approve returns 200 for a runtime fallback decision', async () => {
     const { insertDecision } = await import('../../control-plane/store.js');
-    const { updateProjectItemStage } = await import(
-      '../../control-plane/github-projects.js'
-    );
+    const { updateProjectItemStage } =
+      await import('../../control-plane/github-projects.js');
 
     await withServer(async (base) => {
-      const atlas = createAgentProfile(makeAgentInput('atlas', 'planning', 'claude'));
-      const forge = createAgentProfile(makeAgentInput('forge', 'implement', 'codex'));
-      const lens = createAgentProfile(makeAgentInput('lens', 'review', 'devin'));
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
+      const forge = createAgentProfile(
+        makeAgentInput('forge', 'implement', 'codex'),
+      );
+      const lens = createAgentProfile(
+        makeAgentInput('lens', 'review', 'devin'),
+      );
 
       const create = await postJson<PipelineResponse>(
         base,
@@ -504,7 +570,9 @@ describe('/api/control-plane', () => {
         ]),
       );
       const pipelineId = create.body.pipeline.pipeline.id;
-      const implementStage = create.body.pipeline.stages.find((s) => s.stageKind === 'implement')!;
+      const implementStage = create.body.pipeline.stages.find(
+        (s) => s.stageKind === 'implement',
+      )!;
 
       const decision = insertDecision({
         id: `decision_${Date.now()}`,
@@ -545,28 +613,39 @@ describe('/api/control-plane', () => {
         fieldUpdatedAt: '2026-07-12T12:00:01Z',
       });
 
-      const res = await fetch(`${base}/api/control-plane/decisions/${decision.id}/approve`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ note: 'approved' }),
-      });
+      const res = await fetch(
+        `${base}/api/control-plane/decisions/${decision.id}/approve`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ note: 'approved' }),
+        },
+      );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean; decision: { status: string } };
+      const body = (await res.json()) as {
+        ok: boolean;
+        decision: { status: string };
+      };
       expect(body.ok).toBe(true);
       expect(body.decision.status).toBe('approved');
     });
   });
 
   it('POST /api/control-plane/decisions/:id/approve returns 409 for a stale GitHub conflict', async () => {
-    const { StageConflictError, updateProjectItemStage } = await import(
-      '../../control-plane/github-projects.js'
-    );
+    const { StageConflictError, updateProjectItemStage } =
+      await import('../../control-plane/github-projects.js');
     const { insertDecision } = await import('../../control-plane/store.js');
 
     await withServer(async (base) => {
-      const atlas = createAgentProfile(makeAgentInput('atlas', 'planning', 'claude'));
-      const forge = createAgentProfile(makeAgentInput('forge', 'implement', 'codex'));
-      const lens = createAgentProfile(makeAgentInput('lens', 'review', 'devin'));
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
+      const forge = createAgentProfile(
+        makeAgentInput('forge', 'implement', 'codex'),
+      );
+      const lens = createAgentProfile(
+        makeAgentInput('lens', 'review', 'devin'),
+      );
 
       const create = await postJson<PipelineResponse>(
         base,
@@ -578,7 +657,9 @@ describe('/api/control-plane', () => {
         ]),
       );
       const pipelineId = create.body.pipeline.pipeline.id;
-      const implementStage = create.body.pipeline.stages.find((s) => s.stageKind === 'implement')!;
+      const implementStage = create.body.pipeline.stages.find(
+        (s) => s.stageKind === 'implement',
+      )!;
 
       const decision = insertDecision({
         id: `decision_${Date.now()}`,
@@ -591,7 +672,9 @@ describe('/api/control-plane', () => {
         issueNumber: 1,
         stageId: implementStage.id,
         runId: null,
-        proposedStageId: create.body.pipeline.stages.find((s) => s.stageKind === 'review')!.id,
+        proposedStageId: create.body.pipeline.stages.find(
+          (s) => s.stageKind === 'review',
+        )!.id,
         proposedAgentProfileId: lens.id,
         proposedRuntime: null,
         expectedGithubOptionId: 'opt_implement',
@@ -618,11 +701,14 @@ describe('/api/control-plane', () => {
         new StageConflictError('GitHub project item has changed', {} as any),
       );
 
-      const res = await fetch(`${base}/api/control-plane/decisions/${decision.id}/approve`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ note: 'approved' }),
-      });
+      const res = await fetch(
+        `${base}/api/control-plane/decisions/${decision.id}/approve`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ note: 'approved' }),
+        },
+      );
       expect(res.status).toBe(409);
       const body = (await res.json()) as { error: string };
       expect(body.error).toMatch(/stale|conflict/i);
@@ -630,15 +716,20 @@ describe('/api/control-plane', () => {
   });
 
   it('POST /api/control-plane/decisions/:id/approve returns 503 when GitHub is unavailable', async () => {
-    const { updateProjectItemStage } = await import(
-      '../../control-plane/github-projects.js'
-    );
+    const { updateProjectItemStage } =
+      await import('../../control-plane/github-projects.js');
     const { insertDecision } = await import('../../control-plane/store.js');
 
     await withServer(async (base) => {
-      const atlas = createAgentProfile(makeAgentInput('atlas', 'planning', 'claude'));
-      const forge = createAgentProfile(makeAgentInput('forge', 'implement', 'codex'));
-      const lens = createAgentProfile(makeAgentInput('lens', 'review', 'devin'));
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
+      const forge = createAgentProfile(
+        makeAgentInput('forge', 'implement', 'codex'),
+      );
+      const lens = createAgentProfile(
+        makeAgentInput('lens', 'review', 'devin'),
+      );
 
       const create = await postJson<PipelineResponse>(
         base,
@@ -650,7 +741,9 @@ describe('/api/control-plane', () => {
         ]),
       );
       const pipelineId = create.body.pipeline.pipeline.id;
-      const implementStage = create.body.pipeline.stages.find((s) => s.stageKind === 'implement')!;
+      const implementStage = create.body.pipeline.stages.find(
+        (s) => s.stageKind === 'implement',
+      )!;
 
       const decision = insertDecision({
         id: `decision_${Date.now()}`,
@@ -663,7 +756,9 @@ describe('/api/control-plane', () => {
         issueNumber: 1,
         stageId: implementStage.id,
         runId: null,
-        proposedStageId: create.body.pipeline.stages.find((s) => s.stageKind === 'review')!.id,
+        proposedStageId: create.body.pipeline.stages.find(
+          (s) => s.stageKind === 'review',
+        )!.id,
         proposedAgentProfileId: lens.id,
         proposedRuntime: null,
         expectedGithubOptionId: 'opt_implement',
@@ -690,11 +785,14 @@ describe('/api/control-plane', () => {
         new Error('GITHUB_TOKEN is not configured'),
       );
 
-      const res = await fetch(`${base}/api/control-plane/decisions/${decision.id}/approve`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ note: 'approved' }),
-      });
+      const res = await fetch(
+        `${base}/api/control-plane/decisions/${decision.id}/approve`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ note: 'approved' }),
+        },
+      );
       expect(res.status).toBe(503);
       const body = (await res.json()) as { error: string };
       expect(body.error).toMatch(/github/i);
@@ -705,9 +803,15 @@ describe('/api/control-plane', () => {
     const { insertDecision } = await import('../../control-plane/store.js');
 
     await withServer(async (base) => {
-      const atlas = createAgentProfile(makeAgentInput('atlas', 'planning', 'claude'));
-      const forge = createAgentProfile(makeAgentInput('forge', 'implement', 'codex'));
-      const lens = createAgentProfile(makeAgentInput('lens', 'review', 'devin'));
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
+      const forge = createAgentProfile(
+        makeAgentInput('forge', 'implement', 'codex'),
+      );
+      const lens = createAgentProfile(
+        makeAgentInput('lens', 'review', 'devin'),
+      );
 
       const create = await postJson<PipelineResponse>(
         base,
@@ -719,7 +823,9 @@ describe('/api/control-plane', () => {
         ]),
       );
       const pipelineId = create.body.pipeline.pipeline.id;
-      const implementStage = create.body.pipeline.stages.find((s) => s.stageKind === 'implement')!;
+      const implementStage = create.body.pipeline.stages.find(
+        (s) => s.stageKind === 'implement',
+      )!;
 
       const decision = insertDecision({
         id: `decision_${Date.now()}`,
@@ -732,7 +838,9 @@ describe('/api/control-plane', () => {
         issueNumber: 1,
         stageId: implementStage.id,
         runId: null,
-        proposedStageId: create.body.pipeline.stages.find((s) => s.stageKind === 'review')!.id,
+        proposedStageId: create.body.pipeline.stages.find(
+          (s) => s.stageKind === 'review',
+        )!.id,
         proposedAgentProfileId: lens.id,
         proposedRuntime: null,
         expectedGithubOptionId: 'opt_implement',
@@ -755,13 +863,19 @@ describe('/api/control-plane', () => {
         correlationId: null,
       });
 
-      const res = await fetch(`${base}/api/control-plane/decisions/${decision.id}/reject`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ note: 'not yet' }),
-      });
+      const res = await fetch(
+        `${base}/api/control-plane/decisions/${decision.id}/reject`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ note: 'not yet' }),
+        },
+      );
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { ok: boolean; decision: { status: string } };
+      const body = (await res.json()) as {
+        ok: boolean;
+        decision: { status: string };
+      };
       expect(body.ok).toBe(true);
       expect(body.decision.status).toBe('rejected');
     });
@@ -771,9 +885,15 @@ describe('/api/control-plane', () => {
     const { insertDecision } = await import('../../control-plane/store.js');
 
     await withServer(async (base) => {
-      const atlas = createAgentProfile(makeAgentInput('atlas', 'planning', 'claude'));
-      const forge = createAgentProfile(makeAgentInput('forge', 'implement', 'codex'));
-      const lens = createAgentProfile(makeAgentInput('lens', 'review', 'devin'));
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
+      const forge = createAgentProfile(
+        makeAgentInput('forge', 'implement', 'codex'),
+      );
+      const lens = createAgentProfile(
+        makeAgentInput('lens', 'review', 'devin'),
+      );
 
       const create = await postJson<PipelineResponse>(
         base,
@@ -785,7 +905,9 @@ describe('/api/control-plane', () => {
         ]),
       );
       const pipelineId = create.body.pipeline.pipeline.id;
-      const implementStage = create.body.pipeline.stages.find((s) => s.stageKind === 'implement')!;
+      const implementStage = create.body.pipeline.stages.find(
+        (s) => s.stageKind === 'implement',
+      )!;
 
       const decision = insertDecision({
         id: `decision_${Date.now()}`,
@@ -798,7 +920,9 @@ describe('/api/control-plane', () => {
         issueNumber: 1,
         stageId: implementStage.id,
         runId: null,
-        proposedStageId: create.body.pipeline.stages.find((s) => s.stageKind === 'review')!.id,
+        proposedStageId: create.body.pipeline.stages.find(
+          (s) => s.stageKind === 'review',
+        )!.id,
         proposedAgentProfileId: lens.id,
         proposedRuntime: null,
         expectedGithubOptionId: 'opt_implement',
@@ -821,23 +945,34 @@ describe('/api/control-plane', () => {
         correlationId: null,
       });
 
-      const res = await fetch(`${base}/api/control-plane/decisions/${decision.id}/reassign`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ note: 'reassign' }),
-      });
+      const res = await fetch(
+        `${base}/api/control-plane/decisions/${decision.id}/reassign`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ note: 'reassign' }),
+        },
+      );
       expect(res.status).toBe(400);
     });
   });
 
   it('POST /api/control-plane/decisions/:id/{approve,reject,revise,reassign} returns 404 for unknown id', async () => {
     await withServer(async (base) => {
-      for (const action of ['approve', 'reject', 'revise', 'reassign'] as const) {
-        const res = await fetch(`${base}/api/control-plane/decisions/decision_unknown/${action}`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ note: 'x' }),
-        });
+      for (const action of [
+        'approve',
+        'reject',
+        'revise',
+        'reassign',
+      ] as const) {
+        const res = await fetch(
+          `${base}/api/control-plane/decisions/decision_unknown/${action}`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ note: 'x' }),
+          },
+        );
         expect(res.status).toBe(404);
       }
     });

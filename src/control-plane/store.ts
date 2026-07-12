@@ -908,9 +908,7 @@ function mapSnapshot(row: SnapshotRow): ProjectItemSnapshot {
 export function listPipelines(): PipelineWithStages[] {
   const database = getDatabaseConnection();
   const rows = database
-    .prepare(
-      'SELECT * FROM control_plane_pipelines ORDER BY created_at DESC',
-    )
+    .prepare('SELECT * FROM control_plane_pipelines ORDER BY created_at DESC')
     .all() as PipelineRow[];
   return rows.map((row) => {
     const stages = database
@@ -925,9 +923,7 @@ export function listPipelines(): PipelineWithStages[] {
 export function listDecisions(): ControlPlaneDecision[] {
   const database = getDatabaseConnection();
   const rows = database
-    .prepare(
-      'SELECT * FROM control_plane_decisions ORDER BY created_at DESC',
-    )
+    .prepare('SELECT * FROM control_plane_decisions ORDER BY created_at DESC')
     .all() as DecisionRow[];
   return rows.map(mapDecision);
 }
