@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { parseControlPlaneCommand } from '../control-plane/commands.js';
 import {
   createDiscordChannel,
   normalizeDiscordBotMention,
@@ -174,6 +175,56 @@ describe('DiscordChannel', () => {
 
     expect(channelOpts.onMessage).not.toHaveBeenCalled();
     expect(channelOpts.onChatMetadata).toHaveBeenCalledTimes(1);
+  });
+
+  it('normalizes control-plane command mentions', async () => {
+    const { client } = fakeDiscordClient();
+    const groups = {
+      'dc:123': {
+        name: 'Engineering',
+        folder: 'discord_engineering',
+        trigger: '@NanoCrab',
+        added_at: '2026-07-09T00:00:00.000Z',
+      },
+    };
+    const channelOpts = opts(() => groups);
+    const channel = createDiscordChannel(
+      'discord-token',
+      channelOpts,
+      () => client,
+    );
+    await channel.connect();
+
+    await client.handlers.get('messageCreate')?.({
+      id: 'm-cp',
+      channelId: '123',
+      createdAt: new Date('2026-07-09T15:30:00.123Z'),
+      content: '<@BOT123> status #128',
+      author: {
+        id: 'U123',
+        bot: false,
+        username: 'henrik',
+        globalName: 'Henrik',
+      },
+      guild: { name: 'NanoCrab HQ' },
+      channel: { name: 'engineering' },
+      attachments: new Map(),
+    });
+
+    expect(channelOpts.onMessage).toHaveBeenCalledWith(
+      'dc:123',
+      expect.objectContaining({ content: '@NanoCrab status #128' }),
+    );
+
+    const [, msg] = vi.mocked(channelOpts.onMessage).mock.calls[0];
+    const command = parseControlPlaneCommand(msg.content, {
+      trigger: '@NanoCrab',
+    });
+    expect(command).toEqual({
+      action: 'status',
+      repository: undefined,
+      issueNumber: 128,
+    });
   });
 
   it('sends Discord replies in platform-sized chunks and supports typing', async () => {
