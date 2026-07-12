@@ -1,6 +1,10 @@
 import { getDatabaseConnection } from '../db.js';
 import { getAgentProfile } from '../agent-profiles.js';
-import { buildStageDispatchKey, requireOpaqueId } from './pipelines.js';
+import {
+  requireOpaqueId,
+  requireTimestamp,
+  serializeStageDispatchKey,
+} from './types.js';
 import type {
   DeliveryPipeline,
   PipelineStage,
@@ -48,12 +52,6 @@ interface AssignmentRow {
 
 const REPOSITORY_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
-
-function requireTimestamp(value: string, field: string): void {
-  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
-    throw new Error(`${field} must be a valid timestamp`);
-  }
-}
 
 function requirePipeline(id: string): PipelineRow {
   requireOpaqueId(id, 'pipelineId');
@@ -154,7 +152,10 @@ function mapStage(row: StageRow): PipelineStage {
   };
 }
 
-export function insertPipeline(input: PipelineWithStages): PipelineWithStages {
+/** @internal Use pipelines.insertPipeline for the validated public API. */
+export function _insertPipelineUnchecked(
+  input: PipelineWithStages,
+): PipelineWithStages {
   const database = getDatabaseConnection();
   const insert = database.transaction((candidate: PipelineWithStages) => {
     const pipeline = candidate.pipeline;
@@ -323,6 +324,8 @@ export function saveProjectItemSnapshot(
       );
     if (!Number.isInteger(record.issueNumber) || record.issueNumber <= 0)
       throw new Error('issue number must be a positive integer');
+    if (typeof record.title !== 'string' || !record.title.trim())
+      throw new Error('snapshot title is required');
     requireTimestamp(record.githubFieldUpdatedAt, 'githubFieldUpdatedAt');
     requireTimestamp(record.syncedAt, 'syncedAt');
     const option = database
@@ -401,7 +404,7 @@ export function claimStageDispatch(input: StageDispatchClaim): boolean {
       throw new Error(
         'dispatch agent must match the effective stage assignment',
       );
-    const derivedKey = buildStageDispatchKey(record);
+    const derivedKey = serializeStageDispatchKey(record);
     if (record.dispatchKey !== derivedKey)
       throw new Error('dispatch key does not match the persisted claim fields');
     return (

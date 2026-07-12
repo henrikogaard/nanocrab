@@ -70,3 +70,37 @@ export interface StageDispatchClaim {
   githubFieldUpdatedAt: string;
   claimedAt: string;
 }
+
+/** @internal Primitive validation shared without coupling store and domain modules. */
+export function requireOpaqueId(value: string, field: string): void {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`${field} must be a non-empty GitHub id`);
+  }
+}
+
+/** @internal Primitive validation shared without coupling store and domain modules. */
+export function requireTimestamp(value: string | null, field: string): void {
+  if (value === null) return;
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`${field} must be a valid timestamp`);
+  }
+}
+
+/** @internal Canonical dispatch identity serialization. */
+export function serializeStageDispatchKey(input: {
+  pipelineId: string;
+  projectItemId: string;
+  issueNodeId: string;
+  stageId: string;
+  agentProfileId: string;
+  githubFieldUpdatedAt: string;
+}): string {
+  return [
+    input.pipelineId,
+    input.projectItemId,
+    input.issueNodeId,
+    input.stageId,
+    input.agentProfileId,
+    input.githubFieldUpdatedAt,
+  ].join(':');
+}

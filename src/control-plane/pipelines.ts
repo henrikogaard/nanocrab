@@ -1,5 +1,10 @@
 import { getAgentProfile } from '../agent-profiles.js';
-import { insertPipeline } from './store.js';
+import { _insertPipelineUnchecked } from './store.js';
+import {
+  requireOpaqueId,
+  requireTimestamp,
+  serializeStageDispatchKey,
+} from './types.js';
 import type {
   PipelineStage,
   PipelineStageKind,
@@ -11,19 +16,6 @@ const STAGE_ORDER: PipelineStageKind[] = ['planning', 'implement', 'review'];
 const OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 const REPOSITORY_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
-
-export function requireOpaqueId(value: string, field: string): void {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new Error(`${field} must be a non-empty GitHub id`);
-  }
-}
-
-function requireTimestamp(value: string | null, field: string): void {
-  if (value === null) return;
-  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
-    throw new Error(`${field} must be a valid timestamp`);
-  }
-}
 
 function validateProfileForStage(
   agentProfileId: string,
@@ -142,8 +134,14 @@ export function validatePipeline(candidate: PipelineWithStages): void {
 export function createPipeline(
   candidate: PipelineWithStages,
 ): PipelineWithStages {
-  validatePipeline(candidate);
   return insertPipeline(candidate);
+}
+
+export function insertPipeline(
+  candidate: PipelineWithStages,
+): PipelineWithStages {
+  validatePipeline(candidate);
+  return _insertPipelineUnchecked(candidate);
 }
 
 export function resolveStageAssignment(
@@ -200,12 +198,5 @@ export function buildStageDispatchKey(input: {
   requireOpaqueId(input.stageId, 'stageId');
   requireOpaqueId(input.agentProfileId, 'agentProfileId');
   requireTimestamp(input.githubFieldUpdatedAt, 'githubFieldUpdatedAt');
-  return [
-    input.pipelineId,
-    input.projectItemId,
-    input.issueNodeId,
-    input.stageId,
-    input.agentProfileId,
-    input.githubFieldUpdatedAt,
-  ].join(':');
+  return serializeStageDispatchKey(input);
 }

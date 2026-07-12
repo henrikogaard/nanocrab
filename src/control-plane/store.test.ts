@@ -5,11 +5,11 @@ import { _closeDatabase, _initTestDatabase } from '../db.js';
 import {
   claimStageDispatch,
   getPipeline,
-  insertPipeline,
   saveProjectItemSnapshot,
   setStageAssignment,
 } from './store.js';
-import { buildStageDispatchKey } from './pipelines.js';
+import { buildStageDispatchKey, insertPipeline } from './pipelines.js';
+import type { PipelineWithStages } from './types.js';
 
 const now = '2026-07-12T10:00:00.000Z';
 
@@ -141,15 +141,40 @@ describe('control plane store', () => {
         requiredEvidence: [] as [],
         position: 1,
       },
+      {
+        id: 'stage_review',
+        pipelineId: 'pipeline_1',
+        githubFieldOptionId: 'option_review',
+        githubFieldOptionName: 'Review',
+        stageKind: 'review' as const,
+        agentProfileId: agentIds.review,
+        requiredEvidence: [] as [],
+        position: 2,
+      },
     ];
     const input = { pipeline, stages };
     expect(() => insertPipeline(input)).toThrow(/unique/i);
 
-    insertPipeline({ ...input, stages: [stages[0]] });
+    insertPipeline({
+      ...input,
+      stages: [
+        stages[0],
+        { ...stages[1], githubFieldOptionId: 'option_implement' },
+        stages[2],
+      ],
+    });
     expect(() =>
       insertPipeline({
         pipeline: { ...pipeline, id: 'pipeline_2' },
-        stages: [{ ...stages[0], id: 'stage_2', pipelineId: 'pipeline_2' }],
+        stages: stages.map((stage) => ({
+          ...stage,
+          id: `${stage.id}_2`,
+          pipelineId: 'pipeline_2',
+          githubFieldOptionId:
+            stage.stageKind === 'implement'
+              ? 'option_implement_2'
+              : `${stage.githubFieldOptionId}_2`,
+        })),
       }),
     ).toThrow(/unique/i);
   });
@@ -271,6 +296,26 @@ describe('control plane store', () => {
             agentProfileId: agentIds.planning,
             requiredEvidence: [],
             position: 0,
+          },
+          {
+            id: 'stage_x_implement',
+            pipelineId: 'pipeline_x',
+            githubFieldOptionId: 'option_x_implement',
+            githubFieldOptionName: 'Implement',
+            stageKind: 'implement',
+            agentProfileId: agentIds.implement,
+            requiredEvidence: [],
+            position: 1,
+          },
+          {
+            id: 'stage_x_review',
+            pipelineId: 'pipeline_x',
+            githubFieldOptionId: 'option_x_review',
+            githubFieldOptionName: 'Review',
+            stageKind: 'review',
+            agentProfileId: agentIds.review,
+            requiredEvidence: [],
+            position: 2,
           },
         ],
       }),
@@ -420,6 +465,19 @@ describe('control plane store', () => {
       }),
     ).toThrow(/repository scope/i);
     expect(() =>
+      saveProjectItemSnapshot({
+        pipelineId: 'pipeline_1',
+        projectItemId: 'PVTI_3',
+        issueNodeId: 'I_3',
+        repository: 'henrikogaard/nanocrab',
+        issueNumber: 3,
+        title: ' ',
+        githubFieldOptionId: 'option_planning',
+        githubFieldUpdatedAt: now,
+        syncedAt: now,
+      }),
+    ).toThrow(/title/i);
+    expect(() =>
       insertPipeline({
         pipeline: {
           id: 'pipeline_2',
@@ -438,5 +496,55 @@ describe('control plane store', () => {
         stages: [],
       }),
     ).toThrow(/createdAt/i);
+  });
+
+  it('rejects invalid pipelines through the public persistence API', () => {
+    const valid = (): PipelineWithStages => ({
+      pipeline: {
+        id: 'pipeline_public',
+        name: 'Public pipeline',
+        githubOwner: 'henrikogaard',
+        githubProjectNumber: 9,
+        githubProjectId: 'PVT_PUBLIC',
+        workflowFieldId: 'FIELD_PUBLIC',
+        repositoryScopes: ['henrikogaard/nanocrab'],
+        enabled: true,
+        syncCursor: null,
+        lastSyncedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      stages: (['planning', 'implement', 'review'] as const).map(
+        (stageKind, position) => ({
+          id: `public_${stageKind}`,
+          pipelineId: 'pipeline_public',
+          githubFieldOptionId: `public_option_${stageKind}`,
+          githubFieldOptionName: stageKind,
+          stageKind,
+          agentProfileId: agentIds[stageKind],
+          requiredEvidence: [],
+          position,
+        }),
+      ),
+    });
+
+    for (const mutate of [
+      (candidate: ReturnType<typeof valid>) => (candidate.pipeline.name = ' '),
+      (candidate: ReturnType<typeof valid>) =>
+        (candidate.pipeline.githubOwner = '-bad'),
+      (candidate: ReturnType<typeof valid>) =>
+        (candidate.pipeline.githubProjectNumber = 0),
+      (candidate: ReturnType<typeof valid>) =>
+        (candidate.pipeline.repositoryScopes = []),
+      (candidate: ReturnType<typeof valid>) => candidate.stages.reverse(),
+      (candidate: ReturnType<typeof valid>) =>
+        (candidate.stages[0].agentProfileId = agentIds.review),
+      (candidate: ReturnType<typeof valid>) =>
+        (candidate.stages[0].githubFieldOptionName = ' '),
+    ]) {
+      const candidate = valid();
+      mutate(candidate);
+      expect(() => insertPipeline(candidate)).toThrow();
+    }
   });
 });
