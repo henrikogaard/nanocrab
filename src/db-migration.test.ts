@@ -5,6 +5,76 @@ import path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 
 describe('database migrations', () => {
+  it('adds control plane tables idempotently and preserves legacy profiles', async () => {
+    const repoRoot = process.cwd();
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocrab-db-test-'));
+
+    try {
+      process.chdir(tempDir);
+      fs.mkdirSync(path.join(tempDir, 'store'), { recursive: true });
+      const dbPath = path.join(tempDir, 'store', 'messages.db');
+      const legacyDb = new Database(dbPath);
+      legacyDb.exec(`
+        CREATE TABLE agent_profiles (
+          id TEXT PRIMARY KEY,
+          handle TEXT NOT NULL UNIQUE,
+          display_name TEXT NOT NULL,
+          avatar TEXT,
+          description TEXT,
+          personality TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          provider_profile_id TEXT,
+          provider TEXT,
+          model TEXT,
+          tool_policy TEXT NOT NULL,
+          allowed_mcp_servers_json TEXT,
+          skills_json TEXT NOT NULL,
+          memory_scopes_json TEXT NOT NULL,
+          task_kinds_json TEXT NOT NULL,
+          channel_bindings_json TEXT NOT NULL,
+          write_policy_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO agent_profiles (
+          id, handle, display_name, tool_policy, skills_json,
+          memory_scopes_json, task_kinds_json, channel_bindings_json,
+          write_policy_json, created_at, updated_at
+        ) VALUES (
+          'agent_legacy', 'legacy', 'Legacy', 'approval-required', '[]',
+          '[]', '["chat"]', '{}', '{}', '2026-01-01', '2026-01-01'
+        );
+      `);
+      legacyDb.close();
+
+      vi.resetModules();
+      const { initDatabase, getAgentProfileRow, _closeDatabase } =
+        await import('./db.js');
+      initDatabase();
+      _closeDatabase();
+      initDatabase();
+
+      const migrated = new Database(dbPath);
+      const tables = migrated
+        .prepare(
+          `SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'control_plane_%'`,
+        )
+        .all() as Array<{ name: string }>;
+      expect(tables.map((row) => row.name).sort()).toEqual([
+        'control_plane_dispatches',
+        'control_plane_item_snapshots',
+        'control_plane_pipelines',
+        'control_plane_stage_assignments',
+        'control_plane_stages',
+      ]);
+      migrated.close();
+      expect(getAgentProfileRow('agent_legacy')?.handle).toBe('legacy');
+      _closeDatabase();
+    } finally {
+      process.chdir(repoRoot);
+    }
+  });
+
   it('adds agent runtime profile columns to an existing database', async () => {
     const repoRoot = process.cwd();
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocrab-db-test-'));
