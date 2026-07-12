@@ -1,5 +1,6 @@
+import { getDatabaseConnection } from '../db.js';
 import { getAgentProfile } from '../agent-profiles.js';
-import { _insertPipelineUnchecked } from './store.js';
+import { _insertPipelineUnchecked, getPipeline } from './store.js';
 import {
   requireOpaqueId,
   requireTimestamp,
@@ -199,4 +200,81 @@ export function buildStageDispatchKey(input: {
   requireOpaqueId(input.agentProfileId, 'agentProfileId');
   requireTimestamp(input.githubFieldUpdatedAt, 'githubFieldUpdatedAt');
   return serializeStageDispatchKey(input);
+}
+
+export function updatePipeline(
+  id: string,
+  patch: Partial<PipelineWithStages> & { stages?: Partial<PipelineStage>[] },
+): PipelineWithStages {
+  const existing = getPipeline(id);
+  if (!existing) throw new Error(`pipeline ${id} was not found`);
+
+  const pipeline = {
+    ...existing.pipeline,
+    ...patch.pipeline,
+    id: existing.pipeline.id,
+    createdAt: existing.pipeline.createdAt,
+    syncCursor: existing.pipeline.syncCursor,
+    lastSyncedAt: existing.pipeline.lastSyncedAt,
+    updatedAt: new Date().toISOString(),
+  };
+  const stages = (patch.stages || existing.stages).map((stage) => {
+    const existingStage = stage.id
+      ? existing.stages.find((s) => s.id === stage.id)
+      : existing.stages.find((s) => s.position === stage.position);
+    if (!existingStage) {
+      throw new Error(
+        `stage ${stage.id || stage.position} was not found for update`,
+      );
+    }
+    return {
+      ...existingStage,
+      ...stage,
+      pipelineId: existing.pipeline.id,
+      id: existingStage.id,
+    } as PipelineStage;
+  });
+  const candidate: PipelineWithStages = { pipeline, stages };
+  validatePipeline(candidate);
+
+  const database = getDatabaseConnection();
+  const update = database.transaction((input: PipelineWithStages) => {
+    database
+      .prepare(
+        `UPDATE control_plane_pipelines
+         SET name = ?, github_owner = ?, github_project_number = ?, github_project_id = ?,
+             workflow_field_id = ?, repository_scopes_json = ?, enabled = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        input.pipeline.name,
+        input.pipeline.githubOwner,
+        input.pipeline.githubProjectNumber,
+        input.pipeline.githubProjectId,
+        input.pipeline.workflowFieldId,
+        JSON.stringify(input.pipeline.repositoryScopes),
+        input.pipeline.enabled ? 1 : 0,
+        input.pipeline.updatedAt,
+        input.pipeline.id,
+      );
+    const updateStage = database.prepare(
+      `UPDATE control_plane_stages
+       SET github_field_option_id = ?, github_field_option_name = ?, stage_kind = ?,
+           agent_profile_id = ?, required_evidence_json = ?, position = ?
+       WHERE id = ?`,
+    );
+    for (const stage of input.stages) {
+      updateStage.run(
+        stage.githubFieldOptionId,
+        stage.githubFieldOptionName,
+        stage.stageKind,
+        stage.agentProfileId,
+        JSON.stringify(stage.requiredEvidence),
+        stage.position,
+        stage.id,
+      );
+    }
+  });
+  update(candidate);
+  return getPipeline(id)!;
 }

@@ -6313,6 +6313,88 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
   if (pathname === '/push/vapid-key')
     return { publicKey: 'mock-vapid-public-key' };
 
+  if (pathname === '/control-plane/overview') {
+    return {
+      ok: true,
+      boardCards: [
+        {
+          issue: { number: 42, repo: 'henrikogaard/nanocrab', title: 'Add dashboard mock mode', nodeId: 'issue_42' },
+          stage: { id: 'stage_1', kind: 'implement', name: 'Implement', requiredEvidence: ['tests', 'pushed_branch', 'open_pr'] },
+          agent: { id: 'agent_1', handle: 'forge', displayName: 'Forge', runtime: 'codex' },
+          actualRuntime: 'codex',
+          run: { id: 'run_1', status: 'queued', branch: 'mock-branch', prUrl: null, checks: 'unknown', commitSha: null },
+          decision: { id: 'decision_1', kind: 'stage_transition', status: 'pending', summary: 'Move to review', dispatchStatus: null },
+        },
+      ],
+      stats: { pipelines: 1, agents: 3, pendingDecisions: 1, runs: 1, runtimesHealthy: 2 },
+      loadIssues: [],
+      pipelines: [
+        {
+          id: 'pipeline_1',
+          name: 'NanoCrab Delivery',
+          enabled: true,
+          repositoryScopes: ['henrikogaard/nanocrab'],
+          stages: [
+            { id: 'stage_0', kind: 'planning', name: 'Planning', agentProfileId: 'agent_0' },
+            { id: 'stage_1', kind: 'implement', name: 'Implement', agentProfileId: 'agent_1' },
+            { id: 'stage_2', kind: 'review', name: 'Review', agentProfileId: 'agent_2' },
+          ],
+        },
+      ],
+      agents: [
+        { id: 'agent_0', handle: 'atlas', displayName: 'Atlas', enabled: true, primaryRuntime: 'claude', stageRoles: ['planning'] },
+        { id: 'agent_1', handle: 'forge', displayName: 'Forge', enabled: true, primaryRuntime: 'codex', stageRoles: ['implement'] },
+        { id: 'agent_2', handle: 'lens', displayName: 'Lens', enabled: true, primaryRuntime: 'devin', stageRoles: ['review'] },
+      ],
+      decisions: [
+        { id: 'decision_1', kind: 'stage_transition', status: 'pending', pipelineId: 'pipeline_1', issueNodeId: 'issue_42', repository: 'henrikogaard/nanocrab', issueNumber: 42, stageId: 'stage_1', summary: 'Move to review' },
+      ],
+      snapshots: [
+        { pipelineId: 'pipeline_1', projectItemId: 'item_1', issueNodeId: 'issue_42', repository: 'henrikogaard/nanocrab', issueNumber: 42, title: 'Add dashboard mock mode', githubFieldOptionId: 'opt_implement', githubFieldUpdatedAt: '2026-07-12T12:00:00Z', syncedAt: '2026-07-12T12:00:00Z' },
+      ],
+    };
+  }
+  if (pathname === '/control-plane/runtimes') {
+    return {
+      runtimes: [
+        { cli: 'claude', health: { status: 'healthy' } },
+        { cli: 'codex', health: { status: 'healthy' } },
+        { cli: 'opencode', health: { status: 'missing' } },
+        { cli: 'devin', health: null },
+        { cli: 'pi', health: null },
+        { cli: 'mistral', health: null },
+      ],
+    };
+  }
+  if (pathname === '/control-plane/pipelines') {
+    return {
+      pipelines: [
+        {
+          pipeline: { id: 'pipeline_1', name: 'NanoCrab Delivery', githubOwner: 'henrikogaard', githubProjectNumber: 1, githubProjectId: 'proj_1', workflowFieldId: 'field_1', repositoryScopes: ['henrikogaard/nanocrab'], enabled: true, syncCursor: null, lastSyncedAt: null, createdAt: '2026-07-12T12:00:00Z', updatedAt: '2026-07-12T12:00:00Z' },
+          stages: [
+            { id: 'stage_0', pipelineId: 'pipeline_1', githubFieldOptionId: 'opt_planning', githubFieldOptionName: 'Planning', stageKind: 'planning', agentProfileId: 'agent_0', requiredEvidence: ['plan'], position: 0 },
+            { id: 'stage_1', pipelineId: 'pipeline_1', githubFieldOptionId: 'opt_implement', githubFieldOptionName: 'Implement', stageKind: 'implement', agentProfileId: 'agent_1', requiredEvidence: ['tests', 'pushed_branch', 'open_pr'], position: 1 },
+            { id: 'stage_2', pipelineId: 'pipeline_1', githubFieldOptionId: 'opt_review', githubFieldOptionName: 'Review', stageKind: 'review', agentProfileId: 'agent_2', requiredEvidence: ['review'], position: 2 },
+          ],
+        },
+      ],
+    };
+  }
+  if (pathname === '/control-plane/runs') {
+    return {
+      runs: [
+        { id: 'run_1', repo: 'henrikogaard/nanocrab', issueNumber: 42, status: 'queued', branch: 'mock-branch', prUrl: null, commitSha: null, ciStatus: 'unknown', actualRuntime: 'codex', pipelineId: 'pipeline_1', decisionId: 'decision_1' },
+      ],
+    };
+  }
+  if (pathname === '/control-plane/decisions') {
+    return {
+      decisions: [
+        { id: 'decision_1', kind: 'stage_transition', status: 'pending', pipelineId: 'pipeline_1', projectItemId: 'item_1', issueNodeId: 'issue_42', repository: 'henrikogaard/nanocrab', issueNumber: 42, stageId: 'stage_1', runId: null, proposedStageId: 'stage_2', proposedAgentProfileId: 'agent_2', proposedRuntime: null, expectedGithubOptionId: 'opt_implement', expectedGithubFieldUpdatedAt: '2026-07-12T12:00:00Z', actualGithubOptionId: null, actualGithubFieldUpdatedAt: null, summary: 'Move to review', evidence: {}, decidedBy: null, decidedFrom: null, decisionNote: null, createdAt: '2026-07-12T12:00:00Z', decidedAt: null, actualRuntime: null, dispatchStatus: null, dispatchError: null, dispatchJobId: null, dispatchDecisionId: null, approvalId: null, correlationId: null },
+      ],
+    };
+  }
+
   return undefined;
 }
 
