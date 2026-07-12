@@ -83,6 +83,7 @@ import developerRoutes, {
 import assistantProfileRoutes from './routes/assistant-profile.js';
 import threadsRoutes from './routes/threads.js';
 import projectsRoutes from './routes/projects.js';
+import controlPlaneRoutes from './routes/control-plane.js';
 
 // Plugin system
 import {
@@ -255,6 +256,12 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/threads', requireAuth, threadsRoutes);
   app.use('/api/projects', requireAuth, projectsRoutes);
   app.use('/api/assistant-profile', requireAuth, assistantProfileRoutes);
+  app.use(
+    '/api/control-plane',
+    requireAuth,
+    requireRole('admin'),
+    controlPlaneRoutes,
+  );
 
   // Admin role required
   app.use('/api/mcp', requireAuth, requireRole('admin'), mcpRoutes);

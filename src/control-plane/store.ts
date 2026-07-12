@@ -90,6 +90,18 @@ interface DecisionRow {
   correlation_id: string | null;
 }
 
+interface SnapshotRow {
+  pipeline_id: string;
+  project_item_id: string;
+  issue_node_id: string;
+  repository: string;
+  issue_number: number;
+  title: string;
+  github_field_option_id: string;
+  github_field_updated_at: string;
+  synced_at: string;
+}
+
 const REPOSITORY_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9._-]+$/;
 
@@ -877,4 +889,62 @@ export function getStageAssignmentsForIssue(
     )
     .all(pipelineId, issueNodeId) as AssignmentRow[];
   return rows.map(mapAssignment);
+}
+
+function mapSnapshot(row: SnapshotRow): ProjectItemSnapshot {
+  return {
+    pipelineId: row.pipeline_id,
+    projectItemId: row.project_item_id,
+    issueNodeId: row.issue_node_id,
+    repository: row.repository,
+    issueNumber: row.issue_number,
+    title: row.title,
+    githubFieldOptionId: row.github_field_option_id,
+    githubFieldUpdatedAt: row.github_field_updated_at,
+    syncedAt: row.synced_at,
+  };
+}
+
+export function listPipelines(): PipelineWithStages[] {
+  const database = getDatabaseConnection();
+  const rows = database
+    .prepare('SELECT * FROM control_plane_pipelines ORDER BY created_at DESC')
+    .all() as PipelineRow[];
+  return rows.map((row) => {
+    const stages = database
+      .prepare(
+        'SELECT * FROM control_plane_stages WHERE pipeline_id = ? ORDER BY position ASC',
+      )
+      .all(row.id) as StageRow[];
+    return { pipeline: mapPipeline(row), stages: stages.map(mapStage) };
+  });
+}
+
+export function listDecisions(): ControlPlaneDecision[] {
+  const database = getDatabaseConnection();
+  const rows = database
+    .prepare('SELECT * FROM control_plane_decisions ORDER BY created_at DESC')
+    .all() as DecisionRow[];
+  return rows.map(mapDecision);
+}
+
+export function listProjectItemSnapshots(
+  pipelineId?: string,
+): ProjectItemSnapshot[] {
+  const database = getDatabaseConnection();
+  if (pipelineId) {
+    requireOpaqueId(pipelineId, 'pipelineId');
+    const rows = database
+      .prepare(
+        'SELECT * FROM control_plane_item_snapshots WHERE pipeline_id = ? ORDER BY synced_at DESC',
+      )
+      .all(pipelineId) as SnapshotRow[];
+    return rows.map(mapSnapshot);
+  }
+  const rows = database
+    .prepare(
+      'SELECT * FROM control_plane_item_snapshots ORDER BY synced_at DESC',
+    )
+    .all() as SnapshotRow[];
+  return rows.map(mapSnapshot);
 }

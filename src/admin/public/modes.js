@@ -61,6 +61,7 @@
     'groups',
     'sessions',
     'marketplace',
+    'control-plane',
     'backup',
     'usage',
     'help',
