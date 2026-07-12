@@ -723,4 +723,25 @@ describe('/api/agent-profiles', () => {
       expect(body.profile.enabled).toBe(false);
     });
   });
+
+  it('GET /api/agent-profiles/runtime-health returns health for all allowlisted CLIs', async () => {
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/api/agent-profiles/runtime-health`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Array<{
+        cli: string;
+        executable: string;
+        status: string;
+        checkedAt: string;
+      }>;
+
+      expect(body.length).toBeGreaterThanOrEqual(6);
+      const clis = body.map((h) => h.cli);
+      expect(clis).toContain('codex');
+      expect(clis).toContain('claude');
+
+      const mistral = body.find((h) => h.cli === 'mistral');
+      expect(mistral?.executable).toBe('vibe');
+    });
+  });
 });

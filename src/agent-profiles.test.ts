@@ -17,6 +17,7 @@ import {
   updateAgentProfile,
   validateAgentProfileInput,
   validateSubscriptionShape,
+  validateRuntimeSelection,
 } from './agent-profiles.js';
 import { _closeDatabase, _initTestDatabase } from './db.js';
 
@@ -340,6 +341,34 @@ describe('agent profile persistence', () => {
         taskKind: 'coding_job',
       }),
     ).toThrow(/agent profile not found/i);
+  });
+
+  it('rejects arbitrary CLI executable paths in runtime selection', () => {
+    expect(() =>
+      validateRuntimeSelection({
+        cli: '/tmp/run-anything' as never,
+        provider: 'codex',
+        model: 'gpt-5.4',
+      }),
+    ).toThrow(/CLI is not supported/i);
+  });
+
+  it('preserves an ordered fallback chain', () => {
+    const profile = buildAgentProfile({
+      handle: 'forge',
+      displayName: 'Forge',
+      instructions: 'Implement only an approved plan.',
+      primaryRuntime: { cli: 'codex', provider: 'codex', model: 'gpt-5.4' },
+      fallbackRuntimes: [
+        { cli: 'claude', provider: 'claude', model: 'claude-sonnet-4-6' },
+      ],
+      stageRoles: ['implement'],
+      repositoryScopes: ['henrikogaard/nanocrab'],
+      maxConcurrency: 1,
+    });
+    expect(profile.fallbackRuntimes.map((runtime) => runtime.cli)).toEqual([
+      'claude',
+    ]);
   });
 
   it('records subscription events idempotently by dedupe key', () => {

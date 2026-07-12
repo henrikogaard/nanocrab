@@ -153,6 +153,12 @@ function createSchema(database: Database.Database): void {
       task_kinds_json TEXT NOT NULL,
       channel_bindings_json TEXT NOT NULL,
       write_policy_json TEXT NOT NULL,
+      instructions TEXT,
+      primary_runtime_json TEXT,
+      fallback_runtimes_json TEXT NOT NULL,
+      stage_roles_json TEXT NOT NULL,
+      repository_scopes_json TEXT NOT NULL,
+      max_concurrency INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -1869,6 +1875,12 @@ interface AgentProfileRow {
   task_kinds_json: string;
   channel_bindings_json: string;
   write_policy_json: string;
+  instructions: string | null;
+  primary_runtime_json: string | null;
+  fallback_runtimes_json: string;
+  stage_roles_json: string;
+  repository_scopes_json: string;
+  max_concurrency: number;
   created_at: string;
   updated_at: string;
 }
@@ -2015,6 +2027,57 @@ function parseWritePolicyField(
   };
 }
 
+function parsePrimaryRuntimeField(
+  value: string | null,
+): AgentProfile['primaryRuntime'] {
+  if (!value) return null;
+  const parsed = parseJsonObjectField(value);
+  if (
+    typeof parsed.cli === 'string' &&
+    typeof parsed.provider === 'string' &&
+    typeof parsed.model === 'string'
+  ) {
+    return {
+      cli: parsed.cli as import('./types.js').AgentRuntimeSelection['cli'],
+      provider: parsed.provider as import('./types.js').AgentRuntimeSelection['provider'],
+      model: parsed.model,
+    };
+  }
+  return null;
+}
+
+function parseFallbackRuntimesField(
+  value: string | null,
+): AgentProfile['fallbackRuntimes'] {
+  const parsed = parseJsonValue(value);
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter(
+      (item): item is Record<string, string> =>
+        isPlainObject(item) &&
+        typeof item.cli === 'string' &&
+        typeof item.provider === 'string' &&
+        typeof item.model === 'string',
+    )
+    .map((item) => ({
+      cli: item.cli as import('./types.js').AgentRuntimeSelection['cli'],
+      provider: item.provider as import('./types.js').AgentRuntimeSelection['provider'],
+      model: item.model,
+    }));
+}
+
+function parseStageRolesField(
+  value: string | null,
+): AgentProfile['stageRoles'] {
+  const parsed = parseJsonValue(value);
+  if (!Array.isArray(parsed)) return [];
+  const validRoles = new Set(['planning', 'implement', 'review']);
+  return parsed.filter(
+    (item): item is AgentProfile['stageRoles'][number] =>
+      typeof item === 'string' && validRoles.has(item),
+  );
+}
+
 function agentProfileToRowValues(profile: AgentProfile): unknown[] {
   return [
     profile.id,
@@ -2036,6 +2099,12 @@ function agentProfileToRowValues(profile: AgentProfile): unknown[] {
     JSON.stringify(profile.taskKinds),
     JSON.stringify(profile.channelBindings),
     JSON.stringify(profile.writePolicy),
+    profile.instructions,
+    profile.primaryRuntime ? JSON.stringify(profile.primaryRuntime) : null,
+    JSON.stringify(profile.fallbackRuntimes),
+    JSON.stringify(profile.stageRoles),
+    JSON.stringify(profile.repositoryScopes),
+    profile.maxConcurrency,
     profile.createdAt,
     profile.updatedAt,
   ];
@@ -2062,6 +2131,12 @@ function mapAgentProfileRow(row: AgentProfileRow): AgentProfile {
     taskKinds: parseTaskKindsField(row.task_kinds_json),
     channelBindings: parseChannelBindingsField(row.channel_bindings_json),
     writePolicy: parseWritePolicyField(row.write_policy_json),
+    instructions: row.instructions,
+    primaryRuntime: parsePrimaryRuntimeField(row.primary_runtime_json),
+    fallbackRuntimes: parseFallbackRuntimesField(row.fallback_runtimes_json),
+    stageRoles: parseStageRolesField(row.stage_roles_json),
+    repositoryScopes: parseStringArrayField(row.repository_scopes_json),
+    maxConcurrency: row.max_concurrency || 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -2143,8 +2218,10 @@ export function insertAgentProfile(profile: AgentProfile): AgentProfile {
         provider_profile_id, provider, model, tool_policy,
         allowed_mcp_servers_json, skills_json, memory_scopes_json,
         task_kinds_json, channel_bindings_json, write_policy_json,
+        instructions, primary_runtime_json, fallback_runtimes_json,
+        stage_roles_json, repository_scopes_json, max_concurrency,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     ).run(...agentProfileToRowValues(profile));
   } catch (err) {
@@ -2174,6 +2251,12 @@ export function updateAgentProfile(profile: AgentProfile): AgentProfile {
           task_kinds_json = ?,
           channel_bindings_json = ?,
           write_policy_json = ?,
+          instructions = ?,
+          primary_runtime_json = ?,
+          fallback_runtimes_json = ?,
+          stage_roles_json = ?,
+          repository_scopes_json = ?,
+          max_concurrency = ?,
           created_at = ?,
           updated_at = ?
       WHERE id = ?

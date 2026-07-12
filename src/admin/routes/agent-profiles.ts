@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 
 import * as agentProfiles from '../../agent-profiles.js';
+import * as agentRuntimeRegistry from '../../agent-runtime-registry.js';
 import type {
   AgentProfileInput,
   AgentProfileUpdateInput,
@@ -44,6 +45,12 @@ const EDITABLE_PROFILE_FIELDS = [
   'taskKinds',
   'channelBindings',
   'writePolicy',
+  'instructions',
+  'primaryRuntime',
+  'fallbackRuntimes',
+  'stageRoles',
+  'repositoryScopes',
+  'maxConcurrency',
 ] as const satisfies readonly (keyof AgentProfileUpdateInput)[];
 
 const EDITABLE_SUBSCRIPTION_FIELDS = [
@@ -159,6 +166,15 @@ router.get('/', (_req: Request, res: Response) => {
   }
 
   res.json(domain.listAgentProfiles().map(buildRosterSummary));
+});
+
+router.get('/runtime-health', async (_req: Request, res: Response) => {
+  try {
+    const health = await agentRuntimeRegistry.probeAllAgentRuntimes();
+    res.json(health);
+  } catch (err) {
+    sendError(res, 500, err);
+  }
 });
 
 router.post('/', (req: Request, res: Response) => {
