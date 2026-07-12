@@ -966,22 +966,23 @@ function buildCodingContainerEnv(
   }
 
   if (job.provider === 'pi') {
-    const piKey = envValue(envFileValues, 'PI_API_KEY');
-    if (piKey) env.PI_API_KEY = piKey;
+    const piProxyUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/pi`;
+    env.PI_BASE_URL = piProxyUrl;
+    env.PI_API_KEY = 'placeholder';
     const piProvider = envValue(envFileValues, 'PI_PROVIDER');
     if (piProvider) env.PI_PROVIDER = piProvider;
   }
 
   if (job.provider === 'devin') {
-    const devinKey = envValue(envFileValues, 'DEVIN_API_KEY');
-    if (devinKey) env.DEVIN_API_KEY = devinKey;
+    const devinProxyUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/devin`;
+    env.DEVIN_BASE_URL = devinProxyUrl;
+    env.DEVIN_API_KEY = 'placeholder';
   }
 
   if (job.provider === 'mistral') {
-    const mistralKey = envValue(envFileValues, 'MISTRAL_API_KEY');
-    if (mistralKey) env.MISTRAL_API_KEY = mistralKey;
-    const mistralUrl = envValue(envFileValues, 'MISTRAL_BASE_URL');
-    if (mistralUrl) env.MISTRAL_BASE_URL = mistralUrl;
+    const mistralProxyUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/mistral`;
+    env.MISTRAL_BASE_URL = mistralProxyUrl;
+    env.MISTRAL_API_KEY = 'placeholder';
   }
 
   return env;
@@ -1070,13 +1071,14 @@ function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
       '    claude -p --model "$JOB_MODEL" --output-format text --dangerously-skip-permissions --max-budget-usd "$CODING_JOB_MAX_BUDGET_USD" "$PROMPT"',
       '    ;;',
       '  pi)',
-      '    pi -p "$PROMPT" --mode text --model "$JOB_MODEL" --no-session',
+      '    PI_JOB_PROVIDER="${PI_PROVIDER:-google}"',
+      '    pi -p "$PROMPT" --mode text --model "$JOB_MODEL" --provider "$PI_JOB_PROVIDER" --no-session',
       '    ;;',
       '  devin)',
-      '    devin -p -- "$PROMPT"',
+      '    devin -p --model "$JOB_MODEL" --mode implement -- "$PROMPT"',
       '    ;;',
       '  mistral)',
-      '    vibe -p "$PROMPT" --output text --auto-approve --workdir "$PWD"',
+      '    vibe -p "$PROMPT" --model "$JOB_MODEL" --output text --auto-approve --workdir "$PWD" --max-budget-usd "$CODING_JOB_MAX_BUDGET_USD"',
       '    ;;',
       '  *)',
       '    echo "Unsupported coding provider: $JOB_PROVIDER" >&2',

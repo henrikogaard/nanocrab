@@ -33,7 +33,8 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 # Install agent runtimes globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code @openai/codex opencode-ai playwright
+RUN npm install -g agent-browser @anthropic-ai/claude-code @openai/codex opencode-ai playwright \
+    && npm install -g @pi-dev/pi @devin-ai/devin @mistralai/vibe
 
 # Create app directory
 WORKDIR /app

@@ -125,10 +125,12 @@
     return [{ group: 'Results', pages: flat }];
   }
 
-  function render(term) {
+  function render(term, preserveSelection) {
     if (!overlay || !listEl) return;
     results = searchPages(term);
-    selectedIndex = results.length > 0 && results[0].pages.length > 0 ? 0 : -1;
+    if (!preserveSelection) {
+      selectedIndex = results.length > 0 && results[0].pages.length > 0 ? 0 : -1;
+    }
 
     var html = '';
     var totalResults = 0;
@@ -200,7 +202,7 @@
     }
     if (flat.length === 0) return;
     selectedIndex = (selectedIndex + delta + flat.length) % flat.length;
-    render(input ? input.value : '');
+    render(input ? input.value : '', true);
   }
 
   function close() {

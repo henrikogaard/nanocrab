@@ -43,6 +43,12 @@ export function startCredentialProxy(
     'OPENAI_COMPATIBLE_API_KEY',
     'OPENAI_COMPATIBLE_BASE_URL',
     'DEFAULT_OPENAI_COMPATIBLE_BASE_URL',
+    'DEVIN_API_KEY',
+    'DEVIN_BASE_URL',
+    'MISTRAL_API_KEY',
+    'MISTRAL_BASE_URL',
+    'PI_PROVIDER',
+    'PI_API_KEY',
   ]);
   const secret = (key: string): string | undefined =>
     process.env[key] || secrets[key];
@@ -86,6 +92,21 @@ export function startCredentialProxy(
       apiKey: secret('OPENAI_COMPATIBLE_API_KEY'),
       requiresApiKey: false,
     },
+    devin: {
+      baseUrl: secret('DEVIN_BASE_URL') || 'https://api.devin.ai/v1',
+      apiKey: secret('DEVIN_API_KEY'),
+      requiresApiKey: true,
+    },
+    mistral: {
+      baseUrl: secret('MISTRAL_BASE_URL') || 'https://api.mistral.ai/v1',
+      apiKey: secret('MISTRAL_API_KEY'),
+      requiresApiKey: true,
+    },
+    pi: {
+      baseUrl: '',
+      apiKey: undefined,
+      requiresApiKey: false,
+    },
   };
 
   return new Promise((resolve, reject) => {
@@ -109,19 +130,38 @@ export function startCredentialProxy(
             res.end('Unknown provider route');
             return;
           }
-          if (!route.baseUrl) {
+
+          // Pi is a meta-CLI: resolve actual provider from PI_PROVIDER env
+          if (routeMatch[1] === 'pi') {
+            const piProvider = secret('PI_PROVIDER') || 'google';
+            const piRoute = providerRoutes[piProvider];
+            if (!piRoute || !piRoute.baseUrl) {
+              res.writeHead(400);
+              res.end(`Pi provider "${piProvider}" is not configured`);
+              return;
+            }
+            if (piRoute.requiresApiKey && !piRoute.apiKey) {
+              res.writeHead(401);
+              res.end(`Pi provider "${piProvider}" API key is not configured`);
+              return;
+            }
+            targetUrl = new URL(piRoute.baseUrl.replace(/\/+$/, ''));
+            targetPath = routeMatch[2] || '/';
+            providerApiKey = piRoute.apiKey;
+          } else if (!route.baseUrl) {
             res.writeHead(400);
             res.end(`Provider ${routeMatch[1]} base URL is not configured`);
             return;
+          } else {
+            if (route.requiresApiKey && !route.apiKey) {
+              res.writeHead(401);
+              res.end(`Provider ${routeMatch[1]} API key is not configured`);
+              return;
+            }
+            targetUrl = new URL(route.baseUrl.replace(/\/+$/, ''));
+            targetPath = routeMatch[2] || '/';
+            providerApiKey = route.apiKey;
           }
-          if (route.requiresApiKey && !route.apiKey) {
-            res.writeHead(401);
-            res.end(`Provider ${routeMatch[1]} API key is not configured`);
-            return;
-          }
-          targetUrl = new URL(route.baseUrl.replace(/\/+$/, ''));
-          targetPath = routeMatch[2] || '/';
-          providerApiKey = route.apiKey;
         }
 
         const isHttps = targetUrl.protocol === 'https:';
