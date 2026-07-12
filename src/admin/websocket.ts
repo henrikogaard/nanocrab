@@ -19,7 +19,13 @@ import {
   getSessionUser,
   AdminUser as _AdminUser,
 } from './auth.js';
-import { SESSIONS_DIR, TERMINAL_IDLE_TIMEOUT_MS } from '../config.js';
+import {
+  SESSIONS_DIR,
+  TERMINAL_IDLE_TIMEOUT_MS,
+  MAX_SESSION_LOG_BYTES,
+  MAX_SESSION_RETENTION_DAYS,
+  MAX_SESSIONS_COUNT,
+} from '../config.js';
 
 interface WsMessage {
   type: string;
@@ -154,6 +160,20 @@ export function appendToSessionLog(sessionId: string, data: string): void {
   if (!logPath) return;
   try {
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    // Check file size before appending
+    if (fs.existsSync(logPath)) {
+      const stat = fs.statSync(logPath);
+      if (stat.size >= MAX_SESSION_LOG_BYTES) {
+        logger.warn({ sessionId, size: stat.size }, 'Session log at max size, truncating');
+        return;
+      }
+      // If this write would exceed the limit, only write what fits
+      const remaining = MAX_SESSION_LOG_BYTES - stat.size;
+      if (data.length > remaining) {
+        fs.appendFileSync(logPath, data.slice(0, remaining), 'utf-8');
+        return;
+      }
+    }
     fs.appendFileSync(logPath, data, 'utf-8');
   } catch (err) {
     logger.warn({ err, sessionId }, 'Failed to append to session log');
@@ -179,11 +199,57 @@ export function loadHistoricalSessions(): number {
     let count = 0;
     for (const file of files) {
       const sessionId = file.replace('.log', '');
-      const content = fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf-8');
-      historicalSessions.set(sessionId, content);
-      count++;
+      try {
+        const content = fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf-8');
+        historicalSessions.set(sessionId, content);
+        count++;
+      } catch {
+        // skip files that can't be read
+      }
     }
     return count;
+  } catch {
+    return 0;
+  }
+}
+
+export function pruneOldSessions(): number {
+  try {
+    if (!fs.existsSync(SESSIONS_DIR)) return 0;
+    const indexPath = path.join(SESSIONS_DIR, 'index.json');
+    if (!fs.existsSync(indexPath)) return 0;
+    let index: SessionMetadata[] = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - MAX_SESSION_RETENTION_DAYS);
+    const before = index.length;
+    index = index.filter((entry) => {
+      if (!entry.endedAt) return true; // keep active sessions
+      return new Date(entry.endedAt) >= cutoff;
+    });
+    // Also cap total count
+    if (index.length > MAX_SESSIONS_COUNT) {
+      index.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      index = index.slice(0, MAX_SESSIONS_COUNT);
+    }
+    saveSessionIndex(index);
+    const pruned = before - index.length;
+    if (pruned > 0) {
+      logger.info({ pruned }, 'Pruned old terminal sessions');
+    }
+    // Remove orphan .log files not in index
+    const indexIds = new Set(index.map((e) => e.id));
+    const logFiles = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.log'));
+    for (const file of logFiles) {
+      const sessionId = file.replace('.log', '');
+      if (!indexIds.has(sessionId)) {
+        try {
+          fs.unlinkSync(path.join(SESSIONS_DIR, file));
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return pruned;
   } catch {
     return 0;
   }
@@ -274,7 +340,11 @@ export function initWebSocket(server: HttpServer): void {
         }
         if (msg.type === 'terminal_close' && msg.sessionId) {
           const term = terminals.get(msg.sessionId);
-          if (term) term.process.kill();
+          if (term) {
+            finalizeSessionFile(msg.sessionId);
+            clearTimeout(term.idleTimer);
+            term.process.kill();
+          }
         }
       } catch {
         // ignore malformed messages
@@ -292,6 +362,7 @@ export function initWebSocket(server: HttpServer): void {
     broadcast({ type: 'status', data: getStatusData() });
   }, 3000);
 
+  pruneOldSessions();
   loadHistoricalSessions();
   logger.debug('WebSocket server initialized');
 }

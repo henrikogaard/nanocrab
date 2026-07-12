@@ -12590,7 +12590,21 @@ async function renderTerminal(el) {
         `).join('')}
       </div>
     </section>
-    <div class="terminal-shell-card">
+    <section class="terminal-session-browser" id="terminal-session-browser">
+      <div class="terminal-session-browser-head" onclick="toggleSessionBrowser()">
+        <span class="report-kicker">Session history</span>
+        <span class="terminal-session-browser-toggle">&#9660;</span>
+      </div>
+      <div class="terminal-session-browser-body is-hidden" id="terminal-session-browser-body">
+        <div class="terminal-session-browser-toolbar">
+          <button class="btn btn-sm btn-ghost" onclick="loadTerminalSessions()">Refresh</button>
+        </div>
+        <div class="terminal-session-list" id="terminal-session-list">
+          <p class="terminal-session-empty">Click refresh to load session history.</p>
+        </div>
+      </div>
+    </section>
+    <div class="terminal-shell-card">">
       <div class="split-container" id="terminal-split">
         <div class="split-pane terminal-split-pane" id="pane-left">
           <div class="pane-tabs" id="pane-left-tabs">
@@ -12961,6 +12975,84 @@ window.spawnNewTerminal = function () {
   }
   if (currentPage === 'devhub') navigate('devhub');
 };
+
+window.loadTerminalSessions = async function () {
+  const listEl = document.getElementById('terminal-session-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<p>Loading...</p>';
+  try {
+    const res = await fetch('/api/sessions/terminal/history', {
+      headers: { Authorization: 'Bearer ' + sessionToken },
+    });
+    if (!res.ok) {
+      listEl.innerHTML = '<p class="terminal-session-error">Failed to load session history</p>';
+      return;
+    }
+    const sessions = await res.json();
+    if (sessions.length === 0) {
+      listEl.innerHTML = '<p class="terminal-session-empty">No sessions yet.</p>';
+      return;
+    }
+    listEl.innerHTML = sessions
+      .map(
+        (s) =>
+          `<div class="terminal-session-item ${s.active ? 'active' : ''}" data-session-id="${esc(s.id)}">
+            <div class="terminal-session-item-info" onclick="loadTerminalSession('${esc(s.id)}')">
+              <strong>${esc(s.id)}</strong>
+              <span class="terminal-session-meta">${s.active ? 'Active' : s.endedAt ? timeAgo(s.endedAt) : 'Never ended'} &middot; ${s.owner || 'unknown'} &middot; ${s.bytes ? formatBytes(s.bytes) : '0 B'}</span>
+            </div>
+            <button class="btn btn-sm btn-ghost terminal-session-delete" onclick="event.stopPropagation(); deleteTerminalSession('${esc(s.id)}')" title="Delete session">🗑</button>
+          </div>`,
+      )
+      .join('');
+  } catch {
+    listEl.innerHTML = '<p class="terminal-session-error">Failed to load session history</p>';
+  }
+};
+
+window.loadTerminalSession = function (sessionId) {
+  const input = document.getElementById('terminal-session-id');
+  if (input) input.value = sessionId;
+  localStorage.setItem('terminal_session_id', sessionId);
+  if (window._terminalOperatorState) {
+    window._terminalOperatorState.sessionId = sessionId;
+    window._terminalOperatorState.transcript = '';
+  }
+  if (activeTerminal && activeTerminal.term) {
+    activeTerminal.term.dispose();
+    activeTerminal = null;
+  }
+  if (currentPage === 'devhub') navigate('devhub');
+};
+
+window.deleteTerminalSession = async function (sessionId) {
+  if (!confirm('Delete terminal session ' + sessionId + '?')) return;
+  try {
+    const res = await fetch('/api/sessions/terminal/' + encodeURIComponent(sessionId), {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer ' + sessionToken },
+    });
+    if (res.ok) {
+      toast('Session deleted', 'success');
+      loadTerminalSessions();
+    } else {
+      toast('Failed to delete session', 'error');
+    }
+  } catch {
+    toast('Failed to delete session', 'error');
+  }
+};
+
+window.toggleSessionBrowser = function () {
+  const body = document.getElementById('terminal-session-browser-body');
+  if (body) body.classList.toggle('is-hidden');
+};
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
 
 window.reconnectTerminal = function () {
   const input = document.getElementById('terminal-session-id');

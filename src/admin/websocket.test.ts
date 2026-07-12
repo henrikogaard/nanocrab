@@ -14,6 +14,9 @@ const TEST_DIR = vi.hoisted(
 vi.mock('../config.js', () => ({
   SESSIONS_DIR: TEST_DIR,
   TERMINAL_IDLE_TIMEOUT_MS: 7200000,
+  MAX_SESSION_LOG_BYTES: 1024,
+  MAX_SESSION_RETENTION_DAYS: 90,
+  MAX_SESSIONS_COUNT: 100,
 }));
 
 vi.mock('../logger.js', () => ({
@@ -33,6 +36,7 @@ import {
   finalizeSessionFile,
   loadHistoricalSessions,
   listTerminalSessions,
+  pruneOldSessions,
   startLogStream,
   stopLogStream,
   listCockpitStreamEvents,
@@ -165,6 +169,66 @@ describe('file-backed terminal sessions', () => {
         currentStep: 'Running focused tests',
       }),
     ).not.toThrow();
+  });
+
+  it('pruneOldSessions removes entries older than retention period', () => {
+    const oldDate = new Date();
+    oldDate.setFullYear(oldDate.getFullYear() - 5);
+    createSessionFile('fresh-session', 'alice');
+    createSessionFile('stale-session', 'bob');
+    // Manually backdate the stale entry
+    const indexPath = path.join(TEST_DIR, 'index.json');
+    const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+    const staleEntry = index.find(
+      (e: { id: string }) => e.id === 'stale-session',
+    );
+    staleEntry.endedAt = oldDate.toISOString();
+    fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
+    // Prime a .log file for the stale session so pruneOldSessions deletes it
+    fs.writeFileSync(path.join(TEST_DIR, 'stale-session.log'), 'old data');
+
+    const pruned = pruneOldSessions();
+    expect(pruned).toBe(1);
+    const remaining = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+    expect(remaining.map((e: { id: string }) => e.id)).toEqual([
+      'fresh-session',
+    ]);
+    // Orphan .log file should be removed
+    expect(fs.existsSync(path.join(TEST_DIR, 'stale-session.log'))).toBe(false);
+  });
+
+  it('appendToSessionLog respects MAX_SESSION_LOG_BYTES', () => {
+    // Fill the log past the limit
+    const bigData = 'x'.repeat(1024);
+    appendToSessionLog('term-bounded', bigData);
+    appendToSessionLog('term-bounded', 'SHOULD_NOT_APPEAR');
+    const content = readSessionLog('term-bounded');
+    expect(content).not.toContain('SHOULD_NOT_APPEAR');
+    expect(content).toContain('x');
+    expect(content.length).toBeLessThanOrEqual(1024);
+  });
+
+  it('appendToSessionLog truncates data that exceeds max size', () => {
+    const data = 'y'.repeat(800);
+    const extra = 'z'.repeat(800);
+    appendToSessionLog('term-truncated', data);
+    appendToSessionLog('term-truncated', extra);
+    const content = readSessionLog('term-truncated');
+    // Should not contain all of 'extra'
+    expect(content).not.toContain(extra);
+  });
+
+  it('pruneOldSessions caps total count at MAX_SESSIONS_COUNT', () => {
+    // Create more than max entries
+    for (let i = 0; i < 103; i++) {
+      createSessionFile(`overflow-${i}`, `user-${i}`);
+    }
+    const prune = pruneOldSessions();
+    expect(prune).toBeGreaterThanOrEqual(3);
+    const indexed = JSON.parse(
+      fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8'),
+    );
+    expect(indexed.length).toBeLessThanOrEqual(100);
   });
 
   it('records recent tool and progress events for cockpit streams', () => {

@@ -63,7 +63,16 @@ function loadCommandPalette() {
     addEventListener: () => {},
     appendChild: (child: any) => child,
     innerHTML: '',
-    querySelector: (sel: string) => (sel === '.cp-input' || sel === '.cp-results' ? sel === '.cp-input' ? inputMock : { innerHTML: '', querySelector: () => null, addEventListener: () => {} } : null),
+    querySelector: (sel: string) =>
+      sel === '.cp-input' || sel === '.cp-results'
+        ? sel === '.cp-input'
+          ? inputMock
+          : {
+              innerHTML: '',
+              querySelector: () => null,
+              addEventListener: () => {},
+            }
+        : null,
     querySelectorAll: () => [],
     closest: (_s: string) => null,
     scrollIntoView: () => {},

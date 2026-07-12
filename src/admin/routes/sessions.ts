@@ -10,6 +10,8 @@ import {
   listCockpitStreamEvents,
   listTerminalSessions,
   readSessionLog,
+  finalizeSessionFile,
+  pruneOldSessions,
 } from '../websocket.js';
 import { getAgentProviderConfig } from '../../agent-provider.js';
 import { listApprovals } from '../../approvals.js';
@@ -865,6 +867,44 @@ router.post(
       res.json({ results });
     } catch (_err) {
       res.status(500).json({ error: 'Search failed' });
+    }
+  },
+);
+
+// DELETE /api/sessions/terminal/:id — delete a terminal session
+router.delete(
+  '/terminal/:id',
+  requireRole('owner'),
+  async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id as string;
+      if (!isSafeTerminalSessionId(sessionId)) {
+        res.status(400).json({ error: 'Invalid session id' });
+        return;
+      }
+      const indexPath = path.join(SESSIONS_DIR, 'index.json');
+      if (!fs.existsSync(indexPath)) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      let index: any[] = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+      const before = index.length;
+      index = index.filter((e: any) => e.id !== sessionId);
+      if (index.length === before) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
+      // Remove log file
+      const logPath = path.join(SESSIONS_DIR, `${sessionId}.log`);
+      try {
+        if (fs.existsSync(logPath)) fs.unlinkSync(logPath);
+      } catch {
+        // ignore
+      }
+      res.json({ deleted: sessionId });
+    } catch (_err) {
+      res.status(500).json({ error: 'Failed to delete session' });
     }
   },
 );
