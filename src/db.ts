@@ -226,6 +226,43 @@ function createSchema(database: Database.Database): void {
       github_field_updated_at TEXT NOT NULL,
       claimed_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS control_plane_decisions (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      pipeline_id TEXT NOT NULL,
+      project_item_id TEXT NOT NULL,
+      issue_node_id TEXT NOT NULL,
+      repository TEXT NOT NULL,
+      issue_number INTEGER NOT NULL,
+      stage_id TEXT NOT NULL,
+      run_id TEXT,
+      proposed_stage_id TEXT,
+      proposed_agent_profile_id TEXT,
+      proposed_runtime_json TEXT,
+      expected_github_option_id TEXT NOT NULL,
+      expected_github_field_updated_at TEXT NOT NULL,
+      actual_github_option_id TEXT,
+      actual_github_field_updated_at TEXT,
+      summary TEXT NOT NULL,
+      evidence_json TEXT NOT NULL DEFAULT '{}',
+      decided_by TEXT,
+      decided_from TEXT,
+      decision_note TEXT,
+      created_at TEXT NOT NULL,
+      decided_at TEXT,
+      actual_runtime_json TEXT,
+      dispatch_status TEXT,
+      dispatch_error TEXT,
+      dispatch_job_id TEXT,
+      dispatch_decision_id TEXT,
+      approval_id TEXT,
+      correlation_id TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_control_plane_decisions_pipeline_issue
+      ON control_plane_decisions(pipeline_id, issue_node_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_control_plane_decisions_status
+      ON control_plane_decisions(status);
 
     CREATE TABLE IF NOT EXISTS agent_subscriptions (
       id TEXT PRIMARY KEY,

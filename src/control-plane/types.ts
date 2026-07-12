@@ -87,6 +87,8 @@ export function requireTimestamp(value: string | null, field: string): void {
 }
 
 /** @internal Canonical dispatch identity serialization. */
+import type { AgentRuntimeSelection } from '../types.js';
+
 export function serializeStageDispatchKey(input: {
   pipelineId: string;
   projectItemId: string;
@@ -103,4 +105,52 @@ export function serializeStageDispatchKey(input: {
     input.agentProfileId,
     input.githubFieldUpdatedAt,
   ].join(':');
+}
+
+export type ControlPlaneDecisionAction =
+  | 'approve'
+  | 'reject'
+  | 'revise'
+  | 'reassign';
+
+export type ControlPlaneDecisionStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'revised'
+  | 'reassigned'
+  | 'stale';
+
+export interface ControlPlaneDecision {
+  id: string;
+  kind: 'stage_transition' | 'runtime_fallback';
+  status: ControlPlaneDecisionStatus;
+  pipelineId: string;
+  projectItemId: string;
+  issueNodeId: string;
+  repository: string;
+  issueNumber: number;
+  stageId: string;
+  runId: string | null;
+  proposedStageId: string | null;
+  proposedAgentProfileId: string | null;
+  proposedRuntime: AgentRuntimeSelection | null;
+  expectedGithubOptionId: string;
+  expectedGithubFieldUpdatedAt: string;
+  actualGithubOptionId: string | null;
+  actualGithubFieldUpdatedAt: string | null;
+  summary: string;
+  evidence: Record<string, unknown>;
+  decidedBy: string | null;
+  decidedFrom: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+  decidedAt: string | null;
+  actualRuntime: AgentRuntimeSelection | null;
+  dispatchStatus: string | null;
+  dispatchError: string | null;
+  dispatchJobId: string | null;
+  dispatchDecisionId: string | null;
+  approvalId: string | null;
+  correlationId: string | null;
 }

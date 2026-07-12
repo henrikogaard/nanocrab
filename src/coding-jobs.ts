@@ -20,6 +20,7 @@ import {
   isAgentProvider,
   isCodingCapableProvider,
 } from './agent-provider.js';
+import type { AgentRuntimeSelection } from './types.js';
 import {
   CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
@@ -149,6 +150,10 @@ export interface CodingJob {
   requestedBy: string;
   agentProfileId: string | null;
   sourceSubscriptionId: string | null;
+  pipelineId?: string | null;
+  stageId?: string | null;
+  decisionId?: string | null;
+  actualRuntime?: AgentRuntimeSelection | null;
   createdAt: string;
   completedAt: string | null;
 }
@@ -165,6 +170,10 @@ export interface StartCodingJobInput {
   requestedBy: string;
   agentProfileId?: string | null;
   sourceSubscriptionId?: string | null;
+  pipelineId?: string | null;
+  stageId?: string | null;
+  decisionId?: string | null;
+  actualRuntime?: AgentRuntimeSelection | null;
 }
 
 function readJsonFile<T>(filePath: string, fallback: T): T {
@@ -281,6 +290,10 @@ function ensureJobDefaults(job: CodingJob): CodingJob {
     dryRun: false,
     agentProfileId: null,
     sourceSubscriptionId: null,
+    pipelineId: null,
+    stageId: null,
+    decisionId: null,
+    actualRuntime: null,
   };
   const normalized = { ...defaults, ...job };
   if (!normalized.transitionedAt[normalized.status]) {
@@ -1445,18 +1458,21 @@ export async function startCodingJob(
     throw new Error(`Repo ${input.repo} is not registered for coding jobs`);
   }
 
+  const actualRuntime = input.actualRuntime || null;
   const requestedProvider =
-    input.provider && isAgentProvider(input.provider)
+    actualRuntime?.provider ||
+    (input.provider && isAgentProvider(input.provider)
       ? input.provider
-      : undefined;
+      : undefined);
   const requestedModel =
+    actualRuntime?.model ||
     input.model ||
     (requestedProvider
       ? getAgentProviderConfig().modelsByProvider[requestedProvider] ||
         DEFAULT_AGENT_MODELS[requestedProvider]
       : undefined);
-  const provider = codingProvider(input.provider, requestedModel);
-  const model = input.model || defaultModelForProvider(provider);
+  const provider = codingProvider(requestedProvider, requestedModel);
+  const model = requestedModel || defaultModelForProvider(provider);
   let prompt = input.prompt || '';
   let issueTitle: string | null = null;
   const issueNumber = input.issueNumber || null;
@@ -1526,6 +1542,10 @@ export async function startCodingJob(
     requestedBy: input.requestedBy,
     agentProfileId: input.agentProfileId || null,
     sourceSubscriptionId: input.sourceSubscriptionId || null,
+    pipelineId: input.pipelineId || null,
+    stageId: input.stageId || null,
+    decisionId: input.decisionId || null,
+    actualRuntime,
     createdAt: nowIso(),
     completedAt: null,
   };
