@@ -59,6 +59,10 @@ export const MAX_SESSIONS_COUNT = parseInt(
   process.env.MAX_SESSIONS_COUNT || '100',
   10,
 ); // max session index entries
+export const SESSION_PRUNE_INTERVAL_MS = parseInt(
+  process.env.SESSION_PRUNE_INTERVAL_MS || '21600000',
+  10,
+); // 6 hours default — enforce retention on long-running servers
 export const CODING_WORKSPACE_DIR = path.resolve(DATA_DIR, 'coding-workspaces');
 export const CONTAINER_SKILLS_DIR = path.resolve(
   PROJECT_ROOT,

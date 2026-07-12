@@ -251,6 +251,46 @@ describe('terminal session API', () => {
     });
   });
 
+  it('DELETE /terminal/:id removes an existing session and enforces owner role', async () => {
+    await withSessionsServer('owner', async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/sessions/terminal/term-1`, {
+        method: 'DELETE',
+      });
+      const data = (await response.json()) as { deleted: string };
+      expect(response.status).toBe(200);
+      expect(data.deleted).toBe('term-1');
+
+      const index = JSON.parse(
+        fs.readFileSync(path.join(SESSIONS_DIR, 'index.json'), 'utf-8'),
+      ) as Array<{ id: string }>;
+      expect(index.map((e) => e.id)).not.toContain('term-1');
+      expect(fs.existsSync(path.join(SESSIONS_DIR, 'term-1.log'))).toBe(false);
+    });
+
+    await withSessionsServer('viewer', async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/sessions/terminal/term-2`, {
+        method: 'DELETE',
+      });
+      expect(response.status).toBe(403);
+    });
+  });
+
+  it('DELETE /terminal/:id returns 404 for unknown and 400 for unsafe ids', async () => {
+    await withSessionsServer('owner', async (baseUrl) => {
+      const missing = await fetch(
+        `${baseUrl}/api/sessions/terminal/does-not-exist`,
+        { method: 'DELETE' },
+      );
+      expect(missing.status).toBe(404);
+
+      const unsafe = await fetch(
+        `${baseUrl}/api/sessions/terminal/${encodeURIComponent('../escape')}`,
+        { method: 'DELETE' },
+      );
+      expect(unsafe.status).toBe(400);
+    });
+  });
+
   it('GET /terminal/:id/transcript blocks unsafe session ids', async () => {
     await withSessionsServer('owner', async (baseUrl) => {
       const encodedUnsafeId = encodeURIComponent('../term-1');

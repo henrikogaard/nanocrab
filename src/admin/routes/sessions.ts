@@ -10,8 +10,7 @@ import {
   listCockpitStreamEvents,
   listTerminalSessions,
   readSessionLog,
-  finalizeSessionFile,
-  pruneOldSessions,
+  closeTerminalSession,
 } from '../websocket.js';
 import { getAgentProviderConfig } from '../../agent-provider.js';
 import { listApprovals } from '../../approvals.js';
@@ -882,6 +881,8 @@ router.delete(
         res.status(400).json({ error: 'Invalid session id' });
         return;
       }
+      // If the session is still live, stop it first so it stops writing.
+      closeTerminalSession(sessionId);
       const indexPath = path.join(SESSIONS_DIR, 'index.json');
       if (!fs.existsSync(indexPath)) {
         res.status(404).json({ error: 'Session not found' });

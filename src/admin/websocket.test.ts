@@ -213,9 +213,23 @@ describe('file-backed terminal sessions', () => {
     const extra = 'z'.repeat(800);
     appendToSessionLog('term-truncated', data);
     appendToSessionLog('term-truncated', extra);
+    const bytes = fs.statSync(path.join(TEST_DIR, 'term-truncated.log')).size;
     const content = readSessionLog('term-truncated');
-    // Should not contain all of 'extra'
-    expect(content).not.toContain(extra);
+    // Cap is 1024: 800 y's + exactly 224 z's, never more.
+    expect(bytes).toBe(1024);
+    expect(content).toBe('y'.repeat(800) + 'z'.repeat(224));
+  });
+
+  it('appendToSessionLog truncates on a UTF-8 codepoint boundary', () => {
+    // 1021 ASCII bytes leaves only 3 bytes before the 1024-byte cap; a 4-byte
+    // emoji cannot fit and must be dropped whole rather than split.
+    appendToSessionLog('term-utf8', 'a'.repeat(1021));
+    appendToSessionLog('term-utf8', '\u{1F600}');
+    const buf = fs.readFileSync(path.join(TEST_DIR, 'term-utf8.log'));
+    expect(buf.length).toBe(1021);
+    expect(buf.toString('utf-8')).toBe('a'.repeat(1021));
+    // The written bytes must be valid UTF-8 (no dangling continuation bytes).
+    expect(Buffer.byteLength(buf.toString('utf-8'), 'utf-8')).toBe(1021);
   });
 
   it('pruneOldSessions caps total count at MAX_SESSIONS_COUNT', () => {

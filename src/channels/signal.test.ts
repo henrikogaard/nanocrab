@@ -13,9 +13,16 @@ vi.mock('../logger.js', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+interface MockChildProcess extends EventEmitter {
+  stdout: PassThrough;
+  stderr: PassThrough;
+  kill: ReturnType<typeof vi.fn>;
+  pid: number;
+}
+
 vi.mock('child_process', () => ({
-  spawn: vi.fn(() => {
-    const proc = new EventEmitter();
+  spawn: vi.fn((): MockChildProcess => {
+    const proc = new EventEmitter() as MockChildProcess;
     proc.stdout = new PassThrough();
     proc.stderr = new PassThrough();
     proc.kill = vi.fn();

@@ -25,6 +25,7 @@ import {
   MAX_SESSION_LOG_BYTES,
   MAX_SESSION_RETENTION_DAYS,
   MAX_SESSIONS_COUNT,
+  SESSION_PRUNE_INTERVAL_MS,
 } from '../config.js';
 
 interface WsMessage {
@@ -139,7 +140,21 @@ export function createSessionFile(sessionId: string, owner = 'owner'): boolean {
   return true;
 }
 
+// Sessions whose log has hit the byte cap — used to warn only once per session.
+const maxSizeWarned = new Set<string>();
+
+// Truncate a UTF-8 buffer to at most maxBytes without splitting a multi-byte
+// codepoint (which would write an invalid byte sequence to the log file).
+function safeUtf8Slice(buf: Buffer, maxBytes: number): Buffer {
+  let end = Math.min(maxBytes, buf.length);
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) {
+    end--;
+  }
+  return buf.subarray(0, end);
+}
+
 export function finalizeSessionFile(sessionId: string): void {
+  maxSizeWarned.delete(sessionId);
   const index = loadSessionIndex();
   const entry = index.find((e) => e.id === sessionId);
   if (entry) {
@@ -160,17 +175,31 @@ export function appendToSessionLog(sessionId: string, data: string): void {
   if (!logPath) return;
   try {
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-    // Check file size before appending
+    // Enforce a byte-accurate size cap. Terminal output may contain multi-byte
+    // UTF-8, so we measure and slice on bytes rather than string length.
     if (fs.existsSync(logPath)) {
       const stat = fs.statSync(logPath);
       if (stat.size >= MAX_SESSION_LOG_BYTES) {
-        logger.warn({ sessionId, size: stat.size }, 'Session log at max size, truncating');
+        if (!maxSizeWarned.has(sessionId)) {
+          maxSizeWarned.add(sessionId);
+          logger.warn(
+            { sessionId, size: stat.size },
+            'Session log reached max size, dropping further output',
+          );
+        }
         return;
       }
-      // If this write would exceed the limit, only write what fits
       const remaining = MAX_SESSION_LOG_BYTES - stat.size;
-      if (data.length > remaining) {
-        fs.appendFileSync(logPath, data.slice(0, remaining), 'utf-8');
+      const buf = Buffer.from(data, 'utf-8');
+      if (buf.length > remaining) {
+        fs.appendFileSync(logPath, safeUtf8Slice(buf, remaining));
+        if (!maxSizeWarned.has(sessionId)) {
+          maxSizeWarned.add(sessionId);
+          logger.warn(
+            { sessionId },
+            'Session log reached max size, dropping further output',
+          );
+        }
         return;
       }
     }
@@ -218,7 +247,9 @@ export function pruneOldSessions(): number {
     if (!fs.existsSync(SESSIONS_DIR)) return 0;
     const indexPath = path.join(SESSIONS_DIR, 'index.json');
     if (!fs.existsSync(indexPath)) return 0;
-    let index: SessionMetadata[] = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+    let index: SessionMetadata[] = JSON.parse(
+      fs.readFileSync(indexPath, 'utf-8'),
+    );
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - MAX_SESSION_RETENTION_DAYS);
     const before = index.length;
@@ -228,7 +259,9 @@ export function pruneOldSessions(): number {
     });
     // Also cap total count
     if (index.length > MAX_SESSIONS_COUNT) {
-      index.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      index.sort((a, b) =>
+        (b.createdAt || '').localeCompare(a.createdAt || ''),
+      );
       index = index.slice(0, MAX_SESSIONS_COUNT);
     }
     saveSessionIndex(index);
@@ -238,7 +271,9 @@ export function pruneOldSessions(): number {
     }
     // Remove orphan .log files not in index
     const indexIds = new Set(index.map((e) => e.id));
-    const logFiles = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.log'));
+    const logFiles = fs
+      .readdirSync(SESSIONS_DIR)
+      .filter((f) => f.endsWith('.log'));
     for (const file of logFiles) {
       const sessionId = file.replace('.log', '');
       if (!indexIds.has(sessionId)) {
@@ -339,12 +374,7 @@ export function initWebSocket(server: HttpServer): void {
           }
         }
         if (msg.type === 'terminal_close' && msg.sessionId) {
-          const term = terminals.get(msg.sessionId);
-          if (term) {
-            finalizeSessionFile(msg.sessionId);
-            clearTimeout(term.idleTimer);
-            term.process.kill();
-          }
+          closeTerminalSession(msg.sessionId);
         }
       } catch {
         // ignore malformed messages
@@ -364,6 +394,9 @@ export function initWebSocket(server: HttpServer): void {
 
   pruneOldSessions();
   loadHistoricalSessions();
+  // Enforce retention periodically, not only at startup, so long-running
+  // servers do not accumulate sessions unbounded between restarts.
+  setInterval(() => pruneOldSessions(), SESSION_PRUNE_INTERVAL_MS).unref();
   logger.debug('WebSocket server initialized');
 }
 
@@ -517,6 +550,19 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
   });
 
   logger.info({ sessionId }, 'Terminal session spawned');
+}
+
+// Terminate an active terminal session: finalize its log, clear the idle timer,
+// and kill the process. Returns true if a live session was closed. The process
+// 'close' handler removes it from the terminals map.
+export function closeTerminalSession(sessionId: string): boolean {
+  const term = terminals.get(sessionId);
+  if (!term) return false;
+  clearTimeout(term.idleTimer);
+  finalizeSessionFile(sessionId);
+  term.process.kill();
+  terminals.delete(sessionId);
+  return true;
 }
 
 function broadcastTerminal(sessionId: string, data: string): void {

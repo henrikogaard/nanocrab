@@ -270,7 +270,8 @@
   }
 
   document.addEventListener('keydown', function (e) {
-    if ((e.key === 'k' || e.key === 'K' || e.key === 'p' || e.key === 'P') && (e.metaKey || e.ctrlKey)) {
+    // Bind Cmd/Ctrl+K only. Cmd/Ctrl+P is left to the browser (print).
+    if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       if (active) {
         close();
