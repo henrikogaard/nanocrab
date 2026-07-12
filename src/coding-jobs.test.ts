@@ -60,6 +60,8 @@ vi.mock('child_process', () => ({
 import {
   approveCodingJob,
   buildCodingPrompt,
+  getGitHubToken,
+  githubGraphql,
   listGitHubIssues,
   listGitHubProjectBoards,
   loadCodingJobs,
@@ -149,6 +151,30 @@ describe('coding jobs', () => {
     }
     fs.rmSync(TEST_ROOT, { recursive: true, force: true });
     resetPolicyRules();
+  });
+
+  it('exposes getGitHubToken from the env fallback', () => {
+    expect(getGitHubToken()).toBe('test-token');
+  });
+
+  it('githubGraphql posts to the GitHub GraphQL endpoint and returns data', async () => {
+    mockGitHubFetch(() => ({
+      data: { viewer: { login: 'henrikogaard' } },
+    }));
+
+    const result = await githubGraphql('query { viewer { login } }', {});
+
+    expect(result).toEqual({ viewer: { login: 'henrikogaard' } });
+  });
+
+  it('githubGraphql rejects GraphQL errors in the response', async () => {
+    mockGitHubFetch(() => ({
+      errors: [{ message: 'Bad request' }],
+    }));
+
+    await expect(
+      githubGraphql('query { viewer { login } }', {}),
+    ).rejects.toThrow('Bad request');
   });
 
   it('registers an allowed GitHub repo with its default branch', async () => {
