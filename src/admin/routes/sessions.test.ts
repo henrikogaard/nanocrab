@@ -4,7 +4,10 @@ import path from 'path';
 import os from 'os';
 import express from 'express';
 
-const _TEST_DIR = path.join(os.tmpdir(), `nanocrab-sessions-test-${Date.now()}`);
+const _TEST_DIR = path.join(
+  os.tmpdir(),
+  `nanocrab-sessions-test-${Date.now()}`,
+);
 
 vi.mock('../../config.js', () => ({
   SESSIONS_DIR: path.join(os.tmpdir(), `nanocrab-sessions-test-${Date.now()}`),

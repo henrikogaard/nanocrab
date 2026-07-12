@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi as _vi } from 'vitest';
 
 import { FallbackPolicyManager, isFallbackAction } from './fallback-policy.js';
-import type { FallbackAction as _FallbackAction, FallbackDecision as _FallbackDecision } from './fallback-policy.js';
+import type { FallbackAction, FallbackDecision as _FallbackDecision } from './fallback-policy.js';
 
 function _makePolicy(
   _overrides?: Partial<ReturnType<FallbackPolicyManager['evaluateFallback']>>,

@@ -10,9 +10,9 @@ import crypto from 'crypto';
 
 import { STORE_DIR } from '../../config.js';
 import { resolveGroupIpcPath } from '../../group-folder.js';
-import { _auditLog } from '../security.js';
+import { auditLog as _auditLog } from '../security.js';
 import { logger } from '../../logger.js';
-import { broadcast as _broadcast } from '../websocket.js';
+import { broadcast } from '../websocket.js';
 
 const router = Router();
 

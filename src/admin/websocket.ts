@@ -14,7 +14,11 @@ import {
   isChannelEnabledForRegisteredGroups,
 } from '../channel-status.js';
 import { getState, nonWebGroups } from './state.js';
-import { validateSession, getSessionUser, AdminUser as _AdminUser } from './auth.js';
+import {
+  validateSession,
+  getSessionUser,
+  AdminUser as _AdminUser,
+} from './auth.js';
 import { SESSIONS_DIR, TERMINAL_IDLE_TIMEOUT_MS } from '../config.js';
 
 interface WsMessage {

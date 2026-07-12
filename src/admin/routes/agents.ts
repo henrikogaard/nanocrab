@@ -20,7 +20,10 @@ import {
   isCodingCapableProvider,
   codingProviderUnavailableReason,
 } from '../../agent-provider.js';
-import { _getAllRegisteredGroups, getNonWebRegisteredGroups } from '../../db.js';
+import {
+  getAllRegisteredGroups as _getAllRegisteredGroups,
+  getNonWebRegisteredGroups,
+} from '../../db.js';
 import {
   deriveRuntimeCapabilities,
   resolveAgentBoundary,

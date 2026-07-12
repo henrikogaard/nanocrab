@@ -1,4 +1,11 @@
-import { describe, it, expect, beforeAll as _beforeAll, beforeEach, afterEach } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeAll as _beforeAll,
+  beforeEach,
+  afterEach,
+} from 'vitest';
 import * as db from './db.js';
 
 describe('registered group kind/title round-trip', () => {
