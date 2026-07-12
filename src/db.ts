@@ -164,6 +164,69 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_agent_profiles_enabled ON agent_profiles(enabled);
 
+    CREATE TABLE IF NOT EXISTS control_plane_pipelines (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      github_owner TEXT NOT NULL,
+      github_project_number INTEGER NOT NULL,
+      github_project_id TEXT NOT NULL UNIQUE,
+      workflow_field_id TEXT NOT NULL,
+      repository_scopes_json TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      sync_cursor TEXT,
+      last_synced_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (github_owner, github_project_number)
+    );
+    CREATE TABLE IF NOT EXISTS control_plane_stages (
+      id TEXT PRIMARY KEY,
+      pipeline_id TEXT NOT NULL,
+      github_field_option_id TEXT NOT NULL,
+      github_field_option_name TEXT NOT NULL,
+      stage_kind TEXT NOT NULL,
+      agent_profile_id TEXT NOT NULL,
+      required_evidence_json TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      UNIQUE (pipeline_id, github_field_option_id),
+      UNIQUE (pipeline_id, stage_kind),
+      UNIQUE (pipeline_id, position)
+    );
+    CREATE INDEX IF NOT EXISTS idx_control_plane_stages_pipeline
+      ON control_plane_stages(pipeline_id, position);
+    CREATE TABLE IF NOT EXISTS control_plane_stage_assignments (
+      id TEXT PRIMARY KEY,
+      pipeline_id TEXT NOT NULL,
+      issue_node_id TEXT NOT NULL,
+      stage_id TEXT NOT NULL,
+      agent_profile_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (pipeline_id, issue_node_id, stage_id)
+    );
+    CREATE TABLE IF NOT EXISTS control_plane_item_snapshots (
+      pipeline_id TEXT NOT NULL,
+      project_item_id TEXT NOT NULL,
+      issue_node_id TEXT NOT NULL,
+      repository TEXT NOT NULL,
+      issue_number INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      github_field_option_id TEXT NOT NULL,
+      github_field_updated_at TEXT NOT NULL,
+      synced_at TEXT NOT NULL,
+      PRIMARY KEY (pipeline_id, project_item_id)
+    );
+    CREATE TABLE IF NOT EXISTS control_plane_dispatches (
+      dispatch_key TEXT PRIMARY KEY,
+      pipeline_id TEXT NOT NULL,
+      project_item_id TEXT NOT NULL,
+      issue_node_id TEXT NOT NULL,
+      stage_id TEXT NOT NULL,
+      agent_profile_id TEXT NOT NULL,
+      github_field_updated_at TEXT NOT NULL,
+      claimed_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS agent_subscriptions (
       id TEXT PRIMARY KEY,
       agent_profile_id TEXT NOT NULL,
@@ -604,6 +667,12 @@ export function _closeDatabase(): void {
 /** @internal - used by audit logging to avoid noisy writes before init. */
 export function isDatabaseInitialized(): boolean {
   return Boolean(db);
+}
+
+/** @internal - domain stores use the shared database connection. */
+export function getDatabaseConnection(): Database.Database {
+  if (!db) throw new Error('Database is not initialized');
+  return db;
 }
 
 /**
