@@ -15,7 +15,11 @@ afterEach(() => {
 });
 
 function projectConfigurationFixture(
-  fields: { id: string; name: string; options?: { id: string; name: string }[] }[],
+  fields: {
+    id: string;
+    name: string;
+    options?: { id: string; name: string }[];
+  }[],
   overrides: { hasNextPage?: boolean; endCursor?: string | null } = {},
 ) {
   return {
@@ -171,7 +175,9 @@ describe('DefaultGitHubProjectClient', () => {
     expect(mockGraphql).toHaveBeenCalledTimes(2);
     expect(items).toHaveLength(2);
     expect(items.map((item) => item.issueNumber)).toEqual([113, 114]);
-    expect(items.every((item) => item.currentSingleSelectOptionId !== null)).toBe(true);
+    expect(
+      items.every((item) => item.currentSingleSelectOptionId !== null),
+    ).toBe(true);
   });
 
   it('does not treat permission and rate-limit failures as empty Projects', async () => {
@@ -188,9 +194,9 @@ describe('DefaultGitHubProjectClient', () => {
       new Error('GitHub GraphQL 429: Rate limit exceeded'),
     );
 
-    await expect(
-      client.listProjectItems('PVT_1', 'PVTSSF_1'),
-    ).rejects.toThrow(/GitHub GraphQL 429/);
+    await expect(client.listProjectItems('PVT_1', 'PVTSSF_1')).rejects.toThrow(
+      /GitHub GraphQL 429/,
+    );
   });
 });
 

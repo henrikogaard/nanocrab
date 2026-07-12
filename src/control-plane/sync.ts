@@ -44,7 +44,10 @@ function updateStageOptionName(stageId: string, name: string): void {
     .run(name, stageId);
 }
 
-function updatePipelineLastSyncedAt(pipelineId: string, syncedAt: string): void {
+function updatePipelineLastSyncedAt(
+  pipelineId: string,
+  syncedAt: string,
+): void {
   getDatabaseConnection()
     .prepare(
       'UPDATE control_plane_pipelines SET last_synced_at = ?, updated_at = ? WHERE id = ?',

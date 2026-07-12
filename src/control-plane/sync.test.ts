@@ -5,7 +5,11 @@ import { _closeDatabase, _initTestDatabase } from '../db.js';
 import { insertPipeline } from './pipelines.js';
 import { getPipeline } from './store.js';
 import { syncPipeline } from './sync.js';
-import type { GitHubProjectClient, ProjectConfiguration, ProjectItem } from './github-projects.js';
+import type {
+  GitHubProjectClient,
+  ProjectConfiguration,
+  ProjectItem,
+} from './github-projects.js';
 
 const now = '2026-07-12T10:00:00.000Z';
 
@@ -76,13 +80,19 @@ describe('syncPipeline', () => {
   }
 
   it('throws when the pipeline does not exist', async () => {
-    const client = mockClient({ projectId: 'PVT_1', title: 'T', fields: [] }, []);
+    const client = mockClient(
+      { projectId: 'PVT_1', title: 'T', fields: [] },
+      [],
+    );
     await expect(syncPipeline('missing', client)).rejects.toThrow(/missing/);
   });
 
   it('returns empty results for a disabled pipeline', async () => {
     insertValidPipeline({ enabled: false });
-    const client = mockClient({ projectId: 'PVT_1', title: 'T', fields: [] }, []);
+    const client = mockClient(
+      { projectId: 'PVT_1', title: 'T', fields: [] },
+      [],
+    );
     expect(await syncPipeline('pipeline_1', client)).toEqual({
       candidates: [],
       configurationErrors: [],
@@ -256,9 +266,7 @@ describe('syncPipeline', () => {
     };
 
     const client = {
-      readProjectConfiguration: vi
-        .fn()
-        .mockResolvedValue(configuration),
+      readProjectConfiguration: vi.fn().mockResolvedValue(configuration),
       listProjectItems: vi
         .fn()
         .mockResolvedValueOnce([
@@ -299,13 +307,17 @@ describe('syncPipeline', () => {
   it('does not treat GitHub permission errors as an empty project', async () => {
     insertValidPipeline();
     const client = {
-      readProjectConfiguration: vi.fn().mockRejectedValue(new Error('Bad credentials')),
+      readProjectConfiguration: vi
+        .fn()
+        .mockRejectedValue(new Error('Bad credentials')),
       listProjectItems: vi.fn(),
       readProjectItem: vi.fn(),
       updateProjectV2ItemFieldValue: vi.fn(),
     } as unknown as GitHubProjectClient;
 
-    await expect(syncPipeline('pipeline_1', client)).rejects.toThrow('Bad credentials');
+    await expect(syncPipeline('pipeline_1', client)).rejects.toThrow(
+      'Bad credentials',
+    );
   });
 
   it('reports a missing workflow field as a configuration error', async () => {

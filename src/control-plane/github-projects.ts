@@ -280,9 +280,7 @@ interface UpdateProjectV2ItemFieldValueResponse {
 }
 
 export class DefaultGitHubProjectClient implements GitHubProjectClient {
-  constructor(
-    private graphql: GitHubGraphqlTransport = githubGraphql,
-  ) {}
+  constructor(private graphql: GitHubGraphqlTransport = githubGraphql) {}
 
   async readProjectConfiguration(
     owner: string,
@@ -370,7 +368,9 @@ export class DefaultGitHubProjectClient implements GitHubProjectClient {
       });
       const projectNode = pageData.node;
       if (!projectNode || projectNode.__typename !== 'ProjectV2') {
-        throw new Error('GitHub project node was not found while paginating fields');
+        throw new Error(
+          'GitHub project node was not found while paginating fields',
+        );
       }
       const nodes = projectNode.fields.nodes ?? [];
       for (const node of nodes) {
@@ -433,10 +433,11 @@ export class DefaultGitHubProjectClient implements GitHubProjectClient {
     let hasNextPage = true;
 
     while (hasNextPage) {
-      const data: ListProjectItemsResponse = await this.graphql<ListProjectItemsResponse>(query, {
-        projectId,
-        after: cursor,
-      });
+      const data: ListProjectItemsResponse =
+        await this.graphql<ListProjectItemsResponse>(query, {
+          projectId,
+          after: cursor,
+        });
       const project = data.node;
       if (!project || project.__typename !== 'ProjectV2') {
         throw new Error('GitHub project was not found while listing items');
@@ -521,7 +522,9 @@ export class DefaultGitHubProjectClient implements GitHubProjectClient {
       });
       const pageItem = pageData.node;
       if (!pageItem || pageItem.__typename !== 'ProjectV2Item') {
-        throw new Error(`GitHub project item ${itemId} was not found while paginating`);
+        throw new Error(
+          `GitHub project item ${itemId} was not found while paginating`,
+        );
       }
       fieldValues.push(...(pageItem.fieldValues.nodes ?? []));
       const pageInfo = pageItem.fieldValues.pageInfo;
