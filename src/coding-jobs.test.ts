@@ -60,6 +60,8 @@ vi.mock('child_process', () => ({
 import {
   approveCodingJob,
   buildCodingPrompt,
+  cancelCodingJob,
+  cleanupCodingJob,
   getGitHubToken,
   githubGraphql,
   listGitHubIssues,
@@ -103,9 +105,13 @@ function createFakeProcess() {
   const proc = new EventEmitter() as EventEmitter & {
     stdout: PassThrough;
     stderr: PassThrough;
+    kill: ReturnType<typeof vi.fn>;
+    pid: number;
   };
   proc.stdout = new PassThrough();
   proc.stderr = new PassThrough();
+  proc.kill = vi.fn();
+  proc.pid = 12345;
   return proc;
 }
 
@@ -539,12 +545,18 @@ describe('coding jobs', () => {
       requestedBy: 'control-plane',
       pipelineId: 'pipeline_1',
       stageId: 'stage_planning',
+      stageKind: 'planning',
+      runId: 'run_1',
       decisionId: 'decision_1',
       actualRuntime,
     });
 
     expect(job.pipelineId).toBe('pipeline_1');
     expect(job.stageId).toBe('stage_planning');
+    expect(job.stageKind).toBe('planning');
+    expect(job.runId).toBe('run_1');
+    expect(job.pushed).toBe(false);
+    expect(job.stageEvidence).toBeNull();
     expect(job.decisionId).toBe('decision_1');
     expect(job.actualRuntime).toEqual(actualRuntime);
     expect(loadCodingJobs()[0].actualRuntime).toEqual(actualRuntime);
@@ -587,6 +599,10 @@ describe('coding jobs', () => {
     expect(job.sourceSubscriptionId).toBeNull();
     expect(job.pipelineId).toBeNull();
     expect(job.stageId).toBeNull();
+    expect(job.stageKind).toBeNull();
+    expect(job.runId).toBeNull();
+    expect(job.pushed).toBe(false);
+    expect(job.stageEvidence).toBeNull();
     expect(job.decisionId).toBeNull();
     expect(job.actualRuntime).toBeNull();
   });
@@ -784,7 +800,10 @@ describe('coding jobs', () => {
         'nanocrab-agent:test',
         '/workspace/coding-job/.nanocrab/run.sh',
       ]),
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      expect.objectContaining({
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
     );
     expect(getCodingJob(job.id)?.output).toContain('agent output');
     expect(getCodingJob(job.id)?.transitionedAt).toMatchObject({
@@ -1377,5 +1396,184 @@ describe('coding jobs', () => {
     expect(refreshed.ciStatus).toBe('failure');
     expect(refreshed.lastCiError).toContain('test: failure');
     expect(refreshed.status).toBe('completed');
+  });
+
+  it('cancels an active implementation run and preserves the worktree, branch, and PR fields', async () => {
+    vi.useRealTimers();
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    let fakeProc!: ReturnType<typeof createFakeProcess>;
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      fakeProc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.mkdirSync(`${jobRoot}/owner__repo`, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/changed-files.txt`, 'src/a.ts\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+      });
+      return fakeProc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Cancel me before I finish.',
+      requestedBy: 'whatsapp_main',
+      createPr: true,
+    });
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('implement');
+    });
+    await vi.waitFor(() => {
+      expect(spawn).toHaveBeenCalled();
+    });
+
+    cancelCodingJob(job.id, 'owner');
+    fakeProc.emit('close', 137);
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('cancelled');
+    });
+
+    expect(fakeProc.kill).toHaveBeenCalledWith('SIGTERM');
+    const cancelled = getCodingJob(job.id)!;
+    expect(cancelled.prUrl).toBeNull();
+    expect(cancelled.commitSha).toBeNull();
+    expect(cancelled.pushed).toBe(false);
+    expect(fs.existsSync(cancelled.workspace)).toBe(true);
+    expect(cancelled.branch).toBe(job.branch);
+  });
+
+  it('explains why cleanup is blocked under different conditions', () => {
+    fs.mkdirSync(`${TEST_ROOT}/store`, { recursive: true });
+    fs.writeFileSync(
+      `${TEST_ROOT}/store/coding-jobs.json`,
+      JSON.stringify(
+        [
+          {
+            id: 'job-active',
+            repo: 'owner/repo',
+            type: 'prompt',
+            prompt: 'Active',
+            issueNumber: null,
+            issueTitle: null,
+            provider: 'claude',
+            model: 'claude-sonnet-4-6',
+            status: 'implement',
+            branch: 'nanocrab/active',
+            workspace: '/tmp/workspace-active',
+            createPr: true,
+            prUrl: null,
+            pushed: false,
+            output: '',
+            requestedBy: 'dashboard',
+            createdAt: new Date(0).toISOString(),
+            completedAt: null,
+          },
+          {
+            id: 'job-pending',
+            repo: 'owner/repo',
+            type: 'prompt',
+            prompt: 'Pending',
+            issueNumber: null,
+            issueTitle: null,
+            provider: 'claude',
+            model: 'claude-sonnet-4-6',
+            status: 'await_approval',
+            branch: 'nanocrab/pending',
+            workspace: '/tmp/workspace-pending',
+            createPr: true,
+            prUrl: null,
+            pushed: false,
+            output: '',
+            requestedBy: 'dashboard',
+            createdAt: new Date(0).toISOString(),
+            completedAt: null,
+          },
+          {
+            id: 'job-unpushed',
+            repo: 'owner/repo',
+            type: 'prompt',
+            prompt: 'Unpushed',
+            issueNumber: null,
+            issueTitle: null,
+            provider: 'claude',
+            model: 'claude-sonnet-4-6',
+            status: 'completed',
+            branch: 'nanocrab/unpushed',
+            workspace: '/tmp/workspace-unpushed',
+            createPr: true,
+            prUrl: null,
+            pushed: false,
+            output: '',
+            requestedBy: 'dashboard',
+            createdAt: new Date(0).toISOString(),
+            completedAt: new Date(0).toISOString(),
+          },
+          {
+            id: 'job-pr',
+            repo: 'owner/repo',
+            type: 'prompt',
+            prompt: 'PR open',
+            issueNumber: null,
+            issueTitle: null,
+            provider: 'claude',
+            model: 'claude-sonnet-4-6',
+            status: 'completed',
+            branch: 'nanocrab/pr',
+            workspace: '/tmp/workspace-pr',
+            createPr: true,
+            prUrl: 'https://github.com/owner/repo/pull/1',
+            pushed: true,
+            output: '',
+            requestedBy: 'dashboard',
+            createdAt: new Date(0).toISOString(),
+            completedAt: new Date(0).toISOString(),
+          },
+          {
+            id: 'job-clean',
+            repo: 'owner/repo',
+            type: 'prompt',
+            prompt: 'Clean',
+            issueNumber: null,
+            issueTitle: null,
+            provider: 'claude',
+            model: 'claude-sonnet-4-6',
+            status: 'completed',
+            branch: 'nanocrab/clean',
+            workspace: '/tmp/workspace-clean',
+            createPr: true,
+            prUrl: null,
+            pushed: true,
+            output: '',
+            requestedBy: 'dashboard',
+            createdAt: new Date(0).toISOString(),
+            completedAt: new Date(0).toISOString(),
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    expect(cleanupCodingJob('job-active').reason).toMatch(/run is active/i);
+    expect(cleanupCodingJob('job-pending').reason).toMatch(
+      /decision is pending/i,
+    );
+    expect(cleanupCodingJob('job-unpushed').reason).toMatch(
+      /branch is not pushed/i,
+    );
+    expect(cleanupCodingJob('job-pr').reason).toMatch(/PR remains open/i);
+    expect(cleanupCodingJob('job-clean').ok).toBe(true);
   });
 });
