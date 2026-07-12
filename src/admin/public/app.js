@@ -648,6 +648,8 @@ const navIconPaths = {
     '<path d="M4.5 16a7.5 7.5 0 1 1 15 0"/><path d="M12 16l3.5-4.5"/><circle cx="12" cy="16" r=".7"/>',
   artifacts:
     '<path d="M9 4.5h5l3.5 3.5v8a1.5 1.5 0 0 1-1.5 1.5H9A1.5 1.5 0 0 1 7.5 16V6A1.5 1.5 0 0 1 9 4.5Z"/><path d="M14 4.5V8h3.5"/><path d="M4.5 8.5V18.5A1 1 0 0 0 5.5 19.5h7.5"/>',
+  'control-plane':
+    '<path d="M12 2.5 21.5 8v8L12 21.5 2.5 16V8L12 2.5Z"/><path d="M12 7.5v9"/><path d="M7.5 10.5 12 7.5l4.5 3"/><path d="M7.5 13.5 12 16.5l4.5-3"/>',
 };
 
 function navIcon(name, extraClass = '') {
@@ -1025,6 +1027,7 @@ const _pageMap = {
   autofix: 'renderAutofix',
   help: 'renderHelp',
   marketplace: 'renderMarketplace',
+  'control-plane': 'renderControlPlane',
   'session-detail': 'renderSessionDetail',
 };
 // Track which plugin frontends we've already loaded

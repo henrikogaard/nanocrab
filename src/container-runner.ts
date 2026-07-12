@@ -92,6 +92,73 @@ export interface ContainerOutput {
   error?: string;
 }
 
+interface ContainerProcessRecord {
+  proc: ChildProcess;
+  containerName: string;
+  startedAt: number;
+}
+
+const containerProcessRegistry = new Map<string, ContainerProcessRecord>();
+
+export function registerContainerProcess(
+  key: string,
+  proc: ChildProcess,
+  containerName: string,
+): void {
+  containerProcessRegistry.set(key, {
+    proc,
+    containerName,
+    startedAt: Date.now(),
+  });
+  proc.on('close', () => containerProcessRegistry.delete(key));
+  proc.on('error', () => containerProcessRegistry.delete(key));
+}
+
+export function cancelContainerProcess(
+  key: string,
+  reason?: string,
+): { cancelled: boolean; containerName?: string; error?: string } {
+  const record = containerProcessRegistry.get(key);
+  if (!record) {
+    return { cancelled: false, error: `No active container for key: ${key}` };
+  }
+  const { proc, containerName } = record;
+  containerProcessRegistry.delete(key);
+  logger.info({ key, containerName, reason }, 'Cancelling container process');
+
+  if (!proc.killed) {
+    let terminated = false;
+    if (proc.pid && proc.pid > 0) {
+      try {
+        process.kill(-proc.pid, 'SIGTERM');
+        terminated = true;
+      } catch (err) {
+        logger.warn(
+          { key, err },
+          'Failed to terminate process group, falling back to proc.kill',
+        );
+      }
+    }
+    if (!terminated) {
+      try {
+        proc.kill('SIGTERM');
+      } catch (err) {
+        logger.warn({ key, err }, 'Failed to terminate container process');
+      }
+    }
+  }
+
+  return { cancelled: true, containerName };
+}
+
+export function getContainerProcessKeys(): string[] {
+  return Array.from(containerProcessRegistry.keys());
+}
+
+export function clearContainerProcessRegistry(): void {
+  containerProcessRegistry.clear();
+}
+
 interface VolumeMount {
   hostPath: string;
   containerPath: string;
@@ -932,9 +999,11 @@ export async function runContainerAgent(
   return new Promise((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true,
     });
 
     onProcess(container, containerName);
+    registerContainerProcess(input.groupFolder, container, containerName);
 
     let stdout = '';
     let stderr = '';

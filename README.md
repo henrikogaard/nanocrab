@@ -69,6 +69,7 @@ Channel agents use the same workspace map. From WhatsApp, Signal, Telegram, Slac
 - **Memory, Wiki, Skills** — personal/cross-agent memory, durable reference pages, reusable workflow packages, suggestions, drafts, validation, and rollback
 - **Settings & Integrations** — 2FA (TOTP), themes, API tokens, assistant profile, providers, MCP servers, credentials, plugin management, and connector readiness
 - **Code workspace** — Git Ops, editor, test runner, snippets, review rules, Terminal/Developer Hub, Autofix, and GitHub Copilot
+- **AI Coding Control Plane** — pipeline board (`#/control-plane`) that maps a GitHub Project workflow to `planning`, `implement`, and `review` stages, assigns distinct agent profiles, gates stage transitions with approvals, and dispatches isolated worktrees with runtime-health fallback
 
 ### Plugin System
 
@@ -96,6 +97,7 @@ Additional plugins can be installed from git URLs via the Marketplace page, or c
 - **GitHub Autofix Pipeline** — webhook-driven or poller-driven: issue created/labeled or auto-picked → configured provider/model starts an approval-gated coding job → reviewed PR publish → bot notifies you; dashboard settings include auto-pick cadence, PR behavior, and max active jobs
 - **GitHub Connector Health** — Webhooks shows the receiver URL, secret/target/event setup, recent deliveries, and read-only connector health checks without revealing credentials
 - **PR Review** — an agent reviews every new PR and posts comments
+- **AI Coding Control Plane** — stage-based delivery pipeline: issue sync → planning → approved implement → approved review, each in its own worktree, with chat commands (`approve #n`, `reject #n`, `reassign #n`, etc.) and stale GitHub-field conflict handling
 
 Coding jobs are available only from the main group. Add
 `GITHUB_TOKEN=...` to `.env` or the service environment, then ask the bot things

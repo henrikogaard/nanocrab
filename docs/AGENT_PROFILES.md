@@ -27,6 +27,12 @@ The Agents cockpit stores profile identity, model choice, and capability policy:
 | `taskKinds` | Allowed work types, such as chat, cowork task, coding job, report, research, or scheduled check. Subscriptions and UI validation use this list. |
 | `channelBindings` | Channel-specific aliases or handles when a channel needs different naming. |
 | `writePolicy` | Stored write-policy intent for the profile layer. Existing host policy and approvals remain the enforced write gate. |
+| `instructions` | Extra operating instructions added to the profile context. |
+| `primaryRuntime` | Preferred CLI, provider, and model for the profile, e.g. `{ cli: 'claude', provider: 'claude', model: 'claude-sonnet-4-6' }`. |
+| `fallbackRuntimes` | Ordered list of alternate CLI/provider/model combinations to try when the primary runtime is missing or unhealthy. |
+| `stageRoles` | Which control-plane pipeline stages this profile can perform: `planning`, `implement`, and/or `review`. |
+| `repositoryScopes` | Repositories (`owner/repo`) this profile is allowed to work on. Required for control-plane pipeline assignment. |
+| `maxConcurrency` | Maximum number of simultaneous runs this profile may have. Defaults to `1`. |
 
 Profiles add identity, attribution, preferences, and narrower routing choices.
 They cannot widen runtime access. If a channel group cannot use a private skill,
@@ -99,6 +105,34 @@ Direct read-only answers can return to the invoking channel when the source
 group allows normal replies. Autonomous subscription-triggered sends, file
 writes, connector writes, uploads, PR creation, external webhooks, and other
 write-capable actions remain approval-gated by default.
+
+## CLI Health And Runtime Fallback
+
+The host probes the installed CLI tools that a profile can use (`claude`,
+`codex`, `devin`, `opencode`, `pi`, `mistral`) and records each runtime's
+status, executable, version, and last check. A probe may report `healthy`,
+`missing`, `unsupported`, `unauthenticated`, or `error`.
+
+When `primaryRuntime` is healthy, the control plane uses it for the matching
+stage. When it is missing or fails the probe, the control plane considers the
+profile's `fallbackRuntimes` in order. Read-only tasks can fall back
+automatically; write-capable work such as `implement` and `review` stages
+requires explicit approval before the fallback runtime is used. If no healthy
+fallback is available and approved, dispatch fails with a clear runtime error.
+
+## Stage Roles
+
+Control-plane pipelines move an issue through `planning`, `implement`, and
+`review` stages. An agent profile can be assigned to one or more stages through
+`stageRoles`:
+
+- `planning` — read-only investigation and plan artifact generation.
+- `implement` — writes commits, runs tests, pushes a branch, and opens a PR.
+- `review` — reviews the PR or branch and produces a review artifact.
+
+The same profile cannot be both `implement` and `review` for the same pipeline.
+Profiles must also include the pipeline's `repositoryScopes` to be assigned to a
+stage.
 
 ## Disable And Recovery
 

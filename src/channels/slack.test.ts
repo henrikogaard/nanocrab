@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { parseControlPlaneCommand } from '../control-plane/commands.js';
 import { createSlackChannel, splitSlackText } from './slack.js';
 import type { ChannelOpts } from './registry.js';
 
@@ -152,6 +153,51 @@ describe('SlackChannel', () => {
       true,
     );
     expect(channelOpts.onMessage).not.toHaveBeenCalled();
+  });
+
+  it('normalizes control-plane command mentions', async () => {
+    const app = fakeSlackApp();
+    const groups = {
+      'slack:C123': {
+        name: 'Engineering',
+        folder: 'slack_engineering',
+        trigger: '@NanoCrab',
+        added_at: '2026-07-09T00:00:00.000Z',
+      },
+    };
+    const channelOpts = opts(() => groups);
+    const channel = createSlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      channelOpts,
+      () => app,
+    );
+
+    await channel.connect();
+    await app.handlers.get('message')?.({
+      event: {
+        channel: 'C123',
+        ts: '1783611000.123',
+        user: 'U123',
+        text: '@NanoCrab status #128',
+      },
+      client: app.client,
+    });
+
+    expect(channelOpts.onMessage).toHaveBeenCalledWith(
+      'slack:C123',
+      expect.objectContaining({ content: '@NanoCrab status #128' }),
+    );
+
+    const [, msg] = vi.mocked(channelOpts.onMessage).mock.calls[0];
+    const command = parseControlPlaneCommand(msg.content, {
+      trigger: '@NanoCrab',
+    });
+    expect(command).toEqual({
+      action: 'status',
+      repository: undefined,
+      issueNumber: 128,
+    });
   });
 
   it('sends long Slack replies in bounded chunks', async () => {
