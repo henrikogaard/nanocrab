@@ -1,44 +1,69 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-import type {
-  AgentCliId,
-  AgentRuntimeHealth,
-} from './types.js';
+import type { AgentCliId, AgentRuntimeHealth } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
 export interface AgentRuntimeDefinition {
-  cli: AgentCliId;
-  executable: string;
-  versionArgs: string[];
+  readonly cli: AgentCliId;
+  readonly executable: string;
+  readonly versionArgs: readonly string[];
 }
 
 const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
-  claude: { cli: 'claude', executable: 'claude', versionArgs: ['--version'] },
-  codex: { cli: 'codex', executable: 'codex', versionArgs: ['--version'] },
-  pi: { cli: 'pi', executable: 'pi', versionArgs: ['--version'] },
+  claude: Object.freeze({
+    cli: 'claude',
+    executable: 'claude',
+    versionArgs: Object.freeze(['--version']),
+  }),
+  codex: Object.freeze({
+    cli: 'codex',
+    executable: 'codex',
+    versionArgs: Object.freeze(['--version']),
+  }),
+  pi: Object.freeze({
+    cli: 'pi',
+    executable: 'pi',
+    versionArgs: Object.freeze(['--version']),
+  }),
   opencode: {
     cli: 'opencode',
     executable: 'opencode',
-    versionArgs: ['--version'],
+    versionArgs: Object.freeze(['--version']),
   },
-  devin: { cli: 'devin', executable: 'devin', versionArgs: ['--version'] },
-  mistral: {
+  devin: Object.freeze({
+    cli: 'devin',
+    executable: 'devin',
+    versionArgs: Object.freeze(['--version']),
+  }),
+  mistral: Object.freeze({
     cli: 'mistral',
     executable: 'vibe',
-    versionArgs: ['--version'],
-  },
+    versionArgs: Object.freeze(['--version']),
+  }),
 };
+Object.freeze(RUNTIMES.opencode);
+Object.freeze(RUNTIMES);
+
+function copyDefinition(
+  definition: AgentRuntimeDefinition,
+): AgentRuntimeDefinition {
+  return {
+    ...definition,
+    versionArgs: [...definition.versionArgs],
+  };
+}
 
 export function listAgentRuntimeDefinitions(): AgentRuntimeDefinition[] {
-  return Object.values(RUNTIMES);
+  return Object.values(RUNTIMES).map(copyDefinition);
 }
 
 export function getAgentRuntimeDefinition(
   cli: AgentCliId,
 ): AgentRuntimeDefinition | undefined {
-  return RUNTIMES[cli];
+  const definition = RUNTIMES[cli];
+  return definition ? copyDefinition(definition) : undefined;
 }
 
 export function isAgentCliId(value: string): value is AgentCliId {
@@ -65,9 +90,13 @@ export async function probeAgentRuntime(
   const checkedAt = new Date().toISOString();
 
   try {
-    const { stdout } = await runner(definition.executable, definition.versionArgs, {
-      timeout: 10000,
-    });
+    const { stdout } = await runner(
+      definition.executable,
+      [...definition.versionArgs],
+      {
+        timeout: 10000,
+      },
+    );
     const version = parseVersion(stdout.trim());
 
     return {
@@ -122,9 +151,9 @@ function parseVersion(output: string): string | null {
   return match ? match[1] : trimmed;
 }
 
-export async function probeAllAgentRuntimes(
-  options?: { execFile?: typeof execFileAsync },
-): Promise<AgentRuntimeHealth[]> {
+export async function probeAllAgentRuntimes(options?: {
+  execFile?: typeof execFileAsync;
+}): Promise<AgentRuntimeHealth[]> {
   const results: AgentRuntimeHealth[] = [];
   await Promise.allSettled(
     Object.values(RUNTIMES).map(async (def) => {

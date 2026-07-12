@@ -30,10 +30,37 @@ describe('agent runtime registry', () => {
     });
   });
 
-  it('reports missing runtime when executable not found', async () => {
-    const execFile = vi.fn().mockRejectedValue(
-      Object.assign(new Error('not found'), { code: 'ENOENT' }),
+  it('does not expose mutable runtime definitions', async () => {
+    const definitions = listAgentRuntimeDefinitions();
+    const exposed = definitions[0] as unknown as {
+      executable: string;
+      versionArgs: string[];
+    };
+    exposed.executable = '/tmp/run-anything';
+    exposed.versionArgs[0] = '--execute';
+    definitions.push({
+      cli: 'codex',
+      executable: '/tmp/second-run-anything',
+      versionArgs: ['--evil'],
+    });
+    const execFile = vi.fn().mockResolvedValue({ stdout: '1.2.3', stderr: '' });
+
+    await probeAgentRuntime('claude', { execFile });
+
+    expect(execFile).toHaveBeenCalledWith(
+      'claude',
+      ['--version'],
+      expect.anything(),
     );
+    expect(listAgentRuntimeDefinitions()).toHaveLength(6);
+  });
+
+  it('reports missing runtime when executable not found', async () => {
+    const execFile = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error('not found'), { code: 'ENOENT' }),
+      );
 
     const result = await probeAgentRuntime('pi', { execFile });
 
@@ -76,13 +103,19 @@ describe('agent runtime registry', () => {
       status: 'healthy',
     });
     expect(result.version).toBe('0.9.1');
-    expect(execFile).toHaveBeenCalledWith('vibe', ['--version'], expect.anything());
+    expect(execFile).toHaveBeenCalledWith(
+      'vibe',
+      ['--version'],
+      expect.anything(),
+    );
   });
 
   it('reports error status for non-ENOENT failures', async () => {
-    const execFile = vi.fn().mockRejectedValue(
-      Object.assign(new Error('permission denied'), { code: 'EACCES' }),
-    );
+    const execFile = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error('permission denied'), { code: 'EACCES' }),
+      );
 
     const result = await probeAgentRuntime('claude', { execFile });
 

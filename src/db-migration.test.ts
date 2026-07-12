@@ -5,6 +5,67 @@ import path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 
 describe('database migrations', () => {
+  it('adds agent runtime profile columns to an existing database', async () => {
+    const repoRoot = process.cwd();
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocrab-db-test-'));
+
+    try {
+      process.chdir(tempDir);
+      fs.mkdirSync(path.join(tempDir, 'store'), { recursive: true });
+      const dbPath = path.join(tempDir, 'store', 'messages.db');
+      const legacyDb = new Database(dbPath);
+      legacyDb.exec(`
+        CREATE TABLE agent_profiles (
+          id TEXT PRIMARY KEY,
+          handle TEXT NOT NULL UNIQUE,
+          display_name TEXT NOT NULL,
+          avatar TEXT,
+          description TEXT,
+          personality TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          provider_profile_id TEXT,
+          provider TEXT,
+          model TEXT,
+          tool_policy TEXT NOT NULL,
+          allowed_mcp_servers_json TEXT,
+          skills_json TEXT NOT NULL,
+          memory_scopes_json TEXT NOT NULL,
+          task_kinds_json TEXT NOT NULL,
+          channel_bindings_json TEXT NOT NULL,
+          write_policy_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO agent_profiles (
+          id, handle, display_name, tool_policy, skills_json,
+          memory_scopes_json, task_kinds_json, channel_bindings_json,
+          write_policy_json, created_at, updated_at
+        ) VALUES (
+          'agent_legacy', 'legacy', 'Legacy', 'approval-required', '[]',
+          '[]', '["chat"]', '{}', '{}', '2026-01-01', '2026-01-01'
+        );
+      `);
+      legacyDb.close();
+
+      vi.resetModules();
+      const { initDatabase, getAgentProfileRow, _closeDatabase } =
+        await import('./db.js');
+      initDatabase();
+
+      expect(getAgentProfileRow('agent_legacy')).toMatchObject({
+        instructions: null,
+        primaryRuntime: null,
+        fallbackRuntimes: [],
+        stageRoles: [],
+        repositoryScopes: [],
+        maxConcurrency: 1,
+      });
+      _closeDatabase();
+    } finally {
+      process.chdir(repoRoot);
+    }
+  });
+
   it('defaults Telegram backfill chats to direct messages', async () => {
     const repoRoot = process.cwd();
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocrab-db-test-'));

@@ -356,6 +356,23 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_audit_events_decision ON audit_events(decision);
   `);
 
+  for (const [column, definition] of [
+    ['instructions', 'TEXT'],
+    ['primary_runtime_json', 'TEXT'],
+    ['fallback_runtimes_json', `TEXT NOT NULL DEFAULT '[]'`],
+    ['stage_roles_json', `TEXT NOT NULL DEFAULT '[]'`],
+    ['repository_scopes_json', `TEXT NOT NULL DEFAULT '[]'`],
+    ['max_concurrency', 'INTEGER NOT NULL DEFAULT 1'],
+  ]) {
+    try {
+      database.exec(
+        `ALTER TABLE agent_profiles ADD COLUMN ${column} ${definition}`,
+      );
+    } catch {
+      /* column already exists */
+    }
+  }
+
   // Add context_mode column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -2039,7 +2056,8 @@ function parsePrimaryRuntimeField(
   ) {
     return {
       cli: parsed.cli as import('./types.js').AgentRuntimeSelection['cli'],
-      provider: parsed.provider as import('./types.js').AgentRuntimeSelection['provider'],
+      provider:
+        parsed.provider as import('./types.js').AgentRuntimeSelection['provider'],
       model: parsed.model,
     };
   }
@@ -2061,7 +2079,8 @@ function parseFallbackRuntimesField(
     )
     .map((item) => ({
       cli: item.cli as import('./types.js').AgentRuntimeSelection['cli'],
-      provider: item.provider as import('./types.js').AgentRuntimeSelection['provider'],
+      provider:
+        item.provider as import('./types.js').AgentRuntimeSelection['provider'],
       model: item.model,
     }));
 }

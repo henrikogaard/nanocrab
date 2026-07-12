@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 
-import { isAgentProvider } from './agent-provider.js';
+import { isAgentProvider, isValidAgentModel } from './agent-provider.js';
 import { isAgentCliId } from './agent-runtime-registry.js';
 import {
   getAgentProfileRow,
@@ -125,13 +125,9 @@ export function normalizeAgentHandle(value: string): string {
 
 const STAGE_ROLES: AgentStageRole[] = ['planning', 'implement', 'review'];
 
-export function validateRuntimeSelection(
-  runtime: AgentRuntimeSelection,
-): void {
+export function validateRuntimeSelection(runtime: AgentRuntimeSelection): void {
   if (!isAgentCliId(runtime.cli)) {
-    throw new Error(
-      `agent runtime CLI is not supported: ${runtime.cli}`,
-    );
+    throw new Error(`agent runtime CLI is not supported: ${runtime.cli}`);
   }
   if (runtime.provider && !isAgentProvider(runtime.provider)) {
     throw new Error(
@@ -141,15 +137,18 @@ export function validateRuntimeSelection(
   if (!runtime.model?.trim()) {
     throw new Error('agent runtime model is required');
   }
+  if (!isValidAgentModel(runtime.provider, runtime.model)) {
+    throw new Error(
+      `agent runtime model is not supported for provider ${runtime.provider}: ${runtime.model}`,
+    );
+  }
 }
 
 function validateStageRoles(roles: AgentStageRole[] | undefined): void {
   if (!roles || roles.length === 0) return;
   const invalid = roles.find((role) => !STAGE_ROLES.includes(role));
   if (invalid) {
-    throw new Error(
-      `agent profile stageRole is not supported: ${invalid}`,
-    );
+    throw new Error(`agent profile stageRole is not supported: ${invalid}`);
   }
 }
 
@@ -176,6 +175,13 @@ export function validateAgentProfileInput(input: AgentProfileInput): void {
     throw new Error(
       `agent profile toolPolicy is not supported: ${input.toolPolicy}`,
     );
+  }
+
+  if (
+    input.maxConcurrency !== undefined &&
+    (!Number.isInteger(input.maxConcurrency) || input.maxConcurrency <= 0)
+  ) {
+    throw new Error('agent profile maxConcurrency must be a positive integer');
   }
 
   validateOptionalStringList(input, 'allowedMcpServers', true);
@@ -296,9 +302,7 @@ export function updateAgentProfile(
           ? existing.fallbackRuntimes
           : patch.fallbackRuntimes,
       stageRoles:
-        patch.stageRoles === undefined
-          ? existing.stageRoles
-          : patch.stageRoles,
+        patch.stageRoles === undefined ? existing.stageRoles : patch.stageRoles,
       repositoryScopes:
         patch.repositoryScopes === undefined
           ? existing.repositoryScopes

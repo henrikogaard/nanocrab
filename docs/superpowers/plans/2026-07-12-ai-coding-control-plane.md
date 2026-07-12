@@ -159,7 +159,9 @@ export interface AgentRuntimeSelection {
   model: string;
 }
 
-export interface AgentRuntimeHealth extends AgentRuntimeSelection {
+export interface AgentRuntimeHealth {
+  cli: AgentCliId;
+  executable: string;
   status: 'healthy' | 'missing' | 'unauthenticated' | 'error';
   version: string | null;
   checkedAt: string;
@@ -184,7 +186,7 @@ const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
   pi: { cli: 'pi', executable: 'pi', versionArgs: ['--version'] },
   opencode: { cli: 'opencode', executable: 'opencode', versionArgs: ['--version'] },
   devin: { cli: 'devin', executable: 'devin', versionArgs: ['--version'] },
-  mistral: { cli: 'mistral', executable: 'mistral', versionArgs: ['--version'] },
+  mistral: { cli: 'mistral', executable: 'vibe', versionArgs: ['--version'] },
 };
 ```
 

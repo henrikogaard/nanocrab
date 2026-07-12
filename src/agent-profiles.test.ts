@@ -353,6 +353,33 @@ describe('agent profile persistence', () => {
     ).toThrow(/CLI is not supported/i);
   });
 
+  it('rejects invalid runtime provider and model combinations', () => {
+    expect(() =>
+      buildAgentProfile({
+        handle: 'forge',
+        displayName: 'Forge',
+        primaryRuntime: {
+          cli: 'codex',
+          provider: 'codex',
+          model: 'claude-sonnet-4-6',
+        },
+      }),
+    ).toThrow(/model.*not supported/i);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])(
+    'rejects non-positive or non-integer maxConcurrency %s',
+    (maxConcurrency) => {
+      expect(() =>
+        buildAgentProfile({
+          handle: 'forge',
+          displayName: 'Forge',
+          maxConcurrency,
+        }),
+      ).toThrow(/maxConcurrency.*positive integer/i);
+    },
+  );
+
   it('preserves an ordered fallback chain', () => {
     const profile = buildAgentProfile({
       handle: 'forge',
