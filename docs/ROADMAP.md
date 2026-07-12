@@ -202,6 +202,36 @@ Goal: work with GitHub repos and produce PRs while the owner is on the go.
 
 ---
 
+## AI Coding Control Plane
+
+Goal: coordinate distinct planning, implement, and review agents across a
+GitHub Project workflow with approval gates and isolated worktrees.
+
+- Pipeline board and dashboard:
+  - DONE: `#/control-plane` page shows pipeline overview, runtime health, agent roster, runs, pending decisions, and settings.
+  - DONE: `/api/control-plane/*` routes for pipelines, sync, runtimes, runs, decisions, and approvals.
+- Pipeline configuration:
+  - DONE: pipelines map to one GitHub Project and one `Workflow` single-select field.
+  - DONE: stages are ordered `planning`, `implement`, `review` with stable GitHub option IDs.
+  - DONE: each stage binds to an agent profile with matching `stageRoles` and `repositoryScopes`.
+- Agent profiles:
+  - DONE: `primaryRuntime`, `fallbackRuntimes`, `stageRoles`, and `repositoryScopes` fields.
+  - DONE: runtime health probes (`claude`, `codex`, `devin`, `opencode`, `pi`, `mistral`) with healthy/missing/unsupported/unauthenticated/error states.
+  - DONE: runtime fallback for write-capable stages requires approval.
+- Stage dispatch and evidence:
+  - DONE: `syncPipeline` reads the GitHub Project state and produces dispatch candidates.
+  - DONE: each stage dispatches to an isolated `data/coding-workspaces/jobs/` worktree.
+  - DONE: stage evidence validation for `plan`, `tests`, `pushed_branch`, `open_pr`, and `review`.
+  - DONE: `proposeStageTransition` creates pending decisions with expected GitHub field IDs and timestamps.
+- Decision handling:
+  - DONE: `approve`, `reject`, `revise`, `reassign`, `pause`, and `cancel` commands from dashboard and chat.
+  - DONE: approval writes the target GitHub field and reads it back before dispatch.
+  - DONE: stale GitHub field conflicts reject duplicate commands and prevent duplicate jobs.
+- End-to-end proof:
+  - DONE: integration test (`src/control-plane/control-plane.integration.test.ts`) passes with injected GitHub, runtime, and job transports, covering planning → implement → review with distinct agents, isolated worktrees, and stale deduplication.
+
+---
+
 ## Reports, Documents, And Design Work
 
 Goal: ask NanoCrab for reports, documents, design notes, and generated assets from chat or dashboard.
