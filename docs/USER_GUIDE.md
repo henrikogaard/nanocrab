@@ -173,6 +173,75 @@ Dashboard and chat commands drive the same host-managed coding-job lifecycle.
 The agent container works in an isolated job workspace under
 `data/coding-workspaces/jobs/`.
 
+## AI Coding Control Plane
+
+The **Control Plane** dashboard page (`#/control-plane`) is an approval-gated
+pipeline for delivering GitHub issues with distinct agents. A pipeline is
+mapped to one GitHub Project and a single `Workflow` single-select field. It
+moves issues through `planning`, `implement`, and `review` stages, each tied to
+an agent profile with the matching `stageRoles`.
+
+### Operator Setup
+
+1. Enable `GITHUB_TOKEN` and a registered GitHub Project in the workspace.
+2. Create agent profiles with `stageRoles` (`planning`, `implement`, `review`)
+   and `repositoryScopes` covering the target repos.
+3. Configure `primaryRuntime` and optional `fallbackRuntimes` for each profile.
+4. Use **Control Plane -> Pipelines** or `POST /api/control-plane/pipelines`
+   to create the pipeline. Provide the stable GitHub option IDs for each stage.
+5. Open **Control Plane -> Overview** to see the board, pending decisions, and
+   runtime health.
+
+### Workflow
+
+1. Sync an issue from the GitHub Project (dashboard **Sync** button or
+   `POST /api/control-plane/pipelines/:id/sync`).
+2. The planning agent dispatches into an isolated worktree and produces a plan
+   artifact.
+3. When planning evidence is valid, a pending `implement` decision is created.
+4. Approve the decision to dispatch the implement agent, which writes commits,
+   runs tests, pushes a branch, and opens a PR.
+5. When the required evidence (`pushed_branch`, `open_pr`, passing tests) is
+   present, a pending `review` decision is created.
+6. Approve the review decision to dispatch the review agent in a separate
+   isolated worktree. It must be a different profile/worktree from the
+   implement stage.
+7. Review artifacts record the decision outcome and the pipeline stage moves
+   forward.
+
+### Decision Actions
+
+From the dashboard, the pending decision card shows **Approve**, **Reject**,
+**Revise**, and **Reassign** actions. From the main control group you can type:
+
+```text
+@NanoCrab status #120
+@NanoCrab approve #120
+@NanoCrab approve #120 to implement
+@NanoCrab reject #120: the plan is too broad
+@NanoCrab revise #120: split the plan into two PRs
+@NanoCrab reassign #120 planning to @otheragent
+@NanoCrab pause #120
+@NanoCrab cancel #120
+```
+
+### Authorization
+
+Control plane dashboard routes require admin role. Chat commands are only
+honored when the sender is authorized and the command is processed from the
+main group. Unauthorized commands are rejected; `approve`/`reject`/`reassign`
+are disabled for non-owners.
+
+### Worktree And PR Requirements
+
+Each stage runs in its own `data/coding-workspaces/jobs/` worktree. Planning
+produces a `plan` artifact. Implementation must produce `tests` and `open_pr`
+evidence. Review produces a `review` artifact. A stage cannot advance until its
+required evidence is validated and the GitHub Project field still matches the
+expected option ID and timestamp. If the GitHub field has changed since the
+decision was proposed, the command is rejected as stale, preventing duplicate
+jobs.
+
 ## Agent Profiles
 
 Use **Agents** when you want named profiles such as `RepoFixer`, `ManualHost`,
