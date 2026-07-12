@@ -521,6 +521,35 @@ describe('coding jobs', () => {
     expect(loadCodingJobs()[0].agentProfileId).toBe('agent_repo_fixer');
   });
 
+  it('stores pipeline, stage, decision, and actual runtime attribution on coding jobs', async () => {
+    mockGitHubFetch((url) => {
+      if (url.includes('/repos/owner/repo')) return { default_branch: 'main' };
+      return {};
+    });
+    await registerCodingRepo({ repo: 'owner/repo', labels: ['autofix'] });
+
+    const actualRuntime = {
+      cli: 'claude' as const,
+      provider: 'claude' as const,
+      model: 'claude-sonnet-4-6',
+    };
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Fix pipeline attribution',
+      requestedBy: 'control-plane',
+      pipelineId: 'pipeline_1',
+      stageId: 'stage_planning',
+      decisionId: 'decision_1',
+      actualRuntime,
+    });
+
+    expect(job.pipelineId).toBe('pipeline_1');
+    expect(job.stageId).toBe('stage_planning');
+    expect(job.decisionId).toBe('decision_1');
+    expect(job.actualRuntime).toEqual(actualRuntime);
+    expect(loadCodingJobs()[0].actualRuntime).toEqual(actualRuntime);
+  });
+
   it('normalizes missing agent profile attribution fields to null', () => {
     fs.mkdirSync(`${TEST_ROOT}/store`, { recursive: true });
     fs.writeFileSync(
@@ -556,6 +585,10 @@ describe('coding jobs', () => {
 
     expect(job.agentProfileId).toBeNull();
     expect(job.sourceSubscriptionId).toBeNull();
+    expect(job.pipelineId).toBeNull();
+    expect(job.stageId).toBeNull();
+    expect(job.decisionId).toBeNull();
+    expect(job.actualRuntime).toBeNull();
   });
 
   it('includes approved repo preference rules in coding prompts', async () => {
