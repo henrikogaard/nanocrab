@@ -162,7 +162,7 @@ export interface AgentRuntimeSelection {
 export interface AgentRuntimeHealth {
   cli: AgentCliId;
   executable: string;
-  status: 'healthy' | 'missing' | 'unauthenticated' | 'error';
+  status: 'healthy' | 'missing' | 'unsupported' | 'unauthenticated' | 'error';
   version: string | null;
   checkedAt: string;
   detail: string;
@@ -181,12 +181,12 @@ them through promisified `execFile`:
 
 ```ts
 const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
-  claude: { cli: 'claude', executable: 'claude', versionArgs: ['--version'] },
-  codex: { cli: 'codex', executable: 'codex', versionArgs: ['--version'] },
-  pi: { cli: 'pi', executable: 'pi', versionArgs: ['--version'] },
-  opencode: { cli: 'opencode', executable: 'opencode', versionArgs: ['--version'] },
-  devin: { cli: 'devin', executable: 'devin', versionArgs: ['--version'] },
-  mistral: { cli: 'mistral', executable: 'vibe', versionArgs: ['--version'] },
+  claude: { cli: 'claude', executable: 'claude', versionArgs: ['--version'], codingRunnerSupported: true },
+  codex: { cli: 'codex', executable: 'codex', versionArgs: ['--version'], codingRunnerSupported: true },
+  pi: { cli: 'pi', executable: 'pi', versionArgs: ['--version'], codingRunnerSupported: false },
+  opencode: { cli: 'opencode', executable: 'opencode', versionArgs: ['--version'], codingRunnerSupported: true },
+  devin: { cli: 'devin', executable: 'devin', versionArgs: ['--version'], codingRunnerSupported: false },
+  mistral: { cli: 'mistral', executable: 'vibe', versionArgs: ['--version'], codingRunnerSupported: false },
 };
 ```
 

@@ -42,6 +42,7 @@ describe('agent runtime registry', () => {
       cli: 'codex',
       executable: '/tmp/second-run-anything',
       versionArgs: ['--evil'],
+      codingRunnerSupported: true,
     });
     const execFile = vi.fn().mockResolvedValue({ stdout: '1.2.3', stderr: '' });
 
@@ -89,25 +90,38 @@ describe('agent runtime registry', () => {
     expect(result.version).toBe('1.2.3');
   });
 
-  it('reports healthy mistral runtime using vibe executable', async () => {
-    const execFile = vi.fn().mockResolvedValue({
-      stdout: 'vibe 0.9.1\n',
-      stderr: '',
-    });
+  it('distinguishes installed unsupported runtimes from a supported runtime', async () => {
+    const execFile = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: 'pi 0.4.0\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'devin 1.1.0\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'vibe 0.9.1\n', stderr: '' })
+      .mockResolvedValueOnce({ stdout: 'codex-cli 1.2.3\n', stderr: '' });
 
-    const result = await probeAgentRuntime('mistral', { execFile });
+    for (const [cli, executable, version] of [
+      ['pi', 'pi', '0.4.0'],
+      ['devin', 'devin', '1.1.0'],
+      ['mistral', 'vibe', '0.9.1'],
+    ] as const) {
+      await expect(probeAgentRuntime(cli, { execFile })).resolves.toMatchObject(
+        {
+          cli,
+          executable,
+          status: 'unsupported',
+          version,
+          detail: expect.stringMatching(/not supported.*coding.*runner/i),
+        },
+      );
+    }
 
-    expect(result).toMatchObject({
-      cli: 'mistral',
-      executable: 'vibe',
+    await expect(
+      probeAgentRuntime('codex', { execFile }),
+    ).resolves.toMatchObject({
+      cli: 'codex',
+      executable: 'codex',
       status: 'healthy',
+      version: '1.2.3',
     });
-    expect(result.version).toBe('0.9.1');
-    expect(execFile).toHaveBeenCalledWith(
-      'vibe',
-      ['--version'],
-      expect.anything(),
-    );
   });
 
   it('reports error status for non-ENOENT failures', async () => {

@@ -9,6 +9,7 @@ export interface AgentRuntimeDefinition {
   readonly cli: AgentCliId;
   readonly executable: string;
   readonly versionArgs: readonly string[];
+  readonly codingRunnerSupported: boolean;
 }
 
 const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
@@ -16,31 +17,37 @@ const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
     cli: 'claude',
     executable: 'claude',
     versionArgs: Object.freeze(['--version']),
+    codingRunnerSupported: true,
   }),
   codex: Object.freeze({
     cli: 'codex',
     executable: 'codex',
     versionArgs: Object.freeze(['--version']),
+    codingRunnerSupported: true,
   }),
   pi: Object.freeze({
     cli: 'pi',
     executable: 'pi',
     versionArgs: Object.freeze(['--version']),
+    codingRunnerSupported: false,
   }),
   opencode: {
     cli: 'opencode',
     executable: 'opencode',
     versionArgs: Object.freeze(['--version']),
+    codingRunnerSupported: true,
   },
   devin: Object.freeze({
     cli: 'devin',
     executable: 'devin',
     versionArgs: Object.freeze(['--version']),
+    codingRunnerSupported: false,
   }),
   mistral: Object.freeze({
     cli: 'mistral',
     executable: 'vibe',
     versionArgs: Object.freeze(['--version']),
+    codingRunnerSupported: false,
   }),
 };
 Object.freeze(RUNTIMES.opencode);
@@ -98,6 +105,17 @@ export async function probeAgentRuntime(
       },
     );
     const version = parseVersion(stdout.trim());
+
+    if (!definition.codingRunnerSupported) {
+      return {
+        cli: definition.cli,
+        executable: definition.executable,
+        status: 'unsupported',
+        version,
+        checkedAt,
+        detail: `${definition.cli} is installed but not supported by the current coding-job runner`,
+      };
+    }
 
     return {
       cli: definition.cli,

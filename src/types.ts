@@ -20,7 +20,7 @@ export interface AgentRuntimeSelection {
 export interface AgentRuntimeHealth {
   cli: AgentCliId;
   executable: string;
-  status: 'healthy' | 'missing' | 'unauthenticated' | 'error';
+  status: 'healthy' | 'missing' | 'unsupported' | 'unauthenticated' | 'error';
   version: string | null;
   checkedAt: string;
   detail: string;
