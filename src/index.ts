@@ -16,6 +16,10 @@ import {
   STORE_DIR,
   TIMEZONE,
 } from './config.js';
+import {
+  executeControlPlaneCommand,
+  parseControlPlaneCommand,
+} from './control-plane/commands.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
@@ -265,6 +269,49 @@ function isPrimaryBot(jid: string, group: RegisteredGroup): boolean {
     )
     .sort((a, b) => a[1].added_at.localeCompare(b[1].added_at))[0];
   return fallbackPrimary?.[0] === jid;
+}
+
+export async function processControlPlaneCommand(
+  channel: Channel,
+  chatJid: string,
+  group: RegisteredGroup,
+  messages: NewMessage[],
+): Promise<boolean> {
+  const latestMessage = messages[messages.length - 1];
+  if (!latestMessage) return false;
+
+  const trigger = group.isMain ? undefined : group.trigger;
+  const command = parseControlPlaneCommand(latestMessage.content, { trigger });
+  if (!command) return false;
+
+  const allowlistCfg = loadSenderAllowlist();
+  const isAuthorized =
+    latestMessage.is_from_me ||
+    isSenderAllowed(chatJid, latestMessage.sender, allowlistCfg);
+  const actor = isAuthorized ? 'owner' : latestMessage.sender;
+
+  try {
+    const result = await executeControlPlaneCommand(command, {
+      channel: channel.name,
+      chatJid,
+      senderId: latestMessage.sender,
+      senderName: latestMessage.sender_name,
+      messageId: latestMessage.id,
+      isAuthorized,
+      actor,
+    });
+    if (result.text) {
+      const text = formatOutbound(result.text, chatJid);
+      if (text) await sendBotTextReply(channel, chatJid, text);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const errorText = `Command failed: ${message}`;
+    const text = formatOutbound(errorText, chatJid);
+    if (text) await sendBotTextReply(channel, chatJid, text);
+  }
+
+  return true;
 }
 
 async function sendBotTextReply(
@@ -572,10 +619,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const latestMessageText = missedMessages[missedMessages.length - 1].content;
+  const latestMessage = missedMessages[missedMessages.length - 1];
+
+  const controlPlaneHandled = await processControlPlaneCommand(
+    channel,
+    chatJid,
+    group,
+    missedMessages,
+  );
+  if (controlPlaneHandled) {
+    lastAgentTimestamp[chatJid] = latestMessage.timestamp;
+    saveState();
+    return true;
+  }
+
+  const latestMessageText = latestMessage.content;
   const promptMessages = getPromptContextMessages(
     chatJid,
-    missedMessages[missedMessages.length - 1].timestamp,
+    latestMessage.timestamp,
     missedMessages,
   );
   let runAgentOptions: RunAgentOptions = {};
@@ -1046,6 +1107,19 @@ async function startMessageLoop(): Promise<void> {
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
           const latestMessageToSend = messagesToSend[messagesToSend.length - 1];
+
+          const controlPlaneHandled = await processControlPlaneCommand(
+            channel,
+            chatJid,
+            group,
+            messagesToSend,
+          );
+          if (controlPlaneHandled) {
+            lastAgentTimestamp[chatJid] = latestMessageToSend.timestamp;
+            saveState();
+            continue;
+          }
+
           const promptMessages = getPromptContextMessages(
             chatJid,
             latestMessageToSend.timestamp,

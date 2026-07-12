@@ -40,6 +40,7 @@ export function stripInternalTags(text: string): string {
 function formatSignalText(text: string): string {
   return text
     .replace(/```(?:\w+)?\n?([\s\S]*?)```/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/\*\*([^*\n][\s\S]*?[^*\n])\*\*/g, '$1')

@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
+import { parseControlPlaneCommand } from '../control-plane/commands.js';
+
 // --- Mocks ---
 
 // Mock registry (registerChannel runs at import time)
@@ -12,7 +14,13 @@ vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 vi.mock('../config.js', () => ({
   STORE_DIR: '/tmp/nanocrab-test-store',
   ASSISTANT_NAME: 'Andy',
+  DEFAULT_TRIGGER: '@Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  getTriggerPattern: (trigger: string = '@Andy') =>
+    new RegExp(
+      '^' + trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b',
+      'i',
+    ),
 }));
 
 // Mock logger
@@ -577,6 +585,35 @@ describe('TelegramChannel', () => {
           content: 'check https://example.com',
         }),
       );
+    });
+
+    it('normalizes control-plane command messages', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({
+        text: '@Andy status #128',
+        entities: [],
+      });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: '@Andy status #128',
+        }),
+      );
+
+      const [, msg] = vi.mocked(opts.onMessage).mock.calls[0];
+      const command = parseControlPlaneCommand(msg.content, {
+        trigger: '@Andy',
+      });
+      expect(command).toEqual({
+        action: 'status',
+        repository: undefined,
+        issueNumber: 128,
+      });
     });
   });
 

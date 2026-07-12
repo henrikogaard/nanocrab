@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execSync, spawn } from 'child_process';
 
+import { parseControlPlaneCommand } from '../control-plane/commands.js';
+
 vi.mock('../env.js', () => ({
   readEnvFile: vi.fn(() => ({ SIGNAL_PHONE_NUMBER: '+4712345678' })),
 }));
@@ -21,6 +23,7 @@ vi.mock('child_process', () => ({
     return proc;
   }),
   execSync: vi.fn(() => ''),
+  execFile: vi.fn(),
 }));
 
 import { SignalChannel } from './signal.js';
@@ -209,6 +212,66 @@ describe('SignalChannel connection status', () => {
         content: '@Taskekrabben ping',
       }),
     );
+  });
+
+  it('delivers control-plane command messages', async () => {
+    mockOpts.registeredGroups.mockReturnValue({
+      'sig:group.test': {
+        name: 'Test Group',
+        folder: 'signal_test',
+        trigger: '@Taskekrabben',
+        enabled: true,
+      },
+    });
+
+    const event = {
+      jsonrpc: '2.0',
+      method: 'receive',
+      params: {
+        envelope: {
+          sourceNumber: '+4798765432',
+          sourceName: 'Henrik',
+          timestamp: 1782256000000,
+          dataMessage: {
+            timestamp: 1782256000000,
+            groupInfo: { groupId: 'test' },
+            message: '@Taskekrabben status #128',
+          },
+        },
+        account: '+4712345678',
+      },
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/api/v1/events')) {
+        return eventResponse(`data: ${JSON.stringify(event)}\n\n`);
+      }
+      return {
+        ok: true,
+        json: async () => ({ jsonrpc: '2.0', id: 1, result: 'v1.2.3' }),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await channel.connect();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(mockOpts.onMessage).toHaveBeenCalledWith(
+      'sig:group.test',
+      expect.objectContaining({
+        chat_jid: 'sig:group.test',
+        content: '@Taskekrabben status #128',
+      }),
+    );
+
+    const [, msg] = vi.mocked(mockOpts.onMessage).mock.calls[0];
+    const command = parseControlPlaneCommand(msg.content, {
+      trigger: '@Taskekrabben',
+    });
+    expect(command).toEqual({
+      action: 'status',
+      repository: undefined,
+      issueNumber: 128,
+    });
   });
 
   it('reports a diagnostic reason after disconnect', async () => {

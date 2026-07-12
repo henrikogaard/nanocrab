@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
+import { parseControlPlaneCommand } from '../control-plane/commands.js';
 
 // --- Mocks ---
 
@@ -8,6 +9,13 @@ vi.mock('../config.js', () => ({
   STORE_DIR: '/tmp/nanocrab-test-store',
   ASSISTANT_NAME: 'Andy',
   ASSISTANT_HAS_OWN_NUMBER: false,
+  DEFAULT_TRIGGER: '@Andy',
+  TRIGGER_PATTERN: /^@Andy\b/i,
+  getTriggerPattern: (trigger: string = '@Andy') =>
+    new RegExp(
+      '^' + trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b',
+      'i',
+    ),
 }));
 
 // Mock logger
@@ -44,6 +52,7 @@ vi.mock('fs', async () => {
 // Mock child_process (used for osascript notification)
 vi.mock('child_process', () => ({
   exec: vi.fn(),
+  execFile: vi.fn(),
 }));
 
 // Build a fake WASocket that's an EventEmitter with the methods we need
@@ -689,6 +698,42 @@ describe('WhatsAppChannel', () => {
         'whatsapp',
         false,
       );
+    });
+
+    it('normalizes control-plane command mentions', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-cp',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: { conversation: '@9876543210 status #128' },
+          pushName: 'Henrik',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({ content: '@Andy status #128' }),
+      );
+
+      const [, msg] = vi.mocked(opts.onMessage).mock.calls[0];
+      const command = parseControlPlaneCommand(msg.content, {
+        trigger: '@Andy',
+      });
+      expect(command).toEqual({
+        action: 'status',
+        repository: undefined,
+        issueNumber: 128,
+      });
     });
   });
 
