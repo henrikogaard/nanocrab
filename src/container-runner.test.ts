@@ -128,7 +128,12 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import {
+  runContainerAgent,
+  ContainerOutput,
+  cancelContainerProcess,
+  getContainerProcessKeys,
+} from './container-runner.js';
 import { spawn } from 'child_process';
 import { readEnvFile } from './env.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
@@ -923,5 +928,57 @@ describe('container-runner cowork project mounts', () => {
     expect(payload.runtimeCapabilities.allowedToolActions).toContain(
       'external.write',
     );
+  });
+});
+
+describe('container-runner process registry', () => {
+  let killSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    killSpy = vi.spyOn(process, 'kill').mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    killSpy.mockRestore();
+  });
+
+  it('registers a spawned container and cancels it by group folder', async () => {
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const cancelResult = cancelContainerProcess('test-group');
+    expect(cancelResult.cancelled).toBe(true);
+    expect(cancelResult.containerName).toBeDefined();
+
+    expect(killSpy).toHaveBeenCalledWith(-12345, 'SIGTERM');
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(getContainerProcessKeys()).toEqual([]);
+  });
+
+  it('returns not cancelled when the key has no active container', () => {
+    const result = cancelContainerProcess('unknown-group');
+    expect(result.cancelled).toBe(false);
+    expect(result.error).toMatch(/No active container for key/i);
+  });
+
+  it('falls back to proc.kill when process group kill fails', async () => {
+    killSpy.mockImplementation(() => {
+      throw new Error('kill ESRCH');
+    });
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+    cancelContainerProcess('test-group');
+
+    expect(fakeProc.kill).toHaveBeenCalledWith('SIGTERM');
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
   });
 });

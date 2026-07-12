@@ -38,6 +38,16 @@ import { resolveProviderFallbackForAction } from './provider-router.js';
 import { logAuditEvent } from './audit-log.js';
 import { evaluatePolicy } from './policy-engine.js';
 import { buildRepoRulesContext } from './repo-preferences.js';
+import type { PipelineStageKind } from './control-plane/types.js';
+import type { StageRunEvidence } from './control-plane/run-evidence.js';
+import { validateCleanupPreconditions } from './control-plane/run-evidence.js';
+import {
+  registerContainerProcess,
+  cancelContainerProcess,
+} from './container-runner.js';
+
+export { validateStageCompletion } from './control-plane/run-evidence.js';
+export type { StageRunEvidence } from './control-plane/run-evidence.js';
 
 const CODING_REPOS_PATH = path.join(STORE_DIR, 'coding-repos.json');
 const CODING_JOBS_PATH = path.join(STORE_DIR, 'coding-jobs.json');
@@ -154,6 +164,10 @@ export interface CodingJob {
   stageId?: string | null;
   decisionId?: string | null;
   actualRuntime?: AgentRuntimeSelection | null;
+  runId?: string | null;
+  stageKind?: PipelineStageKind | null;
+  stageEvidence?: StageRunEvidence | null;
+  pushed?: boolean;
   createdAt: string;
   completedAt: string | null;
 }
@@ -174,6 +188,9 @@ export interface StartCodingJobInput {
   stageId?: string | null;
   decisionId?: string | null;
   actualRuntime?: AgentRuntimeSelection | null;
+  runId?: string | null;
+  stageKind?: PipelineStageKind | null;
+  stageEvidence?: StageRunEvidence | null;
 }
 
 function readJsonFile<T>(filePath: string, fallback: T): T {
@@ -294,6 +311,10 @@ function ensureJobDefaults(job: CodingJob): CodingJob {
     stageId: null,
     decisionId: null,
     actualRuntime: null,
+    runId: null,
+    stageKind: null,
+    stageEvidence: null,
+    pushed: false,
   };
   const normalized = { ...defaults, ...job };
   if (!normalized.transitionedAt[normalized.status]) {
@@ -1150,7 +1171,9 @@ function runCodingContainer(job: CodingJob, repo: CodingRepo): Promise<number> {
   return new Promise((resolve, reject) => {
     const proc = spawn(CONTAINER_RUNTIME_BIN, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
     });
+    registerContainerProcess(job.id, proc, containerName);
     proc.stdout?.on('data', (data: Buffer) => {
       updateJobOutput(job, data.toString());
     });
@@ -1204,6 +1227,13 @@ function requirePrProviderFallbackApproval(
 }
 
 async function runCodingJob(job: CodingJob): Promise<void> {
+  const current = getCodingJob(job.id) || job;
+  if (current.status === 'cancelled') {
+    updateJobOutput(current, '\n\nCoding job cancelled.\n');
+    return;
+  }
+  Object.assign(job, current);
+
   const repo = getCodingRepo(job.repo);
   if (!repo?.enabled) throw new Error(`Repo ${job.repo} is not registered`);
 
@@ -1374,11 +1404,17 @@ async function runCodingJob(job: CodingJob): Promise<void> {
     applyCodingJobTransition(job, 'implement');
   }
   const exitCode = await runCodingContainer(job, repo);
+  const refreshed = getCodingJob(job.id) || job;
+  if (refreshed.status === 'cancelled') {
+    updateJobOutput(refreshed, '\n\nCoding job cancelled.\n');
+    return;
+  }
   if (exitCode !== 0) {
     throw new Error(
       `${job.provider} coding container exited with code ${exitCode}`,
     );
   }
+  Object.assign(job, refreshed);
   applyCodingJobTransition(job, 'test');
 
   const metadataDir = path.join(path.dirname(job.workspace), '.nanocrab');
@@ -1546,6 +1582,10 @@ export async function startCodingJob(
     stageId: input.stageId || null,
     decisionId: input.decisionId || null,
     actualRuntime,
+    runId: input.runId || id,
+    stageKind: input.stageKind || null,
+    stageEvidence: input.stageEvidence || null,
+    pushed: false,
     createdAt: nowIso(),
     completedAt: null,
   };
@@ -1554,8 +1594,13 @@ export async function startCodingJob(
   setImmediate(() => {
     void runCodingJob(job).catch((err) => {
       const failureReason = err instanceof Error ? err.message : String(err);
-      applyCodingJobTransition(job, 'failed', failureReason);
-      updateJobOutput(job, `\n\nCoding job failed: ${failureReason}\n`);
+      const latest = getCodingJob(job.id) || job;
+      if (latest.status === 'cancelled') {
+        updateJobOutput(latest, '\n\nCoding job cancelled.\n');
+        return;
+      }
+      applyCodingJobTransition(latest, 'failed', failureReason);
+      updateJobOutput(latest, `\n\nCoding job failed: ${failureReason}\n`);
       logger.error({ err, jobId: job.id }, 'Coding job failed');
     });
   });
@@ -1646,10 +1691,37 @@ function recordJobApproval(
 export function cancelCodingJob(jobId: string, by = 'dashboard'): CodingJob {
   const job = getCodingJob(jobId);
   if (!job) throw new Error(`Coding job not found: ${jobId}`);
+
+  cancelContainerProcess(jobId, 'cancel coding job');
   recordJobApproval(job, 'cancel', by);
   applyCodingJobTransition(job, 'cancelled');
   upsertCodingJob(job);
   return job;
+}
+
+export function cleanupCodingJob(jobId: string): {
+  ok: boolean;
+  reason?: string;
+} {
+  const job = getCodingJob(jobId);
+  if (!job) throw new Error(`Coding job not found: ${jobId}`);
+
+  const runActive = ![
+    'completed',
+    'failed',
+    'cancelled',
+    'await_approval',
+    'await_pr_approval',
+  ].includes(job.status);
+  const decisionPending =
+    job.status === 'await_approval' || job.status === 'await_pr_approval';
+
+  return validateCleanupPreconditions({
+    runActive,
+    decisionPending,
+    pushed: job.pushed || job.prUrl != null,
+    prUrl: job.prUrl,
+  });
 }
 
 export async function retryCodingJob(
@@ -1669,8 +1741,13 @@ export async function retryCodingJob(
   setImmediate(() => {
     void runCodingJob(job).catch((err) => {
       const failureReason = err instanceof Error ? err.message : String(err);
-      applyCodingJobTransition(job, 'failed', failureReason);
-      updateJobOutput(job, `\n\nCoding job failed: ${failureReason}\n`);
+      const latest = getCodingJob(job.id) || job;
+      if (latest.status === 'cancelled') {
+        updateJobOutput(latest, '\n\nCoding job cancelled.\n');
+        return;
+      }
+      applyCodingJobTransition(latest, 'failed', failureReason);
+      updateJobOutput(latest, `\n\nCoding job failed: ${failureReason}\n`);
     });
   });
   return job;
@@ -1720,6 +1797,10 @@ export function approveCodingJob(jobId: string, by = 'dashboard'): CodingJob {
     if (!latest) return;
     void runCodingJob(latest).catch((err) => {
       const failureReason = err instanceof Error ? err.message : String(err);
+      if (latest.status === 'cancelled') {
+        updateJobOutput(latest, '\n\nCoding job cancelled.\n');
+        return;
+      }
       applyCodingJobTransition(latest, 'failed', failureReason);
       updateJobOutput(latest, `\n\nCoding job failed: ${failureReason}\n`);
     });
@@ -1915,6 +1996,7 @@ export async function openCodingJobPr(
     })) as { html_url?: string };
     job.commitSha = sha;
     job.prUrl = pr.html_url || null;
+    job.pushed = true;
     job.diffSummary = diffStat || job.diffSummary;
     job.changedFiles = Array.from(
       new Set(
@@ -2117,6 +2199,7 @@ export async function closeCodingJobPr(
       body: JSON.stringify({ state: 'closed' }),
     });
   }
+  job.prUrl = null;
   recordJobApproval(job, 'close-pr', by);
   upsertCodingJob(job);
   return job;

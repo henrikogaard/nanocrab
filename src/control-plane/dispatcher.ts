@@ -288,6 +288,7 @@ export async function dispatchCandidate(
       agentProfileId: candidate.agentProfileId,
       pipelineId: candidate.pipelineId,
       stageId: candidate.stageId,
+      stageKind: stage.stageKind,
       decisionId: options.decisionId,
       actualRuntime: selectedRuntime,
       createPr: stage.stageKind === 'implement',
