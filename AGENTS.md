@@ -89,6 +89,44 @@ After roadmap-sized work, update README, docs, roadmap status, security notes, a
 
 When starting work on a GitHub issue, move it to `In progress` in the NanoCrab project. When the implementation is complete and ready for review, move it to `In review`. If an issue is only partially advanced by a slice, leave it `In progress` and call out the remaining scope.
 
+When Henrik asks to test, validate, or drive issues to closure, treat that as authorization to run the necessary checks, post or preserve evidence, update issue/project state, and close evidence-backed issues when acceptance criteria are satisfied. Do not close or move issues to `Done` when closure depends on subjective QA, production credentials, release/deploy decisions, or external signoff unless Henrik explicitly confirms that signoff and asks for closure.
+
+### Issue And PR Completion Discipline
+
+- When work is tied to an issue, identify the issue number, target branch, and
+  expected integration branch before implementation. Default integration branch
+  is `development` when it exists; otherwise use repo-level instructions or
+  ask.
+- Before starting implementation, record the current branch/worktree and
+  whether the branch already has an open PR.
+- Implementation is not complete until all of these are true:
+  - relevant tests/checks have run, or skipped checks are explicitly justified
+  - changes are committed on a named branch
+  - the branch is pushed
+  - a PR exists targeting the correct integration branch, usually `development`
+  - the PR description links the issue and includes verification evidence
+  - project/issue status is moved to `In review` when repo rules use that state
+- If the agent cannot push or create a PR because of auth, detached HEAD,
+  sandbox, CI, or branch protection, it must stop with a clear handoff
+  containing branch name, commit SHA, target branch, exact PR title/body,
+  commands already run, and remaining manual action.
+- Do not report an issue as `done`, `complete`, or `ready` when code exists
+  only in an unpushed branch, local worktree, stash, or detached commit.
+- TDD green is implementation evidence, not closure evidence. Before closing an
+  issue or moving it to `Done`, verify the issue acceptance criteria against the
+  changed surface, preserve the red/green/manual evidence in the PR, issue
+  comment, or worklog, confirm the PR/merge/board state, and call out any
+  residual risk.
+- When asked for progress/status, check for stale local branches, unpushed
+  commits, open PRs, and issue/project status before summarizing.
+- For issue work, prefer the lifecycle: branch -> implement -> verify ->
+  commit -> push -> PR to integration branch -> move issue to `In review`.
+- Never leave completed implementation work only in a local branch without
+  either creating a PR or explicitly handing off why PR creation was blocked.
+- Before final response on implementation tasks, run `git status --short`,
+  `git branch --show-current`, and check whether the branch is pushed / has a
+  PR when the repo uses GitHub.
+
 ## Container Build Cache
 
 The container buildkit caches aggressively. `--no-cache` alone does NOT invalidate COPY steps. To force a clean rebuild, prune the builder then re-run `./container/build.sh`.
