@@ -17,6 +17,7 @@ import {
   updateAgentProfile,
   validateAgentProfileInput,
   validateSubscriptionShape,
+  validateRuntimeSelection,
 } from './agent-profiles.js';
 import { _closeDatabase, _initTestDatabase } from './db.js';
 
@@ -340,6 +341,61 @@ describe('agent profile persistence', () => {
         taskKind: 'coding_job',
       }),
     ).toThrow(/agent profile not found/i);
+  });
+
+  it('rejects arbitrary CLI executable paths in runtime selection', () => {
+    expect(() =>
+      validateRuntimeSelection({
+        cli: '/tmp/run-anything' as never,
+        provider: 'codex',
+        model: 'gpt-5.4',
+      }),
+    ).toThrow(/CLI is not supported/i);
+  });
+
+  it('rejects invalid runtime provider and model combinations', () => {
+    expect(() =>
+      buildAgentProfile({
+        handle: 'forge',
+        displayName: 'Forge',
+        primaryRuntime: {
+          cli: 'codex',
+          provider: 'codex',
+          model: 'claude-sonnet-4-6',
+        },
+      }),
+    ).toThrow(/model.*not supported/i);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN])(
+    'rejects non-positive or non-integer maxConcurrency %s',
+    (maxConcurrency) => {
+      expect(() =>
+        buildAgentProfile({
+          handle: 'forge',
+          displayName: 'Forge',
+          maxConcurrency,
+        }),
+      ).toThrow(/maxConcurrency.*positive integer/i);
+    },
+  );
+
+  it('preserves an ordered fallback chain', () => {
+    const profile = buildAgentProfile({
+      handle: 'forge',
+      displayName: 'Forge',
+      instructions: 'Implement only an approved plan.',
+      primaryRuntime: { cli: 'codex', provider: 'codex', model: 'gpt-5.4' },
+      fallbackRuntimes: [
+        { cli: 'claude', provider: 'claude', model: 'claude-sonnet-4-6' },
+      ],
+      stageRoles: ['implement'],
+      repositoryScopes: ['henrikogaard/nanocrab'],
+      maxConcurrency: 1,
+    });
+    expect(profile.fallbackRuntimes.map((runtime) => runtime.cli)).toEqual([
+      'claude',
+    ]);
   });
 
   it('records subscription events idempotently by dedupe key', () => {

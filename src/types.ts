@@ -1,5 +1,31 @@
 import type { AgentProvider } from './agent-provider.js';
 
+export const AGENT_CLI_IDS = [
+  'claude',
+  'codex',
+  'pi',
+  'opencode',
+  'devin',
+  'mistral',
+] as const;
+export type AgentCliId = (typeof AGENT_CLI_IDS)[number];
+export type AgentStageRole = 'planning' | 'implement' | 'review';
+
+export interface AgentRuntimeSelection {
+  cli: AgentCliId;
+  provider: AgentProvider;
+  model: string;
+}
+
+export interface AgentRuntimeHealth {
+  cli: AgentCliId;
+  executable: string;
+  status: 'healthy' | 'missing' | 'unsupported' | 'unauthenticated' | 'error';
+  version: string | null;
+  checkedAt: string;
+  detail: string;
+}
+
 export interface AdditionalMount {
   hostPath: string; // Absolute path on host (supports ~ for home)
   containerPath?: string; // Optional — defaults to basename of hostPath. Mounted at /workspace/extra/{value}
@@ -257,6 +283,12 @@ export interface AgentProfile {
     directSendRequiresApproval: boolean;
     autonomousSendRequiresApproval: boolean;
   };
+  instructions: string | null;
+  primaryRuntime: AgentRuntimeSelection | null;
+  fallbackRuntimes: AgentRuntimeSelection[];
+  stageRoles: AgentStageRole[];
+  repositoryScopes: string[];
+  maxConcurrency: number;
   createdAt: string;
   updatedAt: string;
 }

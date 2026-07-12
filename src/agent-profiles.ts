@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 
-import { isAgentProvider } from './agent-provider.js';
+import { isAgentProvider, isValidAgentModel } from './agent-provider.js';
+import { isAgentCliId } from './agent-runtime-registry.js';
 import {
   getAgentProfileRow,
   getAgentProfileRowByHandle,
@@ -21,6 +22,8 @@ import type {
   AgentProfileActivity,
   AgentProfileTaskKind,
   AgentProfileToolPolicy,
+  AgentRuntimeSelection,
+  AgentStageRole,
   AgentSubscription,
   AgentSubscriptionAutonomyMode,
   AgentSubscriptionEvent,
@@ -71,6 +74,12 @@ export interface AgentProfileInput {
     directSendRequiresApproval?: boolean;
     autonomousSendRequiresApproval?: boolean;
   };
+  instructions?: string | null;
+  primaryRuntime?: AgentRuntimeSelection | null;
+  fallbackRuntimes?: AgentRuntimeSelection[];
+  stageRoles?: AgentStageRole[];
+  repositoryScopes?: string[];
+  maxConcurrency?: number;
 }
 
 export type AgentProfileUpdateInput = Partial<AgentProfileInput>;
@@ -114,6 +123,35 @@ export function normalizeAgentHandle(value: string): string {
   return value.trim().replace(/^@+/, '').toLowerCase();
 }
 
+const STAGE_ROLES: AgentStageRole[] = ['planning', 'implement', 'review'];
+
+export function validateRuntimeSelection(runtime: AgentRuntimeSelection): void {
+  if (!isAgentCliId(runtime.cli)) {
+    throw new Error(`agent runtime CLI is not supported: ${runtime.cli}`);
+  }
+  if (runtime.provider && !isAgentProvider(runtime.provider)) {
+    throw new Error(
+      `agent runtime provider is not supported: ${runtime.provider}`,
+    );
+  }
+  if (!runtime.model?.trim()) {
+    throw new Error('agent runtime model is required');
+  }
+  if (!isValidAgentModel(runtime.provider, runtime.model)) {
+    throw new Error(
+      `agent runtime model is not supported for provider ${runtime.provider}: ${runtime.model}`,
+    );
+  }
+}
+
+function validateStageRoles(roles: AgentStageRole[] | undefined): void {
+  if (!roles || roles.length === 0) return;
+  const invalid = roles.find((role) => !STAGE_ROLES.includes(role));
+  if (invalid) {
+    throw new Error(`agent profile stageRole is not supported: ${invalid}`);
+  }
+}
+
 export function validateAgentProfileInput(input: AgentProfileInput): void {
   const handle = normalizeAgentHandle(input.handle || '');
 
@@ -137,6 +175,13 @@ export function validateAgentProfileInput(input: AgentProfileInput): void {
     throw new Error(
       `agent profile toolPolicy is not supported: ${input.toolPolicy}`,
     );
+  }
+
+  if (
+    input.maxConcurrency !== undefined &&
+    (!Number.isInteger(input.maxConcurrency) || input.maxConcurrency <= 0)
+  ) {
+    throw new Error('agent profile maxConcurrency must be a positive integer');
   }
 
   validateOptionalStringList(input, 'allowedMcpServers', true);
@@ -244,6 +289,28 @@ export function updateAgentProfile(
               ...existing.writePolicy,
               ...patch.writePolicy,
             },
+      instructions:
+        patch.instructions === undefined
+          ? existing.instructions
+          : patch.instructions,
+      primaryRuntime:
+        patch.primaryRuntime === undefined
+          ? existing.primaryRuntime
+          : patch.primaryRuntime,
+      fallbackRuntimes:
+        patch.fallbackRuntimes === undefined
+          ? existing.fallbackRuntimes
+          : patch.fallbackRuntimes,
+      stageRoles:
+        patch.stageRoles === undefined ? existing.stageRoles : patch.stageRoles,
+      repositoryScopes:
+        patch.repositoryScopes === undefined
+          ? existing.repositoryScopes
+          : patch.repositoryScopes,
+      maxConcurrency:
+        patch.maxConcurrency === undefined
+          ? existing.maxConcurrency
+          : patch.maxConcurrency,
     }),
     id: existing.id,
     createdAt: existing.createdAt,
@@ -549,6 +616,15 @@ function normalizeAgentProfileFields(
       autonomousSendRequiresApproval:
         input.writePolicy?.autonomousSendRequiresApproval !== false,
     },
+    instructions: nullableString(input.instructions),
+    primaryRuntime: normalizeRuntimeSelection(input.primaryRuntime),
+    fallbackRuntimes: normalizeFallbackRuntimes(input.fallbackRuntimes),
+    stageRoles: normalizeStageRoles(input.stageRoles),
+    repositoryScopes: sanitizeStringList(input.repositoryScopes),
+    maxConcurrency:
+      typeof input.maxConcurrency === 'number' && input.maxConcurrency >= 1
+        ? input.maxConcurrency
+        : 1,
   };
 }
 
@@ -586,4 +662,31 @@ function sanitizeChannelBindings(
     },
     {},
   );
+}
+
+function normalizeRuntimeSelection(
+  runtime: AgentRuntimeSelection | null | undefined,
+): AgentRuntimeSelection | null {
+  if (!runtime) return null;
+  validateRuntimeSelection(runtime);
+  return {
+    cli: runtime.cli,
+    provider: runtime.provider,
+    model: runtime.model.trim(),
+  };
+}
+
+function normalizeFallbackRuntimes(
+  runtimes: AgentRuntimeSelection[] | undefined,
+): AgentRuntimeSelection[] {
+  if (!runtimes || !Array.isArray(runtimes)) return [];
+  return runtimes.map((r) => normalizeRuntimeSelection(r)!);
+}
+
+function normalizeStageRoles(
+  roles: AgentStageRole[] | undefined,
+): AgentStageRole[] {
+  if (!roles || !Array.isArray(roles)) return [];
+  validateStageRoles(roles);
+  return roles;
 }
