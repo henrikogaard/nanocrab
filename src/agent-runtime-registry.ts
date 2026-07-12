@@ -29,7 +29,7 @@ const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
     cli: 'pi',
     executable: 'pi',
     versionArgs: Object.freeze(['--version']),
-    codingRunnerSupported: false,
+    codingRunnerSupported: true,
   }),
   opencode: {
     cli: 'opencode',
@@ -41,13 +41,13 @@ const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
     cli: 'devin',
     executable: 'devin',
     versionArgs: Object.freeze(['--version']),
-    codingRunnerSupported: false,
+    codingRunnerSupported: true,
   }),
   mistral: Object.freeze({
     cli: 'mistral',
     executable: 'vibe',
     versionArgs: Object.freeze(['--version']),
-    codingRunnerSupported: false,
+    codingRunnerSupported: true,
   }),
 };
 Object.freeze(RUNTIMES.opencode);

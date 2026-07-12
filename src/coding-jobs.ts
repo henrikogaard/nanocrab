@@ -55,6 +55,9 @@ const CODING_JOB_PROVIDERS = new Set<AgentProvider>([
   'claude',
   'codex',
   'opencode',
+  'pi',
+  'devin',
+  'mistral',
   'openrouter',
   'ollama',
   'openai-compatible',
@@ -64,6 +67,9 @@ type CodingProvider = Extract<
   | 'claude'
   | 'codex'
   | 'opencode'
+  | 'pi'
+  | 'devin'
+  | 'mistral'
   | 'openrouter'
   | 'ollama'
   | 'openai-compatible'
@@ -860,6 +866,11 @@ function buildCodingContainerEnv(
     'OPENAI_COMPATIBLE_API_KEY',
     'OPENAI_COMPATIBLE_BASE_URL',
     'DEFAULT_OPENAI_COMPATIBLE_BASE_URL',
+    'PI_API_KEY',
+    'PI_PROVIDER',
+    'DEVIN_API_KEY',
+    'MISTRAL_API_KEY',
+    'MISTRAL_BASE_URL',
   ]);
   const env: Record<string, string> = {
     TZ: TIMEZONE,
@@ -954,6 +965,25 @@ function buildCodingContainerEnv(
     }
   }
 
+  if (job.provider === 'pi') {
+    const piKey = envValue(envFileValues, 'PI_API_KEY');
+    if (piKey) env.PI_API_KEY = piKey;
+    const piProvider = envValue(envFileValues, 'PI_PROVIDER');
+    if (piProvider) env.PI_PROVIDER = piProvider;
+  }
+
+  if (job.provider === 'devin') {
+    const devinKey = envValue(envFileValues, 'DEVIN_API_KEY');
+    if (devinKey) env.DEVIN_API_KEY = devinKey;
+  }
+
+  if (job.provider === 'mistral') {
+    const mistralKey = envValue(envFileValues, 'MISTRAL_API_KEY');
+    if (mistralKey) env.MISTRAL_API_KEY = mistralKey;
+    const mistralUrl = envValue(envFileValues, 'MISTRAL_BASE_URL');
+    if (mistralUrl) env.MISTRAL_BASE_URL = mistralUrl;
+  }
+
   return env;
 }
 
@@ -1038,6 +1068,15 @@ function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
       '    ;;',
       '  claude)',
       '    claude -p --model "$JOB_MODEL" --output-format text --dangerously-skip-permissions --max-budget-usd "$CODING_JOB_MAX_BUDGET_USD" "$PROMPT"',
+      '    ;;',
+      '  pi)',
+      '    pi -p "$PROMPT" --mode text --model "$JOB_MODEL" --no-session',
+      '    ;;',
+      '  devin)',
+      '    devin -p -- "$PROMPT"',
+      '    ;;',
+      '  mistral)',
+      '    vibe -p "$PROMPT" --output text --auto-approve --workdir "$PWD"',
       '    ;;',
       '  *)',
       '    echo "Unsupported coding provider: $JOB_PROVIDER" >&2',

@@ -90,7 +90,7 @@ describe('agent runtime registry', () => {
     expect(result.version).toBe('1.2.3');
   });
 
-  it('distinguishes installed unsupported runtimes from a supported runtime', async () => {
+  it('reports supported runtimes as healthy when installed', async () => {
     const execFile = vi
       .fn()
       .mockResolvedValueOnce({ stdout: 'pi 0.4.0\n', stderr: '' })
@@ -107,9 +107,8 @@ describe('agent runtime registry', () => {
         {
           cli,
           executable,
-          status: 'unsupported',
+          status: 'healthy',
           version,
-          detail: expect.stringMatching(/not supported.*coding.*runner/i),
         },
       );
     }
