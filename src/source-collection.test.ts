@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
@@ -12,6 +12,7 @@ import {
   getSourceCollectionByReportJobId,
   listSourceCollections,
   getSourceLedger,
+  collectSources,
 } from './source-collection.js';
 import { STORE_DIR } from './config.js';
 
@@ -60,6 +61,142 @@ describe('source-collection', () => {
         'research',
       ]);
       expect(collection.items.every((i) => i.status === 'pending')).toBe(true);
+    });
+
+    it('finalizes a connector-only collection as failed when none are ready', () => {
+      const startWithConnectors = startSourceCollection as unknown as (
+        reportJobId: string,
+        scopes: ['connector'],
+        options: { availableConnectors: string[] },
+      ) => ReturnType<typeof startSourceCollection>;
+      const collection = startWithConnectors(
+        'report-no-connector',
+        ['connector'],
+        { availableConnectors: [] },
+      );
+
+      expect(collection.status).toBe('failed');
+      expect(collection.completedAt).not.toBeNull();
+      expect(collection.items[0].status).toBe('failed');
+    });
+  });
+
+  describe('collectSources connector authorization', () => {
+    type Context = {
+      actor: string;
+      groupFolder: string;
+      agentId: string;
+    };
+    type Dependencies = {
+      availableConnectors: string[];
+      authorizeConnectorAction: ReturnType<typeof vi.fn>;
+      githubApi: ReturnType<typeof vi.fn>;
+      listMemoryRecords?: ReturnType<typeof vi.fn>;
+    };
+    const collectWithContext = collectSources as unknown as (
+      reportJobId: string,
+      scopes: string[],
+      query: string,
+      context: Context,
+      dependencies: Dependencies,
+    ) => ReturnType<typeof collectSources>;
+
+    it('authorizes the concrete GitHub read before fetching', async () => {
+      const authorize = vi.fn().mockReturnValue({
+        allowed: true,
+        decision: 'allowed',
+        reason: 'allowed',
+      });
+      const githubApi = vi.fn().mockResolvedValue({ items: [] });
+
+      const collected = await collectWithContext(
+        'report-authorized',
+        ['connector'],
+        'nanocrab',
+        {
+          actor: 'henrik',
+          groupFolder: 'whatsapp_main',
+          agentId: 'default_reports',
+        },
+        {
+          availableConnectors: ['github'],
+          authorizeConnectorAction: authorize,
+          githubApi,
+        },
+      );
+
+      expect(authorize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connectorId: 'github',
+          action: 'issues.read',
+          groupFolder: 'whatsapp_main',
+          agentId: 'default_reports',
+        }),
+      );
+      expect(githubApi).toHaveBeenCalledOnce();
+      expect(getSourceCollection(collected.sourceCollectionId)?.status).toBe(
+        'completed',
+      );
+    });
+
+    it('does not fetch on denial and records safe failed provenance', async () => {
+      const authorize = vi.fn().mockReturnValue({
+        allowed: false,
+        decision: 'denied',
+        reason: 'outside connector scope',
+      });
+      const githubApi = vi.fn();
+
+      const collected = await collectWithContext(
+        'report-denied',
+        ['connector'],
+        'nanocrab',
+        {
+          actor: 'henrik',
+          groupFolder: 'whatsapp_main',
+          agentId: 'default_reports',
+        },
+        {
+          availableConnectors: ['github'],
+          authorizeConnectorAction: authorize,
+          githubApi,
+        },
+      );
+
+      expect(githubApi).not.toHaveBeenCalled();
+      const collection = getSourceCollection(collected.sourceCollectionId)!;
+      expect(collection.status).toBe('failed');
+      expect(collection.items[0]).toMatchObject({
+        status: 'failed',
+        provenance: ['authorization:denied'],
+      });
+    });
+
+    it('keeps mixed local success and connector denial visibly partial', async () => {
+      const collected = await collectWithContext(
+        'report-partial',
+        ['memory', 'connector'],
+        'nanocrab',
+        {
+          actor: 'henrik',
+          groupFolder: 'whatsapp_main',
+          agentId: 'default_reports',
+        },
+        {
+          availableConnectors: ['github'],
+          authorizeConnectorAction: vi.fn().mockReturnValue({
+            allowed: false,
+            decision: 'denied',
+            reason: 'outside connector scope',
+          }),
+          githubApi: vi.fn(),
+          listMemoryRecords: vi.fn().mockReturnValue([]),
+        },
+      );
+
+      expect(getSourceCollection(collected.sourceCollectionId)?.status).toBe(
+        'partial',
+      );
     });
   });
 

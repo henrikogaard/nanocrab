@@ -2,7 +2,8 @@ import crypto from 'crypto';
 
 import { getAgentProfile } from '../agent-profiles.js';
 import { isCodingCapableProvider } from '../agent-provider.js';
-import { isAgentCliId, probeAgentRuntime } from '../agent-runtime-registry.js';
+import { isAgentCliId } from '../agent-runtime-registry.js';
+import { probeCodingRunnerReadiness } from '../coding-runner-readiness.js';
 import type { AgentRuntimeHealth } from '../types.js';
 import { startCodingJob, type CodingJob } from '../coding-jobs.js';
 import { createApproval } from '../approvals.js';
@@ -19,7 +20,7 @@ import type { StageDispatchCandidate } from './sync.js';
 import type { ControlPlaneDecision, PipelineStageKind } from './types.js';
 
 export const runtime = {
-  probe: probeAgentRuntime,
+  probe: probeCodingRunnerReadiness,
 };
 
 export interface DispatchCandidateOptions {

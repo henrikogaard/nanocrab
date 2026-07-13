@@ -132,6 +132,69 @@ describe('learning-loop', () => {
       expect(proposal).toBeNull();
     });
 
+    it.each([
+      ['prompt', 'Deploy with api_key=learning-secret-123456789'],
+      ['diffSummary', 'Authorization: Bearer learning-token-abcdef123456'],
+      ['testSummary', 'password: learning-password-123456789'],
+      [
+        'output',
+        '-----BEGIN PRIVATE KEY-----\nlearning-private-key-material\n-----END PRIVATE KEY-----',
+      ],
+    ])(
+      'default-denies and never persists a secret from %s',
+      (field, secret) => {
+        writeTestJobs([createTestJob({ [field]: secret })]);
+
+        expect(deriveLearningFromRun('code-test-123', 'test-user')).toBeNull();
+        const persisted = fs.existsSync(LEARNING_PROPOSALS_PATH)
+          ? fs.readFileSync(LEARNING_PROPOSALS_PATH, 'utf-8')
+          : '';
+        expect(persisted).not.toContain(secret);
+      },
+    );
+
+    it('default-denies an unlabeled plausible high-entropy secret', () => {
+      const secret = 'gH8vQ3xZ9mK2pL7sT4wY6cN1bR5dF0aJ';
+      writeTestJobs([createTestJob({ diffSummary: `config=${secret}` })]);
+
+      expect(deriveLearningFromRun('code-test-123', 'test-user')).toBeNull();
+      expect(fs.existsSync(LEARNING_PROPOSALS_PATH)).toBe(false);
+    });
+
+    it('does not classify generated branch names or workspace paths as secrets', () => {
+      writeTestJobs([
+        createTestJob({
+          output:
+            'branch nanocrab-code-code-1783979306220-54e5a43a in /tmp/nanocrab-coding-jobs-test/data/coding-workspaces/jobs/code-1783979306220-54e5a43a',
+        }),
+      ]);
+
+      expect(
+        deriveLearningFromRun('code-test-123', 'test-user'),
+      ).not.toBeNull();
+    });
+
+    it('treats placeholder test prose as missing evidence', () => {
+      writeTestJobs([
+        createTestJob({
+          testSummary: 'Review job output for tests run by the coding agent.',
+        }),
+      ]);
+      const placeholder = deriveLearningFromRun('code-test-123', 'test-user');
+      expect(placeholder).not.toBeNull();
+      expect(placeholder!.extractedLesson).not.toContain('Review job output');
+      expect(placeholder!.validationResult).not.toContain('tests meaningful');
+
+      cleanLearningState();
+      writeTestJobs([
+        createTestJob({ testSummary: '42 focused tests passed' }),
+      ]);
+      const genuine = deriveLearningFromRun('code-test-123', 'test-user');
+      expect(genuine).not.toBeNull();
+      expect(genuine!.validationResult).toContain('tests meaningful');
+      expect(genuine!.confidence).toBeGreaterThan(placeholder!.confidence);
+    });
+
     it('returns null when learning loop is disabled', () => {
       updateLearningConfig({ enabled: false });
       const proposal = deriveLearningFromRun('code-test-123', 'test-user');

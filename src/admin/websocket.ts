@@ -14,11 +14,7 @@ import {
   isChannelEnabledForRegisteredGroups,
 } from '../channel-status.js';
 import { getState, nonWebGroups } from './state.js';
-import {
-  validateSession,
-  getSessionUser,
-  AdminUser as _AdminUser,
-} from './auth.js';
+import { validateSession, getSessionUser, AdminUser } from './auth.js';
 import {
   SESSIONS_DIR,
   TERMINAL_IDLE_TIMEOUT_MS,
@@ -63,10 +59,76 @@ const SAFE_SESSION_ID = /^[A-Za-z0-9_.-]+$/;
 interface SessionMetadata {
   id: string;
   name: string;
-  owner: string;
+  owner?: string;
   createdAt: string;
   endedAt: string | null;
   bytes: number;
+}
+
+type TerminalOperation = 'spawn' | 'attach' | 'input' | 'close';
+
+function terminalSessionOwner(sessionId: string): string | undefined {
+  return (
+    terminals.get(sessionId)?.owner ||
+    loadSessionIndex().find((entry) => entry.id === sessionId)?.owner
+  );
+}
+
+function denyTerminalOperation(
+  ws: WebSocket,
+  operation: TerminalOperation,
+  sessionId: string,
+  reason: string,
+): void {
+  send(ws, {
+    type: 'terminal_denied',
+    sessionId,
+    data: { operation, reason },
+  });
+}
+
+function authorizeTerminalOperation(
+  ws: WebSocket,
+  user: AdminUser | null,
+  operation: TerminalOperation,
+  sessionId: string,
+): boolean {
+  if (user?.role !== 'owner') {
+    denyTerminalOperation(
+      ws,
+      operation,
+      sessionId,
+      'Terminal operations require owner role.',
+    );
+    return false;
+  }
+
+  const sessionOwner = terminalSessionOwner(sessionId);
+  if (sessionOwner && sessionOwner !== user.username) {
+    denyTerminalOperation(
+      ws,
+      operation,
+      sessionId,
+      'Terminal session belongs to a different owner.',
+    );
+    return false;
+  }
+
+  if (
+    (operation === 'input' || operation === 'close') &&
+    !terminals.has(sessionId) &&
+    historicalSessions.has(sessionId)
+  ) {
+    denyTerminalOperation(
+      ws,
+      operation,
+      sessionId,
+      'Historical terminal sessions are read-only.',
+    );
+    return false;
+  }
+
+  return true;
 }
 
 export interface CockpitStreamEvent {
@@ -126,8 +188,8 @@ function sessionLogPath(sessionId: string): string | null {
 
 export function createSessionFile(sessionId: string, owner = 'owner'): boolean {
   if (!isSafeTerminalSessionId(sessionId)) return false;
-  let index = loadSessionIndex();
-  index = index.filter((e) => e.id !== sessionId);
+  const index = loadSessionIndex();
+  if (index.some((entry) => entry.id === sessionId)) return false;
   index.push({
     id: sessionId,
     name: sessionId,
@@ -221,6 +283,7 @@ export function readSessionLog(sessionId: string): string {
 
 export function loadHistoricalSessions(): number {
   try {
+    historicalSessions.clear();
     if (!fs.existsSync(SESSIONS_DIR)) return 0;
     const files = fs
       .readdirSync(SESSIONS_DIR)
@@ -277,17 +340,42 @@ export function pruneOldSessions(): number {
     for (const file of logFiles) {
       const sessionId = file.replace('.log', '');
       if (!indexIds.has(sessionId)) {
-        try {
-          fs.unlinkSync(path.join(SESSIONS_DIR, file));
-        } catch {
-          // ignore
-        }
+        removeTerminalSessionArtifacts(sessionId);
       }
     }
     return pruned;
   } catch {
     return 0;
   }
+}
+
+function removeTerminalSessionArtifacts(sessionId: string): void {
+  closeTerminalSession(sessionId);
+  historicalSessions.delete(sessionId);
+  maxSizeWarned.delete(sessionId);
+  const logPath = sessionLogPath(sessionId);
+  try {
+    if (logPath && fs.existsSync(logPath)) fs.unlinkSync(logPath);
+  } catch {
+    // best-effort cleanup; the index/cache state is still made coherent
+  }
+}
+
+export function deleteTerminalSession(sessionId: string): boolean {
+  if (!isSafeTerminalSessionId(sessionId)) return false;
+  const index = loadSessionIndex();
+  const indexed = index.some((entry) => entry.id === sessionId);
+  const logPath = sessionLogPath(sessionId);
+  const exists =
+    indexed ||
+    terminals.has(sessionId) ||
+    historicalSessions.has(sessionId) ||
+    Boolean(logPath && fs.existsSync(logPath));
+  if (!exists) return false;
+
+  saveSessionIndex(index.filter((entry) => entry.id !== sessionId));
+  removeTerminalSessionArtifacts(sessionId);
+  return true;
 }
 
 export function initWebSocket(server: HttpServer): void {
@@ -319,18 +407,15 @@ export function initWebSocket(server: HttpServer): void {
           stopLogStream(ws);
         }
         if (msg.type === 'terminal_spawn') {
-          // Only owner can open terminal sessions
-          if (wsUser?.role !== 'owner') {
-            send(ws, {
-              type: 'terminal_output',
-              data: 'Permission denied: terminal requires owner role.\r\n',
-              sessionId: msg.data as string,
-            });
-            return;
+          const sessionId = msg.data as string;
+          if (authorizeTerminalOperation(ws, wsUser, 'spawn', sessionId)) {
+            spawnTerminal(ws, sessionId, wsUser!.username);
           }
-          spawnTerminal(ws, msg.data as string, wsUser?.username || 'owner');
         }
         if (msg.type === 'terminal_input' && msg.sessionId) {
+          if (!authorizeTerminalOperation(ws, wsUser, 'input', msg.sessionId)) {
+            return;
+          }
           const term = terminals.get(msg.sessionId);
           if (term && term.clients.has(ws)) {
             term.process.stdin?.write(msg.data as string);
@@ -349,9 +434,17 @@ export function initWebSocket(server: HttpServer): void {
         }
         if (msg.type === 'terminal_attach' && msg.sessionId) {
           const sid = msg.sessionId as string;
+          if (!authorizeTerminalOperation(ws, wsUser, 'attach', sid)) {
+            return;
+          }
           const term = terminals.get(sid);
           if (term) {
             term.clients.add(ws);
+            send(ws, {
+              type: 'terminal_attach_result',
+              data: { status: 'active', readOnly: false },
+              sessionId: sid,
+            });
             send(ws, {
               type: 'terminal_output',
               data: term.transcript.slice(-50000),
@@ -360,6 +453,11 @@ export function initWebSocket(server: HttpServer): void {
           } else {
             const historical = historicalSessions.get(sid);
             if (historical) {
+              send(ws, {
+                type: 'terminal_attach_result',
+                data: { status: 'historical', readOnly: true },
+                sessionId: sid,
+              });
               send(ws, {
                 type: 'terminal_output',
                 data: historical.slice(-50000),
@@ -370,11 +468,19 @@ export function initWebSocket(server: HttpServer): void {
                 data: '\r\n[Session ended — read-only view. Close this and spawn a new session to continue.]\r\n',
                 sessionId: sid,
               });
+            } else {
+              send(ws, {
+                type: 'terminal_attach_result',
+                data: { status: 'not-found', readOnly: false },
+                sessionId: sid,
+              });
             }
           }
         }
         if (msg.type === 'terminal_close' && msg.sessionId) {
-          closeTerminalSession(msg.sessionId);
+          if (authorizeTerminalOperation(ws, wsUser, 'close', msg.sessionId)) {
+            closeTerminalSession(msg.sessionId);
+          }
         }
       } catch {
         // ignore malformed messages
@@ -494,6 +600,19 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
       data: existing.transcript.slice(-50000),
       sessionId,
     });
+    return;
+  }
+
+  if (
+    historicalSessions.has(sessionId) ||
+    loadSessionIndex().some((entry) => entry.id === sessionId)
+  ) {
+    denyTerminalOperation(
+      ws,
+      'spawn',
+      sessionId,
+      'Historical terminal session ids cannot be reused.',
+    );
     return;
   }
 

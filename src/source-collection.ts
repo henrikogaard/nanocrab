@@ -13,8 +13,10 @@ import {
   buildConnectorCatalog,
 } from './connector-catalog.js';
 import {
+  authorizeConnectorAction,
   loadConnectorPermissions,
   defaultConnectorPermission,
+  type ConnectorPermissionDecision,
 } from './connector-permissions.js';
 import { readEnvFile } from './env.js';
 import { githubApi } from './coding-jobs.js';
@@ -208,8 +210,10 @@ function getAvailableConnectors(): string[] {
 export function startSourceCollection(
   reportJobId: string,
   requestedScopes: SourceScope[],
+  options: { availableConnectors?: string[] } = {},
 ): SourceCollectionRecord {
-  const availableConnectors = getAvailableConnectors();
+  const availableConnectors =
+    options.availableConnectors ?? getAvailableConnectors();
 
   const items: SourceCollectionItem[] = [];
   for (const scope of requestedScopes) {
@@ -253,15 +257,20 @@ export function startSourceCollection(
     }
   }
 
+  const status = items.some(
+    (item) => item.status === 'pending' || item.status === 'collecting',
+  )
+    ? 'collecting'
+    : computeOverallStatus(items);
   const record: SourceCollectionRecord = {
     id: `src-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
     reportJobId,
     requestedScopes,
     items,
     ledger: [],
-    status: 'collecting',
+    status,
     startedAt: new Date().toISOString(),
-    completedAt: null,
+    completedAt: status === 'collecting' ? null : new Date().toISOString(),
     failureReason: null,
   };
 
@@ -330,6 +339,7 @@ export function markScopeFailed(
   scope: SourceScope,
   reason: string,
   connectorId?: string,
+  provenance: string[] = [],
 ): SourceCollectionRecord {
   const collections = readCollections();
   const record = collections.find((c) => c.id === collectionId);
@@ -342,6 +352,7 @@ export function markScopeFailed(
   item.status = 'failed';
   item.completedAt = new Date().toISOString();
   item.failureReason = reason;
+  item.provenance = provenance;
 
   record.status = computeOverallStatus(record.items);
   if (record.status !== 'collecting') {
@@ -447,11 +458,12 @@ async function fetchGitHubConnectorSources(
   query: string,
   sections: string[],
   citations: Array<{ label: string; source: string }>,
+  githubFetch: typeof githubApi,
 ): Promise<{ itemCount: number; provenance: string[] }> {
   const searchQuery = query.trim()
     ? `${query.trim()} is:open is:issue`
     : 'is:open is:issue';
-  const result = (await githubApi(
+  const result = (await githubFetch(
     `/search/issues?q=${encodeURIComponent(searchQuery)}&per_page=10`,
   )) as {
     items?: Array<{
@@ -493,6 +505,7 @@ async function fetchConnectorSource(
   query: string,
   sections: string[],
   citations: Array<{ label: string; source: string }>,
+  githubFetch: typeof githubApi,
 ): Promise<void> {
   if (connectorId === 'github') {
     const { itemCount, provenance } = await fetchGitHubConnectorSources(
@@ -500,6 +513,7 @@ async function fetchConnectorSource(
       query,
       sections,
       citations,
+      githubFetch,
     );
     markScopeCollected(
       collectionId,
@@ -513,13 +527,79 @@ async function fetchConnectorSource(
   throw new Error(`Connector source fetch not implemented: ${connectorId}`);
 }
 
+export interface SourceCollectionActorContext {
+  actor: string;
+  groupFolder: string;
+  agentId?: string;
+  isMain?: boolean;
+}
+
+interface SourceCollectionDependencies {
+  availableConnectors?: string[];
+  authorizeConnectorAction?: typeof authorizeConnectorAction;
+  githubApi?: typeof githubApi;
+  listMemoryRecords?: typeof listMemoryRecords;
+}
+
+function connectorReadAction(connectorId: string): string {
+  return connectorId === 'github' ? 'issues.read' : 'source.read';
+}
+
+function authorizeSourceConnector(
+  reportJobId: string,
+  connectorId: string,
+  context: SourceCollectionActorContext,
+  authorize: typeof authorizeConnectorAction,
+): ConnectorPermissionDecision {
+  const action = connectorReadAction(connectorId);
+  const decision = authorize({
+    connectorId,
+    action,
+    groupFolder: context.groupFolder,
+    agentId: context.agentId,
+    isMain: context.isMain,
+    context: {
+      actor: context.actor,
+      reportJobId,
+      connectorId,
+      action,
+    },
+  });
+  logAuditEvent({
+    actor: context.actor,
+    actorId: context.agentId || null,
+    actionType: `source.connector.${action}`,
+    resource: connectorId,
+    decision: decision.allowed ? 'allowed' : decision.decision,
+    correlationId: reportJobId,
+    context: {
+      connectorId,
+      action,
+      groupFolder: context.groupFolder,
+      allowed: decision.allowed,
+      reason: decision.reason,
+    },
+  });
+  return decision;
+}
+
 export async function collectSources(
   reportJobId: string,
   sourceScopes: string[],
   query: string,
+  actorContext: SourceCollectionActorContext,
+  dependencies: SourceCollectionDependencies = {},
 ): Promise<CollectedSources> {
   const requestedScopes = sourceScopes.filter(isSourceScope);
-  const record = startSourceCollection(reportJobId, requestedScopes);
+  const availableConnectors =
+    dependencies.availableConnectors ?? getAvailableConnectors();
+  const authorize =
+    dependencies.authorizeConnectorAction ?? authorizeConnectorAction;
+  const githubFetch = dependencies.githubApi ?? githubApi;
+  const listMemories = dependencies.listMemoryRecords ?? listMemoryRecords;
+  const record = startSourceCollection(reportJobId, requestedScopes, {
+    availableConnectors,
+  });
   const sections: string[] = [];
   const citations: Array<{ label: string; source: string }> = [];
 
@@ -557,7 +637,7 @@ export async function collectSources(
           break;
         }
         case 'memory': {
-          const memories = listMemoryRecords({ status: 'approved', limit: 25 });
+          const memories = listMemories({ status: 'approved', limit: 25 });
           sections.push(
             `## Approved Memory\n\n${
               memories.map((memory) => `- ${memory.content}`).join('\n') ||
@@ -641,13 +721,31 @@ export async function collectSources(
           }
           for (const item of connectorItems) {
             if (item.status !== 'pending') continue;
+            const connectorId = item.connectorId as string;
+            const authorization = authorizeSourceConnector(
+              reportJobId,
+              connectorId,
+              actorContext,
+              authorize,
+            );
+            if (!authorization.allowed) {
+              markScopeFailed(
+                record.id,
+                'connector',
+                `Connector access ${authorization.decision}: ${authorization.reason}`,
+                connectorId,
+                [`authorization:${authorization.decision}`],
+              );
+              continue;
+            }
             try {
               await fetchConnectorSource(
                 record.id,
-                item.connectorId as string,
+                connectorId,
                 query,
                 sections,
                 citations,
+                githubFetch,
               );
             } catch (err) {
               markScopeFailed(

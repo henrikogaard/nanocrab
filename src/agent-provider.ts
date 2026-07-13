@@ -438,14 +438,50 @@ function commandAvailable(command: string): boolean {
   }
 }
 
-export function getProviderAvailability(): Record<AgentProvider, boolean> {
+function codingContainerImageAvailable(): boolean {
+  try {
+    execFileSync(
+      'docker',
+      [
+        'image',
+        'inspect',
+        process.env.CONTAINER_IMAGE || 'nanocrab-agent:latest',
+      ],
+      { stdio: 'ignore', timeout: 10000 },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function credentialConfigured(key: string): boolean {
+  return Boolean(process.env[key] || readEnvFile([key])[key]);
+}
+
+export function getProviderAvailability(
+  options: {
+    commandAvailable?: (command: string) => boolean;
+    containerImageAvailable?: () => boolean;
+    credentialAvailable?: (key: string) => boolean;
+  } = {},
+): Record<AgentProvider, boolean> {
   const config = getAgentProviderConfig();
   const availability = {} as Record<AgentProvider, boolean>;
+  const hasCommand = options.commandAvailable || commandAvailable;
+  const hasContainerImage =
+    options.containerImageAvailable || codingContainerImageAvailable;
+  const hasCredential = options.credentialAvailable || credentialConfigured;
 
   for (const provider of AGENT_PROVIDERS) {
     const definition = AGENT_PROVIDER_DEFINITIONS[provider];
+    if (provider === 'pi') {
+      availability.pi =
+        hasContainerImage() && hasCredential('OPENROUTER_API_KEY');
+      continue;
+    }
     if (definition.requiresCli) {
-      availability[provider] = commandAvailable(definition.requiresCli);
+      availability[provider] = hasCommand(definition.requiresCli);
       continue;
     }
 

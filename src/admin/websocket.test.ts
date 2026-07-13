@@ -66,6 +66,19 @@ describe('file-backed terminal sessions', () => {
     expect(index[0].endedAt).toBeNull();
   });
 
+  it('does not reuse an ended historical session id', () => {
+    createSessionFile('term-ended', 'alice');
+    appendToSessionLog('term-ended', 'historical output');
+    finalizeSessionFile('term-ended');
+    const before = fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8');
+
+    expect(createSessionFile('term-ended', 'alice')).toBe(false);
+    expect(fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8')).toBe(
+      before,
+    );
+    expect(readSessionLog('term-ended')).toBe('historical output');
+  });
+
   it('rejects unsafe terminal session ids before writing files', () => {
     expect(createSessionFile('../outside', 'alice')).toBe(false);
     appendToSessionLog('../outside', 'nope');
@@ -186,6 +199,7 @@ describe('file-backed terminal sessions', () => {
     fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
     // Prime a .log file for the stale session so pruneOldSessions deletes it
     fs.writeFileSync(path.join(TEST_DIR, 'stale-session.log'), 'old data');
+    loadHistoricalSessions();
 
     const pruned = pruneOldSessions();
     expect(pruned).toBe(1);
@@ -195,6 +209,9 @@ describe('file-backed terminal sessions', () => {
     ]);
     // Orphan .log file should be removed
     expect(fs.existsSync(path.join(TEST_DIR, 'stale-session.log'))).toBe(false);
+    expect(listTerminalSessions().map((session) => session.id)).not.toContain(
+      'stale-session',
+    );
   });
 
   it('appendToSessionLog respects MAX_SESSION_LOG_BYTES', () => {

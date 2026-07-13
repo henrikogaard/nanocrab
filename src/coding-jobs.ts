@@ -871,6 +871,7 @@ function buildCodingContainerEnv(
     'GIT_AUTHOR_NAME',
     'GIT_AUTHOR_EMAIL',
     'CODING_JOB_MAX_BUDGET_USD',
+    'CODING_JOB_MAX_TURNS',
     'OPENCODE_API_KEY',
     'OPENROUTER_API_KEY',
     'OPENROUTER_BASE_URL',
@@ -894,6 +895,8 @@ function buildCodingContainerEnv(
     CREATE_PR: 'false',
     CODING_JOB_MAX_BUDGET_USD:
       envValue(envFileValues, 'CODING_JOB_MAX_BUDGET_USD') || '5',
+    CODING_JOB_MAX_TURNS:
+      envValue(envFileValues, 'CODING_JOB_MAX_TURNS') || '30',
     GIT_AUTHOR_NAME:
       envValue(envFileValues, 'GIT_AUTHOR_NAME') || 'NanoCrab Bot',
     GIT_AUTHOR_EMAIL:
@@ -1137,7 +1140,7 @@ function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
       '  mistral)',
       '    VIBE_HOME=/workspace/coding-job/.nanocrab/vibe-home',
       '    MISTRAL_API_KEY=placeholder',
-      '    vibe -p "$PROMPT" --output text --auto-approve --workdir "$PWD" --max-price "$CODING_JOB_MAX_BUDGET_USD" --trust',
+      '    vibe --prompt "$PROMPT" --output json --max-turns "$CODING_JOB_MAX_TURNS" --max-price "$CODING_JOB_MAX_BUDGET_USD"',
       '    ;;',
       '  *)',
       '    echo "Unsupported coding provider: $JOB_PROVIDER" >&2',

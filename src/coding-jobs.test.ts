@@ -1001,7 +1001,10 @@ describe('coding jobs', () => {
       const metadataDir = `${jobRoot}/.nanocrab`;
 
       expect(fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8')).toContain(
-        'vibe -p "$PROMPT" --output text --auto-approve --workdir "$PWD" --max-price "$CODING_JOB_MAX_BUDGET_USD" --trust',
+        'vibe --prompt "$PROMPT" --output json --max-turns "$CODING_JOB_MAX_TURNS" --max-price "$CODING_JOB_MAX_BUDGET_USD"',
+      );
+      expect(fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8')).not.toMatch(
+        /--auto-approve|--workdir|--trust/,
       );
       const config = fs.readFileSync(
         `${metadataDir}/vibe-home/config.toml`,

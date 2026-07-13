@@ -10,7 +10,7 @@ import {
   listCockpitStreamEvents,
   listTerminalSessions,
   readSessionLog,
-  closeTerminalSession,
+  deleteTerminalSession,
 } from '../websocket.js';
 import { getAgentProviderConfig } from '../../agent-provider.js';
 import { listApprovals } from '../../approvals.js';
@@ -881,27 +881,9 @@ router.delete(
         res.status(400).json({ error: 'Invalid session id' });
         return;
       }
-      // If the session is still live, stop it first so it stops writing.
-      closeTerminalSession(sessionId);
-      const indexPath = path.join(SESSIONS_DIR, 'index.json');
-      if (!fs.existsSync(indexPath)) {
+      if (!deleteTerminalSession(sessionId)) {
         res.status(404).json({ error: 'Session not found' });
         return;
-      }
-      let index: any[] = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-      const before = index.length;
-      index = index.filter((e: any) => e.id !== sessionId);
-      if (index.length === before) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
-      fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
-      // Remove log file
-      const logPath = path.join(SESSIONS_DIR, `${sessionId}.log`);
-      try {
-        if (fs.existsSync(logPath)) fs.unlinkSync(logPath);
-      } catch {
-        // ignore
       }
       res.json({ deleted: sessionId });
     } catch (_err) {

@@ -145,6 +145,28 @@ describe('Terminal operator console UI', () => {
     expect(source).not.toContain('Clipboard access failed');
   });
 
+  it('keeps historical terminal attachment read-only until a deliberate new session', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const connectBlock = source.slice(
+      source.indexOf('ws.onopen = () =>'),
+      source.indexOf('ws.onmessage ='),
+    );
+    const initBlock = source.slice(
+      source.indexOf('// Spawn or attach terminal session'),
+      source.indexOf('term.onData'),
+    );
+
+    expect(connectBlock).toContain("type: 'terminal_attach'");
+    expect(connectBlock).not.toContain("type: 'terminal_spawn'");
+    expect(initBlock).toContain("type: 'terminal_attach'");
+    expect(initBlock).not.toContain("type: 'terminal_spawn'");
+    expect(source).toContain("msg.type === 'terminal_attach_result'");
+    expect(source).toContain("msg.data.status === 'not-found'");
+    expect(source).toContain("msg.data.status === 'historical'");
+    expect(source).toContain('activeTerminal.readOnly');
+    expect(source).not.toContain('<div class="terminal-shell-card">">');
+  });
+
   it('keeps files, logs, search, and WebSocket terminal behavior intact', () => {
     const source = fs.readFileSync(appPath, 'utf8');
 

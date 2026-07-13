@@ -237,7 +237,6 @@ function connectWs() {
       ws.send(
         JSON.stringify({ type: 'terminal_attach', sessionId: savedSessionId }),
       );
-      ws.send(JSON.stringify({ type: 'terminal_spawn', data: savedSessionId }));
     }
   };
   ws.onmessage = (e) => {
@@ -306,6 +305,29 @@ function activatePageTabAlias(alias) {
 }
 
 let handleWsMessage = function (msg) {
+  if (
+    msg.type === 'terminal_attach_result' &&
+    activeTerminal &&
+    msg.sessionId === activeTerminal.sessionId
+  ) {
+    activeTerminal.readOnly = msg.data.status === 'historical';
+    if (msg.data.status === 'not-found' && ws?.readyState === 1) {
+      ws.send(
+        JSON.stringify({ type: 'terminal_spawn', data: msg.sessionId }),
+      );
+    }
+    return;
+  }
+  if (
+    msg.type === 'terminal_denied' &&
+    activeTerminal &&
+    msg.sessionId === activeTerminal.sessionId
+  ) {
+    activeTerminal.term.write(
+      `\r\n[Permission denied: ${msg.data.reason || 'terminal operation denied'}]\r\n`,
+    );
+    return;
+  }
   // Route terminal output to active terminal
   if (
     msg.type === 'terminal_output' &&
@@ -12610,7 +12632,7 @@ async function renderTerminal(el) {
         </div>
       </div>
     </section>
-    <div class="terminal-shell-card">">
+    <div class="terminal-shell-card">
       <div class="split-container" id="terminal-split">
         <div class="split-pane terminal-split-pane" id="pane-left">
           <div class="pane-tabs" id="pane-left-tabs">
@@ -12738,7 +12760,7 @@ async function renderTerminal(el) {
 
   const sessionId = document.getElementById('terminal-session-id').value;
   localStorage.setItem('terminal_session_id', sessionId);
-  activeTerminal = { sessionId, term, transcript: '' };
+  activeTerminal = { sessionId, term, transcript: '', readOnly: false };
   window._terminalOperatorState = {
     ...(window._terminalOperatorState || {}),
     sessionId,
@@ -12750,7 +12772,6 @@ async function renderTerminal(el) {
   const initTerminal = () => {
     if (ws?.readyState === 1) {
       ws.send(JSON.stringify({ type: 'terminal_attach', sessionId }));
-      ws.send(JSON.stringify({ type: 'terminal_spawn', data: sessionId }));
       return;
     }
     term.write('Connecting...\r\n');
@@ -12761,7 +12782,6 @@ async function renderTerminal(el) {
       if (ws?.readyState === 1) {
         clearInterval(check);
         ws.send(JSON.stringify({ type: 'terminal_attach', sessionId }));
-        ws.send(JSON.stringify({ type: 'terminal_spawn', data: sessionId }));
       } else if (attempts > 20) {
         clearInterval(check);
         term.write('\r\nFailed to connect. Check WebSocket.\r\n');
@@ -12772,7 +12792,7 @@ async function renderTerminal(el) {
   initTerminal();
 
   term.onData((data) => {
-    if (ws?.readyState === 1) {
+    if (ws?.readyState === 1 && !activeTerminal.readOnly) {
       ws.send(JSON.stringify({ type: 'terminal_input', sessionId, data }));
     }
   });

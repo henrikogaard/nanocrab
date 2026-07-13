@@ -102,7 +102,17 @@ async function collectReportSources(job: ReportJob): Promise<{
   sections: string[];
   citations: Array<{ label: string; source: string }>;
 }> {
-  const collected = await collectSources(job.id, job.sourceScopes, job.request);
+  const collected = await collectSources(
+    job.id,
+    job.sourceScopes,
+    job.request,
+    {
+      actor: job.requester,
+      groupFolder: job.requester,
+      agentId: job.providerProfileId,
+      isMain: job.requester === 'whatsapp_main',
+    },
+  );
   job.sourceCollectionId = collected.sourceCollectionId;
   return {
     sections: collected.sections,

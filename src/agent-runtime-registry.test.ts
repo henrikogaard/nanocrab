@@ -4,6 +4,7 @@ import {
   listAgentRuntimeDefinitions,
   probeAgentRuntime,
 } from './agent-runtime-registry.js';
+import { probeCodingRunnerReadiness } from './coding-runner-readiness.js';
 
 describe('agent runtime registry', () => {
   it('exposes allowlisted CLI definitions', () => {
@@ -72,6 +73,39 @@ describe('agent runtime registry', () => {
     });
     expect(result.version).toBeNull();
     expect(result.checkedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('reports Pi coding readiness from the image and credential route, not host CLI', async () => {
+    const hostProbe = vi.fn();
+
+    await expect(
+      probeCodingRunnerReadiness('pi', {
+        probeHostRuntime: hostProbe,
+        containerImageAvailable: vi.fn().mockReturnValue(true),
+        credentialAvailable: vi
+          .fn()
+          .mockImplementation((key: string) => key === 'OPENROUTER_API_KEY'),
+      }),
+    ).resolves.toMatchObject({
+      cli: 'pi',
+      status: 'healthy',
+      detail: expect.stringContaining('OpenRouter'),
+    });
+    expect(hostProbe).not.toHaveBeenCalled();
+  });
+
+  it('does not report Pi runnable without the OpenRouter credential route', async () => {
+    await expect(
+      probeCodingRunnerReadiness('pi', {
+        probeHostRuntime: vi.fn(),
+        containerImageAvailable: vi.fn().mockReturnValue(true),
+        credentialAvailable: vi.fn().mockReturnValue(false),
+      }),
+    ).resolves.toMatchObject({
+      cli: 'pi',
+      status: 'missing',
+      detail: expect.stringContaining('OPENROUTER_API_KEY'),
+    });
   });
 
   it('reports healthy runtime with parsed version', async () => {

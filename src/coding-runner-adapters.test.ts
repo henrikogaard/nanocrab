@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   AGENT_PROVIDER_DEFINITIONS as _AGENT_PROVIDER_DEFINITIONS,
@@ -8,11 +8,18 @@ import {
   isCodingCapableProvider,
   isAgentProvider,
   getAgentProviderDefinition,
+  getProviderAvailability,
 } from './agent-provider.js';
 import {
   getAgentRuntimeDefinition,
   listAgentRuntimeDefinitions,
 } from './agent-runtime-registry.js';
+import {
+  buildMistralVibeInvocation,
+  probeMistralVibe,
+  runMistralVibe,
+  type CodingRunnerProcess,
+} from './mistral-vibe-adapter.js';
 
 describe('coding-runner adapters', () => {
   describe('pi adapter', () => {
@@ -47,6 +54,31 @@ describe('coding-runner adapters', () => {
       expect(def?.codingRunnerSupported).toBe(true);
       expect(def?.executable).toBe('pi');
     });
+
+    it('uses container-image and OpenRouter readiness for admin availability', () => {
+      const availabilityWith = getProviderAvailability as unknown as (options: {
+        commandAvailable: () => boolean;
+        containerImageAvailable: () => boolean;
+        credentialAvailable: (key: string) => boolean;
+      }) => ReturnType<typeof getProviderAvailability>;
+      const base = {
+        commandAvailable: () => false,
+        containerImageAvailable: () => true,
+      };
+
+      expect(
+        availabilityWith({
+          ...base,
+          credentialAvailable: (key) => key === 'OPENROUTER_API_KEY',
+        }).pi,
+      ).toBe(true);
+      expect(
+        availabilityWith({
+          ...base,
+          credentialAvailable: () => false,
+        }).pi,
+      ).toBe(false);
+    });
   });
 
   describe('mistral vibe adapter', () => {
@@ -67,6 +99,113 @@ describe('coding-runner adapters', () => {
       expect(def).toBeDefined();
       expect(def?.codingRunnerSupported).toBe(true);
       expect(def?.executable).toBe('vibe');
+    });
+
+    it('constructs the official non-interactive Vibe invocation', () => {
+      expect(
+        buildMistralVibeInvocation({
+          prompt: 'Fix the issue',
+          cwd: '/tmp/worktree',
+          maxTurns: 12,
+          maxPrice: 3.5,
+        }),
+      ).toEqual({
+        runtime: 'mistral',
+        command: 'vibe',
+        args: [
+          '--prompt',
+          'Fix the issue',
+          '--output',
+          'json',
+          '--max-turns',
+          '12',
+          '--max-price',
+          '3.5',
+        ],
+        cwd: '/tmp/worktree',
+      });
+    });
+
+    it('runs with injected execution and normalizes JSON success', async () => {
+      const runner = vi.fn().mockResolvedValue({
+        exitCode: 0,
+        stdout: '{"result":"done"}',
+        stderr: '',
+      } satisfies CodingRunnerProcess);
+
+      const result = await runMistralVibe(
+        { prompt: 'Fix it', cwd: '/tmp/worktree', maxTurns: 8, maxPrice: 2 },
+        { runner },
+      );
+
+      expect(runner).toHaveBeenCalledWith(
+        'vibe',
+        [
+          '--prompt',
+          'Fix it',
+          '--output',
+          'json',
+          '--max-turns',
+          '8',
+          '--max-price',
+          '2',
+        ],
+        expect.objectContaining({ cwd: '/tmp/worktree' }),
+      );
+      expect(result).toMatchObject({
+        status: 'succeeded',
+        output: { result: 'done' },
+        exitCode: 0,
+      });
+    });
+
+    it('normalizes stderr and non-zero exits', async () => {
+      const runner = vi.fn().mockResolvedValue({
+        exitCode: 2,
+        stdout: '',
+        stderr: 'budget exceeded',
+      } satisfies CodingRunnerProcess);
+
+      await expect(
+        runMistralVibe({ prompt: 'Fix it', cwd: '/tmp/worktree' }, { runner }),
+      ).resolves.toMatchObject({
+        status: 'failed',
+        error: 'budget exceeded',
+        exitCode: 2,
+      });
+    });
+
+    it('normalizes cancellation without invoking an aborted runner', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const runner = vi.fn();
+
+      await expect(
+        runMistralVibe(
+          { prompt: 'Fix it', cwd: '/tmp/worktree', signal: controller.signal },
+          { runner },
+        ),
+      ).resolves.toMatchObject({ status: 'cancelled', exitCode: null });
+      expect(runner).not.toHaveBeenCalled();
+    });
+
+    it('probes Vibe health through injected execution', async () => {
+      const runner = vi.fn().mockResolvedValue({
+        exitCode: 0,
+        stdout: 'vibe 0.9.1\n',
+        stderr: '',
+      } satisfies CodingRunnerProcess);
+
+      await expect(probeMistralVibe({ runner })).resolves.toMatchObject({
+        runtime: 'mistral',
+        status: 'healthy',
+        version: '0.9.1',
+      });
+      expect(runner).toHaveBeenCalledWith(
+        'vibe',
+        ['--version'],
+        expect.any(Object),
+      );
     });
   });
 

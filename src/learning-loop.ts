@@ -130,28 +130,105 @@ function isEligibleRun(job: CodingJob, config: LearningLoopConfig): boolean {
   if (config.excludeFailed && job.failureReason) return false;
   if (config.excludePrivate && job.prompt.toLowerCase().includes('private'))
     return false;
+  return true;
+}
+
+const SECRET_SENTINEL = '[REDACTED]';
+const PRIVATE_KEY_RE =
+  /-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?-----END [^-\r\n]*PRIVATE KEY-----/gi;
+const LABELED_SECRET_RE =
+  /\b(api[_ -]?key|access[_ -]?token|refresh[_ -]?token|token|password|passwd|client[_ -]?secret|secret|authorization)\b\s*(?:=|:)\s*(?:Bearer\s+)?[^\s,;]+/gi;
+const KNOWN_CREDENTIAL_RE =
+  /\b(?:sk-[A-Za-z0-9_-]{12,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{12,}|AKIA[A-Z0-9]{16}|eyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})\b/g;
+const HIGH_ENTROPY_CANDIDATE_RE = /\b[A-Za-z0-9+/_=-]{32,}\b/g;
+
+function shannonEntropy(value: string): number {
+  const counts = new Map<string, number>();
+  for (const char of value) counts.set(char, (counts.get(char) || 0) + 1);
+  let entropy = 0;
+  for (const count of counts.values()) {
+    const probability = count / value.length;
+    entropy -= probability * Math.log2(probability);
+  }
+  return entropy;
+}
+
+function isPlausibleHighEntropySecret(value: string): boolean {
+  if (value.includes('/') || !/[A-Z+_=]/.test(value)) return false;
+  const categoryCount = [/[a-z]/, /[A-Z]/, /\d/, /[+/_=-]/].filter((pattern) =>
+    pattern.test(value),
+  ).length;
+  return (
+    categoryCount >= 3 &&
+    new Set(value).size >= 16 &&
+    shannonEntropy(value) >= 4
+  );
+}
+
+function redactSecretText(value: string | null | undefined): {
+  value: string;
+  secretFound: boolean;
+} {
+  if (!value) return { value: '', secretFound: false };
+  let secretFound = false;
+  const replaceSecret = () => {
+    secretFound = true;
+    return SECRET_SENTINEL;
+  };
+  let redacted = value.replace(PRIVATE_KEY_RE, replaceSecret);
+  redacted = redacted.replace(LABELED_SECRET_RE, replaceSecret);
+  redacted = redacted.replace(KNOWN_CREDENTIAL_RE, replaceSecret);
+  redacted = redacted.replace(HIGH_ENTROPY_CANDIDATE_RE, (candidate) =>
+    isPlausibleHighEntropySecret(candidate) ? replaceSecret() : candidate,
+  );
+  return { value: redacted, secretFound };
+}
+
+function sanitizeLearningJob(job: CodingJob): {
+  job: CodingJob;
+  secretFound: boolean;
+} {
+  let secretFound = false;
+  const sanitize = (value: string | null | undefined): string => {
+    const result = redactSecretText(value);
+    secretFound ||= result.secretFound;
+    return result.value;
+  };
+  const sanitized: CodingJob = {
+    ...job,
+    prompt: sanitize(job.prompt),
+    issueTitle: job.issueTitle ? sanitize(job.issueTitle) : null,
+    diffSummary: job.diffSummary ? sanitize(job.diffSummary) : null,
+    testSummary: job.testSummary ? sanitize(job.testSummary) : null,
+    output: sanitize(job.output),
+    changedFiles: job.changedFiles.map(sanitize),
+  };
+  return { job: sanitized, secretFound };
+}
+
+function normalizeTestEvidence(
+  testSummary: string | null | undefined,
+): string | null {
+  const trimmed = testSummary?.trim();
+  if (!trimmed) return null;
   if (
-    config.excludeSecretBearing &&
-    /\b(api[_ -]?key|token|password|secret|private key|oauth)\b/i.test(
-      job.output,
+    /^(?:see|review) (?:job )?output for tests run by the coding agent\.?$/i.test(
+      trimmed,
     )
   ) {
-    return false;
+    return null;
   }
-  return true;
+  return trimmed;
 }
 
 function extractLessonFromRun(job: CodingJob): string | null {
   const diffSummary = job.diffSummary || '';
-  const testSummary = job.testSummary || '';
+  const testSummary = normalizeTestEvidence(job.testSummary);
 
   const sections = [
     job.prompt ? `Task: ${job.prompt.slice(0, 500)}` : null,
     diffSummary ? `Changes: ${diffSummary}` : null,
-    testSummary &&
-    testSummary !== 'See job output for tests run by the coding agent.'
-      ? `Tests: ${testSummary}`
-      : null,
+    testSummary ? `Tests: ${testSummary}` : null,
   ].filter(Boolean);
 
   if (sections.length === 0) return null;
@@ -212,17 +289,10 @@ function detectSensitivity(
   return 'normal';
 }
 
-const DEFAULT_TEST_SUMMARY =
-  'See job output for tests run by the coding agent.';
-
 function hasMeaningfulTestSummary(
   testSummary: string | null | undefined,
 ): boolean {
-  return !!(
-    testSummary &&
-    testSummary.trim().length > 0 &&
-    testSummary !== DEFAULT_TEST_SUMMARY
-  );
+  return normalizeTestEvidence(testSummary) !== null;
 }
 
 function looksLikeFailure(text: string | undefined): boolean {
@@ -296,8 +366,22 @@ export function deriveLearningFromRun(
   if (!config.enabled) return null;
 
   const jobs = loadCodingJobs();
-  const job = jobs.find((j) => j.id === jobId);
-  if (!job) return null;
+  const sourceJob = jobs.find((j) => j.id === jobId);
+  if (!sourceJob) return null;
+
+  const sanitized = sanitizeLearningJob(sourceJob);
+  const job = sanitized.job;
+  if (sanitized.secretFound) {
+    logAuditEvent({
+      actor: requestedBy,
+      actionType: 'learning.derive',
+      resource: jobId,
+      decision: 'skipped',
+      correlationId: jobId,
+      context: { reason: 'secret-bearing content' },
+    });
+    return null;
+  }
 
   if (!isEligibleRun(job, config)) {
     logAuditEvent({

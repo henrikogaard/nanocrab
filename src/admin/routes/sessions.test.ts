@@ -35,7 +35,8 @@ const DATA_DIR = config.DATA_DIR as string;
 const STORE_DIR = config.STORE_DIR as string;
 const { default: sessionsRouter, listCockpitSessions } =
   await import('./sessions.js');
-const { broadcastTaskProgress } = await import('../websocket.js');
+const { broadcastTaskProgress, loadHistoricalSessions, listTerminalSessions } =
+  await import('../websocket.js');
 
 function transcriptId(group: string, sessionId: string): string {
   return `transcript:${encodeURIComponent(group)}:${encodeURIComponent(sessionId)}`;
@@ -252,6 +253,7 @@ describe('terminal session API', () => {
   });
 
   it('DELETE /terminal/:id removes an existing session and enforces owner role', async () => {
+    loadHistoricalSessions();
     await withSessionsServer('owner', async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/sessions/terminal/term-1`, {
         method: 'DELETE',
@@ -265,6 +267,9 @@ describe('terminal session API', () => {
       ) as Array<{ id: string }>;
       expect(index.map((e) => e.id)).not.toContain('term-1');
       expect(fs.existsSync(path.join(SESSIONS_DIR, 'term-1.log'))).toBe(false);
+      expect(listTerminalSessions().map((session) => session.id)).not.toContain(
+        'term-1',
+      );
     });
 
     await withSessionsServer('viewer', async (baseUrl) => {

@@ -51,6 +51,23 @@ vi.mock('../../admin/security.js', () => ({
   auditLog: vi.fn(),
 }));
 
+vi.mock('../../coding-runner-readiness.js', () => ({
+  probeCodingRunnerReadiness: vi.fn().mockResolvedValue({
+    cli: 'codex',
+    status: 'healthy',
+    detail: 'mock coding runner',
+    checkedAt: '2026-07-13T00:00:00.000Z',
+  }),
+  probeAllCodingRunnerReadiness: vi.fn().mockResolvedValue([
+    {
+      cli: 'pi',
+      status: 'healthy',
+      detail: 'Pi coding runner is available in the agent container',
+      checkedAt: '2026-07-13T00:00:00.000Z',
+    },
+  ]),
+}));
+
 vi.mock('../../coding-jobs.js', () => {
   const jobs: Array<Record<string, unknown>> = [];
   return {
@@ -317,10 +334,17 @@ describe('/api/control-plane', () => {
       const res = await fetch(`${base}/api/control-plane/runtimes`);
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        runtimes: Array<{ cli: string; health: { status: string } | null }>;
+        runtimes: Array<{
+          cli: string;
+          health: { status: string } | null;
+          codingReadiness: { status: string } | null;
+        }>;
       };
       expect(body.runtimes.length).toBeGreaterThan(0);
       expect(body.runtimes.map((r) => r.cli)).toContain('claude');
+      expect(
+        body.runtimes.find((r) => r.cli === 'pi')?.codingReadiness,
+      ).toEqual(expect.objectContaining({ status: 'healthy' }));
     });
   });
 

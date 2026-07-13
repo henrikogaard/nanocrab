@@ -116,6 +116,9 @@ What exists:
 - Allowlisted CLI discovery for Claude, Codex, Pi, OpenCode, Devin, and Mistral Vibe.
 - Independent health states for healthy, missing, unsupported, unauthenticated, and error conditions.
 - Mistral’s logical runtime id maps to the installed `vibe` executable.
+- Coding-runner readiness is separate from host interactive CLI discovery. Pi
+  is runnable when the coding image and OpenRouter credential route are ready,
+  even when no host `pi` executable is installed.
 - Additive migration preserves existing Agent Profiles.
 
 Before depending on it, run its focused profile/registry tests and inspect the merged interfaces rather than copying types from the plan blindly.
