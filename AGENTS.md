@@ -93,19 +93,37 @@ When Henrik asks to test, validate, or drive issues to closure, treat that as au
 
 ### Issue And PR Completion Discipline
 
-- When work is tied to an issue, identify the issue number, target branch, and
-  expected integration branch before implementation. Default integration branch
-  is `development` when it exists; otherwise use repo-level instructions or
-  ask.
+- NanoCrab's integration branch is `main`. Feature work starts from `main`, and
+  normal feature PRs target `main`.
+- A request to fix, implement, build, or finish repository work authorizes the
+  normal feature branch -> verify -> commit -> push -> ready-for-review PR
+  workflow unless Henrik says `local only`, `do not commit`, `do not push`, or
+  otherwise narrows the request.
+- When work is tied to an issue, identify the issue number, feature branch, and
+  `main` target before implementation.
 - Before starting implementation, record the current branch/worktree and
   whether the branch already has an open PR.
 - Implementation is not complete until all of these are true:
   - relevant tests/checks have run, or skipped checks are explicitly justified
   - changes are committed on a named branch
   - the branch is pushed
-  - a PR exists targeting the correct integration branch, usually `development`
-  - the PR description links the issue and includes verification evidence
+  - a PR exists targeting `main`
+  - the PR states its intended effect and focused scope, links the issue when
+    applicable, and includes verification evidence, skipped checks, and
+    residual risk
+  - the PR is ready for review, not draft, unless known implementation work,
+    required verification, or a blocking decision remains
   - project/issue status is moved to `In review` when repo rules use that state
+- Draft PRs are temporary. Convert them to ready for review as soon as scoped
+  implementation and required local verification are complete. Ready for
+  review is not automatically merge-ready; required CI, approvals, and manual
+  QA may still remain.
+- Never merge a PR unless Henrik explicitly instructs you to merge that
+  specific PR after his review. Creating, updating, resolving conflicts in,
+  approving, or marking a PR ready for review does not authorize merging it.
+- Release, version, tag, signing, notarization, deployment, and publishing
+  actions require explicit authorization and are not implied by ordinary
+  implementation work.
 - If the agent cannot push or create a PR because of auth, detached HEAD,
   sandbox, CI, or branch protection, it must stop with a clear handoff
   containing branch name, commit SHA, target branch, exact PR title/body,
