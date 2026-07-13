@@ -98,11 +98,11 @@ function safeFilename(value: string): string {
   );
 }
 
-function collectReportSources(job: ReportJob): {
+async function collectReportSources(job: ReportJob): Promise<{
   sections: string[];
   citations: Array<{ label: string; source: string }>;
-} {
-  const collected = collectSources(job.id, job.sourceScopes, job.request);
+}> {
+  const collected = await collectSources(job.id, job.sourceScopes, job.request);
   job.sourceCollectionId = collected.sourceCollectionId;
   return {
     sections: collected.sections,
@@ -151,8 +151,8 @@ function ensureReportApproval(job: ReportJob, kind: ApprovalKind): void {
   });
 }
 
-function composeMarkdown(job: ReportJob): void {
-  const collected = collectReportSources(job);
+async function composeMarkdown(job: ReportJob): Promise<void> {
+  const collected = await collectReportSources(job);
   job.citations = collected.citations;
   const designSystem = job.designSystemId
     ? designSystemSelectionSummary({
@@ -327,7 +327,7 @@ export async function approveReportOutline(id: string): Promise<ReportJob> {
     ensureReportApproval(job, 'report-outline');
     throw new Error('Report outline approval is still pending');
   }
-  composeMarkdown(job);
+  await composeMarkdown(job);
   await exportArtifacts(job);
   job.status = job.requireDeliveryApproval
     ? 'awaiting_delivery_approval'

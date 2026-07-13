@@ -650,6 +650,10 @@ const navIconPaths = {
     '<path d="M9 4.5h5l3.5 3.5v8a1.5 1.5 0 0 1-1.5 1.5H9A1.5 1.5 0 0 1 7.5 16V6A1.5 1.5 0 0 1 9 4.5Z"/><path d="M14 4.5V8h3.5"/><path d="M4.5 8.5V18.5A1 1 0 0 0 5.5 19.5h7.5"/>',
   'control-plane':
     '<path d="M12 2.5 21.5 8v8L12 21.5 2.5 16V8L12 2.5Z"/><path d="M12 7.5v9"/><path d="M7.5 10.5 12 7.5l4.5 3"/><path d="M7.5 13.5 12 16.5l4.5-3"/>',
+  learning:
+    '<path d="M12 3.5 19.5 8v8L12 20.5 4.5 16V8L12 3.5Z"/><path d="M12 8.5v7"/><path d="M8 11.5 12 8.5l4 3"/><path d="M8 14.5 12 17.5l4-3"/>',
+  source:
+    '<path d="M4.5 6.5h15v3.5h-15z"/><path d="M6 10v8.5a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V10"/><path d="M10 14h4"/>',
 };
 
 function navIcon(name, extraClass = '') {
@@ -1028,6 +1032,8 @@ const _pageMap = {
   help: 'renderHelp',
   marketplace: 'renderMarketplace',
   'control-plane': 'renderControlPlane',
+  'learning-proposals': 'renderLearningProposals',
+  'source-collections': 'renderSourceCollections',
   'session-detail': 'renderSessionDetail',
 };
 // Track which plugin frontends we've already loaded

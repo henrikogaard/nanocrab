@@ -64,7 +64,7 @@ RUN npm install -g \
     mkdir -p /usr/local/share/devin && \
     tar xzf /tmp/devin.tar.gz -C /usr/local/share/devin && \
     rm -f /tmp/devin.tar.gz && \
-    ln -s /usr/local/share/devin/devin/bin/devin /usr/local/bin/devin && \
+    ln -s /usr/local/share/devin/bin/devin /usr/local/bin/devin && \
     \
     # Install Mistral Vibe (PyPI package, not npm)
     python3 -m venv /usr/local/share/vibe && \

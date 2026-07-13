@@ -163,6 +163,28 @@ describe('learning-loop', () => {
       expect(proposal).not.toBeNull();
       expect(proposal!.type).toBe('memory');
     });
+
+    it('computes confidence from run evidence and stores the validation result', () => {
+      const proposal = deriveLearningFromRun('code-test-123', 'test-user');
+      expect(proposal).not.toBeNull();
+      expect(proposal!.confidence).toBeGreaterThan(0.6);
+      expect(proposal!.validationResult).not.toBeNull();
+      expect(proposal!.validationResult).toContain('diff present');
+    });
+
+    it('skips a proposal when confidence is below minConfidence', () => {
+      updateLearningConfig({ minConfidence: 0.95 });
+      writeTestJobs([
+        createTestJob({
+          diffSummary: '',
+          changedFiles: [],
+          testSummary: '',
+          output: '',
+        }),
+      ]);
+      const proposal = deriveLearningFromRun('code-test-123', 'test-user');
+      expect(proposal).toBeNull();
+    });
   });
 
   describe('reviewLearningProposals', () => {

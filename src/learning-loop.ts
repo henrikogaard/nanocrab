@@ -183,6 +183,77 @@ function detectSensitivity(
   return 'normal';
 }
 
+const DEFAULT_TEST_SUMMARY =
+  'See job output for tests run by the coding agent.';
+
+function hasMeaningfulTestSummary(
+  testSummary: string | null | undefined,
+): boolean {
+  return !!(
+    testSummary &&
+    testSummary.trim().length > 0 &&
+    testSummary !== DEFAULT_TEST_SUMMARY
+  );
+}
+
+function looksLikeFailure(text: string | undefined): boolean {
+  if (!text) return false;
+  const lowered = text.toLowerCase();
+  return (
+    lowered.includes('error') ||
+    lowered.includes('fail') ||
+    lowered.includes('exception') ||
+    lowered.includes('timeout') ||
+    lowered.includes('abort')
+  );
+}
+
+function computeLessonConfidence(
+  job: CodingJob,
+  sensitivity: LearningProposal['sensitivity'],
+  type: LearningProposalType,
+): { confidence: number; validationResult: string } {
+  let score = 0.5;
+  const signals: string[] = [];
+
+  if (job.diffSummary && job.diffSummary.trim().length > 0) {
+    score += 0.1;
+    signals.push('diff present');
+  }
+  if (job.changedFiles && job.changedFiles.length > 0) {
+    score += 0.05;
+    signals.push(`${job.changedFiles.length} changed files`);
+  }
+  if (hasMeaningfulTestSummary(job.testSummary)) {
+    score += 0.1;
+    signals.push('tests meaningful');
+  }
+  if (job.output && job.output.length > 100) {
+    if (looksLikeFailure(job.output)) {
+      score -= 0.15;
+      signals.push('output has failure markers');
+    } else {
+      score += 0.1;
+      signals.push('output clean');
+    }
+  }
+  if (sensitivity === 'normal') {
+    score += 0.05;
+    signals.push('normal sensitivity');
+  } else if (sensitivity === 'sensitive') {
+    score -= 0.05;
+    signals.push('sensitive content');
+  }
+  if (type === 'skill-draft') {
+    score += 0.05;
+    signals.push('skill-draft intent');
+  }
+
+  const confidence = normalizeConfidence(score);
+  const validationResult = signals.join('; ') || 'no signals';
+  return { confidence, validationResult };
+}
+
 function normalizeConfidence(value: number | undefined): number {
   if (value === undefined || Number.isNaN(value)) return 0.5;
   return Math.min(Math.max(value, 0), 1);
@@ -231,6 +302,27 @@ export function deriveLearningFromRun(
   const extractedLesson =
     type === 'skill-draft' ? buildSkillMd(job, lesson) : lesson;
 
+  const { confidence, validationResult } = computeLessonConfidence(
+    job,
+    sensitivity,
+    type,
+  );
+  if (confidence < config.minConfidence) {
+    logAuditEvent({
+      actor: requestedBy,
+      actionType: 'learning.derive',
+      resource: jobId,
+      decision: 'skipped',
+      correlationId: jobId,
+      context: {
+        reason: 'confidence below threshold',
+        confidence,
+        minConfidence: config.minConfidence,
+      },
+    });
+    return null;
+  }
+
   const proposal: LearningProposal = {
     id: `learn-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
     type,
@@ -239,8 +331,8 @@ export function deriveLearningFromRun(
     extractedLesson,
     proposedScope: 'group',
     sensitivity,
-    confidence: normalizeConfidence(0.7),
-    validationResult: null,
+    confidence,
+    validationResult,
     diff: job.diffSummary,
     status: 'pending',
     createdBy: requestedBy,

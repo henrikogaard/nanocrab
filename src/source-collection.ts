@@ -8,7 +8,16 @@ import { listJournalEntryRecords, findJournalEvents } from './journal-store.js';
 import { listMemoryRecords } from './memory-store.js';
 import { listResearchJobs } from './research-jobs.js';
 import { listArtifactVault } from './artifact-vault.js';
-import { DEFAULT_CONNECTOR_CATALOG } from './connector-catalog.js';
+import {
+  DEFAULT_CONNECTOR_CATALOG,
+  buildConnectorCatalog,
+} from './connector-catalog.js';
+import {
+  loadConnectorPermissions,
+  defaultConnectorPermission,
+} from './connector-permissions.js';
+import { readEnvFile } from './env.js';
+import { githubApi } from './coding-jobs.js';
 
 export type SourceCollectionStatus =
   | 'pending'
@@ -106,38 +115,94 @@ function readLedgerEntries(reportJobId?: string): SourceLedgerEntry[] {
   }
 }
 
-function normalizeConnectorId(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !value.trim()) return undefined;
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '');
+interface McpServerConfig {
+  name: string;
+  envVars?: string[];
+}
+
+function loadMcpServers(): McpServerConfig[] {
+  try {
+    const mcpConfigPath = path.join(STORE_DIR, 'mcp-servers.json');
+    if (!fs.existsSync(mcpConfigPath)) return [];
+    const servers = JSON.parse(fs.readFileSync(mcpConfigPath, 'utf-8'));
+    if (!Array.isArray(servers)) return [];
+    return servers as McpServerConfig[];
+  } catch {
+    return [];
+  }
 }
 
 function getAvailableConnectors(): string[] {
-  const builtInIds = DEFAULT_CONNECTOR_CATALOG.filter(
-    (definition) => definition.setupPath === 'built-in',
-  ).map((definition) => definition.id);
-  const configuredIds: string[] = [];
-  try {
-    const mcpConfigPath = path.join(STORE_DIR, 'mcp-servers.json');
-    if (fs.existsSync(mcpConfigPath)) {
-      const servers = JSON.parse(
-        fs.readFileSync(mcpConfigPath, 'utf-8'),
-      ) as Array<{
-        name?: string;
-      }>;
-      for (const server of servers) {
-        const id = normalizeConnectorId(server.name);
-        if (id && !builtInIds.includes(id) && !configuredIds.includes(id)) {
-          configuredIds.push(id);
-        }
-      }
-    }
-  } catch {
-    /* ignore malformed MCP configuration */
+  const mcpServers = loadMcpServers();
+  const permissions = loadConnectorPermissions();
+
+  const allEnvKeys = [
+    ...new Set(
+      DEFAULT_CONNECTOR_CATALOG.flatMap((d) => d.requiredEnvVars)
+        .concat(mcpServers.flatMap((s) => s.envVars || []))
+        .filter(Boolean),
+    ),
+  ];
+  const envValues = readEnvFile(allEnvKeys);
+
+  const serverByName = new Map<string, McpServerConfig>();
+  for (const server of mcpServers) {
+    serverByName.set(server.name, server);
   }
-  return Array.from(new Set([...builtInIds, ...configuredIds]));
+
+  const servers = DEFAULT_CONNECTOR_CATALOG.filter(
+    (d) => d.setupPath === 'built-in',
+  ).map((definition) => {
+    const server = serverByName.get(definition.id);
+    const envVars = server?.envVars || definition.requiredEnvVars;
+    const envStatus = envVars.map((key) => ({
+      key,
+      isSet: !!(process.env[key] || envValues[key]),
+    }));
+    const permission =
+      permissions.find((p) => p.connectorId === definition.id) ||
+      defaultConnectorPermission(definition.id) ||
+      undefined;
+    return {
+      name: definition.id,
+      envStatus,
+      permission,
+    };
+  });
+
+  for (const server of mcpServers) {
+    if (DEFAULT_CONNECTOR_CATALOG.some((d) => d.id === server.name)) continue;
+    const envStatus = (server.envVars || []).map((key) => ({
+      key,
+      isSet: !!(process.env[key] || envValues[key]),
+    }));
+    const permission =
+      permissions.find((p) => p.connectorId === server.name) ||
+      defaultConnectorPermission(server.name) ||
+      undefined;
+    servers.push({
+      name: server.name,
+      envStatus,
+      permission,
+    });
+  }
+
+  const installedPresetNames = new Set(mcpServers.map((s) => s.name));
+  const presets = DEFAULT_CONNECTOR_CATALOG.filter(
+    (d) => d.setupPath === 'preset',
+  ).map((d) => ({
+    name: d.presetName || d.id,
+    installed: installedPresetNames.has(d.presetName || d.id),
+  }));
+
+  const catalog = buildConnectorCatalog({
+    servers,
+    presets,
+  });
+
+  return catalog.items
+    .filter((item) => item.ready && item.id !== 'nanocrab')
+    .map((item) => item.id);
 }
 
 export function startSourceCollection(
@@ -145,24 +210,48 @@ export function startSourceCollection(
   requestedScopes: SourceScope[],
 ): SourceCollectionRecord {
   const availableConnectors = getAvailableConnectors();
-  const items: SourceCollectionItem[] = requestedScopes.map((scope) => {
-    const isConnectorScope = scope === 'connector';
-    const connectorUnavailable =
-      isConnectorScope && availableConnectors.length === 0;
 
-    return {
-      scope,
-      connectorId: isConnectorScope ? availableConnectors[0] : undefined,
-      status: connectorUnavailable ? 'failed' : 'pending',
-      requestedAt: new Date().toISOString(),
-      completedAt: null,
-      itemCount: 0,
-      failureReason: connectorUnavailable
-        ? 'No connectors available for source collection'
-        : null,
-      provenance: [],
-    };
-  });
+  const items: SourceCollectionItem[] = [];
+  for (const scope of requestedScopes) {
+    if (scope === 'connector') {
+      if (availableConnectors.length === 0) {
+        items.push({
+          scope,
+          connectorId: undefined,
+          status: 'failed',
+          requestedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          itemCount: 0,
+          failureReason: 'No connectors available for source collection',
+          provenance: [],
+        });
+      } else {
+        for (const connectorId of availableConnectors) {
+          items.push({
+            scope,
+            connectorId,
+            status: 'pending',
+            requestedAt: new Date().toISOString(),
+            completedAt: null,
+            itemCount: 0,
+            failureReason: null,
+            provenance: [],
+          });
+        }
+      }
+    } else {
+      items.push({
+        scope,
+        connectorId: undefined,
+        status: 'pending',
+        requestedAt: new Date().toISOString(),
+        completedAt: null,
+        itemCount: 0,
+        failureReason: null,
+        provenance: [],
+      });
+    }
+  }
 
   const record: SourceCollectionRecord = {
     id: `src-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
@@ -195,17 +284,30 @@ export function startSourceCollection(
   return record;
 }
 
+function findScopeItem(
+  record: SourceCollectionRecord,
+  scope: SourceScope,
+  connectorId?: string,
+): SourceCollectionItem | undefined {
+  return record.items.find(
+    (i) =>
+      i.scope === scope &&
+      (connectorId === undefined || i.connectorId === connectorId),
+  );
+}
+
 export function markScopeCollected(
   collectionId: string,
   scope: SourceScope,
   itemCount: number,
   provenance: string[] = [],
+  connectorId?: string,
 ): SourceCollectionRecord {
   const collections = readCollections();
   const record = collections.find((c) => c.id === collectionId);
   if (!record) throw new Error(`Source collection not found: ${collectionId}`);
 
-  const item = record.items.find((i) => i.scope === scope);
+  const item = findScopeItem(record, scope, connectorId);
   if (!item)
     throw new Error(`Scope ${scope} not in collection ${collectionId}`);
 
@@ -227,12 +329,13 @@ export function markScopeFailed(
   collectionId: string,
   scope: SourceScope,
   reason: string,
+  connectorId?: string,
 ): SourceCollectionRecord {
   const collections = readCollections();
   const record = collections.find((c) => c.id === collectionId);
   if (!record) throw new Error(`Source collection not found: ${collectionId}`);
 
-  const item = record.items.find((i) => i.scope === scope);
+  const item = findScopeItem(record, scope, connectorId);
   if (!item)
     throw new Error(`Scope ${scope} not in collection ${collectionId}`);
 
@@ -339,11 +442,82 @@ export interface CollectedSources {
   sourceCollectionId: string;
 }
 
-export function collectSources(
+async function fetchGitHubConnectorSources(
+  collectionId: string,
+  query: string,
+  sections: string[],
+  citations: Array<{ label: string; source: string }>,
+): Promise<{ itemCount: number; provenance: string[] }> {
+  const searchQuery = query.trim()
+    ? `${query.trim()} is:open is:issue`
+    : 'is:open is:issue';
+  const result = (await githubApi(
+    `/search/issues?q=${encodeURIComponent(searchQuery)}&per_page=10`,
+  )) as {
+    items?: Array<{
+      number: number;
+      title: string;
+      html_url: string;
+      repository?: { full_name?: string };
+    }>;
+  };
+  const issues = (result?.items || []).slice(0, 10);
+  if (issues.length === 0) {
+    return { itemCount: 0, provenance: ['github:search'] };
+  }
+
+  const lines: string[] = [];
+  for (const issue of issues) {
+    const repo = issue.repository?.full_name || 'unknown';
+    lines.push(`- ${issue.title} (${repo}#${issue.number})`);
+    addLedgerEntry(
+      collectionId,
+      'connector',
+      issue.title,
+      `Issue #${issue.number}: ${issue.title}`,
+      issue.html_url,
+      'github',
+    );
+    citations.push({
+      label: issue.title,
+      source: issue.html_url,
+    });
+  }
+  sections.push(`## GitHub Issues\n\n${lines.join('\n')}`);
+  return { itemCount: issues.length, provenance: ['github:search'] };
+}
+
+async function fetchConnectorSource(
+  collectionId: string,
+  connectorId: string,
+  query: string,
+  sections: string[],
+  citations: Array<{ label: string; source: string }>,
+): Promise<void> {
+  if (connectorId === 'github') {
+    const { itemCount, provenance } = await fetchGitHubConnectorSources(
+      collectionId,
+      query,
+      sections,
+      citations,
+    );
+    markScopeCollected(
+      collectionId,
+      'connector',
+      itemCount,
+      provenance,
+      connectorId,
+    );
+    return;
+  }
+  throw new Error(`Connector source fetch not implemented: ${connectorId}`);
+}
+
+export async function collectSources(
   reportJobId: string,
   sourceScopes: string[],
   query: string,
-): CollectedSources {
+): Promise<CollectedSources> {
   const requestedScopes = sourceScopes.filter(isSourceScope);
   const record = startSourceCollection(reportJobId, requestedScopes);
   const sections: string[] = [];
@@ -458,28 +632,32 @@ export function collectSources(
           break;
         }
         case 'connector': {
-          const connectorIds = getAvailableConnectors();
-          const connectorSection = connectorIds
-            .map((id) => `- ${id}`)
-            .join('\n');
-          sections.push(
-            `## Connectors\n\n${connectorSection || 'No connectors available.'}`,
+          const connectorItems = record.items.filter(
+            (i) => i.scope === 'connector',
           );
-          for (const connectorId of connectorIds) {
-            addLedgerEntry(
-              record.id,
-              'connector',
-              connectorId,
-              `Connector source: ${connectorId}`,
-              `connector:${connectorId}`,
-              connectorId,
-            );
-            citations.push({
-              label: connectorId,
-              source: `connector:${connectorId}`,
-            });
+          if (connectorItems.length === 0) {
+            sections.push('## Connectors\n\nNo connectors available.');
+            break;
           }
-          markScopeCollected(record.id, 'connector', connectorIds.length);
+          for (const item of connectorItems) {
+            if (item.status !== 'pending') continue;
+            try {
+              await fetchConnectorSource(
+                record.id,
+                item.connectorId as string,
+                query,
+                sections,
+                citations,
+              );
+            } catch (err) {
+              markScopeFailed(
+                record.id,
+                'connector',
+                err instanceof Error ? err.message : String(err),
+                item.connectorId,
+              );
+            }
+          }
           break;
         }
         default:

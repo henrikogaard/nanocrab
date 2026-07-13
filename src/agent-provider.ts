@@ -91,7 +91,7 @@ export const AGENT_PROVIDER_DEFINITIONS: Record<
     name: 'Devin CLI',
     runtime: 'devin-cli',
     description:
-      'Devin AI coding agent via CLI. Supports local and cloud sessions.',
+      'Devin CLI runtime discovery. Requires interactive `devin auth login`; not usable for unattended coding jobs through the credential proxy.',
     selectable: true,
     requiresCli: 'devin',
     requiresAuth: true,
