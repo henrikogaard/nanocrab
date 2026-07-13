@@ -13048,12 +13048,6 @@ window.toggleSessionBrowser = function () {
   if (body) body.classList.toggle('is-hidden');
 };
 
-function formatBytes(bytes) {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / 1048576).toFixed(1) + ' MB';
-}
-
 window.reconnectTerminal = function () {
   const input = document.getElementById('terminal-session-id');
   const sessionId = input?.value;
@@ -13878,7 +13872,7 @@ function colorizeLog(lines) {
   return lines
     .map((l) => {
       if (!l) return '';
-      const escaped = esc(l.replace(/\x1b\[[0-9;]*m/g, ''));
+      const escaped = esc(l.replace(new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g'), ''));
       if (escaped.includes('ERROR'))
         return `<span class="log-error">${escaped}</span>`;
       if (escaped.includes('WARN'))

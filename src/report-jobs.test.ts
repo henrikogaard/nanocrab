@@ -26,6 +26,8 @@ const {
 } = await import('./report-jobs.js');
 const { createDesignSystem } = await import('./design-systems.js');
 const { listApprovals, reviewApproval } = await import('./approvals.js');
+const { getSourceCollection, getSourceLedger } =
+  await import('./source-collection.js');
 
 function approvalFor(kind: string, targetId: string) {
   const approval = listApprovals({ targetId }).find(
@@ -79,6 +81,15 @@ describe('report jobs', () => {
     expect(outlined.status).toBe('awaiting_delivery_approval');
     expect(outlined.artifacts).toHaveLength(1);
     expect(fs.existsSync(outlined.artifacts[0].path)).toBe(true);
+    expect(outlined.sourceCollectionId).not.toBeNull();
+
+    const collection = getSourceCollection(outlined.sourceCollectionId!);
+    expect(collection).not.toBeUndefined();
+    expect(collection!.reportJobId).toBe(job.id);
+    expect(collection!.requestedScopes).toEqual(['journal', 'memory']);
+    expect(collection!.items.every((i) => i.status === 'completed')).toBe(true);
+    expect(getSourceLedger(job.id).length).toBe(0);
+
     await expect(() => approveReportDelivery(job.id)).toThrow(
       'Report delivery approval is still pending',
     );

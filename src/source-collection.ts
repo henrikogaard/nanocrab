@@ -4,6 +4,11 @@ import path from 'path';
 
 import { STORE_DIR } from './config.js';
 import { logAuditEvent } from './audit-log.js';
+import { listJournalEntryRecords, findJournalEvents } from './journal-store.js';
+import { listMemoryRecords } from './memory-store.js';
+import { listResearchJobs } from './research-jobs.js';
+import { listArtifactVault } from './artifact-vault.js';
+import { DEFAULT_CONNECTOR_CATALOG } from './connector-catalog.js';
 
 export type SourceCollectionStatus =
   | 'pending'
@@ -101,10 +106,38 @@ function readLedgerEntries(reportJobId?: string): SourceLedgerEntry[] {
   }
 }
 
+function normalizeConnectorId(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '');
+}
+
 function getAvailableConnectors(): string[] {
-  // For now, return empty array - connectors are managed externally
-  // In a full implementation, this would query the connector catalog
-  return [];
+  const builtInIds = DEFAULT_CONNECTOR_CATALOG.filter(
+    (definition) => definition.setupPath === 'built-in',
+  ).map((definition) => definition.id);
+  const configuredIds: string[] = [];
+  try {
+    const mcpConfigPath = path.join(STORE_DIR, 'mcp-servers.json');
+    if (fs.existsSync(mcpConfigPath)) {
+      const servers = JSON.parse(
+        fs.readFileSync(mcpConfigPath, 'utf-8'),
+      ) as Array<{
+        name?: string;
+      }>;
+      for (const server of servers) {
+        const id = normalizeConnectorId(server.name);
+        if (id && !builtInIds.includes(id) && !configuredIds.includes(id)) {
+          configuredIds.push(id);
+        }
+      }
+    }
+  } catch {
+    /* ignore malformed MCP configuration */
+  }
+  return Array.from(new Set([...builtInIds, ...configuredIds]));
 }
 
 export function startSourceCollection(
@@ -284,6 +317,184 @@ function computeOverallStatus(
     return completedCount > 0 ? 'partial' : 'failed';
   }
   return 'failed';
+}
+
+const SOURCE_SCOPES: SourceScope[] = [
+  'memory',
+  'journal',
+  'research',
+  'connector',
+  'artifact',
+  'web',
+  'file',
+];
+
+function isSourceScope(value: string): value is SourceScope {
+  return (SOURCE_SCOPES as string[]).includes(value);
+}
+
+export interface CollectedSources {
+  sections: string[];
+  citations: Array<{ label: string; source: string }>;
+  sourceCollectionId: string;
+}
+
+export function collectSources(
+  reportJobId: string,
+  sourceScopes: string[],
+  query: string,
+): CollectedSources {
+  const requestedScopes = sourceScopes.filter(isSourceScope);
+  const record = startSourceCollection(reportJobId, requestedScopes);
+  const sections: string[] = [];
+  const citations: Array<{ label: string; source: string }> = [];
+
+  for (const scope of requestedScopes) {
+    try {
+      switch (scope) {
+        case 'journal': {
+          const entries = listJournalEntryRecords({ limit: 10 });
+          const events = query ? findJournalEvents({ query, limit: 10 }) : [];
+          sections.push(
+            `## Journal\n\n${
+              entries
+                .map((entry) => `### ${entry.date}\n${entry.summary}`)
+                .join('\n\n') || 'No journal entries found.'
+            }`,
+          );
+          for (const event of events) {
+            addLedgerEntry(
+              record.id,
+              'journal',
+              event.title,
+              `Journal event: ${event.title}`,
+              `journal:${event.id}`,
+            );
+            citations.push({
+              label: event.title,
+              source: `journal:${event.id}`,
+            });
+          }
+          markScopeCollected(
+            record.id,
+            'journal',
+            entries.length + events.length,
+          );
+          break;
+        }
+        case 'memory': {
+          const memories = listMemoryRecords({ status: 'approved', limit: 25 });
+          sections.push(
+            `## Approved Memory\n\n${
+              memories.map((memory) => `- ${memory.content}`).join('\n') ||
+              'No approved memories found.'
+            }`,
+          );
+          for (const memory of memories.slice(0, 10)) {
+            addLedgerEntry(
+              record.id,
+              'memory',
+              memory.content.slice(0, 80),
+              memory.content,
+              `memory:${memory.id}`,
+            );
+            citations.push({
+              label: memory.content.slice(0, 80),
+              source: `memory:${memory.id}`,
+            });
+          }
+          markScopeCollected(record.id, 'memory', memories.length);
+          break;
+        }
+        case 'research': {
+          const researchJobs = listResearchJobs();
+          const researchSection = researchJobs
+            .map(
+              (job) =>
+                `- ${job.query}${job.notesPath ? ` (notes: ${job.notesPath})` : ''}`,
+            )
+            .join('\n');
+          sections.push(
+            `## Research\n\n${researchSection || 'No research jobs found.'}`,
+          );
+          for (const job of researchJobs.slice(0, 10)) {
+            addLedgerEntry(
+              record.id,
+              'research',
+              `Research: ${job.query}`,
+              `Research query: ${job.query}`,
+              `research:${job.id}`,
+            );
+            citations.push({
+              label: `Research: ${job.query.slice(0, 80)}`,
+              source: `research:${job.id}`,
+            });
+          }
+          markScopeCollected(record.id, 'research', researchJobs.length);
+          break;
+        }
+        case 'artifact': {
+          const artifacts = listArtifactVault();
+          const artifactSection = artifacts
+            .map((artifact) => `- ${artifact.title} (${artifact.sourceType})`)
+            .join('\n');
+          sections.push(
+            `## Artifacts\n\n${artifactSection || 'No artifacts found.'}`,
+          );
+          for (const artifact of artifacts.slice(0, 10)) {
+            addLedgerEntry(
+              record.id,
+              'artifact',
+              artifact.title,
+              `${artifact.sourceType} artifact: ${artifact.title}`,
+              `artifact:${artifact.id}`,
+            );
+            citations.push({
+              label: artifact.title,
+              source: `artifact:${artifact.id}`,
+            });
+          }
+          markScopeCollected(record.id, 'artifact', artifacts.length);
+          break;
+        }
+        case 'connector': {
+          const connectorIds = getAvailableConnectors();
+          const connectorSection = connectorIds
+            .map((id) => `- ${id}`)
+            .join('\n');
+          sections.push(
+            `## Connectors\n\n${connectorSection || 'No connectors available.'}`,
+          );
+          for (const connectorId of connectorIds) {
+            addLedgerEntry(
+              record.id,
+              'connector',
+              connectorId,
+              `Connector source: ${connectorId}`,
+              `connector:${connectorId}`,
+              connectorId,
+            );
+            citations.push({
+              label: connectorId,
+              source: `connector:${connectorId}`,
+            });
+          }
+          markScopeCollected(record.id, 'connector', connectorIds.length);
+          break;
+        }
+        default:
+          markScopeFailed(record.id, scope, 'Source scope not yet implemented');
+      }
+    } catch (err) {
+      markScopeFailed(
+        record.id,
+        scope,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  return { sections, citations, sourceCollectionId: record.id };
 }
 
 export function getSourceCollection(

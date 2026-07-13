@@ -90,8 +90,8 @@
       var groupOrder = [];
       if (MODE_MAP) {
         var modeIds = window.NanoModes && window.NanoModes.MODE_ORDER || Object.keys(MODE_MAP);
-        for (var oi = 0; oi < modeIds.length; oi++) {
-          groupOrder.push(MODE_MAP[modeIds[oi]]);
+        for (var mi = 0; mi < modeIds.length; mi++) {
+          groupOrder.push(MODE_MAP[modeIds[mi]]);
         }
       }
       if (DRAWER_SECTIONS) {
@@ -158,7 +158,8 @@
     }
 
     listEl.innerHTML = html;
-    listEl.querySelector('.cp-selected') && listEl.querySelector('.cp-selected').scrollIntoView({ block: 'nearest' });
+    const selected = listEl.querySelector('.cp-selected');
+    if (selected) selected.scrollIntoView({ block: 'nearest' });
   }
 
   function escHtml(str) {

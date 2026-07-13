@@ -11,9 +11,8 @@ import {
   listApprovals,
   type ApprovalKind,
 } from './approvals.js';
-import { listJournalEntryRecords, findJournalEvents } from './journal-store.js';
-import { listMemoryRecords } from './memory-store.js';
 import { ProviderPurpose } from './provider-router.js';
+import { collectSources } from './source-collection.js';
 import {
   designSystemSelectionSummary,
   type DesignSystem,
@@ -43,6 +42,7 @@ export interface ReportJob {
   outline: string;
   markdown: string;
   citations: Array<{ label: string; source: string }>;
+  sourceCollectionId: string | null;
   artifacts: Array<{ format: string; path: string }>;
   createdAt: string;
   updatedAt: string;
@@ -98,42 +98,16 @@ function safeFilename(value: string): string {
   );
 }
 
-function collectSources(job: ReportJob): {
+function collectReportSources(job: ReportJob): {
   sections: string[];
   citations: Array<{ label: string; source: string }>;
 } {
-  const sections: string[] = [];
-  const citations: Array<{ label: string; source: string }> = [];
-  if (job.sourceScopes.includes('journal')) {
-    const entries = listJournalEntryRecords({ limit: 10 });
-    const events = findJournalEvents({ query: job.request, limit: 10 });
-    sections.push(
-      `## Journal\n\n${
-        entries
-          .map((entry) => `### ${entry.date}\n${entry.summary}`)
-          .join('\n\n') || 'No journal entries found.'
-      }`,
-    );
-    for (const event of events) {
-      citations.push({ label: event.title, source: `journal:${event.id}` });
-    }
-  }
-  if (job.sourceScopes.includes('memory')) {
-    const memories = listMemoryRecords({ status: 'approved', limit: 25 });
-    sections.push(
-      `## Approved Memory\n\n${
-        memories.map((memory) => `- ${memory.content}`).join('\n') ||
-        'No approved memories found.'
-      }`,
-    );
-    for (const memory of memories.slice(0, 10)) {
-      citations.push({
-        label: memory.content.slice(0, 80),
-        source: `memory:${memory.id}`,
-      });
-    }
-  }
-  return { sections, citations };
+  const collected = collectSources(job.id, job.sourceScopes, job.request);
+  job.sourceCollectionId = collected.sourceCollectionId;
+  return {
+    sections: collected.sections,
+    citations: collected.citations,
+  };
 }
 
 function composeOutline(job: ReportJob): string {
@@ -178,7 +152,7 @@ function ensureReportApproval(job: ReportJob, kind: ApprovalKind): void {
 }
 
 function composeMarkdown(job: ReportJob): void {
-  const collected = collectSources(job);
+  const collected = collectReportSources(job);
   job.citations = collected.citations;
   const designSystem = job.designSystemId
     ? designSystemSelectionSummary({
@@ -328,6 +302,7 @@ export function createReportJob(input: CreateReportJobInput): ReportJob {
     outline: '',
     markdown: '',
     citations: [],
+    sourceCollectionId: null,
     artifacts: [],
     createdAt: now,
     updatedAt: now,

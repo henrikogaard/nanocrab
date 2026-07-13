@@ -3,17 +3,21 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  approveLearningProposal,
   deriveLearningFromRun,
   listLearningProposals,
   getLearningProposal,
+  rejectLearningProposal,
   updateLearningConfig,
   getLearningConfig,
 } from './learning-loop.js';
 import { STORE_DIR } from './config.js';
+import { _closeDatabase, _initTestDatabase } from './db.js';
 
 const LEARNING_PROPOSALS_PATH = path.join(STORE_DIR, 'learning-proposals.json');
 const LEARNING_CONFIG_PATH = path.join(STORE_DIR, 'learning-config.json');
 const CODING_JOBS_PATH = path.join(STORE_DIR, 'coding-jobs.json');
+const SKILL_DRAFTS_DIR = path.join(STORE_DIR, 'skill-drafts');
 
 function cleanLearningState() {
   try {
@@ -23,6 +27,14 @@ function cleanLearningState() {
   }
   try {
     fs.unlinkSync(LEARNING_CONFIG_PATH);
+  } catch {
+    /* ignore */
+  }
+}
+
+function cleanSkillDrafts() {
+  try {
+    fs.rmSync(SKILL_DRAFTS_DIR, { recursive: true, force: true });
   } catch {
     /* ignore */
   }
@@ -74,11 +86,19 @@ function writeTestJobs(jobs: Record<string, unknown>[]): void {
 describe('learning-loop', () => {
   beforeEach(() => {
     cleanLearningState();
+    cleanSkillDrafts();
+    _initTestDatabase();
     writeTestJobs([createTestJob()]);
   });
 
   afterEach(() => {
     cleanLearningState();
+    cleanSkillDrafts();
+    try {
+      _closeDatabase();
+    } catch {
+      /* ignore */
+    }
   });
 
   describe('deriveLearningFromRun', () => {
@@ -121,6 +141,74 @@ describe('learning-loop', () => {
     it('returns null for a non-existent job', () => {
       const proposal = deriveLearningFromRun('non-existent', 'test-user');
       expect(proposal).toBeNull();
+    });
+
+    it('derives a skill draft for skill-oriented prompts with changes', () => {
+      writeTestJobs([
+        createTestJob({
+          prompt: 'skill: add a focused regression test helper',
+          diffSummary: 'src/test-helpers.ts | 12 +++++',
+        }),
+      ]);
+      const proposal = deriveLearningFromRun('code-test-123', 'test-user');
+      expect(proposal).not.toBeNull();
+      expect(proposal!.type).toBe('skill-draft');
+      expect(proposal!.extractedLesson).toMatch(/^---\nname: skill-/);
+      expect(proposal!.extractedLesson).toContain('description:');
+    });
+
+    it('returns a memory for prompts that are not skill requests', () => {
+      writeTestJobs([createTestJob({ prompt: 'Fix the login bug' })]);
+      const proposal = deriveLearningFromRun('code-test-123', 'test-user');
+      expect(proposal).not.toBeNull();
+      expect(proposal!.type).toBe('memory');
+    });
+  });
+
+  describe('reviewLearningProposals', () => {
+    it('approves a memory proposal and stores the memory id', () => {
+      const proposal = deriveLearningFromRun('code-test-123', 'test-user');
+      expect(proposal).not.toBeNull();
+      const approved = approveLearningProposal(proposal!.id, 'reviewer');
+      expect(approved.status).toBe('approved');
+      expect(approved.memoryId).not.toBeNull();
+      const fetched = getLearningProposal(proposal!.id);
+      expect(fetched!.memoryId).toBe(approved.memoryId);
+    });
+
+    it('approves a skill draft proposal and creates a skill draft', () => {
+      writeTestJobs([
+        createTestJob({
+          prompt: 'skill: create a reusable markdown table formatter',
+          diffSummary: 'src/markdown.ts | 8 ++++',
+        }),
+      ]);
+      const proposal = deriveLearningFromRun('code-test-123', 'test-user');
+      expect(proposal).not.toBeNull();
+      expect(proposal!.type).toBe('skill-draft');
+
+      const approved = approveLearningProposal(proposal!.id, 'reviewer');
+      expect(approved.status).toBe('approved');
+      expect(approved.skillDraftId).not.toBeNull();
+      expect(
+        fs.existsSync(
+          path.join(SKILL_DRAFTS_DIR, approved.skillDraftId!, 'SKILL.md'),
+        ),
+      ).toBe(true);
+      const fetched = getLearningProposal(proposal!.id);
+      expect(fetched!.skillDraftId).toBe(approved.skillDraftId);
+    });
+
+    it('rejects a proposal with a note', () => {
+      const proposal = deriveLearningFromRun('code-test-123', 'test-user');
+      expect(proposal).not.toBeNull();
+      const rejected = rejectLearningProposal(
+        proposal!.id,
+        'reviewer',
+        'not reusable',
+      );
+      expect(rejected.status).toBe('rejected');
+      expect(rejected.decisionNote).toBe('not reusable');
     });
   });
 

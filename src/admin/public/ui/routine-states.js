@@ -1,5 +1,3 @@
-/* global window */
-
 (function () {
   var esc =
     (window.NanoShared && window.NanoShared.esc) ||

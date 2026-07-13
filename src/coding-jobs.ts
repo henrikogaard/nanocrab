@@ -778,6 +778,20 @@ function applyCodingJobTransition(
       dryRun: job.dryRun,
     },
   });
+
+  if (to === 'completed') {
+    void import('./learning-loop.js')
+      .then(({ deriveLearningFromRun }) => {
+        deriveLearningFromRun(job.id, job.requestedBy || 'system');
+      })
+      .catch((err) => {
+        logger.error(
+          { err, jobId: job.id },
+          'Failed to derive learning proposal from coding job',
+        );
+      });
+  }
+
   return job;
 }
 

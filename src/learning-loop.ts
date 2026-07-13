@@ -129,6 +129,46 @@ function extractLessonFromRun(job: CodingJob): string | null {
   return sections.join('\n\n');
 }
 
+function looksLikeSkillDraft(job: CodingJob): boolean {
+  const prompt = job.prompt.toLowerCase();
+  const hasSkillPrefix =
+    prompt.startsWith('skill:') ||
+    prompt.startsWith('create skill:') ||
+    prompt.startsWith('add skill:') ||
+    prompt.startsWith('make skill:');
+  const hasChanges =
+    (job.diffSummary && job.diffSummary.trim().length > 0) ||
+    (job.changedFiles && job.changedFiles.length > 0);
+  return hasSkillPrefix && hasChanges;
+}
+
+function kebabSkillName(input: string): string {
+  const base = input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const name = base || 'auto-skill';
+  const tail = `${Date.now()}-${crypto.randomBytes(2).toString('hex')}`;
+  const combined = `${name.slice(0, 30)}-${tail}`;
+  return combined.replace(/-+/g, '-').slice(0, 63);
+}
+
+function buildSkillMd(job: CodingJob, lesson: string): string {
+  const name = kebabSkillName(job.prompt);
+  const description = (job.issueTitle || job.prompt)
+    .replace(/\r?\n/g, ' ')
+    .trim()
+    .slice(0, 500);
+  return `---\nname: ${name}\ndescription: ${description}\n---\n\n${lesson}`;
+}
+
+function decideProposalType(job: CodingJob): LearningProposalType {
+  if (looksLikeSkillDraft(job)) {
+    return 'skill-draft';
+  }
+  return 'memory';
+}
+
 function detectSensitivity(
   content: string,
 ): 'normal' | 'sensitive' | 'secret-note' {
@@ -187,12 +227,16 @@ export function deriveLearningFromRun(
     return null;
   }
 
+  const type = decideProposalType(job);
+  const extractedLesson =
+    type === 'skill-draft' ? buildSkillMd(job, lesson) : lesson;
+
   const proposal: LearningProposal = {
     id: `learn-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
-    type: 'memory',
+    type,
     sourceRunId: jobId,
     sourceRunSummary: job.issueTitle || job.prompt.slice(0, 200),
-    extractedLesson: lesson,
+    extractedLesson,
     proposedScope: 'group',
     sensitivity,
     confidence: normalizeConfidence(0.7),

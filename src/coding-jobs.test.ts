@@ -76,6 +76,7 @@ import {
   startCodingJob,
   transitionCodingJob,
 } from './coding-jobs.js';
+import { listLearningProposals } from './learning-loop.js';
 import { upsertRepoRule } from './repo-preferences.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
 import { createApproval, reviewApproval } from './approvals.js';
@@ -813,6 +814,230 @@ describe('coding jobs', () => {
       implement: expect.any(String),
       test: expect.any(String),
       completed: expect.any(String),
+    });
+  });
+
+  it('derives a learning proposal when a coding job completes', async () => {
+    vi.useRealTimers();
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.stdout.push('agent output\n');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+    });
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('completed');
+    });
+
+    await vi.waitFor(() => {
+      const proposals = listLearningProposals({ sourceRunId: job.id });
+      expect(proposals.length).toBe(1);
+    });
+
+    const [proposal] = listLearningProposals({ sourceRunId: job.id });
+    expect(proposal.type).toBe('memory');
+    expect(proposal.extractedLesson).toContain('Task:');
+  });
+
+  it('derives a skill draft when a coding job is completed from a skill prompt', async () => {
+    vi.useRealTimers();
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.stdout.push('agent output\n');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'skill: add a focused regression test helper',
+      requestedBy: 'whatsapp_main',
+    });
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('completed');
+    });
+
+    await vi.waitFor(() => {
+      const proposals = listLearningProposals({ sourceRunId: job.id });
+      expect(proposals.length).toBe(1);
+    });
+
+    const [proposal] = listLearningProposals({ sourceRunId: job.id });
+    expect(proposal.type).toBe('skill-draft');
+    expect(proposal.extractedLesson).toMatch(/^---\nname: skill-/);
+  });
+
+  it('writes Pi run.sh and config files when running with the pi provider', async () => {
+    vi.useRealTimers();
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
+      approved: true,
+      profile: {
+        id: 'default_coding',
+        label: 'Coding',
+        purpose: 'default_coding',
+        provider: 'pi',
+        model: 'gemini-2.5-pro',
+        toolPolicy: 'approval-required',
+        updatedAt: new Date(0).toISOString(),
+      },
+      provider: 'pi',
+      model: 'gemini-2.5-pro',
+    });
+
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      const metadataDir = `${jobRoot}/.nanocrab`;
+
+      expect(fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8')).toContain(
+        'pi -p "$PROMPT" --mode json --model "$PI_JOB_MODEL" --provider openrouter --no-session',
+      );
+      const models = JSON.parse(
+        fs.readFileSync(`${metadataDir}/pi-agent/models.json`, 'utf-8'),
+      );
+      expect(models.providers.openrouter.baseUrl).toContain(
+        '__nanocrab/providers/openrouter',
+      );
+      expect(
+        fs.readFileSync(`${metadataDir}/pi-agent/auth.json`, 'utf-8'),
+      ).toBe('{}');
+
+      setImmediate(() => {
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.stdout.push('agent output\n');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      provider: 'pi',
+      model: 'gemini-2.5-pro',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+    });
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('completed');
+    });
+  });
+
+  it('writes Mistral Vibe run.sh and config.toml when running with the mistral provider', async () => {
+    vi.useRealTimers();
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
+      approved: true,
+      profile: {
+        id: 'default_coding',
+        label: 'Coding',
+        purpose: 'default_coding',
+        provider: 'mistral',
+        model: 'mistral-large-latest',
+        toolPolicy: 'approval-required',
+        updatedAt: new Date(0).toISOString(),
+      },
+      provider: 'mistral',
+      model: 'mistral-large-latest',
+    });
+
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      const metadataDir = `${jobRoot}/.nanocrab`;
+
+      expect(fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8')).toContain(
+        'vibe -p "$PROMPT" --output text --auto-approve --workdir "$PWD" --max-price "$CODING_JOB_MAX_BUDGET_USD" --trust',
+      );
+      const config = fs.readFileSync(
+        `${metadataDir}/vibe-home/config.toml`,
+        'utf-8',
+      );
+      expect(config).toContain('active_model = "nanocrab"');
+      expect(config).toContain('provider = "mistral"');
+      expect(config).toContain('alias = "nanocrab"');
+      expect(config).toContain('api_key_env_var = "MISTRAL_API_KEY"');
+      expect(config).toContain('name = "mistral-large-latest"');
+
+      setImmediate(() => {
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.stdout.push('agent output\n');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      provider: 'mistral',
+      model: 'mistral-large-latest',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+    });
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('completed');
     });
   });
 
