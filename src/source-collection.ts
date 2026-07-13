@@ -62,7 +62,9 @@ const SOURCE_LEDGER_PATH = path.join(STORE_DIR, 'source-ledger.jsonl');
 
 function readCollections(): SourceCollectionRecord[] {
   try {
-    const records = JSON.parse(fs.readFileSync(SOURCE_COLLECTIONS_PATH, 'utf-8'));
+    const records = JSON.parse(
+      fs.readFileSync(SOURCE_COLLECTIONS_PATH, 'utf-8'),
+    );
     if (!Array.isArray(records)) return [];
     return records;
   } catch {
@@ -72,7 +74,10 @@ function readCollections(): SourceCollectionRecord[] {
 
 function writeCollections(collections: SourceCollectionRecord[]): void {
   fs.mkdirSync(path.dirname(SOURCE_COLLECTIONS_PATH), { recursive: true });
-  fs.writeFileSync(SOURCE_COLLECTIONS_PATH, `${JSON.stringify(collections, null, 2)}\n`);
+  fs.writeFileSync(
+    SOURCE_COLLECTIONS_PATH,
+    `${JSON.stringify(collections, null, 2)}\n`,
+  );
 }
 
 function appendLedgerEntry(entry: SourceLedgerEntry): void {
@@ -82,7 +87,10 @@ function appendLedgerEntry(entry: SourceLedgerEntry): void {
 
 function readLedgerEntries(reportJobId?: string): SourceLedgerEntry[] {
   try {
-    const lines = fs.readFileSync(SOURCE_LEDGER_PATH, 'utf-8').split(/\r?\n/).filter(Boolean);
+    const lines = fs
+      .readFileSync(SOURCE_LEDGER_PATH, 'utf-8')
+      .split(/\r?\n/)
+      .filter(Boolean);
     const entries = lines.map((line) => JSON.parse(line) as SourceLedgerEntry);
     if (reportJobId) {
       return entries.filter((e) => e.reportJobId === reportJobId);
@@ -106,7 +114,8 @@ export function startSourceCollection(
   const availableConnectors = getAvailableConnectors();
   const items: SourceCollectionItem[] = requestedScopes.map((scope) => {
     const isConnectorScope = scope === 'connector';
-    const connectorUnavailable = isConnectorScope && availableConnectors.length === 0;
+    const connectorUnavailable =
+      isConnectorScope && availableConnectors.length === 0;
 
     return {
       scope,
@@ -164,7 +173,8 @@ export function markScopeCollected(
   if (!record) throw new Error(`Source collection not found: ${collectionId}`);
 
   const item = record.items.find((i) => i.scope === scope);
-  if (!item) throw new Error(`Scope ${scope} not in collection ${collectionId}`);
+  if (!item)
+    throw new Error(`Scope ${scope} not in collection ${collectionId}`);
 
   item.status = 'completed';
   item.completedAt = new Date().toISOString();
@@ -190,7 +200,8 @@ export function markScopeFailed(
   if (!record) throw new Error(`Source collection not found: ${collectionId}`);
 
   const item = record.items.find((i) => i.scope === scope);
-  if (!item) throw new Error(`Scope ${scope} not in collection ${collectionId}`);
+  if (!item)
+    throw new Error(`Scope ${scope} not in collection ${collectionId}`);
 
   item.status = 'failed';
   item.completedAt = new Date().toISOString();
@@ -205,7 +216,9 @@ export function markScopeFailed(
   return record;
 }
 
-export function cancelSourceCollection(collectionId: string): SourceCollectionRecord {
+export function cancelSourceCollection(
+  collectionId: string,
+): SourceCollectionRecord {
   const collections = readCollections();
   const record = collections.find((c) => c.id === collectionId);
   if (!record) throw new Error(`Source collection not found: ${collectionId}`);
@@ -257,11 +270,14 @@ export function addLedgerEntry(
   return entry;
 }
 
-function computeOverallStatus(items: SourceCollectionItem[]): SourceCollectionStatus {
+function computeOverallStatus(
+  items: SourceCollectionItem[],
+): SourceCollectionStatus {
   const statuses = items.map((i) => i.status);
 
   if (statuses.every((s) => s === 'cancelled')) return 'cancelled';
-  if (statuses.some((s) => s === 'collecting' || s === 'pending')) return 'collecting';
+  if (statuses.some((s) => s === 'collecting' || s === 'pending'))
+    return 'collecting';
   if (statuses.every((s) => s === 'completed')) return 'completed';
   if (statuses.some((s) => s === 'failed')) {
     const completedCount = statuses.filter((s) => s === 'completed').length;
@@ -270,7 +286,9 @@ function computeOverallStatus(items: SourceCollectionItem[]): SourceCollectionSt
   return 'failed';
 }
 
-export function getSourceCollection(id: string): SourceCollectionRecord | undefined {
+export function getSourceCollection(
+  id: string,
+): SourceCollectionRecord | undefined {
   return readCollections().find((c) => c.id === id);
 }
 
@@ -291,7 +309,9 @@ export function listSourceCollections(filters?: {
     collections = collections.filter((c) => c.status === filters.status);
   }
   if (filters?.reportJobId) {
-    collections = collections.filter((c) => c.reportJobId === filters.reportJobId);
+    collections = collections.filter(
+      (c) => c.reportJobId === filters.reportJobId,
+    );
   }
 
   collections.sort((a, b) => b.startedAt.localeCompare(a.startedAt));

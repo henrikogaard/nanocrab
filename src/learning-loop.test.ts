@@ -1,11 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
 import {
   deriveLearningFromRun,
-  approveLearningProposal,
-  rejectLearningProposal,
   listLearningProposals,
   getLearningProposal,
   updateLearningConfig,
@@ -18,11 +16,21 @@ const LEARNING_CONFIG_PATH = path.join(STORE_DIR, 'learning-config.json');
 const CODING_JOBS_PATH = path.join(STORE_DIR, 'coding-jobs.json');
 
 function cleanLearningState() {
-  try { fs.unlinkSync(LEARNING_PROPOSALS_PATH); } catch { /* ignore */ }
-  try { fs.unlinkSync(LEARNING_CONFIG_PATH); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(LEARNING_PROPOSALS_PATH);
+  } catch {
+    /* ignore */
+  }
+  try {
+    fs.unlinkSync(LEARNING_CONFIG_PATH);
+  } catch {
+    /* ignore */
+  }
 }
 
-function createTestJob(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function createTestJob(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     id: 'code-test-123',
     repo: 'test/repo',
@@ -85,7 +93,9 @@ describe('learning-loop', () => {
     });
 
     it('returns null for a failed run when excludeFailed is true', () => {
-      writeTestJobs([createTestJob({ status: 'failed', failureReason: 'timeout' })]);
+      writeTestJobs([
+        createTestJob({ status: 'failed', failureReason: 'timeout' }),
+      ]);
       const proposal = deriveLearningFromRun('code-test-123', 'test-user');
       expect(proposal).toBeNull();
     });
@@ -123,7 +133,9 @@ describe('learning-loop', () => {
 
     it('filters by sourceRunId', () => {
       deriveLearningFromRun('code-test-123', 'test-user');
-      expect(listLearningProposals({ sourceRunId: 'code-test-123' }).length).toBe(1);
+      expect(
+        listLearningProposals({ sourceRunId: 'code-test-123' }).length,
+      ).toBe(1);
       expect(listLearningProposals({ sourceRunId: 'other' }).length).toBe(0);
     });
 

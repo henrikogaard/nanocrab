@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 
@@ -19,8 +19,16 @@ const SOURCE_COLLECTIONS_PATH = path.join(STORE_DIR, 'source-collections.json');
 const SOURCE_LEDGER_PATH = path.join(STORE_DIR, 'source-ledger.jsonl');
 
 function cleanSourceCollectionState() {
-  try { fs.unlinkSync(SOURCE_COLLECTIONS_PATH); } catch { /* ignore */ }
-  try { fs.unlinkSync(SOURCE_LEDGER_PATH); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(SOURCE_COLLECTIONS_PATH);
+  } catch {
+    /* ignore */
+  }
+  try {
+    fs.unlinkSync(SOURCE_LEDGER_PATH);
+  } catch {
+    /* ignore */
+  }
 }
 
 describe('source-collection', () => {
@@ -34,7 +42,10 @@ describe('source-collection', () => {
 
   describe('startSourceCollection', () => {
     it('creates a new source collection record', () => {
-      const collection = startSourceCollection('report-123', ['memory', 'journal']);
+      const collection = startSourceCollection('report-123', [
+        'memory',
+        'journal',
+      ]);
       expect(collection).not.toBeNull();
       expect(collection.reportJobId).toBe('report-123');
       expect(collection.requestedScopes).toEqual(['memory', 'journal']);
@@ -43,15 +54,24 @@ describe('source-collection', () => {
     });
 
     it('initializes all scopes as pending', () => {
-      const collection = startSourceCollection('report-123', ['memory', 'journal', 'research']);
+      const collection = startSourceCollection('report-123', [
+        'memory',
+        'journal',
+        'research',
+      ]);
       expect(collection.items.every((i) => i.status === 'pending')).toBe(true);
     });
   });
 
   describe('markScopeCollected', () => {
     it('marks a scope as completed', () => {
-      const collection = startSourceCollection('report-123', ['memory', 'journal']);
-      const updated = markScopeCollected(collection.id, 'memory', 5, ['db:memories']);
+      const collection = startSourceCollection('report-123', [
+        'memory',
+        'journal',
+      ]);
+      const updated = markScopeCollected(collection.id, 'memory', 5, [
+        'db:memories',
+      ]);
       const memoryItem = updated.items.find((i) => i.scope === 'memory');
       expect(memoryItem?.status).toBe('completed');
       expect(memoryItem?.itemCount).toBe(5);
@@ -59,7 +79,10 @@ describe('source-collection', () => {
     });
 
     it('updates overall status to partial when some scopes fail', () => {
-      const collection = startSourceCollection('report-123', ['memory', 'journal']);
+      const collection = startSourceCollection('report-123', [
+        'memory',
+        'journal',
+      ]);
       markScopeCollected(collection.id, 'memory', 5);
       markScopeFailed(collection.id, 'journal', 'connector unavailable');
       const updated = getSourceCollection(collection.id)!;
@@ -67,7 +90,10 @@ describe('source-collection', () => {
     });
 
     it('updates overall status to completed when all scopes succeed', () => {
-      const collection = startSourceCollection('report-123', ['memory', 'journal']);
+      const collection = startSourceCollection('report-123', [
+        'memory',
+        'journal',
+      ]);
       markScopeCollected(collection.id, 'memory', 5);
       const updated = markScopeCollected(collection.id, 'journal', 3);
       expect(updated.status).toBe('completed');
@@ -97,7 +123,10 @@ describe('source-collection', () => {
     });
 
     it('updates overall status to failed when all scopes fail', () => {
-      const collection = startSourceCollection('report-123', ['memory', 'journal']);
+      const collection = startSourceCollection('report-123', [
+        'memory',
+        'journal',
+      ]);
       markScopeFailed(collection.id, 'memory', 'error1');
       const updated = markScopeFailed(collection.id, 'journal', 'error2');
       expect(updated.status).toBe('failed');
@@ -106,7 +135,10 @@ describe('source-collection', () => {
 
   describe('cancelSourceCollection', () => {
     it('cancels a collection and all pending items', () => {
-      const collection = startSourceCollection('report-123', ['memory', 'journal']);
+      const collection = startSourceCollection('report-123', [
+        'memory',
+        'journal',
+      ]);
       const updated = cancelSourceCollection(collection.id);
       expect(updated.status).toBe('cancelled');
       expect(updated.items.every((i) => i.status === 'cancelled')).toBe(true);
@@ -130,7 +162,9 @@ describe('source-collection', () => {
       expect(entry.reportJobId).toBe('report-123');
       expect(entry.scope).toBe('memory');
       expect(entry.sourceLabel).toBe('User prefers dark mode');
-      expect(entry.citationText).toBe('User prefers dark mode for all interfaces');
+      expect(entry.citationText).toBe(
+        'User prefers dark mode for all interfaces',
+      );
     });
 
     it('appends to the ledger file', () => {
@@ -180,7 +214,9 @@ describe('source-collection', () => {
     it('filters by reportJobId', () => {
       startSourceCollection('report-123', ['memory']);
       startSourceCollection('report-456', ['journal']);
-      expect(listSourceCollections({ reportJobId: 'report-123' }).length).toBe(1);
+      expect(listSourceCollections({ reportJobId: 'report-123' }).length).toBe(
+        1,
+      );
     });
 
     it('respects limit', () => {

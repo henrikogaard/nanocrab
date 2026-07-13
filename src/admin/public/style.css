@@ -37170,7 +37170,7 @@ select {
 	  .files-loading-bars i::after,
 	  .chat-loading-bars i::after,
 	  .wiki-loading-bars i::after,
- 	  .progress-spinner {
+  .progress-spinner {
 	    animation: none !important;
 	  }
 }

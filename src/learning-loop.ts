@@ -9,7 +9,11 @@ import { loadCodingJobs, type CodingJob } from './coding-jobs.js';
 import { logAuditEvent } from './audit-log.js';
 
 export type LearningProposalType = 'memory' | 'skill-draft';
-export type LearningProposalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
+export type LearningProposalStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'expired';
 
 export interface LearningProposal {
   id: string;
@@ -55,7 +59,9 @@ const DEFAULT_CONFIG: LearningLoopConfig = {
 
 function readProposals(): LearningProposal[] {
   try {
-    const records = JSON.parse(fs.readFileSync(LEARNING_PROPOSALS_PATH, 'utf-8'));
+    const records = JSON.parse(
+      fs.readFileSync(LEARNING_PROPOSALS_PATH, 'utf-8'),
+    );
     if (!Array.isArray(records)) return [];
     return records;
   } catch {
@@ -65,12 +71,18 @@ function readProposals(): LearningProposal[] {
 
 function writeProposals(proposals: LearningProposal[]): void {
   fs.mkdirSync(path.dirname(LEARNING_PROPOSALS_PATH), { recursive: true });
-  fs.writeFileSync(LEARNING_PROPOSALS_PATH, `${JSON.stringify(proposals, null, 2)}\n`);
+  fs.writeFileSync(
+    LEARNING_PROPOSALS_PATH,
+    `${JSON.stringify(proposals, null, 2)}\n`,
+  );
 }
 
 function readConfig(): LearningLoopConfig {
   try {
-    return { ...DEFAULT_CONFIG, ...JSON.parse(fs.readFileSync(LEARNING_CONFIG_PATH, 'utf-8')) };
+    return {
+      ...DEFAULT_CONFIG,
+      ...JSON.parse(fs.readFileSync(LEARNING_CONFIG_PATH, 'utf-8')),
+    };
   } catch {
     return { ...DEFAULT_CONFIG };
   }
@@ -78,16 +90,22 @@ function readConfig(): LearningLoopConfig {
 
 function writeConfig(config: LearningLoopConfig): void {
   fs.mkdirSync(path.dirname(LEARNING_CONFIG_PATH), { recursive: true });
-  fs.writeFileSync(LEARNING_CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`);
+  fs.writeFileSync(
+    LEARNING_CONFIG_PATH,
+    `${JSON.stringify(config, null, 2)}\n`,
+  );
 }
 
 function isEligibleRun(job: CodingJob, config: LearningLoopConfig): boolean {
   if (job.status !== 'completed') return false;
   if (config.excludeFailed && job.failureReason) return false;
-  if (config.excludePrivate && job.prompt.toLowerCase().includes('private')) return false;
+  if (config.excludePrivate && job.prompt.toLowerCase().includes('private'))
+    return false;
   if (
     config.excludeSecretBearing &&
-    /\b(api[_ -]?key|token|password|secret|private key|oauth)\b/i.test(job.output)
+    /\b(api[_ -]?key|token|password|secret|private key|oauth)\b/i.test(
+      job.output,
+    )
   ) {
     return false;
   }
@@ -95,14 +113,14 @@ function isEligibleRun(job: CodingJob, config: LearningLoopConfig): boolean {
 }
 
 function extractLessonFromRun(job: CodingJob): string | null {
-  const output = job.output || '';
   const diffSummary = job.diffSummary || '';
   const testSummary = job.testSummary || '';
 
   const sections = [
     job.prompt ? `Task: ${job.prompt.slice(0, 500)}` : null,
     diffSummary ? `Changes: ${diffSummary}` : null,
-    testSummary && testSummary !== 'See job output for tests run by the coding agent.'
+    testSummary &&
+    testSummary !== 'See job output for tests run by the coding agent.'
       ? `Tests: ${testSummary}`
       : null,
   ].filter(Boolean);
@@ -111,8 +129,12 @@ function extractLessonFromRun(job: CodingJob): string | null {
   return sections.join('\n\n');
 }
 
-function detectSensitivity(content: string): 'normal' | 'sensitive' | 'secret-note' {
-  if (/\b(api[_ -]?key|token|password|secret|private key|oauth)\b/i.test(content)) {
+function detectSensitivity(
+  content: string,
+): 'normal' | 'sensitive' | 'secret-note' {
+  if (
+    /\b(api[_ -]?key|token|password|secret|private key|oauth)\b/i.test(content)
+  ) {
     return 'secret-note';
   }
   if (/\b(address|phone|email|health|salary|personal)\b/i.test(content)) {
