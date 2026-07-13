@@ -18,6 +18,7 @@ vi.mock('child_process', () => ({
 
 import {
   CONTAINER_RUNTIME_BIN,
+  resolveContainerRuntimeBin,
   readonlyMountArgs,
   stopContainer,
   ensureContainerRuntimeRunning,
@@ -35,6 +36,18 @@ describe('readonlyMountArgs', () => {
   it('returns -v flag with :ro suffix', () => {
     const args = readonlyMountArgs('/host/path', '/container/path');
     expect(args).toEqual(['-v', '/host/path:/container/path:ro']);
+  });
+});
+
+describe('resolveContainerRuntimeBin', () => {
+  it('uses the configured runtime binary', () => {
+    expect(
+      resolveContainerRuntimeBin({ CONTAINER_RUNTIME_BIN: 'podman' }),
+    ).toBe('podman');
+  });
+
+  it('defaults to docker', () => {
+    expect(resolveContainerRuntimeBin({})).toBe('docker');
   });
 });
 

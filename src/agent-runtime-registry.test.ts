@@ -4,7 +4,11 @@ import {
   listAgentRuntimeDefinitions,
   probeAgentRuntime,
 } from './agent-runtime-registry.js';
-import { probeCodingRunnerReadiness } from './coding-runner-readiness.js';
+import {
+  getCodingRunnerInfrastructure,
+  isCodingContainerImageAvailable,
+  probeCodingRunnerReadiness,
+} from './coding-runner-readiness.js';
 
 describe('agent runtime registry', () => {
   it('exposes allowlisted CLI definitions', () => {
@@ -106,6 +110,22 @@ describe('agent runtime registry', () => {
       status: 'missing',
       detail: expect.stringContaining('OPENROUTER_API_KEY'),
     });
+  });
+
+  it('uses the configured container runtime and image for coding readiness', () => {
+    const infrastructure = getCodingRunnerInfrastructure({
+      CONTAINER_RUNTIME_BIN: 'podman',
+      CONTAINER_IMAGE: 'registry.example/nanocrab-agent:test',
+    });
+    const inspect = vi.fn().mockReturnValue(true);
+
+    expect(isCodingContainerImageAvailable({ infrastructure, inspect })).toBe(
+      true,
+    );
+    expect(inspect).toHaveBeenCalledWith(
+      'podman',
+      'registry.example/nanocrab-agent:test',
+    );
   });
 
   it('reports healthy runtime with parsed version', async () => {

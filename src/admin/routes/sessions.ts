@@ -6,6 +6,7 @@ import readline from 'readline';
 import { DATA_DIR, SESSIONS_DIR } from '../../config.js';
 import { requireRole } from '../middleware.js';
 import {
+  authorizeTerminalSessionAccess,
   isSafeTerminalSessionId,
   listCockpitStreamEvents,
   listTerminalSessions,
@@ -748,7 +749,7 @@ router.get(
 router.get(
   '/terminal/history',
   requireRole('owner'),
-  async (_req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const indexPath = path.join(SESSIONS_DIR, 'index.json');
       if (!fs.existsSync(indexPath)) {
@@ -760,10 +761,16 @@ router.get(
       const activeIds = new Set(
         activeSessions.filter((s) => s.active).map((s) => s.id),
       );
-      const history = index.map((entry: any) => ({
-        ...entry,
-        active: activeIds.has(entry.id),
-      }));
+      const username = req.user?.username || '';
+      const history = index
+        .filter(
+          (entry: any) =>
+            authorizeTerminalSessionAccess(entry.id, username) === 'allowed',
+        )
+        .map((entry: any) => ({
+          ...entry,
+          active: activeIds.has(entry.id),
+        }));
       history.sort((a: any, b: any) =>
         (b.createdAt || '').localeCompare(a.createdAt || ''),
       );
@@ -783,6 +790,14 @@ router.get(
       const sessionId = req.params.id as string;
       if (!isSafeTerminalSessionId(sessionId)) {
         res.status(400).json({ error: 'Invalid session id' });
+        return;
+      }
+      const access = authorizeTerminalSessionAccess(
+        sessionId,
+        req.user?.username || '',
+      );
+      if (access === 'forbidden') {
+        res.status(403).json({ error: 'Forbidden' });
         return;
       }
       const content = readSessionLog(sessionId);
@@ -824,6 +839,14 @@ router.post(
         return;
       }
       const index: any[] = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+      const username = req.user?.username || '';
+      if (
+        sessionId &&
+        authorizeTerminalSessionAccess(sessionId, username) === 'forbidden'
+      ) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
       const lowerQuery = query.toLowerCase();
       const results: Array<{
         sessionId: string;
@@ -834,7 +857,10 @@ router.post(
 
       const sessionsToSearch = sessionId
         ? index.filter((e) => e.id === sessionId)
-        : index;
+        : index.filter(
+            (entry) =>
+              authorizeTerminalSessionAccess(entry.id, username) === 'allowed',
+          );
 
       for (const entry of sessionsToSearch) {
         if (dateFrom && entry.createdAt && entry.createdAt < dateFrom) continue;
@@ -879,6 +905,16 @@ router.delete(
       const sessionId = req.params.id as string;
       if (!isSafeTerminalSessionId(sessionId)) {
         res.status(400).json({ error: 'Invalid session id' });
+        return;
+      }
+      if (
+        authorizeTerminalSessionAccess(
+          sessionId,
+          req.user?.username || '',
+          'delete',
+        ) === 'forbidden'
+      ) {
+        res.status(403).json({ error: 'Forbidden' });
         return;
       }
       if (!deleteTerminalSession(sessionId)) {

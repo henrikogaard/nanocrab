@@ -65,11 +65,12 @@ function writeTranscript(
 async function withSessionsServer<T>(
   role: 'viewer' | 'admin' | 'owner',
   handler: (baseUrl: string) => Promise<T>,
+  username: string = role,
 ): Promise<T> {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    req.user = { id: role, username: role, role };
+    req.user = { id: username, username, role };
     next();
   });
   app.use('/api/sessions', sessionsRouter);
@@ -111,6 +112,13 @@ describe('terminal session API', () => {
             endedAt: null,
             bytes: 50,
           },
+          {
+            id: 'legacy-term',
+            name: 'legacy-term',
+            createdAt: '2026-05-01T12:00:00Z',
+            endedAt: '2026-05-01T13:00:00Z',
+            bytes: 24,
+          },
         ],
         null,
         2,
@@ -124,6 +132,10 @@ describe('terminal session API', () => {
       path.join(SESSIONS_DIR, 'term-2.log'),
       'startup\nrunning\n',
     );
+    fs.writeFileSync(
+      path.join(SESSIONS_DIR, 'legacy-term.log'),
+      'legacy read-only transcript\n',
+    );
   });
 
   afterEach(() => {
@@ -135,7 +147,7 @@ describe('terminal session API', () => {
   it('GET /terminal/history returns session list from index', () => {
     const indexPath = path.join(SESSIONS_DIR, 'index.json');
     const data = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-    expect(data).toHaveLength(2);
+    expect(data).toHaveLength(3);
     expect(data[0].id).toBe('term-1');
     expect(data[1].id).toBe('term-2');
   });
@@ -307,6 +319,71 @@ describe('terminal session API', () => {
       expect(response.status).toBe(400);
       expect(body.error).toBe('Invalid session id');
     });
+  });
+
+  it('enforces session ownership across every HTTP terminal operation', async () => {
+    await withSessionsServer(
+      'owner',
+      async (baseUrl) => {
+        const historyResponse = await fetch(
+          `${baseUrl}/api/sessions/terminal/history`,
+        );
+        const history = (await historyResponse.json()) as Array<{ id: string }>;
+        expect(historyResponse.status).toBe(200);
+        expect(history.map((entry) => entry.id)).toEqual(['legacy-term']);
+
+        const transcript = await fetch(
+          `${baseUrl}/api/sessions/terminal/term-1/transcript`,
+        );
+        expect(transcript.status).toBe(403);
+        expect(await transcript.text()).not.toContain('something failed');
+
+        const targetedSearch = await fetch(
+          `${baseUrl}/api/sessions/terminal/search`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ query: 'error', sessionId: 'term-1' }),
+          },
+        );
+        expect(targetedSearch.status).toBe(403);
+        expect(await targetedSearch.text()).not.toContain('something failed');
+
+        const globalSearch = await fetch(
+          `${baseUrl}/api/sessions/terminal/search`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ query: 'error' }),
+          },
+        );
+        expect(globalSearch.status).toBe(200);
+        expect(await globalSearch.json()).toEqual({ results: [] });
+
+        const deletion = await fetch(
+          `${baseUrl}/api/sessions/terminal/term-1`,
+          { method: 'DELETE' },
+        );
+        expect(deletion.status).toBe(403);
+        expect(fs.existsSync(path.join(SESSIONS_DIR, 'term-1.log'))).toBe(true);
+
+        const legacyTranscript = await fetch(
+          `${baseUrl}/api/sessions/terminal/legacy-term/transcript`,
+        );
+        expect(legacyTranscript.status).toBe(200);
+        expect(await legacyTranscript.json()).toEqual({
+          id: 'legacy-term',
+          content: 'legacy read-only transcript\n',
+        });
+
+        const legacyDeletion = await fetch(
+          `${baseUrl}/api/sessions/terminal/legacy-term`,
+          { method: 'DELETE' },
+        );
+        expect(legacyDeletion.status).toBe(403);
+      },
+      'second-owner',
+    );
   });
 
   it('lists cockpit session summaries with stable fields from transcripts', () => {

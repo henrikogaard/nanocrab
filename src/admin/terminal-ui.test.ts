@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import vm from 'node:vm';
 
 const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
@@ -165,6 +166,71 @@ describe('Terminal operator console UI', () => {
     expect(source).toContain("msg.data.status === 'historical'");
     expect(source).toContain('activeTerminal.readOnly');
     expect(source).not.toContain('<div class="terminal-shell-card">">');
+  });
+
+  it('drives the real message handler without spawning after historical attach', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const start = source.indexOf('let handleWsMessage = function (msg)');
+    const end = source.indexOf(
+      '\n};\n\nfunction bindChatApprovalActions',
+      start,
+    );
+    const handlerSource = source
+      .slice(start, end + 3)
+      .replace('let handleWsMessage =', 'globalThis.handleWsMessage =');
+    const send = vi.fn();
+    const context = {
+      activeTerminal: {
+        sessionId: 'historical-session',
+        readOnly: false,
+        term: { write: vi.fn() },
+      },
+      ws: { readyState: 1, send },
+    } as Record<string, unknown>;
+    vm.runInNewContext(handlerSource, context);
+
+    (context.handleWsMessage as (message: unknown) => void)({
+      type: 'terminal_attach_result',
+      sessionId: 'historical-session',
+      data: { status: 'historical', readOnly: true },
+    });
+
+    expect((context.activeTerminal as { readOnly: boolean }).readOnly).toBe(
+      true,
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('allows the real message handler to spawn only an explicitly fresh id', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const start = source.indexOf('let handleWsMessage = function (msg)');
+    const end = source.indexOf(
+      '\n};\n\nfunction bindChatApprovalActions',
+      start,
+    );
+    const handlerSource = source
+      .slice(start, end + 3)
+      .replace('let handleWsMessage =', 'globalThis.handleWsMessage =');
+    const send = vi.fn();
+    const context = {
+      activeTerminal: {
+        sessionId: 'fresh-session',
+        readOnly: false,
+        term: { write: vi.fn() },
+      },
+      ws: { readyState: 1, send },
+    } as Record<string, unknown>;
+    vm.runInNewContext(handlerSource, context);
+
+    (context.handleWsMessage as (message: unknown) => void)({
+      type: 'terminal_attach_result',
+      sessionId: 'fresh-session',
+      data: { status: 'not-found', readOnly: false },
+    });
+
+    expect(send).toHaveBeenCalledWith(
+      JSON.stringify({ type: 'terminal_spawn', data: 'fresh-session' }),
+    );
   });
 
   it('keeps files, logs, search, and WebSocket terminal behavior intact', () => {

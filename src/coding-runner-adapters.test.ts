@@ -16,6 +16,7 @@ import {
 } from './agent-runtime-registry.js';
 import {
   buildMistralVibeInvocation,
+  buildMistralVibeShellCommand,
   probeMistralVibe,
   runMistralVibe,
   type CodingRunnerProcess,
@@ -58,12 +59,21 @@ describe('coding-runner adapters', () => {
     it('uses container-image and OpenRouter readiness for admin availability', () => {
       const availabilityWith = getProviderAvailability as unknown as (options: {
         commandAvailable: () => boolean;
-        containerImageAvailable: () => boolean;
+        codingRunnerInfrastructure: {
+          runtimeBin: string;
+          image: string;
+        };
+        inspectContainerImage: (runtimeBin: string, image: string) => boolean;
         credentialAvailable: (key: string) => boolean;
       }) => ReturnType<typeof getProviderAvailability>;
+      const inspectContainerImage = vi.fn().mockReturnValue(true);
       const base = {
         commandAvailable: () => false,
-        containerImageAvailable: () => true,
+        codingRunnerInfrastructure: {
+          runtimeBin: 'podman',
+          image: 'registry.example/nanocrab-agent:test',
+        },
+        inspectContainerImage,
       };
 
       expect(
@@ -72,6 +82,10 @@ describe('coding-runner adapters', () => {
           credentialAvailable: (key) => key === 'OPENROUTER_API_KEY',
         }).pi,
       ).toBe(true);
+      expect(inspectContainerImage).toHaveBeenCalledWith(
+        'podman',
+        'registry.example/nanocrab-agent:test',
+      );
       expect(
         availabilityWith({
           ...base,
@@ -126,6 +140,18 @@ describe('coding-runner adapters', () => {
       });
     });
 
+    it('owns the generated in-container shell command contract', () => {
+      expect(
+        buildMistralVibeShellCommand({
+          prompt: '"$PROMPT"',
+          maxTurns: '"$CODING_JOB_MAX_TURNS"',
+          maxPrice: '"$CODING_JOB_MAX_BUDGET_USD"',
+        }),
+      ).toBe(
+        'vibe --prompt "$PROMPT" --output json --max-turns "$CODING_JOB_MAX_TURNS" --max-price "$CODING_JOB_MAX_BUDGET_USD"',
+      );
+    });
+
     it('runs with injected execution and normalizes JSON success', async () => {
       const runner = vi.fn().mockResolvedValue({
         exitCode: 0,
@@ -172,6 +198,22 @@ describe('coding-runner adapters', () => {
         status: 'failed',
         error: 'budget exceeded',
         exitCode: 2,
+      });
+    });
+
+    it('fails closed when Vibe exits zero with non-empty stderr', async () => {
+      const runner = vi.fn().mockResolvedValue({
+        exitCode: 0,
+        stdout: '{"result":"possibly incomplete"}',
+        stderr: 'tool execution warning',
+      } satisfies CodingRunnerProcess);
+
+      await expect(
+        runMistralVibe({ prompt: 'Fix it', cwd: '/tmp/worktree' }, { runner }),
+      ).resolves.toMatchObject({
+        status: 'failed',
+        error: 'tool execution warning',
+        exitCode: 0,
       });
     });
 

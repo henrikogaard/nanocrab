@@ -68,6 +68,11 @@ router.post('/jobs', requireRole('admin'), (req: Request, res: Response) => {
       title: req.body.title,
       request: req.body.request,
       requester: req.user?.username || 'dashboard',
+      authorizationContext: {
+        actorUsername: req.user?.username || 'dashboard',
+        groupFolder: 'dashboard',
+        isMainAgent: false,
+      },
       providerProfileId: req.body.providerProfileId,
       sourceScopes: Array.isArray(req.body.sourceScopes)
         ? req.body.sourceScopes

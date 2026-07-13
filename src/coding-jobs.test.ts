@@ -84,6 +84,7 @@ import { listAuditEvents } from './audit-log.js';
 import { _closeDatabase, _initTestDatabase } from './db.js';
 import { resetPolicyRules, savePolicyRules } from './policy-engine.js';
 import { readEnvFile } from './env.js';
+import { buildMistralVibeShellCommand } from './mistral-vibe-adapter.js';
 
 const mockedReadEnvFile = vi.mocked(readEnvFile);
 
@@ -1001,7 +1002,11 @@ describe('coding jobs', () => {
       const metadataDir = `${jobRoot}/.nanocrab`;
 
       expect(fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8')).toContain(
-        'vibe --prompt "$PROMPT" --output json --max-turns "$CODING_JOB_MAX_TURNS" --max-price "$CODING_JOB_MAX_BUDGET_USD"',
+        buildMistralVibeShellCommand({
+          prompt: '"$PROMPT"',
+          maxTurns: '"$CODING_JOB_MAX_TURNS"',
+          maxPrice: '"$CODING_JOB_MAX_BUDGET_USD"',
+        }),
       );
       expect(fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8')).not.toMatch(
         /--auto-approve|--workdir|--trust/,

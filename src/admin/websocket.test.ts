@@ -102,6 +102,14 @@ describe('file-backed terminal sessions', () => {
     const entry = index.find((e) => e.id === 'term-finalize')!;
     expect(entry.endedAt).toBeTruthy();
     expect(entry.bytes).toBeGreaterThan(0);
+    expect(listTerminalSessions()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'term-finalize',
+          active: false,
+        }),
+      ]),
+    );
   });
 
   it('loadHistoricalSessions loads from .log files', () => {
@@ -211,6 +219,27 @@ describe('file-backed terminal sessions', () => {
     expect(fs.existsSync(path.join(TEST_DIR, 'stale-session.log'))).toBe(false);
     expect(listTerminalSessions().map((session) => session.id)).not.toContain(
       'stale-session',
+    );
+  });
+
+  it('pruneOldSessions evicts stale history even when its log is already absent', () => {
+    const oldDate = new Date();
+    oldDate.setFullYear(oldDate.getFullYear() - 5);
+    createSessionFile('stale-cache-only', 'alice');
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'stale-cache-only.log'),
+      'cached old data',
+    );
+    loadHistoricalSessions();
+    fs.unlinkSync(path.join(TEST_DIR, 'stale-cache-only.log'));
+    const indexPath = path.join(TEST_DIR, 'index.json');
+    const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+    index[0].endedAt = oldDate.toISOString();
+    fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
+
+    expect(pruneOldSessions()).toBe(1);
+    expect(listTerminalSessions().map((session) => session.id)).not.toContain(
+      'stale-cache-only',
     );
   });
 

@@ -74,6 +74,24 @@ function terminalSessionOwner(sessionId: string): string | undefined {
   );
 }
 
+export type TerminalSessionAccess = 'allowed' | 'forbidden' | 'not-found';
+
+export function authorizeTerminalSessionAccess(
+  sessionId: string,
+  username: string,
+  operation: 'read' | 'delete' = 'read',
+): TerminalSessionAccess {
+  const indexed = loadSessionIndex().find((entry) => entry.id === sessionId);
+  const active = terminals.get(sessionId);
+  const exists = Boolean(
+    indexed || active || historicalSessions.has(sessionId),
+  );
+  if (!exists) return 'not-found';
+  const owner = active?.owner || indexed?.owner;
+  if (owner) return owner === username ? 'allowed' : 'forbidden';
+  return operation === 'read' ? 'allowed' : 'forbidden';
+}
+
 function denyTerminalOperation(
   ws: WebSocket,
   operation: TerminalOperation,
@@ -229,6 +247,8 @@ export function finalizeSessionFile(sessionId: string): void {
     }
     saveSessionIndex(index);
   }
+  const transcript = readSessionLog(sessionId);
+  if (transcript) historicalSessions.set(sessionId, transcript);
 }
 
 export function appendToSessionLog(sessionId: string, data: string): void {
@@ -313,9 +333,9 @@ export function pruneOldSessions(): number {
     let index: SessionMetadata[] = JSON.parse(
       fs.readFileSync(indexPath, 'utf-8'),
     );
+    const originalIndex = [...index];
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - MAX_SESSION_RETENTION_DAYS);
-    const before = index.length;
     index = index.filter((entry) => {
       if (!entry.endedAt) return true; // keep active sessions
       return new Date(entry.endedAt) >= cutoff;
@@ -327,8 +347,15 @@ export function pruneOldSessions(): number {
       );
       index = index.slice(0, MAX_SESSIONS_COUNT);
     }
+    const retainedIds = new Set(index.map((entry) => entry.id));
+    const prunedIds = originalIndex
+      .filter((entry) => !retainedIds.has(entry.id))
+      .map((entry) => entry.id);
     saveSessionIndex(index);
-    const pruned = before - index.length;
+    for (const sessionId of prunedIds) {
+      removeTerminalSessionArtifacts(sessionId);
+    }
+    const pruned = prunedIds.length;
     if (pruned > 0) {
       logger.info({ pruned }, 'Pruned old terminal sessions');
     }

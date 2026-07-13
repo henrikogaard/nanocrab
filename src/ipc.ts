@@ -894,6 +894,12 @@ export async function processTaskIpc(
           title: data.title,
           request: data.request,
           requester: sourceGroup,
+          authorizationContext: {
+            actorUsername: `agent:${sourceGroup}`,
+            groupFolder: sourceGroup,
+            agentId: sourceGroup,
+            isMainAgent: isMain,
+          },
           outputFormats: data.outputFormats,
           sourceScopes: data.sourceScopes,
           designSystemId: data.designSystemId,

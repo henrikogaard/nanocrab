@@ -154,14 +154,34 @@ function shannonEntropy(value: string): number {
 }
 
 function isPlausibleHighEntropySecret(value: string): boolean {
-  if (value.includes('/') || !/[A-Z+_=]/.test(value)) return false;
   const categoryCount = [/[a-z]/, /[A-Z]/, /\d/, /[+/_=-]/].filter((pattern) =>
     pattern.test(value),
   ).length;
   return (
-    categoryCount >= 3 &&
-    new Set(value).size >= 16 &&
-    shannonEntropy(value) >= 4
+    categoryCount >= 2 &&
+    new Set(value).size >= 12 &&
+    shannonEntropy(value) >= 3.5
+  );
+}
+
+function isGeneratedPathOrBranch(
+  candidate: string,
+  source: string,
+  offset: number,
+): boolean {
+  const context = source.slice(Math.max(0, offset - 32), offset).toLowerCase();
+  if (
+    /^(?:nanocrab-code|code)-[a-z0-9-]+$/.test(candidate) &&
+    /\b(?:branch|ref|container|session|job)\s*(?:=|:)?\s*$/.test(context)
+  ) {
+    return true;
+  }
+  const normalized = candidate.replace(/^\/+/, '');
+  return (
+    /^(?:tmp|var|home|users|workspace|data|src)\//i.test(normalized) &&
+    /(?:\b(?:path|workspace|cwd|file|directory|dir)\s*(?:=|:)?\s*\/?|\bin\s+\/?)$/.test(
+      context,
+    )
   );
 }
 
@@ -178,8 +198,13 @@ function redactSecretText(value: string | null | undefined): {
   let redacted = value.replace(PRIVATE_KEY_RE, replaceSecret);
   redacted = redacted.replace(LABELED_SECRET_RE, replaceSecret);
   redacted = redacted.replace(KNOWN_CREDENTIAL_RE, replaceSecret);
-  redacted = redacted.replace(HIGH_ENTROPY_CANDIDATE_RE, (candidate) =>
-    isPlausibleHighEntropySecret(candidate) ? replaceSecret() : candidate,
+  redacted = redacted.replace(
+    HIGH_ENTROPY_CANDIDATE_RE,
+    (candidate, offset: number, source: string) =>
+      !isGeneratedPathOrBranch(candidate, source, offset) &&
+      isPlausibleHighEntropySecret(candidate)
+        ? replaceSecret()
+        : candidate,
   );
   return { value: redacted, secretFound };
 }

@@ -26,11 +26,19 @@ export type ReportJobStatus =
   | 'delivered'
   | 'failed';
 
+export interface ReportAuthorizationContext {
+  actorUsername: string;
+  groupFolder: string;
+  agentId?: string;
+  isMainAgent: boolean;
+}
+
 export interface ReportJob {
   id: string;
   title: string;
   request: string;
   requester: string;
+  authorizationContext: ReportAuthorizationContext;
   providerProfileId: ProviderPurpose;
   sourceScopes: string[];
   outputFormats: string[];
@@ -53,6 +61,7 @@ export interface CreateReportJobInput {
   title?: string;
   request: string;
   requester?: string;
+  authorizationContext?: ReportAuthorizationContext;
   providerProfileId?: ProviderPurpose;
   sourceScopes?: string[];
   outputFormats?: string[];
@@ -67,13 +76,31 @@ const REPORT_JOBS_PATH = path.join(STORE_DIR, 'report-jobs.json');
 
 function readJobs(): ReportJob[] {
   try {
-    return JSON.parse(
+    const jobs = JSON.parse(
       fs.readFileSync(REPORT_JOBS_PATH, 'utf-8'),
     ) as ReportJob[];
+    return jobs.map((job) => ({
+      ...job,
+      authorizationContext: {
+        actorUsername:
+          job.authorizationContext?.actorUsername ||
+          job.requester ||
+          'dashboard',
+        groupFolder: job.authorizationContext?.groupFolder || 'dashboard',
+        ...(job.authorizationContext?.agentId
+          ? { agentId: job.authorizationContext.agentId }
+          : {}),
+        isMainAgent: job.authorizationContext?.isMainAgent === true,
+      },
+    }));
   } catch {
     return [];
   }
 }
+
+export const reportSourceRuntime = {
+  collectSources,
+};
 
 function writeJobs(jobs: ReportJob[]): void {
   fs.mkdirSync(path.dirname(REPORT_JOBS_PATH), { recursive: true });
@@ -102,15 +129,15 @@ async function collectReportSources(job: ReportJob): Promise<{
   sections: string[];
   citations: Array<{ label: string; source: string }>;
 }> {
-  const collected = await collectSources(
+  const collected = await reportSourceRuntime.collectSources(
     job.id,
     job.sourceScopes,
     job.request,
     {
-      actor: job.requester,
-      groupFolder: job.requester,
-      agentId: job.providerProfileId,
-      isMain: job.requester === 'whatsapp_main',
+      actor: job.authorizationContext.actorUsername,
+      groupFolder: job.authorizationContext.groupFolder,
+      agentId: job.authorizationContext.agentId,
+      isMain: job.authorizationContext.isMainAgent,
     },
   );
   job.sourceCollectionId = collected.sourceCollectionId;
@@ -293,6 +320,11 @@ export function createReportJob(input: CreateReportJobInput): ReportJob {
       'NanoCrab Report',
     request: input.request.trim(),
     requester: input.requester || 'dashboard',
+    authorizationContext: input.authorizationContext || {
+      actorUsername: input.requester || 'dashboard',
+      groupFolder: 'dashboard',
+      isMainAgent: false,
+    },
     providerProfileId: input.providerProfileId || 'default_reports',
     sourceScopes: input.sourceScopes?.length
       ? input.sourceScopes

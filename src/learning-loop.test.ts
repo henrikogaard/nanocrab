@@ -13,6 +13,7 @@ import {
 } from './learning-loop.js';
 import { STORE_DIR } from './config.js';
 import { _closeDatabase, _initTestDatabase } from './db.js';
+import { listAuditEvents } from './audit-log.js';
 
 const LEARNING_PROPOSALS_PATH = path.join(STORE_DIR, 'learning-proposals.json');
 const LEARNING_CONFIG_PATH = path.join(STORE_DIR, 'learning-config.json');
@@ -161,6 +162,30 @@ describe('learning-loop', () => {
       expect(fs.existsSync(LEARNING_PROPOSALS_PATH)).toBe(false);
     });
 
+    it.each([
+      [
+        'base64 with slash',
+        'dGhpcy1pcy1hLXByaXZhdGUvc2VjcmV0LXRva2VuLzEyMzQ1Njc4OTA=',
+      ],
+      ['lowercase and digits', 'm4p9k2v7x3q8n6c1b5z0r4t9y2w7s8d3f6h1j5l0'],
+    ])(
+      'default-denies %s without persisting the raw value',
+      (_label, secret) => {
+        writeTestJobs([
+          createTestJob({ output: `runtime credential ${secret}` }),
+        ]);
+
+        expect(deriveLearningFromRun('code-test-123', 'test-user')).toBeNull();
+        const proposals = fs.existsSync(LEARNING_PROPOSALS_PATH)
+          ? fs.readFileSync(LEARNING_PROPOSALS_PATH, 'utf-8')
+          : '';
+        expect(proposals).not.toContain(secret);
+        expect(
+          JSON.stringify(listAuditEvents({ correlationId: 'code-test-123' })),
+        ).not.toContain(secret);
+      },
+    );
+
     it('does not classify generated branch names or workspace paths as secrets', () => {
       writeTestJobs([
         createTestJob({
@@ -172,6 +197,18 @@ describe('learning-loop', () => {
       expect(
         deriveLearningFromRun('code-test-123', 'test-user'),
       ).not.toBeNull();
+    });
+
+    it('only exempts generated-looking values when their surrounding text identifies a path or branch', () => {
+      const secret = 'nanocrab-code-code-1783979306220-54e5a43a';
+      writeTestJobs([
+        createTestJob({ output: `runtime credential ${secret}` }),
+      ]);
+
+      expect(deriveLearningFromRun('code-test-123', 'test-user')).toBeNull();
+      expect(
+        JSON.stringify(listAuditEvents({ correlationId: 'code-test-123' })),
+      ).not.toContain(secret);
     });
 
     it('treats placeholder test prose as missing evidence', () => {

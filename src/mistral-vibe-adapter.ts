@@ -27,6 +27,12 @@ export interface MistralVibeInvocation {
   cwd: string;
 }
 
+export interface MistralVibeCommandValues {
+  prompt: string;
+  maxTurns: string;
+  maxPrice: string;
+}
+
 export type MistralVibeResult =
   | {
       status: 'succeeded';
@@ -61,22 +67,44 @@ function boundedPrice(value: number | undefined): number {
   return Math.min(value as number, 100);
 }
 
-export function buildMistralVibeInvocation(
-  input: MistralVibeInput,
-): MistralVibeInvocation {
+function mistralVibeCommand(values: MistralVibeCommandValues): {
+  command: 'vibe';
+  args: string[];
+} {
   return {
-    runtime: 'mistral',
     command: 'vibe',
     args: [
       '--prompt',
-      input.prompt,
+      values.prompt,
       '--output',
       'json',
       '--max-turns',
-      String(boundedTurns(input.maxTurns)),
+      values.maxTurns,
       '--max-price',
-      String(boundedPrice(input.maxPrice)),
+      values.maxPrice,
     ],
+  };
+}
+
+export function buildMistralVibeShellCommand(
+  values: MistralVibeCommandValues,
+): string {
+  const command = mistralVibeCommand(values);
+  return [command.command, ...command.args].join(' ');
+}
+
+export function buildMistralVibeInvocation(
+  input: MistralVibeInput,
+): MistralVibeInvocation {
+  const command = mistralVibeCommand({
+    prompt: input.prompt,
+    maxTurns: String(boundedTurns(input.maxTurns)),
+    maxPrice: String(boundedPrice(input.maxPrice)),
+  });
+  return {
+    runtime: 'mistral',
+    command: command.command,
+    args: command.args,
     cwd: input.cwd,
   };
 }
@@ -153,7 +181,7 @@ export async function runMistralVibe(
         exitCode: null,
       };
     }
-    if (process.exitCode !== 0) {
+    if (process.exitCode !== 0 || process.stderr.trim()) {
       return {
         status: 'failed',
         output: null,

@@ -1,14 +1,41 @@
-import { execFileSync } from 'child_process';
+import { createRequire } from 'node:module';
 
-import { probeAgentRuntime } from './agent-runtime-registry.js';
-import { CONTAINER_IMAGE } from './config.js';
-import { CONTAINER_RUNTIME_BIN } from './container-runtime.js';
 import { readEnvFile } from './env.js';
 import type { AgentCliId, AgentRuntimeHealth } from './types.js';
 
-export function isCodingContainerImageAvailable(): boolean {
+const require = createRequire(import.meta.url);
+
+export interface CodingRunnerInfrastructure {
+  runtimeBin: string;
+  image: string;
+}
+
+export type ContainerImageInspector = (
+  runtimeBin: string,
+  image: string,
+) => boolean;
+
+type HostRuntimeProbe = (cli: AgentCliId) => Promise<AgentRuntimeHealth>;
+
+export function getCodingRunnerInfrastructure(
+  env: Record<string, string | undefined> = process.env,
+): CodingRunnerInfrastructure {
+  return {
+    runtimeBin: env.CONTAINER_RUNTIME_BIN || 'docker',
+    image: env.CONTAINER_IMAGE || 'nanocrab-agent:latest',
+  };
+}
+
+function inspectContainerImage(runtimeBin: string, image: string): boolean {
   try {
-    execFileSync(CONTAINER_RUNTIME_BIN, ['image', 'inspect', CONTAINER_IMAGE], {
+    const { execFileSync } = require('node:child_process') as {
+      execFileSync: (
+        command: string,
+        args: string[],
+        options: { stdio: string; timeout: number },
+      ) => unknown;
+    };
+    execFileSync(runtimeBin, ['image', 'inspect', image], {
       stdio: 'pipe',
       timeout: 10000,
     });
@@ -18,33 +45,60 @@ export function isCodingContainerImageAvailable(): boolean {
   }
 }
 
+export function isCodingContainerImageAvailable(
+  options: {
+    infrastructure?: CodingRunnerInfrastructure;
+    inspect?: ContainerImageInspector;
+  } = {},
+): boolean {
+  const infrastructure =
+    options.infrastructure || getCodingRunnerInfrastructure();
+  return (options.inspect || inspectContainerImage)(
+    infrastructure.runtimeBin,
+    infrastructure.image,
+  );
+}
+
 export function isCredentialConfigured(key: string): boolean {
   return Boolean(process.env[key] || readEnvFile([key])[key]);
+}
+
+async function probeHostRuntime(cli: AgentCliId): Promise<AgentRuntimeHealth> {
+  const { probeAgentRuntime } = await import('./agent-runtime-registry.js');
+  return probeAgentRuntime(cli);
 }
 
 export async function probeCodingRunnerReadiness(
   cli: AgentCliId,
   options: {
-    probeHostRuntime?: typeof probeAgentRuntime;
+    probeHostRuntime?: HostRuntimeProbe;
     containerImageAvailable?: () => boolean;
     credentialAvailable?: (key: string) => boolean;
+    infrastructure?: CodingRunnerInfrastructure;
+    inspectContainerImage?: ContainerImageInspector;
   } = {},
 ): Promise<AgentRuntimeHealth> {
   if (cli !== 'pi') {
-    return (options.probeHostRuntime || probeAgentRuntime)(cli);
+    return (options.probeHostRuntime || probeHostRuntime)(cli);
   }
 
   const checkedAt = new Date().toISOString();
+  const infrastructure =
+    options.infrastructure || getCodingRunnerInfrastructure();
   const hasImage =
-    options.containerImageAvailable?.() ?? isCodingContainerImageAvailable();
+    options.containerImageAvailable?.() ??
+    isCodingContainerImageAvailable({
+      infrastructure,
+      inspect: options.inspectContainerImage,
+    });
   if (!hasImage) {
     return {
       cli: 'pi',
-      executable: CONTAINER_IMAGE,
+      executable: infrastructure.image,
       status: 'missing',
       version: null,
       checkedAt,
-      detail: `Coding container image ${CONTAINER_IMAGE} is unavailable`,
+      detail: `Coding container image ${infrastructure.image} is unavailable through ${infrastructure.runtimeBin}`,
     };
   }
 
@@ -54,7 +108,7 @@ export async function probeCodingRunnerReadiness(
   if (!hasCredential) {
     return {
       cli: 'pi',
-      executable: CONTAINER_IMAGE,
+      executable: infrastructure.image,
       status: 'missing',
       version: null,
       checkedAt,
@@ -65,7 +119,7 @@ export async function probeCodingRunnerReadiness(
 
   return {
     cli: 'pi',
-    executable: CONTAINER_IMAGE,
+    executable: infrastructure.image,
     status: 'healthy',
     version: null,
     checkedAt,
