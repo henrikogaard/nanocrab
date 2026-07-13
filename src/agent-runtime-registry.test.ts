@@ -127,14 +127,14 @@ describe('agent runtime registry', () => {
       stderr: '',
     });
 
-    await expect(probeAgentRuntime('devin', { execFile })).resolves.toMatchObject(
-      {
-        cli: 'devin',
-        executable: 'devin',
-        status: 'unsupported',
-        version: '1.1.0',
-      },
-    );
+    await expect(
+      probeAgentRuntime('devin', { execFile }),
+    ).resolves.toMatchObject({
+      cli: 'devin',
+      executable: 'devin',
+      status: 'unsupported',
+      version: '1.1.0',
+    });
   });
 
   it('reports error status for non-ENOENT failures', async () => {
