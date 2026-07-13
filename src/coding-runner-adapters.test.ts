@@ -49,40 +49,6 @@ describe('coding-runner adapters', () => {
     });
   });
 
-  describe('devin adapter', () => {
-    it('is registered as an agent provider', () => {
-      expect(isAgentProvider('devin')).toBe(true);
-    });
-
-    it('has a provider definition', () => {
-      const def = getAgentProviderDefinition('devin');
-      expect(def).toBeDefined();
-      expect(def.id).toBe('devin');
-      expect(def.requiresCli).toBe('devin');
-      expect(def.selectable).toBe(true);
-    });
-
-    it('has default model and model list', () => {
-      expect(DEFAULT_AGENT_MODELS.devin).toBeDefined();
-      expect(AGENT_PROVIDER_MODELS.devin.length).toBeGreaterThan(0);
-    });
-
-    it('is not coding-capable', () => {
-      expect(isCodingCapableProvider('devin')).toBe(false);
-    });
-
-    it('is not in CODING_PROVIDER_IDS', () => {
-      expect(CODING_PROVIDER_IDS.has('devin')).toBe(false);
-    });
-
-    it('is marked unsupported in the runtime registry', () => {
-      const def = getAgentRuntimeDefinition('devin');
-      expect(def).toBeDefined();
-      expect(def?.codingRunnerSupported).toBe(false);
-      expect(def?.executable).toBe('devin');
-    });
-  });
-
   describe('mistral vibe adapter', () => {
     it('is registered as an agent provider', () => {
       expect(isAgentProvider('mistral')).toBe(true);

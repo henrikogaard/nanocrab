@@ -187,17 +187,6 @@ const STATIC_CAPABILITIES: Record<AgentProvider, ProviderCapabilities> = {
     privacy_tier: 'third-party',
     supports_mcp_strategy: 'container-loop',
   },
-  devin: {
-    tool_calls: true,
-    structured_output: false,
-    streaming: false,
-    vision: false,
-    code_strength: 'agentic',
-    context_window: 128000,
-    cost_tier: 'high',
-    privacy_tier: 'hosted',
-    supports_mcp_strategy: 'container-loop',
-  },
   ollama: {
     tool_calls: false,
     structured_output: false,

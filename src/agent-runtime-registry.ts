@@ -44,7 +44,7 @@ const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
     versionArgs: Object.freeze(['--version']),
     codingRunnerSupported: false,
     detail:
-      'Devin CLI requires interactive `devin auth login` and does not accept DEVIN_API_KEY or WINDSURF_API_KEY for non-interactive runs, so it cannot be used in unattended coding jobs through the credential proxy.',
+      'Devin CLI is discoverable for runtime health but is not a selectable agent provider or coding runner. It requires interactive `devin auth login` and does not accept DEVIN_API_KEY/WINDSURF_API_KEY for non-interactive runs, so it cannot be used in unattended coding jobs.',
   }),
   mistral: Object.freeze({
     cli: 'mistral',

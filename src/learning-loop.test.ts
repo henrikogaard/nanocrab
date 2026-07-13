@@ -282,5 +282,23 @@ describe('learning-loop', () => {
       expect(config.enabled).toBe(false);
       expect(config.minConfidence).toBe(0.8);
     });
+
+    it('rejects invalid minConfidence values', () => {
+      expect(() => updateLearningConfig({ minConfidence: 1.5 })).toThrow();
+      expect(() => updateLearningConfig({ minConfidence: -0.1 })).toThrow();
+      expect(() => updateLearningConfig({ minConfidence: NaN })).toThrow();
+      expect(() =>
+        updateLearningConfig({ minConfidence: '0.5' as unknown as number }),
+      ).toThrow();
+    });
+
+    it('rejects non-boolean config flags', () => {
+      expect(() =>
+        updateLearningConfig({ enabled: 'false' as unknown as boolean }),
+      ).toThrow();
+      expect(() =>
+        updateLearningConfig({ excludeFailed: 1 as unknown as boolean }),
+      ).toThrow();
+    });
   });
 });

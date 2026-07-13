@@ -57,17 +57,6 @@ const CAPABILITIES: Record<AgentProvider, ProviderCapabilitiesResult> = {
     privacyTier: 'medium',
     supportsMcpStrategy: true,
   },
-  devin: {
-    toolCalls: true,
-    structuredOutput: false,
-    streaming: false,
-    vision: false,
-    codeStrength: 'high',
-    contextWindow: 128000,
-    costTier: 'high',
-    privacyTier: 'medium',
-    supportsMcpStrategy: true,
-  },
   ollama: {
     toolCalls: false,
     structuredOutput: false,

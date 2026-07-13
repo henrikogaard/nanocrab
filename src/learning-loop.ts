@@ -79,10 +79,12 @@ function writeProposals(proposals: LearningProposal[]): void {
 
 function readConfig(): LearningLoopConfig {
   try {
-    return {
+    const config = {
       ...DEFAULT_CONFIG,
       ...JSON.parse(fs.readFileSync(LEARNING_CONFIG_PATH, 'utf-8')),
     };
+    validateLearningConfig(config);
+    return config;
   } catch {
     return { ...DEFAULT_CONFIG };
   }
@@ -94,6 +96,33 @@ function writeConfig(config: LearningLoopConfig): void {
     LEARNING_CONFIG_PATH,
     `${JSON.stringify(config, null, 2)}\n`,
   );
+}
+
+const BOOLEAN_CONFIG_KEYS: (keyof LearningLoopConfig)[] = [
+  'enabled',
+  'excludeFailed',
+  'excludeCancelled',
+  'excludePrivate',
+  'excludeSecretBearing',
+];
+
+function validateLearningConfig(config: LearningLoopConfig): void {
+  for (const key of BOOLEAN_CONFIG_KEYS) {
+    if (typeof config[key] !== 'boolean') {
+      throw new Error(`Learning config ${key} must be a boolean`);
+    }
+  }
+
+  if (
+    typeof config.minConfidence !== 'number' ||
+    !Number.isFinite(config.minConfidence) ||
+    config.minConfidence < 0 ||
+    config.minConfidence > 1
+  ) {
+    throw new Error(
+      'Learning config minConfidence must be a finite number between 0 and 1',
+    );
+  }
 }
 
 function isEligibleRun(job: CodingJob, config: LearningLoopConfig): boolean {
@@ -483,6 +512,7 @@ export function updateLearningConfig(
 ): LearningLoopConfig {
   const current = readConfig();
   const next = { ...current, ...config };
+  validateLearningConfig(next);
   writeConfig(next);
   return next;
 }

@@ -17,8 +17,32 @@ function sourceCollectionScopeItem(item) {
   </div>`;
 }
 
+function sourceLedgerEntry(entry) {
+  const provenance = (entry.provenance || [])
+    .map((p) => `<span class="badge badge-muted">${esc(p)}</span>`)
+    .join(' ');
+  const sourceUrl = entry.sourceUrl
+    ? `<a class="source-ledger-link" href="${esc(entry.sourceUrl)}" target="_blank" rel="noopener noreferrer">${esc(entry.sourceUrl)}</a>`
+    : '';
+  return `<div class="source-ledger-entry">
+    <div class="source-ledger-header">
+      <span class="source-ledger-label">${esc(entry.sourceLabel || 'Untitled source')}</span>
+      <span class="source-ledger-scope">${esc(entry.scope)}${entry.connectorId ? ` (${esc(entry.connectorId)})` : ''}</span>
+      <span class="muted">${esc(new Date(entry.collectedAt).toLocaleString())}</span>
+    </div>
+    <blockquote class="source-ledger-citation">${esc(entry.citationText || '')}</blockquote>
+    ${sourceUrl ? `<div class="source-ledger-url">${sourceUrl}</div>` : ''}
+    ${provenance ? `<div class="source-ledger-provenance">${provenance}</div>` : ''}
+  </div>`;
+}
+
 function sourceCollectionCard(collection) {
-  const scopes = (collection.items || []).map((i) => sourceCollectionScopeItem(i)).join('');
+  const scopes = (collection.items || [])
+    .map((i) => sourceCollectionScopeItem(i))
+    .join('');
+  const ledger = (collection.ledger || [])
+    .map((e) => sourceLedgerEntry(e))
+    .join('');
   return `<div class="card source-collection-card">
     <div class="card-title">
       <span class="source-collection-id">${esc(collection.id)}</span>
@@ -32,7 +56,8 @@ function sourceCollectionCard(collection) {
       ${scopes || '<p class="muted">No scopes.</p>'}
     </div>
     <div class="source-collection-ledger">
-      <div class="ledger-count">Ledger entries: ${esc(String((collection.ledger || []).length))}</div>
+      <div class="source-collection-ledger-title">Ledger entries (${esc(String((collection.ledger || []).length))})</div>
+      ${ledger || '<p class="muted">No ledger entries.</p>'}
     </div>
   </div>`;
 }
@@ -41,7 +66,9 @@ async function renderSourceCollections(el) {
   el.innerHTML = `<div class="page-header"><h2>Source Collections</h2><span class="muted">Inspect source collection records and ledger entries</span></div><div class="source-collections-loading">Loading…</div>`;
   try {
     const collections = await api('/source-collections');
-    const cards = (collections || []).map((c) => sourceCollectionCard(c)).join('');
+    const cards = (collections || [])
+      .map((c) => sourceCollectionCard(c))
+      .join('');
     el.innerHTML = `
       <div class="page-header">
         <h2>Source Collections</h2>

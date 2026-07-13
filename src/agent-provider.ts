@@ -7,7 +7,6 @@ export const AGENT_PROVIDERS = [
   'codex',
   'opencode',
   'pi',
-  'devin',
   'ollama',
   'openrouter',
   'google',
@@ -25,7 +24,6 @@ export type AgentProviderRuntime =
   | 'codex-cli'
   | 'opencode-cli'
   | 'pi-cli'
-  | 'devin-cli'
   | 'vibe-cli'
   | 'openai-compatible'
   | 'openai-responses'
@@ -84,16 +82,6 @@ export const AGENT_PROVIDER_DEFINITIONS: Record<
     description: 'Pi coding assistant with read, bash, edit, write tools.',
     selectable: true,
     requiresCli: 'pi',
-    requiresAuth: true,
-  },
-  devin: {
-    id: 'devin',
-    name: 'Devin CLI',
-    runtime: 'devin-cli',
-    description:
-      'Devin CLI runtime discovery. Requires interactive `devin auth login`; not usable for unattended coding jobs through the credential proxy.',
-    selectable: true,
-    requiresCli: 'devin',
     requiresAuth: true,
   },
   ollama: {
@@ -217,7 +205,6 @@ export const AGENT_PROVIDER_MODELS: Record<AgentProvider, string[]> = {
     'openai/gpt-5.4',
   ],
   pi: ['gemini-2.5-pro', 'claude-sonnet-4-6', 'gpt-5.4'],
-  devin: ['devin-default'],
   ollama: ['llama3', 'llama3.1', 'mistral', 'codestral', 'gemma4:e2b'],
   openrouter: [
     'openai/gpt-5.4',
@@ -248,7 +235,6 @@ export const DEFAULT_AGENT_MODELS: Record<AgentProvider, string> = {
   codex: 'gpt-5.4',
   opencode: 'opencode/grok-code-fast-1',
   pi: 'gemini-2.5-pro',
-  devin: 'devin-default',
   ollama: 'llama3',
   openrouter: 'openrouter/auto',
   google: 'gemini-3.5-flash',
@@ -352,7 +338,6 @@ export function isValidAgentModel(
       'google',
       'opencode',
       'pi',
-      'devin',
       'openai-compatible',
       'gemini',
       'mistral',
