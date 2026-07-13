@@ -18,11 +18,7 @@ function errorMessage(err: unknown): string {
 }
 
 function userActor(req: Request): string {
-  return (
-    ((req as any).user?.role as string | undefined) ||
-    ((req as any).user?.username as string | undefined) ||
-    'admin'
-  );
+  return req.user?.username || 'admin';
 }
 
 function routeParam(req: Request, name: string): string {
