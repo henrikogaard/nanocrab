@@ -56,7 +56,6 @@ const CODING_JOB_PROVIDERS = new Set<AgentProvider>([
   'codex',
   'opencode',
   'pi',
-  'devin',
   'mistral',
   'openrouter',
   'ollama',
@@ -68,7 +67,6 @@ type CodingProvider = Extract<
   | 'codex'
   | 'opencode'
   | 'pi'
-  | 'devin'
   | 'mistral'
   | 'openrouter'
   | 'ollama'
@@ -866,11 +864,8 @@ function buildCodingContainerEnv(
     'OPENAI_COMPATIBLE_API_KEY',
     'OPENAI_COMPATIBLE_BASE_URL',
     'DEFAULT_OPENAI_COMPATIBLE_BASE_URL',
-    'PI_API_KEY',
     'PI_PROVIDER',
-    'DEVIN_API_KEY',
     'MISTRAL_API_KEY',
-    'MISTRAL_BASE_URL',
   ]);
   const env: Record<string, string> = {
     TZ: TIMEZONE,
@@ -966,32 +961,75 @@ function buildCodingContainerEnv(
   }
 
   if (job.provider === 'pi') {
-    const piProxyUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/pi`;
-    env.PI_BASE_URL = piProxyUrl;
-    env.PI_API_KEY = 'placeholder';
-    const piProvider = envValue(envFileValues, 'PI_PROVIDER');
-    if (piProvider) env.PI_PROVIDER = piProvider;
-  }
-
-  if (job.provider === 'devin') {
-    const devinProxyUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/devin`;
-    env.DEVIN_BASE_URL = devinProxyUrl;
-    env.DEVIN_API_KEY = 'placeholder';
+    const openrouterKey = envValue(envFileValues, 'OPENROUTER_API_KEY');
+    if (openrouterKey) {
+      env.OPENROUTER_API_KEY = 'placeholder';
+    }
+    env.PI_PROVIDER = 'openrouter';
+    env.PI_CODING_AGENT_DIR = '/workspace/coding-job/.nanocrab/pi-agent';
   }
 
   if (job.provider === 'mistral') {
-    const mistralProxyUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/mistral`;
-    env.MISTRAL_BASE_URL = mistralProxyUrl;
     env.MISTRAL_API_KEY = 'placeholder';
+    env.VIBE_HOME = '/workspace/coding-job/.nanocrab/vibe-home';
   }
 
   return env;
+}
+
+function buildProxyProviderUrl(provider: string): string {
+  return `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/${provider}`;
+}
+
+function writeVibeConfig(metadataDir: string, job: CodingJob): void {
+  const vibeDir = path.join(metadataDir, 'vibe-home');
+  fs.mkdirSync(vibeDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(vibeDir, 'config.toml'),
+    [
+      'active_model = "nanocrab"',
+      '',
+      '[[providers]]',
+      'name = "mistral"',
+      `api_base = "${buildProxyProviderUrl('mistral')}"`,
+      'api_key_env_var = "MISTRAL_API_KEY"',
+      '',
+      '[[models]]',
+      `name = "${job.model.replace(/"/g, '\\"')}"`,
+      'provider = "mistral"',
+      'alias = "nanocrab"',
+      '',
+    ].join('\n'),
+  );
+}
+
+function writePiConfig(metadataDir: string): void {
+  const piDir = path.join(metadataDir, 'pi-agent');
+  fs.mkdirSync(piDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(piDir, 'models.json'),
+    JSON.stringify(
+      {
+        providers: {
+          openrouter: {
+            baseUrl: buildProxyProviderUrl('openrouter'),
+            apiKey: 'OPENROUTER_API_KEY',
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  fs.writeFileSync(path.join(piDir, 'auth.json'), '{}');
 }
 
 function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
   const jobRoot = path.dirname(job.workspace);
   const metadataDir = path.join(jobRoot, '.nanocrab');
   fs.mkdirSync(metadataDir, { recursive: true });
+  if (job.provider === 'mistral') writeVibeConfig(metadataDir, job);
+  if (job.provider === 'pi') writePiConfig(metadataDir);
   fs.writeFileSync(
     path.join(metadataDir, 'prompt.txt'),
     `${buildCodingPrompt(job)}\n`,
@@ -1071,14 +1109,21 @@ function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
       '    claude -p --model "$JOB_MODEL" --output-format text --dangerously-skip-permissions --max-budget-usd "$CODING_JOB_MAX_BUDGET_USD" "$PROMPT"',
       '    ;;',
       '  pi)',
-      '    PI_JOB_PROVIDER="${PI_PROVIDER:-google}"',
-      '    pi -p "$PROMPT" --mode text --model "$JOB_MODEL" --provider "$PI_JOB_PROVIDER" --no-session',
-      '    ;;',
-      '  devin)',
-      '    devin -p --model "$JOB_MODEL" --mode implement -- "$PROMPT"',
+      '    PI_PROVIDER=openrouter',
+      '    PI_CODING_AGENT_DIR=/workspace/coding-job/.nanocrab/pi-agent',
+      '    OPENROUTER_API_KEY=placeholder',
+      '    case "$JOB_MODEL" in',
+      '      gemini-2.5-pro) PI_JOB_MODEL="google/gemini-2.5-pro" ;;',
+      '      claude-sonnet-4-6) PI_JOB_MODEL="anthropic/claude-sonnet-4-6" ;;',
+      '      gpt-5.4) PI_JOB_MODEL="openai/gpt-5.4" ;;',
+      '      *) PI_JOB_MODEL="$JOB_MODEL" ;;',
+      '    esac',
+      '    pi -p "$PROMPT" --mode json --model "$PI_JOB_MODEL" --provider openrouter --no-session',
       '    ;;',
       '  mistral)',
-      '    vibe -p "$PROMPT" --model "$JOB_MODEL" --output text --auto-approve --workdir "$PWD" --max-budget-usd "$CODING_JOB_MAX_BUDGET_USD"',
+      '    VIBE_HOME=/workspace/coding-job/.nanocrab/vibe-home',
+      '    MISTRAL_API_KEY=placeholder',
+      '    vibe -p "$PROMPT" --output text --auto-approve --workdir "$PWD" --max-price "$CODING_JOB_MAX_BUDGET_USD" --trust',
       '    ;;',
       '  *)',
       '    echo "Unsupported coding provider: $JOB_PROVIDER" >&2',

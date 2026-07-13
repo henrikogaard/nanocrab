@@ -265,7 +265,6 @@ export const CODING_PROVIDER_IDS = new Set<AgentProvider>([
   'codex',
   'opencode',
   'pi',
-  'devin',
   'mistral',
   'openrouter',
   'ollama',

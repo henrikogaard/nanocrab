@@ -10,6 +10,7 @@ export interface AgentRuntimeDefinition {
   readonly executable: string;
   readonly versionArgs: readonly string[];
   readonly codingRunnerSupported: boolean;
+  readonly detail?: string;
 }
 
 const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
@@ -41,7 +42,9 @@ const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
     cli: 'devin',
     executable: 'devin',
     versionArgs: Object.freeze(['--version']),
-    codingRunnerSupported: true,
+    codingRunnerSupported: false,
+    detail:
+      'Devin CLI requires interactive `devin auth login` and does not accept DEVIN_API_KEY or WINDSURF_API_KEY for non-interactive runs, so it cannot be used in unattended coding jobs through the credential proxy.',
   }),
   mistral: Object.freeze({
     cli: 'mistral',
@@ -113,7 +116,9 @@ export async function probeAgentRuntime(
         status: 'unsupported',
         version,
         checkedAt,
-        detail: `${definition.cli} is installed but not supported by the current coding-job runner`,
+        detail:
+          definition.detail ||
+          `${definition.cli} is installed but not supported by the current coding-job runner`,
       };
     }
 

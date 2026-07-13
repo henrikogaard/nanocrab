@@ -67,18 +67,18 @@ describe('coding-runner adapters', () => {
       expect(AGENT_PROVIDER_MODELS.devin.length).toBeGreaterThan(0);
     });
 
-    it('is coding-capable', () => {
-      expect(isCodingCapableProvider('devin')).toBe(true);
+    it('is not coding-capable', () => {
+      expect(isCodingCapableProvider('devin')).toBe(false);
     });
 
-    it('is in CODING_PROVIDER_IDS', () => {
-      expect(CODING_PROVIDER_IDS.has('devin')).toBe(true);
+    it('is not in CODING_PROVIDER_IDS', () => {
+      expect(CODING_PROVIDER_IDS.has('devin')).toBe(false);
     });
 
-    it('has codingRunnerSupported in runtime registry', () => {
+    it('is marked unsupported in the runtime registry', () => {
       const def = getAgentRuntimeDefinition('devin');
       expect(def).toBeDefined();
-      expect(def?.codingRunnerSupported).toBe(true);
+      expect(def?.codingRunnerSupported).toBe(false);
       expect(def?.executable).toBe('devin');
     });
   });
@@ -113,8 +113,8 @@ describe('coding-runner adapters', () => {
       expect(supportedClis).toContain('codex');
       expect(supportedClis).toContain('opencode');
       expect(supportedClis).toContain('pi');
-      expect(supportedClis).toContain('devin');
       expect(supportedClis).toContain('mistral');
+      expect(supportedClis).not.toContain('devin');
     });
   });
 });

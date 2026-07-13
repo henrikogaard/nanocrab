@@ -94,13 +94,11 @@ describe('agent runtime registry', () => {
     const execFile = vi
       .fn()
       .mockResolvedValueOnce({ stdout: 'pi 0.4.0\n', stderr: '' })
-      .mockResolvedValueOnce({ stdout: 'devin 1.1.0\n', stderr: '' })
       .mockResolvedValueOnce({ stdout: 'vibe 0.9.1\n', stderr: '' })
       .mockResolvedValueOnce({ stdout: 'codex-cli 1.2.3\n', stderr: '' });
 
     for (const [cli, executable, version] of [
       ['pi', 'pi', '0.4.0'],
-      ['devin', 'devin', '1.1.0'],
       ['mistral', 'vibe', '0.9.1'],
     ] as const) {
       await expect(probeAgentRuntime(cli, { execFile })).resolves.toMatchObject(
@@ -121,6 +119,22 @@ describe('agent runtime registry', () => {
       status: 'healthy',
       version: '1.2.3',
     });
+  });
+
+  it('reports devin as unsupported when installed', async () => {
+    const execFile = vi.fn().mockResolvedValue({
+      stdout: 'devin 1.1.0\n',
+      stderr: '',
+    });
+
+    await expect(probeAgentRuntime('devin', { execFile })).resolves.toMatchObject(
+      {
+        cli: 'devin',
+        executable: 'devin',
+        status: 'unsupported',
+        version: '1.1.0',
+      },
+    );
   });
 
   it('reports error status for non-ENOENT failures', async () => {
