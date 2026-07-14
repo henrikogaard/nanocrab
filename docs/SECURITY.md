@@ -155,8 +155,17 @@ launcher. The agent config (`0600`) and launcher (`0555`) are created or opened
 through `O_NOFOLLOW` file handles and verified by owner, mode, identity, size,
 and content; protected job metadata, the credential, service-user SSH/GPG data,
 and NanoCrab config remain denied. Model-side write permissions explicitly deny
-the workspace `.git` root and descendants, so repository metadata is read-only
-to the model even during implement/direct stages. The broker validates an exact
+the workspace `.git` root and descendants as defense in depth. Before process
+spawn, NanoCrab recursively rejects every workspace symlink and any workspace
+file hard-linked to `.git` metadata. It then wraps the whole Devin process in
+OS isolation. On Linux, Bubblewrap creates a new PID namespace and session,
+binds the host root first, mounts a private `/proc`, then rebinds the workspace
+`.git` read-only. On macOS, `sandbox-exec` denies `.git` writes, file links, and
+symlink creation. Alias validation or sandbox preparation failure aborts the
+attempt before Devin is spawned, so `.git` is read-only to the whole Devin
+process during every stage.
+
+The command broker is a separate, stricter boundary. It validates an exact
 command allowlist and routes every accepted inspection, Git, build, and test
 command through OS isolation. Linux uses Bubblewrap with an empty root, no
 network, and PID/IPC/session/private-proc isolation; macOS uses an explicit
@@ -203,13 +212,15 @@ Devin sends prompts, selected repository content, and tool results to Devin's
 external service. This external processing is an operator-approved privacy
 boundary; repository tests do not invoke a live or paid Devin session. The
 Devin Research Preview sandbox is defense in depth, not the sole boundary. A
-residual local TOCTOU risk remains because workspace parent components are
-checked with path-based `lstat`/`realpath` rather than a directory-handle-relative
-`openat` walk. Git metadata is also recursively checked before trusted host
-operations, but those path-based checks do not pin every component for the
-duration of the later Git child. A malicious same-UID host process could race
-workspace paths or metadata after validation; use a dedicated service account
-and do not run untrusted same-UID host software.
+residual local validation-to-sandbox-spawn TOCTOU risk remains because workspace
+components are checked with path-based `lstat`/`realpath` rather than a
+directory-handle-relative `openat` walk. Symlink-containing workspaces fail
+closed during normal launch preparation, but a malicious same-UID host process
+could race workspace paths or metadata after validation and before sandbox
+spawn. Git metadata is also recursively checked before trusted host operations,
+but those path-based checks do not pin every component for the duration of the
+later Git child. Use a dedicated service account and do not run untrusted
+same-UID host software.
 
 Rollback does not destroy operator state: disable or reassign Devin profiles,
 cancel exact active attempts, preserve each checkout and its evidence, and

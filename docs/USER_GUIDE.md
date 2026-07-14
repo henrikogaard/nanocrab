@@ -501,6 +501,10 @@ npm run mock:admin:build
 | Memory feels wrong       | **Memory** proposals, approved records, stale/contradicted markers.                                                                                                                                                                                 |
 | Update fails             | Dirty worktree, Node version, Docker availability, setup logs.                                                                                                                                                                                      |
 
+For a Devin launch-isolation error, inspect the workspace before retrying:
+launch preparation fails closed before spawn if it contains any symlink or
+Git-metadata hardlink alias.
+
 Useful logs and checks:
 
 ```bash

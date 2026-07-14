@@ -107,7 +107,7 @@ A personal AI assistant accessible via messaging, with minimal custom code.
 
 - Normal agent invocations and container-backed coding runners use containers (lightweight Linux VMs).
 - Containers provide filesystem isolation: agents can see only mounted paths.
-- The opt-in Devin coding CLI is a host-native exception, not a provider or container runner. It requires a healthy host readiness probe and uses an attempt-owned process, constrained model tools, and an OS-sandboxed command broker scoped to one isolated coding workspace.
+- The opt-in Devin coding CLI is a host-native exception, not a provider or container runner. It requires a healthy host readiness probe and uses an attempt-owned process, constrained model tools, whole-process read-only `.git` isolation, and an OS-sandboxed command broker scoped to one isolated coding workspace. Launch preparation fails closed before spawn when the workspace contains symlinks or Git-metadata hardlink aliases.
 - Browser automation uses agent-browser with Chromium in the container.
 
 ### Scheduled Tasks
