@@ -96,6 +96,132 @@ export function buildDevinChildEnvironment(
   return environment;
 }
 
+export interface SandboxedDevinLaunchInput {
+  sandboxExecutable: '/usr/bin/bwrap' | '/usr/bin/sandbox-exec';
+  workspace: string;
+  executable: string;
+  args: readonly string[];
+}
+
+interface DevinSandboxFilesystem {
+  lstat(value: string): Promise<fs.Stats>;
+  realpath(value: string): Promise<string>;
+  readdir(
+    value: string,
+    options: { withFileTypes: true },
+  ): Promise<fs.Dirent[]>;
+}
+
+const devinSandboxFilesystem: DevinSandboxFilesystem = {
+  lstat: (value) => fs.promises.lstat(value),
+  realpath: (value) => fs.promises.realpath(value),
+  readdir: (value, options) => fs.promises.readdir(value, options),
+};
+
+async function assertNoGitMetadataAliases(
+  workspace: string,
+  deps: DevinSandboxFilesystem,
+): Promise<void> {
+  const gitDir = path.join(workspace, '.git');
+  const gitStats = await deps.lstat(gitDir);
+  if (gitStats.isSymbolicLink() || !gitStats.isDirectory()) {
+    throw new Error('Git metadata root is not a trusted directory');
+  }
+  if ((await deps.realpath(gitDir)) !== gitDir) {
+    throw new Error('Git metadata root is not canonical');
+  }
+
+  const gitFileIdentities = new Set<string>();
+  const collectGitMetadata = async (directory: string): Promise<void> => {
+    for (const entry of await deps.readdir(directory, {
+      withFileTypes: true,
+    })) {
+      const candidate = path.join(directory, entry.name);
+      const stats = await deps.lstat(candidate);
+      if (stats.isSymbolicLink()) {
+        throw new Error('Git metadata must not contain symlinks');
+      }
+      if (stats.isDirectory()) {
+        await collectGitMetadata(candidate);
+      } else if (stats.isFile()) {
+        gitFileIdentities.add(`${stats.dev}:${stats.ino}`);
+      } else {
+        throw new Error('Git metadata contains an unsupported entry');
+      }
+    }
+  };
+  await collectGitMetadata(gitDir);
+
+  const walkWorkspace = async (directory: string): Promise<void> => {
+    for (const entry of await deps.readdir(directory, {
+      withFileTypes: true,
+    })) {
+      const candidate = path.join(directory, entry.name);
+      if (candidate === gitDir) continue;
+      const stats = await deps.lstat(candidate);
+      if (stats.isSymbolicLink()) {
+        throw new Error('Workspace symlinks are unavailable for Devin');
+      } else if (stats.isDirectory()) {
+        await walkWorkspace(candidate);
+      } else if (
+        stats.isFile() &&
+        gitFileIdentities.has(`${stats.dev}:${stats.ino}`)
+      ) {
+        throw new Error('Workspace contains a Git metadata hardlink');
+      }
+    }
+  };
+  await walkWorkspace(workspace);
+}
+
+export async function buildSandboxedDevinLaunch(
+  input: SandboxedDevinLaunchInput,
+  deps: DevinSandboxFilesystem = devinSandboxFilesystem,
+): Promise<{ executable: string; args: string[] }> {
+  const gitDir = path.join(input.workspace, '.git');
+  await assertNoGitMetadataAliases(input.workspace, deps);
+  if (input.sandboxExecutable === '/usr/bin/bwrap') {
+    return {
+      executable: input.sandboxExecutable,
+      args: [
+        '--die-with-parent',
+        '--new-session',
+        '--bind',
+        '/',
+        '/',
+        '--ro-bind',
+        gitDir,
+        gitDir,
+        '--chdir',
+        input.workspace,
+        '--',
+        input.executable,
+        ...input.args,
+      ],
+    };
+  }
+  if (input.sandboxExecutable === '/usr/bin/sandbox-exec') {
+    const gitFilters = `(literal ${JSON.stringify(gitDir)}) (subpath ${JSON.stringify(gitDir)})`;
+    return {
+      executable: input.sandboxExecutable,
+      args: [
+        '-p',
+        [
+          '(version 1)',
+          '(allow default)',
+          '(deny file-link)',
+          '(deny file-write-create (vnode-type SYMLINK))',
+          `(deny file-write* ${gitFilters})`,
+        ].join(' '),
+        '--',
+        input.executable,
+        ...input.args,
+      ],
+    };
+  }
+  throw new Error('Devin process sandbox isolation is unavailable');
+}
+
 interface DevinBrokerLauncherDependencies {
   mkdir(
     path: string,
@@ -514,6 +640,9 @@ export interface DevinHostRunnerDependencies {
   ensureAgentConfig(path: string, data: string): Promise<void>;
   realpath(path: string): Promise<string>;
   getVerifiedRuntimeContext(): VerifiedDevinRuntimeContext | null;
+  buildSandboxedLaunch(
+    input: SandboxedDevinLaunchInput,
+  ): Promise<{ executable: string; args: string[] }>;
   ensureCommandBrokerLauncher: (
     input: DevinBrokerLauncherInput,
   ) => Promise<string>;
@@ -526,7 +655,7 @@ export interface DevinHostRunnerDependencies {
 
 export interface DevinHostRunnerProductionDependencies extends Omit<
   DevinHostRunnerDependencies,
-  'ensureAgentConfig' | 'ensureCommandBrokerLauncher'
+  'ensureAgentConfig' | 'ensureCommandBrokerLauncher' | 'buildSandboxedLaunch'
 > {
   filesystem?: EnsureDevinBrokerLauncherDependencies &
     EnsureDevinAgentConfigDependencies;
@@ -554,6 +683,7 @@ export function createProductionDevinHostRunner(
       ensureDevinAgentConfig(configPath, source, filesystem),
     ensureCommandBrokerLauncher: (input) =>
       ensureDevinCommandBrokerLauncher(input, filesystem),
+    buildSandboxedLaunch: (input) => buildSandboxedDevinLaunch(input),
   });
 }
 
@@ -699,32 +829,46 @@ export function createDevinHostRunner(
         );
       }
 
+      const devinArgs = [
+        '--prompt-file',
+        promptFile,
+        '--model',
+        input.model,
+        '--permission-mode',
+        'auto',
+        '--sandbox',
+        '--agent-config',
+        agentConfigPath,
+        '--respect-workspace-trust',
+        'true',
+        '-p',
+      ];
+      let launch: { executable: string; args: string[] };
+      /* eslint-disable no-catch-all/no-catch-all -- isolation failures must not expose host paths */
+      try {
+        launch = await deps.buildSandboxedLaunch({
+          sandboxExecutable: runtime.sandboxExecutable,
+          workspace,
+          executable: runtime.executable,
+          args: devinArgs,
+        });
+      } catch {
+        return failedBeforeSpawn(
+          input.attemptId,
+          'Devin process isolation failed',
+        );
+      }
+      /* eslint-enable no-catch-all/no-catch-all */
+
       let child;
       try {
-        child = deps.spawn(
-          runtime.executable,
-          [
-            '--prompt-file',
-            promptFile,
-            '--model',
-            input.model,
-            '--permission-mode',
-            'auto',
-            '--sandbox',
-            '--agent-config',
-            agentConfigPath,
-            '--respect-workspace-trust',
-            'true',
-            '-p',
-          ],
-          {
-            cwd: workspace,
-            env: buildDevinChildEnvironment(deps.environmentSource),
-            shell: false,
-            detached: true,
-            stdio: ['ignore', 'pipe', 'pipe'],
-          },
-        );
+        child = deps.spawn(launch.executable, launch.args, {
+          cwd: workspace,
+          env: buildDevinChildEnvironment(deps.environmentSource),
+          shell: false,
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
       } catch {
         return failedBeforeSpawn(
           input.attemptId,

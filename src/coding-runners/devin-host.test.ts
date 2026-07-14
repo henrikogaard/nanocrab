@@ -1,5 +1,8 @@
 import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -7,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildDevinAgentConfig,
   buildDevinChildEnvironment,
+  buildSandboxedDevinLaunch,
   createDevinHostRunner,
   ensureDevinAgentConfig,
   ensureDevinCommandBrokerLauncher,
@@ -23,6 +27,19 @@ const input = {
   devinCredentialPath: '/home/service/.config/devin/credentials.json',
   home: '/home/service',
   nanocrabConfigRoot: '/home/service/.config/nanocrab',
+};
+
+const trustedSandboxFilesystem = {
+  lstat: async (value: string) =>
+    ({
+      dev: 1,
+      ino: value.length,
+      isDirectory: () => value.endsWith('/.git'),
+      isFile: () => false,
+      isSymbolicLink: () => false,
+    }) as fs.Stats,
+  realpath: async (value: string) => value,
+  readdir: async () => [] as fs.Dirent[],
 };
 
 const readOnlyConfig = {
@@ -145,6 +162,160 @@ describe('Devin child environment', () => {
       NO_COLOR: '1',
     });
   });
+});
+
+describe('Devin process sandbox', () => {
+  const devinArgs = ['--prompt-file', '/jobs/job/.nanocrab/prompt.txt'];
+
+  it('overlays Git metadata read-only around the entire Linux Devin process', async () => {
+    await expect(
+      buildSandboxedDevinLaunch(
+        {
+          sandboxExecutable: '/usr/bin/bwrap',
+          workspace: '/jobs/job/repo',
+          executable: '/opt/devin/bin/devin',
+          args: devinArgs,
+        },
+        trustedSandboxFilesystem,
+      ),
+    ).resolves.toEqual({
+      executable: '/usr/bin/bwrap',
+      args: [
+        '--die-with-parent',
+        '--new-session',
+        '--bind',
+        '/',
+        '/',
+        '--ro-bind',
+        '/jobs/job/repo/.git',
+        '/jobs/job/repo/.git',
+        '--chdir',
+        '/jobs/job/repo',
+        '--',
+        '/opt/devin/bin/devin',
+        ...devinArgs,
+      ],
+    });
+  });
+
+  it('rejects a pre-existing workspace alias to Git metadata before macOS launch', async () => {
+    const root = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'nanocrab-devin-alias-'),
+    );
+    const requestedWorkspace = path.join(root, 'repo');
+    fs.mkdirSync(path.join(requestedWorkspace, '.git'), { recursive: true });
+    const workspace = fs.realpathSync(requestedWorkspace);
+    fs.symlinkSync('.git', path.join(workspace, 'metadata-alias'));
+    try {
+      await expect(
+        buildSandboxedDevinLaunch({
+          sandboxExecutable: '/usr/bin/sandbox-exec',
+          workspace,
+          executable: '/bin/sh',
+          args: ['-c', 'echo exploit > metadata-alias/config'],
+        }),
+      ).rejects.toThrow('Workspace symlinks');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['/usr/bin/bwrap', '/usr/bin/sandbox-exec'] as const)(
+    'rejects a pre-existing hardlink alias to Git metadata before %s launch',
+    async (sandboxExecutable) => {
+      const root = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'nanocrab-devin-hardlink-'),
+      );
+      const requestedWorkspace = path.join(root, 'repo');
+      fs.mkdirSync(path.join(requestedWorkspace, '.git'), { recursive: true });
+      const workspace = fs.realpathSync(requestedWorkspace);
+      fs.writeFileSync(path.join(workspace, '.git', 'config'), '[core]\n');
+      fs.linkSync(
+        path.join(workspace, '.git', 'config'),
+        path.join(workspace, 'metadata-alias'),
+      );
+      try {
+        await expect(
+          buildSandboxedDevinLaunch({
+            sandboxExecutable,
+            workspace,
+            executable: '/bin/sh',
+            args: ['-c', 'echo exploit > metadata-alias'],
+          }),
+        ).rejects.toThrow('Git metadata hardlink');
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform === 'darwin')(
+    'allows repository edits while denying direct Git metadata writes',
+    async () => {
+      const root = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'nanocrab-devin-write-'),
+      );
+      const requestedWorkspace = path.join(root, 'repo');
+      fs.mkdirSync(path.join(requestedWorkspace, '.git'), { recursive: true });
+      const workspace = fs.realpathSync(requestedWorkspace);
+      try {
+        const launch = await buildSandboxedDevinLaunch({
+          sandboxExecutable: '/usr/bin/sandbox-exec',
+          workspace,
+          executable: '/bin/sh',
+          args: ['-c', 'echo changed > source.txt; echo exploit > .git/config'],
+        });
+        const result = spawnSync(launch.executable, launch.args, {
+          cwd: workspace,
+          encoding: 'utf8',
+        });
+
+        expect(result.status).not.toBe(0);
+        expect(
+          fs.readFileSync(path.join(workspace, 'source.txt'), 'utf8'),
+        ).toBe('changed\n');
+        expect(fs.existsSync(path.join(workspace, '.git', 'config'))).toBe(
+          false,
+        );
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform === 'darwin')(
+    'prevents the sandboxed process from creating a new alias to Git metadata',
+    async () => {
+      const root = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'nanocrab-devin-sandbox-'),
+      );
+      const requestedWorkspace = path.join(root, 'repo');
+      fs.mkdirSync(path.join(requestedWorkspace, '.git'), { recursive: true });
+      const workspace = fs.realpathSync(requestedWorkspace);
+      try {
+        const launch = await buildSandboxedDevinLaunch({
+          sandboxExecutable: '/usr/bin/sandbox-exec',
+          workspace,
+          executable: '/bin/sh',
+          args: [
+            '-c',
+            'ln -s .git metadata-alias && echo exploit > metadata-alias/config',
+          ],
+        });
+        const result = spawnSync(launch.executable, launch.args, {
+          cwd: workspace,
+          encoding: 'utf8',
+        });
+
+        expect(result.status).not.toBe(0);
+        expect(fs.existsSync(path.join(workspace, '.git', 'config'))).toBe(
+          false,
+        );
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe('Devin command broker launcher', () => {
@@ -729,6 +900,9 @@ function runnerHarness(processes = [new FakeCodingProcess(101)]) {
   const getVerifiedRuntimeContext = vi.fn(
     (): typeof canonicalRuntime | null => canonicalRuntime,
   );
+  const buildSandboxedLaunch = vi.fn((input) =>
+    buildSandboxedDevinLaunch(input, trustedSandboxFilesystem),
+  );
   const runner = createDevinHostRunner({
     spawn,
     registry,
@@ -743,6 +917,7 @@ function runnerHarness(processes = [new FakeCodingProcess(101)]) {
     ensureAgentConfig: ensureConfig,
     realpath: async (value) => value,
     getVerifiedRuntimeContext,
+    buildSandboxedLaunch,
     ensureCommandBrokerLauncher: ensureLauncher,
     commandBrokerModulePath:
       '/opt/nanocrab/dist/coding-runners/command-broker.js',
@@ -758,6 +933,7 @@ function runnerHarness(processes = [new FakeCodingProcess(101)]) {
     ensureConfig,
     ensureLauncher,
     getVerifiedRuntimeContext,
+    buildSandboxedLaunch,
     groupSignals,
   };
 }
@@ -791,9 +967,40 @@ describe('Devin host process runner', () => {
       '/jobs/job/.nanocrab/devin-agent.json',
       expect.stringContaining('Write(/jobs/job/owner__repo/**)'),
     );
+    expect(harness.buildSandboxedLaunch).toHaveBeenCalledWith({
+      sandboxExecutable: '/usr/bin/bwrap',
+      workspace: '/jobs/job/owner__repo',
+      executable: '/opt/devin/bin/devin',
+      args: [
+        '--prompt-file',
+        '/jobs/job/.nanocrab/prompt.txt',
+        '--model',
+        'claude-sonnet-4',
+        '--permission-mode',
+        'auto',
+        '--sandbox',
+        '--agent-config',
+        '/jobs/job/.nanocrab/devin-agent.json',
+        '--respect-workspace-trust',
+        'true',
+        '-p',
+      ],
+    });
     expect(harness.spawn).toHaveBeenCalledWith(
-      '/opt/devin/bin/devin',
+      '/usr/bin/bwrap',
       [
+        '--die-with-parent',
+        '--new-session',
+        '--bind',
+        '/',
+        '/',
+        '--ro-bind',
+        '/jobs/job/owner__repo/.git',
+        '/jobs/job/owner__repo/.git',
+        '--chdir',
+        '/jobs/job/owner__repo',
+        '--',
+        '/opt/devin/bin/devin',
         '--prompt-file',
         '/jobs/job/.nanocrab/prompt.txt',
         '--model',
@@ -846,11 +1053,33 @@ describe('Devin host process runner', () => {
     await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledTimes(2));
     second.close(0);
     await secondRun;
-    const spawnCalls = harness.spawn.mock.calls as unknown as Array<[string]>;
-    expect(spawnCalls.map((call) => call[0])).toEqual([
+    const sandboxCalls = harness.buildSandboxedLaunch.mock
+      .calls as unknown as Array<[{ executable: string }]>;
+    expect(sandboxCalls.map(([call]) => call.executable)).toEqual([
       '/opt/devin/bin/devin',
       '/opt/devin-v2/bin/devin',
     ]);
+    const spawnCalls = harness.spawn.mock.calls as unknown as Array<[string]>;
+    expect(spawnCalls.map((call) => call[0])).toEqual([
+      '/usr/bin/bwrap',
+      '/usr/bin/bwrap',
+    ]);
+  });
+
+  it('fails closed before spawn when whole-process isolation cannot be prepared', async () => {
+    const harness = runnerHarness();
+    harness.buildSandboxedLaunch.mockRejectedValueOnce(
+      new Error('sandbox unavailable'),
+    );
+
+    await expect(harness.runner.run(runnerInput())).resolves.toEqual({
+      attemptId: 'attempt-1',
+      state: 'failed',
+      exitCode: null,
+      signal: null,
+      detail: 'Devin process isolation failed',
+    });
+    expect(harness.spawn).not.toHaveBeenCalled();
   });
 
   it('terminates an unleased detached process group when registration fails', async () => {
