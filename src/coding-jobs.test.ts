@@ -13,6 +13,9 @@ vi.mock('./config.js', () => ({
   CREDENTIAL_PROXY_PORT: 3001,
   DATA_DIR: '/tmp/nanocrab-coding-jobs-test/data',
   TIMEZONE: 'UTC',
+  DEVIN_CLI_MODEL_ALIASES: {
+    'claude/claude-sonnet-4-6': 'claude-sonnet-4',
+  },
 }));
 
 vi.mock('./env.js', () => ({
@@ -49,6 +52,7 @@ vi.mock('./provider-router.js', () => ({
 }));
 
 vi.mock('child_process', () => ({
+  execFile: vi.fn(),
   execFileSync: vi.fn((command: string, args: string[]) => {
     if (command === 'git' && args[0] === 'rev-parse') return 'abc123def456\n';
     return '';
@@ -94,6 +98,38 @@ const { spawnSync: realSpawnSync } =
   );
 
 const TEST_ROOT = '/tmp/nanocrab-coding-jobs-test';
+
+function writeLegacyJob({ provider }: { provider: string }): void {
+  fs.mkdirSync(`${TEST_ROOT}/store`, { recursive: true });
+  fs.writeFileSync(
+    `${TEST_ROOT}/store/coding-jobs.json`,
+    JSON.stringify(
+      [
+        {
+          id: 'code-legacy',
+          repo: 'owner/repo',
+          type: 'prompt',
+          prompt: 'Legacy job',
+          issueNumber: null,
+          issueTitle: null,
+          provider,
+          model: 'legacy-model',
+          status: 'queued',
+          branch: 'nanocrab/legacy',
+          workspace: '/tmp/workspace',
+          createPr: false,
+          prUrl: null,
+          output: '',
+          requestedBy: 'dashboard',
+          createdAt: new Date(0).toISOString(),
+          completedAt: null,
+        },
+      ],
+      null,
+      2,
+    ),
+  );
+}
 
 function mockGitHubFetch(
   handler: (url: string) => unknown,
@@ -605,6 +641,44 @@ describe('coding jobs', () => {
     expect(loadCodingJobs()[0].actualRuntime).toEqual(actualRuntime);
   });
 
+  it('persists runner CLI from the complete actual runtime', async () => {
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Use Devin',
+      requestedBy: 'control-plane',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    expect(job.runnerCli).toBe('devin');
+    expect(loadCodingJobs()[0].runnerCli).toBe('devin');
+    expect(job.executionAttempts).toEqual([]);
+    expect(job.activeAttemptId).toBeNull();
+  });
+
+  it.each([
+    ['claude', 'claude'],
+    ['codex', 'codex'],
+    ['opencode', 'opencode'],
+    ['openrouter', 'opencode'],
+    ['ollama', 'opencode'],
+    ['openai-compatible', 'opencode'],
+    ['pi', 'pi'],
+    ['mistral', 'mistral'],
+  ])('normalizes legacy provider %s to runner %s', (provider, runnerCli) => {
+    writeLegacyJob({ provider });
+    expect(loadCodingJobs()[0]).toMatchObject({
+      runnerCli,
+      activeAttemptId: null,
+      executionAttempts: [],
+    });
+  });
+
   it('normalizes missing agent profile attribution fields to null', () => {
     fs.mkdirSync(`${TEST_ROOT}/store`, { recursive: true });
     fs.writeFileSync(
@@ -949,7 +1023,7 @@ describe('coding jobs', () => {
     expect(proposal.extractedLesson).toMatch(/^---\nname: skill-/);
   });
 
-  it('writes Pi run.sh and config files when running with the pi provider', async () => {
+  it('preserves legacy Pi and Mistral dispatch contract for Pi', async () => {
     vi.useRealTimers();
     mockGitHubFetch(() => ({ default_branch: 'main' }));
     await registerCodingRepo({ repo: 'owner/repo' });
@@ -975,9 +1049,11 @@ describe('coding jobs', () => {
       const jobRoot = firstMount.split(':')[0];
       const metadataDir = `${jobRoot}/.nanocrab`;
 
-      expect(fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8')).toContain(
+      const runScript = fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8');
+      expect(runScript).toContain(
         'pi -p "$PROMPT" --mode json --model "$PI_JOB_MODEL" --provider openrouter --no-session',
       );
+      expect(runScript).not.toContain('devin');
       const models = JSON.parse(
         fs.readFileSync(`${metadataDir}/pi-agent/models.json`, 'utf-8'),
       );
@@ -1016,7 +1092,7 @@ describe('coding jobs', () => {
     });
   });
 
-  it('writes Mistral Vibe run.sh and config.toml when running with the mistral provider', async () => {
+  it('preserves legacy Pi and Mistral dispatch contract for Mistral', async () => {
     vi.useRealTimers();
     mockGitHubFetch(() => ({ default_branch: 'main' }));
     await registerCodingRepo({ repo: 'owner/repo' });
@@ -1050,6 +1126,7 @@ describe('coding jobs', () => {
           maxPrice: '"$CODING_JOB_MAX_BUDGET_USD"',
         }),
       );
+      expect(runScript).not.toContain('devin');
       expect(runScript).not.toMatch(/--auto-approve|--workdir|--trust/);
       const successfulVibe = runGeneratedMistralCase(runScript);
       expect(successfulVibe.status).toBe(0);

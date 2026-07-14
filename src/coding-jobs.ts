@@ -20,7 +20,12 @@ import {
   isAgentProvider,
   isCodingCapableProvider,
 } from './agent-provider.js';
-import type { AgentRuntimeSelection } from './types.js';
+import type { AgentCliId, AgentRuntimeSelection } from './types.js';
+import {
+  inferLegacyRunnerCli,
+  validateCodingRuntimeSelection,
+} from './agent-runtime-registry.js';
+import type { CodingExecutionAttempt } from './coding-runners/types.js';
 import {
   CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
@@ -169,6 +174,9 @@ export interface CodingJob {
   stageId?: string | null;
   decisionId?: string | null;
   actualRuntime?: AgentRuntimeSelection | null;
+  runnerCli: AgentCliId;
+  activeAttemptId: string | null;
+  executionAttempts: CodingExecutionAttempt[];
   runId?: string | null;
   stageKind?: PipelineStageKind | null;
   stageEvidence?: StageRunEvidence | null;
@@ -321,7 +329,13 @@ function ensureJobDefaults(job: CodingJob): CodingJob {
     stageEvidence: null,
     pushed: false,
   };
-  const normalized = { ...defaults, ...job };
+  const normalized = {
+    ...defaults,
+    ...job,
+    runnerCli: job.runnerCli ?? inferLegacyRunnerCli(job.provider),
+    activeAttemptId: job.activeAttemptId ?? null,
+    executionAttempts: [...(job.executionAttempts ?? [])],
+  };
   if (!normalized.transitionedAt[normalized.status]) {
     normalized.transitionedAt[normalized.status] =
       normalized.completedAt || normalized.createdAt || nowIso();
@@ -1604,6 +1618,7 @@ export async function startCodingJob(
   }
 
   const actualRuntime = input.actualRuntime || null;
+  if (actualRuntime) validateCodingRuntimeSelection(actualRuntime);
   const requestedProvider =
     actualRuntime?.provider ||
     (input.provider && isAgentProvider(input.provider)
@@ -1691,6 +1706,9 @@ export async function startCodingJob(
     stageId: input.stageId || null,
     decisionId: input.decisionId || null,
     actualRuntime,
+    runnerCli: actualRuntime?.cli ?? inferLegacyRunnerCli(provider),
+    activeAttemptId: null,
+    executionAttempts: [],
     runId: input.runId || id,
     stageKind: input.stageKind || null,
     stageEvidence: input.stageEvidence || null,
