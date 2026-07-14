@@ -52,6 +52,9 @@ function actionToStatus(
   if (action === 'approve') return 'approved';
   if (action === 'reject') return 'rejected';
   if (action === 'revise') return 'revised';
+  if (action === 'reassign') return 'reassigned';
+  if (action === 'pause') return 'paused';
+  if (action === 'cancel') return 'cancelled';
   return 'reassigned';
 }
 
@@ -162,6 +165,11 @@ function requireDecision(
 ): ControlPlaneDecision {
   const decision = getDecision(decisionId);
   if (!decision) throw new Error(`decision ${decisionId} was not found`);
+
+  // Follow action can be performed on any decision status
+  if (action === 'follow') {
+    return decision;
+  }
 
   if (!isDecisionActorAuthorized(input.actor)) {
     throw new DecisionResolutionError(
@@ -445,6 +453,71 @@ export async function resolveDecision(
       decision: 'approved',
       correlationId: decision.correlationId || decisionId,
       context: { decisionId, action, actor, agentHandle, note, source },
+    });
+    return decision;
+  }
+
+  if (action === 'pause') {
+    const changed = writeTerminalStatus(decisionId, action, input);
+    if (changed === 0) {
+      decision = getDecision(decisionId)!;
+      if (decision.status !== 'paused') {
+        throw new DecisionResolutionError(
+          `decision ${decisionId} is already ${decision.status}`,
+          decision,
+        );
+      }
+    } else {
+      decision = getDecision(decisionId)!;
+    }
+
+    logAuditEvent({
+      actor,
+      actionType: 'control_plane.decision.resolved',
+      resource: `${decision.repository}#${decision.issueNumber}`,
+      decision: 'paused',
+      correlationId: decision.correlationId || decisionId,
+      context: { decisionId, action, actor, note, source },
+    });
+    return decision;
+  }
+
+  if (action === 'cancel') {
+    const changed = writeTerminalStatus(decisionId, action, input);
+    if (changed === 0) {
+      decision = getDecision(decisionId)!;
+      if (decision.status !== 'cancelled') {
+        throw new DecisionResolutionError(
+          `decision ${decisionId} is already ${decision.status}`,
+          decision,
+        );
+      }
+    } else {
+      decision = getDecision(decisionId)!;
+    }
+
+    logAuditEvent({
+      actor,
+      actionType: 'control_plane.decision.resolved',
+      resource: `${decision.repository}#${decision.issueNumber}`,
+      decision: 'cancelled',
+      correlationId: decision.correlationId || decisionId,
+      context: { decisionId, action, actor, note, source },
+    });
+    return decision;
+  }
+
+  if (action === 'follow') {
+    // Follow action retrieves the current decision status without mutation
+    decision = getDecision(decisionId)!;
+
+    logAuditEvent({
+      actor,
+      actionType: 'control_plane.decision.followed',
+      resource: `${decision.repository}#${decision.issueNumber}`,
+      decision: decision.status,
+      correlationId: decision.correlationId || decisionId,
+      context: { decisionId, action, actor, note, source },
     });
     return decision;
   }

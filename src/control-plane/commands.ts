@@ -30,6 +30,7 @@ export type ControlPlaneCommand =
   | { action: 'status'; repository?: string; issueNumber: number }
   | { action: 'show_plan'; repository?: string; issueNumber: number }
   | { action: 'show_decision'; repository?: string; issueNumber: number }
+  | { action: 'follow'; repository?: string; issueNumber: number }
   | {
       action: 'approve';
       repository?: string;
@@ -49,7 +50,13 @@ export type ControlPlaneCommand =
       stage: PipelineStageKind;
       agentHandle: string;
     }
-  | { action: 'pause' | 'cancel'; repository?: string; issueNumber: number };
+  | {
+      action: 'pause' | 'cancel';
+      repository?: string;
+      issueNumber: number;
+      note?: string;
+    }
+
 
 export interface ControlPlaneCommandResult {
   text: string;
@@ -77,7 +84,7 @@ export interface ParseControlPlaneCommandOptions {
 }
 
 const ACTION_PATTERN =
-  /^(status|show plan|show decision|approve|reject|revise|reassign|pause|cancel)(?:\s+(.+))?$/i;
+  /^(status|show plan|show decision|approve|reject|revise|reassign|pause|cancel|follow)(?:\s+(.+))?$/i;
 
 function parseIssueRef(text: string): {
   repository: string | undefined;
@@ -130,6 +137,8 @@ export function parseControlPlaneCommand(
       return { action: 'show_plan', repository, issueNumber };
     case 'show decision':
       return { action: 'show_decision', repository, issueNumber };
+    case 'follow':
+      return { action: 'follow', repository, issueNumber };
     case 'approve': {
       let targetStage: string | undefined;
       const toMatch = remainder.match(/^\s*to\s+(\w+)\s*$/i);
@@ -155,8 +164,10 @@ export function parseControlPlaneCommand(
       };
     }
     case 'pause':
-    case 'cancel':
-      return { action, repository, issueNumber };
+    case 'cancel': {
+      const note = remainder.replace(/^\s*:\s*/, '').trim();
+      return { action, repository, issueNumber, note: note || undefined };
+    }
     default:
       return null;
   }
@@ -320,6 +331,7 @@ export async function executeControlPlaneCommand(
     'reassign',
     'pause',
     'cancel',
+    'follow',
   ]);
   if (mutationActions.has(command.action) && !context.isAuthorized) {
     return {
@@ -386,6 +398,47 @@ export async function executeControlPlaneCommand(
             actions: buildActions(context.isAuthorized, latestDecision),
           };
         }
+        break;
+      }
+      case 'follow': {
+        if (!latestDecision) {
+          result = {
+            text: `No decision to follow for ${repo}#${issue}.`,
+            decisionId: null,
+            actions: [],
+          };
+          break;
+        }
+        const decision = await resolveDecision(
+          latestDecision.id,
+          {
+            action: 'follow',
+            actor: context.actor,
+            source,
+          },
+          client,
+        );
+        let text = `Decision ${decision.id} for ${repo}#${issue} is ${decision.status}.`;
+        if (decision.summary) {
+          text += ` ${decision.summary}`;
+        }
+        if (decision.proposedStageId) {
+          text += `\nProposed next stage: ${nextStageKind(pipeline, decision)}.`;
+        }
+        if (decision.dispatchStatus) {
+          text += `\nDispatch status: ${decision.dispatchStatus}.`;
+        }
+        if (decision.dispatchJobId) {
+          text += `\nRun: ${decision.dispatchJobId}.`;
+        }
+        if (decision.dispatchError) {
+          text += `\nError: ${decision.dispatchError}`;
+        }
+        result = {
+          text,
+          decisionId: decision.id,
+          actions: buildActions(context.isAuthorized, decision),
+        };
         break;
       }
       case 'approve': {
@@ -538,35 +591,27 @@ export async function executeControlPlaneCommand(
         result = { text, decisionId: decision.id, actions: [] };
         break;
       }
-      case 'pause': {
-        const jobs = loadCodingJobs().filter(
-          (j) =>
-            j.repo === repo &&
-            j.issueNumber === issue &&
-            ![
-              'completed',
-              'failed',
-              'cancelled',
-              'await_approval',
-              'await_pr_approval',
-            ].includes(j.status),
-        );
-        if (jobs.length === 0) {
-          result = {
-            text: `No active run to pause for ${repo}#${issue}.`,
-            decisionId: null,
-            actions: [],
-          };
-        } else {
-          result = {
-            text: `Pause is not implemented for ${repo}#${issue}; active run: ${jobs[0].id}. Use cancel to stop the run.`,
-            decisionId: null,
-            actions: [],
-          };
-        }
-        break;
-      }
       case 'cancel': {
+        // Try to cancel a pending decision first
+        if (latestPendingDecision) {
+          const decision = await resolveDecision(
+            latestPendingDecision.id,
+            {
+              action: 'cancel',
+              actor: context.actor,
+              note: command.note,
+              source,
+            },
+            client,
+          );
+          result = {
+            text: `Cancelled decision ${decision.id} for ${repo}#${issue}. Status: ${decision.status}.`,
+            decisionId: decision.id,
+            actions: [],
+          };
+          break;
+        }
+        // Fall back to cancelling coding jobs
         const jobs = loadCodingJobs().filter(
           (j) =>
             j.repo === repo &&
@@ -575,7 +620,7 @@ export async function executeControlPlaneCommand(
         );
         if (jobs.length === 0) {
           result = {
-            text: `No active run to cancel for ${repo}#${issue}.`,
+            text: `No active run or pending decision to cancel for ${repo}#${issue}.`,
             decisionId: null,
             actions: [],
           };
@@ -600,6 +645,33 @@ export async function executeControlPlaneCommand(
             };
           }
         }
+        break;
+      }
+      case 'pause': {
+        // Try to pause a pending decision first
+        if (latestPendingDecision) {
+          const decision = await resolveDecision(
+            latestPendingDecision.id,
+            {
+              action: 'pause',
+              actor: context.actor,
+              note: command.note,
+              source,
+            },
+            client,
+          );
+          result = {
+            text: `Paused decision ${decision.id} for ${repo}#${issue}. Status: ${decision.status}.`,
+            decisionId: decision.id,
+            actions: [],
+          };
+          break;
+        }
+        result = {
+          text: `No pending decision to pause for ${repo}#${issue}.`,
+          decisionId: null,
+          actions: [],
+        };
         break;
       }
       default: {
