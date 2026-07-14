@@ -80,9 +80,7 @@ export function parsePositiveMilliseconds(
   fallback: number,
   key: string,
 ): number {
-  if (raw === undefined) return fallback;
-
-  const parsed = Number(raw);
+  const parsed = raw === undefined ? fallback : Number(raw);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new Error(`${key} must be a positive integer number of milliseconds`);
   }

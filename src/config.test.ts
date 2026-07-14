@@ -61,6 +61,15 @@ describe('Devin runner configuration', () => {
     },
   );
 
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
+    'rejects invalid fallback millisecond value %s',
+    (fallback) => {
+      expect(() =>
+        parsePositiveMilliseconds(undefined, fallback, 'TEST_TIMEOUT_MS'),
+      ).toThrow('TEST_TIMEOUT_MS');
+    },
+  );
+
   it('uses null when DEVIN_CREDENTIAL_PATH is omitted', async () => {
     vi.stubEnv('DEVIN_CREDENTIAL_PATH', '');
 
