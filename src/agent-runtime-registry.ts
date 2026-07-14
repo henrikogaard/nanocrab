@@ -23,7 +23,20 @@ const DEVIN_REQUIRED_CAPABILITIES = [
   '--respect-workspace-trust',
   '-p',
 ] as const;
-let verifiedDevinAliases: ReadonlySet<string> = new Set();
+
+export interface VerifiedDevinRuntimeContext {
+  readonly executable: string;
+  readonly nodeExecutable: string;
+  readonly sandboxExecutable: '/usr/bin/bwrap' | '/usr/bin/sandbox-exec';
+  readonly trustedRuntimeReadRoots: readonly string[];
+}
+
+interface VerifiedDevinState {
+  readonly aliases: ReadonlySet<string>;
+  readonly context: VerifiedDevinRuntimeContext;
+}
+
+let verifiedDevinState: VerifiedDevinState | null = null;
 
 export interface DevinProbeDependencies {
   execFile: (
@@ -41,10 +54,27 @@ export interface DevinProbeDependencies {
   ): Promise<boolean>;
   env: NodeJS.ProcessEnv;
   credentialPath: string | null;
+  resolveExecutable(
+    command: 'devin',
+    searchDirectories: readonly string[],
+  ): Promise<string | null>;
+  executableSearchDirectories: readonly string[];
+  nodeExecutable: string;
+  trustedRuntimeRootCandidates: readonly string[];
 }
 
 export function getVerifiedDevinAliases(): ReadonlySet<string> {
-  return new Set(verifiedDevinAliases);
+  return new Set(verifiedDevinState?.aliases ?? []);
+}
+
+export function getVerifiedDevinRuntimeContext(): VerifiedDevinRuntimeContext | null {
+  if (!verifiedDevinState) return null;
+  return {
+    ...verifiedDevinState.context,
+    trustedRuntimeReadRoots: [
+      ...verifiedDevinState.context.trustedRuntimeReadRoots,
+    ],
+  };
 }
 
 export function inferLegacyRunnerCli(provider: AgentProvider): AgentCliId {
@@ -293,13 +323,28 @@ function devinHealth(
   };
 }
 
-function clearVerifiedDevinAliases(): void {
-  verifiedDevinAliases = new Set();
+function clearVerifiedDevinState(): void {
+  verifiedDevinState = null;
 }
 
 function parseAdvertisedDevinModelExamples(help: string): Set<string> {
+  const lines = help.split(/\r?\n/);
+  const modelOptionStart = lines.findIndex((line) =>
+    /^\s*--model(?:\s|[=<]|$)/.test(line),
+  );
+  if (modelOptionStart < 0) return new Set();
+
+  const modelBlock: string[] = [];
+  for (let index = modelOptionStart; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (index > modelOptionStart && /^\s*-{1,2}[a-z0-9]/i.test(line)) {
+      break;
+    }
+    modelBlock.push(line);
+  }
+
   const aliases = new Set<string>();
-  for (const line of help.split(/\r?\n/)) {
+  for (const line of modelBlock) {
     if (!/examples?\s*:/i.test(line)) continue;
     const examples = line
       .replace(/^.*?examples?\s*:/i, '')
@@ -312,6 +357,89 @@ function parseAdvertisedDevinModelExamples(help: string): Set<string> {
   return aliases;
 }
 
+function isAtOrBelow(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return (
+    relative === '' ||
+    (relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
+}
+
+async function verifyDevinRuntimeContext(
+  deps: DevinProbeDependencies,
+  sandboxExecutable: '/usr/bin/bwrap' | '/usr/bin/sandbox-exec',
+): Promise<VerifiedDevinRuntimeContext | null> {
+  if (
+    deps.executableSearchDirectories.length === 0 ||
+    deps.executableSearchDirectories.some(
+      (directory) => !path.isAbsolute(directory),
+    )
+  ) {
+    return null;
+  }
+  const resolvedDevin = await deps.resolveExecutable(
+    'devin',
+    deps.executableSearchDirectories,
+  );
+  if (!resolvedDevin || !path.isAbsolute(resolvedDevin)) return null;
+
+  const canonicalDevin = await deps.realpath(resolvedDevin);
+  const canonicalNode = await deps.realpath(deps.nodeExecutable);
+  const canonicalSandbox = await deps.realpath(sandboxExecutable);
+  if (
+    canonicalDevin !== resolvedDevin ||
+    canonicalNode !== deps.nodeExecutable ||
+    canonicalSandbox !== sandboxExecutable
+  ) {
+    return null;
+  }
+
+  const canonicalRoots: string[] = [];
+  for (const candidate of deps.trustedRuntimeRootCandidates) {
+    if (
+      !path.isAbsolute(candidate) ||
+      path.parse(candidate).root === candidate
+    ) {
+      return null;
+    }
+    try {
+      const canonical = await deps.realpath(candidate);
+      const stats = await deps.stat(canonical);
+      if (canonical !== candidate || !stats.isDirectory()) return null;
+      if (!canonicalRoots.includes(canonical)) canonicalRoots.push(canonical);
+    } catch {
+      // Candidates are platform-specific; only verified existing roots survive.
+    }
+  }
+
+  const executables = [canonicalDevin, canonicalNode, canonicalSandbox];
+  const trustedRoots = canonicalRoots.filter(
+    (root) =>
+      !canonicalRoots.some(
+        (other) => other !== root && isAtOrBelow(root, other),
+      ),
+  );
+  for (const executable of executables) {
+    const stats = await deps.stat(executable);
+    if (
+      !stats.isFile() ||
+      (stats.mode & 0o111) === 0 ||
+      !trustedRoots.some((root) => isAtOrBelow(executable, root))
+    ) {
+      return null;
+    }
+  }
+
+  return {
+    executable: canonicalDevin,
+    nodeExecutable: canonicalNode,
+    sandboxExecutable,
+    trustedRuntimeReadRoots: trustedRoots,
+  };
+}
+
 function helpAdvertisesCapability(help: string, capability: string): boolean {
   const escaped = capability.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(^|\\s)${escaped}(?=\\s|[=<]|$)`, 'm').test(help);
@@ -322,7 +450,7 @@ export async function probeDevinRuntime(
 ): Promise<AgentRuntimeHealth> {
   const checkedAt = new Date().toISOString();
   if (deps.credentialPath === null) {
-    clearVerifiedDevinAliases();
+    clearVerifiedDevinState();
     return devinHealth(
       'error',
       'Configure an absolute DEVIN_CREDENTIAL_PATH for the NanoCrab service user',
@@ -331,7 +459,7 @@ export async function probeDevinRuntime(
   }
 
   const fail = (detail: string, version: string | null = null) => {
-    clearVerifiedDevinAliases();
+    clearVerifiedDevinState();
     return devinHealth('error', detail, checkedAt, version);
   };
   const credentialPath = deps.credentialPath;
@@ -345,14 +473,24 @@ export async function probeDevinRuntime(
   }
 
   try {
-    const [canonicalPath, linkStats, fileStats] = await Promise.all([
-      deps.realpath(credentialPath),
-      deps.lstat(credentialPath),
-      deps.stat(credentialPath),
-    ]);
+    const initialLinkStats = await deps.lstat(credentialPath);
+    if (initialLinkStats.isSymbolicLink()) {
+      return fail(
+        'DEVIN_CREDENTIAL_PATH must be a canonical service-user-owned regular file with mode 0600',
+      );
+    }
+    const canonicalPath = await deps.realpath(credentialPath);
+    const fileStats = await deps.stat(credentialPath);
+    const finalLinkStats = await deps.lstat(credentialPath);
     if (
       canonicalPath !== credentialPath ||
-      linkStats.isSymbolicLink() ||
+      finalLinkStats.isSymbolicLink() ||
+      !initialLinkStats.isFile() ||
+      !finalLinkStats.isFile() ||
+      initialLinkStats.dev !== fileStats.dev ||
+      initialLinkStats.ino !== fileStats.ino ||
+      finalLinkStats.dev !== fileStats.dev ||
+      finalLinkStats.ino !== fileStats.ino ||
       !fileStats.isFile() ||
       fileStats.uid !== deps.getuid() ||
       (fileStats.mode & 0o777) !== 0o600
@@ -385,11 +523,31 @@ export async function probeDevinRuntime(
     env: buildDevinChildEnvironment(deps.env),
     timeout: DEVIN_PROBE_TIMEOUT_MS,
   };
+  let runtimeContext: VerifiedDevinRuntimeContext | null;
+  try {
+    runtimeContext = await verifyDevinRuntimeContext(deps, sandboxExecutable);
+  } catch {
+    runtimeContext = null;
+  }
+  if (!runtimeContext) {
+    return fail(
+      'Devin Node and sandbox executables must be canonical executable files inside trusted runtime roots',
+    );
+  }
+
   let version: string | null = null;
   try {
-    const versionResult = await deps.execFile('devin', ['--version'], options);
+    const versionResult = await deps.execFile(
+      runtimeContext.executable,
+      ['--version'],
+      options,
+    );
     version = parseVersion(versionResult.stdout);
-    const helpResult = await deps.execFile('devin', ['--help'], options);
+    const helpResult = await deps.execFile(
+      runtimeContext.executable,
+      ['--help'],
+      options,
+    );
     if (
       DEVIN_REQUIRED_CAPABILITIES.some(
         (capability) =>
@@ -412,9 +570,13 @@ export async function probeDevinRuntime(
     }
 
     try {
-      await deps.execFile('devin', ['auth', 'status'], options);
+      await deps.execFile(
+        runtimeContext.executable,
+        ['auth', 'status'],
+        options,
+      );
     } catch {
-      clearVerifiedDevinAliases();
+      clearVerifiedDevinState();
       return devinHealth(
         'unauthenticated',
         'Run devin auth login as the NanoCrab service user',
@@ -423,7 +585,15 @@ export async function probeDevinRuntime(
       );
     }
 
-    verifiedDevinAliases = new Set(configuredAliases);
+    verifiedDevinState = Object.freeze({
+      aliases: new Set(configuredAliases),
+      context: Object.freeze({
+        ...runtimeContext,
+        trustedRuntimeReadRoots: Object.freeze([
+          ...runtimeContext.trustedRuntimeReadRoots,
+        ]),
+      }),
+    });
     return devinHealth(
       'healthy',
       'Devin host runner is ready',
@@ -432,7 +602,7 @@ export async function probeDevinRuntime(
     );
   } catch (error: unknown) {
     const code = (error as { code?: string }).code;
-    clearVerifiedDevinAliases();
+    clearVerifiedDevinState();
     if (code === 'ENOENT') {
       return devinHealth('missing', 'executable devin not found', checkedAt);
     }
@@ -446,6 +616,7 @@ export async function probeDevinRuntime(
 }
 
 function defaultDevinProbeDependencies(): DevinProbeDependencies {
+  const childEnvironment = buildDevinChildEnvironment(process.env);
   return {
     execFile: async (executable, args, options) => {
       const result = await execFileAsync(executable, [...args], options);
@@ -469,7 +640,56 @@ function defaultDevinProbeDependencies(): DevinProbeDependencies {
     },
     env: process.env,
     credentialPath: DEVIN_CREDENTIAL_PATH,
+    resolveExecutable: async (command, searchDirectories) => {
+      for (const directory of searchDirectories) {
+        if (!path.isAbsolute(directory)) continue;
+        const candidate = path.join(directory, command);
+        try {
+          const canonical = await fs.promises.realpath(candidate);
+          const stats = await fs.promises.stat(canonical);
+          await fs.promises.access(canonical, fs.constants.X_OK);
+          if (stats.isFile()) return canonical;
+        } catch {
+          // Continue through the fixed scrubbed search path only.
+        }
+      }
+      return null;
+    },
+    executableSearchDirectories: [
+      ...new Set([
+        ...(childEnvironment.PATH ?? '')
+          .split(path.delimiter)
+          .filter(path.isAbsolute),
+        path.dirname(process.execPath),
+      ]),
+    ],
+    nodeExecutable: process.execPath,
+    trustedRuntimeRootCandidates: defaultTrustedRuntimeRootCandidates(
+      childEnvironment.PATH ?? '',
+      process.execPath,
+    ),
   };
+}
+
+function defaultTrustedRuntimeRootCandidates(
+  searchPath: string,
+  nodeExecutable: string,
+): string[] {
+  const rawCandidates = [
+    ...searchPath
+      .split(path.delimiter)
+      .filter(path.isAbsolute)
+      .map((directory) => path.dirname(directory)),
+    path.dirname(path.dirname(nodeExecutable)),
+    '/usr/bin',
+  ];
+  return [
+    ...new Set(
+      rawCandidates.filter(
+        (candidate) => path.parse(candidate).root !== candidate,
+      ),
+    ),
+  ];
 }
 
 function parseVersion(output: string): string | null {

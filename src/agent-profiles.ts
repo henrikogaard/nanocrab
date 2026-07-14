@@ -144,6 +144,14 @@ export function validateRuntimeSelection(
     throw new Error('agent runtime model is required');
   }
   if (options.coding) {
+    if (
+      runtime.cli !== 'devin' &&
+      !isValidAgentModel(runtime.provider, runtime.model)
+    ) {
+      throw new Error(
+        `agent runtime model is not supported for provider ${runtime.provider}: ${runtime.model}`,
+      );
+    }
     validateCodingRuntimeSelection(runtime);
     return;
   }

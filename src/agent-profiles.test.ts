@@ -401,6 +401,21 @@ describe('agent profile persistence', () => {
     }
   });
 
+  it('still rejects provider-catalog-invalid models for non-Devin coding profiles', () => {
+    expect(() =>
+      buildAgentProfile({
+        handle: 'codex-coder',
+        displayName: 'Codex Coder',
+        taskKinds: ['coding_job'],
+        primaryRuntime: {
+          cli: 'codex',
+          provider: 'codex',
+          model: 'claude-sonnet-4-6',
+        },
+      }),
+    ).toThrow(/model.*not supported/i);
+  });
+
   it.each([0, -1, 1.5, Number.NaN])(
     'rejects non-positive or non-integer maxConcurrency %s',
     (maxConcurrency) => {

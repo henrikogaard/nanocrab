@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   inferLegacyRunnerCli,
   getVerifiedDevinAliases,
+  getVerifiedDevinRuntimeContext,
   listAgentRuntimeDefinitions,
   probeAgentRuntime,
   probeDevinRuntime,
@@ -35,14 +36,20 @@ function fakeStats(
   input: {
     mode?: number;
     uid?: number;
+    dev?: number;
+    ino?: number;
     regular?: boolean;
+    directory?: boolean;
     symlink?: boolean;
   } = {},
 ): fs.Stats {
   return {
     mode: input.mode ?? 0o100600,
     uid: input.uid ?? 1000,
+    dev: input.dev ?? 10,
+    ino: input.ino ?? 20,
     isFile: () => input.regular !== false,
+    isDirectory: () => input.directory === true,
     isSymbolicLink: () => input.symlink === true,
   } as fs.Stats;
 }
@@ -57,6 +64,9 @@ function healthyDevinProbe(overrides: Record<string, unknown> = {}) {
       { stdout: 'Authenticated as Person <person@example.test>', stderr: '' },
     ],
   ]);
+  const credentialPath = '/home/nanocrab/.config/devin/credentials.json';
+  const devinExecutable = '/opt/devin/bin/devin';
+  const nodeExecutable = '/usr/local/bin/node';
   return {
     execFile: vi.fn(
       async (
@@ -66,13 +76,31 @@ function healthyDevinProbe(overrides: Record<string, unknown> = {}) {
       ) => outputs.get(JSON.stringify(args)) ?? { stdout: '', stderr: '' },
     ),
     realpath: vi.fn(async (value: string) => value),
-    stat: vi.fn(async () => fakeStats()),
+    stat: vi.fn(async (value: string) => {
+      if (value === credentialPath) return fakeStats();
+      if (
+        value === '/opt/devin' ||
+        value === '/usr/local' ||
+        value === '/usr/bin'
+      ) {
+        return fakeStats({
+          mode: 0o40755,
+          regular: false,
+          directory: true,
+        });
+      }
+      return fakeStats({ mode: 0o100755 });
+    }),
     lstat: vi.fn(async () => fakeStats()),
     getuid: vi.fn(() => 1000),
     platform: 'linux' as const,
     commandAvailable: vi.fn(async () => true),
     env,
-    credentialPath: '/home/nanocrab/.config/devin/credentials.json',
+    credentialPath,
+    resolveExecutable: vi.fn(async () => devinExecutable),
+    executableSearchDirectories: ['/opt/devin/bin'],
+    nodeExecutable,
+    trustedRuntimeRootCandidates: ['/opt/devin', '/usr/local', '/usr/bin'],
     ...overrides,
   };
 }
@@ -368,6 +396,15 @@ describe('agent runtime registry', () => {
       );
     }
     expect(deps.commandAvailable).toHaveBeenCalledWith('/usr/bin/bwrap');
+    expect(deps.resolveExecutable).toHaveBeenCalledWith('devin', [
+      '/opt/devin/bin',
+    ]);
+    expect(getVerifiedDevinRuntimeContext()).toEqual({
+      executable: '/opt/devin/bin/devin',
+      nodeExecutable: '/usr/local/bin/node',
+      sandboxExecutable: '/usr/bin/bwrap',
+      trustedRuntimeReadRoots: ['/opt/devin', '/usr/local', '/usr/bin'],
+    });
   });
 
   it('fails closed before probing when DEVIN_CREDENTIAL_PATH is not configured', async () => {
@@ -450,6 +487,20 @@ describe('agent runtime registry', () => {
     }
   });
 
+  it('rejects a credential swapped between metadata checks', async () => {
+    const lstat = vi
+      .fn()
+      .mockResolvedValueOnce(fakeStats({ dev: 10, ino: 20 }))
+      .mockResolvedValueOnce(fakeStats({ dev: 10, ino: 21 }));
+    const deps = healthyDevinProbe({ lstat });
+
+    await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
+      status: 'error',
+    });
+    expect(lstat).toHaveBeenCalledTimes(2);
+    expect(deps.execFile).not.toHaveBeenCalled();
+  });
+
   it('rejects a CLI missing prompt model config print or sandbox capability', async () => {
     for (const capability of [
       '--prompt-file',
@@ -513,6 +564,24 @@ describe('agent runtime registry', () => {
       status: 'error',
     });
     expect(getVerifiedDevinAliases()).toEqual(new Set());
+    expect(getVerifiedDevinRuntimeContext()).toBeNull();
+  });
+
+  it('ignores model aliases advertised outside the --model option block', async () => {
+    const misplacedHelp = DEVIN_HELP.replace(
+      '--model <model> (examples: claude-sonnet-4, claude-opus-4.6)',
+      '--model <model> (examples: claude-sonnet-4)\n  --other <value> (examples: claude-opus-4.6)',
+    );
+    const deps = healthyDevinProbe({
+      execFile: vi.fn(async (_executable: string, args: readonly string[]) => ({
+        stdout: args[0] === '--version' ? 'devin 1.1.0' : misplacedHelp,
+        stderr: '',
+      })),
+    });
+
+    await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
+      status: 'error',
+    });
   });
 
   it('stores no auth stdout stderr name email user id team id or credential value', async () => {
