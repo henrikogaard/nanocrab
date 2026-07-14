@@ -34,8 +34,17 @@ const trustedSandboxFilesystem = {
     ({
       dev: 1,
       ino: value.length,
-      isDirectory: () => value.endsWith('/.git'),
-      isFile: () => false,
+      isDirectory: () =>
+        value.endsWith('/.git') ||
+        value === '/tmp' ||
+        [
+          '/opt/devin',
+          '/opt/devin-v2',
+          '/usr',
+          '/usr/local',
+          '/usr/bin',
+        ].includes(value),
+      isFile: () => value.endsWith('.txt') || value.endsWith('.json'),
       isSymbolicLink: () => false,
     }) as fs.Stats,
   realpath: async (value: string) => value,
@@ -166,15 +175,22 @@ describe('Devin child environment', () => {
 
 describe('Devin process sandbox', () => {
   const devinArgs = ['--prompt-file', '/jobs/job/.nanocrab/prompt.txt'];
+  const launchInput = {
+    sandboxExecutable: '/usr/bin/bwrap' as const,
+    workspace: '/jobs/job/repo',
+    executable: '/opt/devin/bin/devin',
+    args: devinArgs,
+    trustedRuntimeReadRoots: ['/opt/devin', '/usr/local', '/usr/bin'],
+    temporaryDirectory: '/tmp',
+    readOnlyPaths: [
+      '/jobs/job/.nanocrab/prompt.txt',
+      '/jobs/job/.nanocrab/devin-agent.json',
+    ],
+  };
 
-  it('overlays Git metadata read-only around the entire Linux Devin process', async () => {
+  it('starts Linux Devin from an explicit minimal mount set', async () => {
     const launch = await buildSandboxedDevinLaunch(
-      {
-        sandboxExecutable: '/usr/bin/bwrap',
-        workspace: '/jobs/job/repo',
-        executable: '/opt/devin/bin/devin',
-        args: devinArgs,
-      },
+      launchInput,
       trustedSandboxFilesystem,
     );
     expect(launch).toEqual({
@@ -183,14 +199,58 @@ describe('Devin process sandbox', () => {
         '--die-with-parent',
         '--new-session',
         '--unshare-pid',
-        '--bind',
+        '--tmpfs',
         '/',
-        '/',
+        '--dev',
+        '/dev',
         '--proc',
         '/proc',
+        '--dir',
+        '/opt',
+        '--dir',
+        '/usr',
+        '--dir',
+        '/jobs',
+        '--dir',
+        '/tmp',
+        '--dir',
+        '/opt/devin',
+        '--dir',
+        '/usr/local',
+        '--dir',
+        '/usr/bin',
+        '--dir',
+        '/jobs/job',
+        '--dir',
+        '/jobs/job/repo',
+        '--dir',
+        '/jobs/job/.nanocrab',
+        '--dir',
+        '/jobs/job/repo/.git',
+        '--ro-bind',
+        '/opt/devin',
+        '/opt/devin',
+        '--ro-bind',
+        '/usr/local',
+        '/usr/local',
+        '--ro-bind',
+        '/usr/bin',
+        '/usr/bin',
+        '--bind',
+        '/jobs/job/repo',
+        '/jobs/job/repo',
         '--ro-bind',
         '/jobs/job/repo/.git',
         '/jobs/job/repo/.git',
+        '--bind',
+        '/tmp',
+        '/tmp',
+        '--ro-bind',
+        '/jobs/job/.nanocrab/prompt.txt',
+        '/jobs/job/.nanocrab/prompt.txt',
+        '--ro-bind',
+        '/jobs/job/.nanocrab/devin-agent.json',
+        '/jobs/job/.nanocrab/devin-agent.json',
         '--chdir',
         '/jobs/job/repo',
         '--',
@@ -198,12 +258,43 @@ describe('Devin process sandbox', () => {
         ...devinArgs,
       ],
     });
-    expect(launch.args.indexOf('--bind')).toBeLessThan(
-      launch.args.indexOf('--proc'),
+    expect(
+      launch.args.some(
+        (value, index) =>
+          value === '--bind' &&
+          launch.args[index + 1] === '/' &&
+          launch.args[index + 2] === '/',
+      ),
+    ).toBe(false);
+    expect(launch.args).not.toContain('/home/service');
+    expect(launch.args).not.toContain(
+      '/home/service/.config/devin/credentials.json',
     );
-    expect(launch.args.indexOf('--proc')).toBeLessThan(
-      launch.args.indexOf('--ro-bind'),
-    );
+  });
+
+  it.each([
+    ['missing runtime roots', { trustedRuntimeReadRoots: [] }],
+    ['missing temp root', { temporaryDirectory: undefined }],
+    ['missing launch files', { readOnlyPaths: [] }],
+  ])('fails closed with %s', async (_label, change) => {
+    await expect(
+      buildSandboxedDevinLaunch(
+        { ...launchInput, ...change } as typeof launchInput,
+        trustedSandboxFilesystem,
+      ),
+    ).rejects.toThrow(/required|root/i);
+  });
+
+  it('rejects overlapping runtime roots before constructing mounts', async () => {
+    await expect(
+      buildSandboxedDevinLaunch(
+        {
+          ...launchInput,
+          trustedRuntimeReadRoots: ['/usr', '/usr/bin'],
+        },
+        trustedSandboxFilesystem,
+      ),
+    ).rejects.toThrow(/overlap/i);
   });
 
   it('rejects a pre-existing workspace alias to Git metadata before macOS launch', async () => {
@@ -993,6 +1084,12 @@ describe('Devin host process runner', () => {
         'true',
         '-p',
       ],
+      trustedRuntimeReadRoots: ['/opt/devin', '/usr/local', '/usr/bin'],
+      temporaryDirectory: '/tmp',
+      readOnlyPaths: [
+        '/jobs/job/.nanocrab/prompt.txt',
+        '/jobs/job/.nanocrab/devin-agent.json',
+      ],
     });
     expect(harness.spawn).toHaveBeenCalledWith(
       '/usr/bin/bwrap',
@@ -1000,14 +1097,58 @@ describe('Devin host process runner', () => {
         '--die-with-parent',
         '--new-session',
         '--unshare-pid',
-        '--bind',
+        '--tmpfs',
         '/',
-        '/',
+        '--dev',
+        '/dev',
         '--proc',
         '/proc',
+        '--dir',
+        '/opt',
+        '--dir',
+        '/usr',
+        '--dir',
+        '/jobs',
+        '--dir',
+        '/tmp',
+        '--dir',
+        '/opt/devin',
+        '--dir',
+        '/usr/local',
+        '--dir',
+        '/usr/bin',
+        '--dir',
+        '/jobs/job',
+        '--dir',
+        '/jobs/job/owner__repo',
+        '--dir',
+        '/jobs/job/.nanocrab',
+        '--dir',
+        '/jobs/job/owner__repo/.git',
+        '--ro-bind',
+        '/opt/devin',
+        '/opt/devin',
+        '--ro-bind',
+        '/usr/local',
+        '/usr/local',
+        '--ro-bind',
+        '/usr/bin',
+        '/usr/bin',
+        '--bind',
+        '/jobs/job/owner__repo',
+        '/jobs/job/owner__repo',
         '--ro-bind',
         '/jobs/job/owner__repo/.git',
         '/jobs/job/owner__repo/.git',
+        '--bind',
+        '/tmp',
+        '/tmp',
+        '--ro-bind',
+        '/jobs/job/.nanocrab/prompt.txt',
+        '/jobs/job/.nanocrab/prompt.txt',
+        '--ro-bind',
+        '/jobs/job/.nanocrab/devin-agent.json',
+        '/jobs/job/.nanocrab/devin-agent.json',
         '--chdir',
         '/jobs/job/owner__repo',
         '--',
@@ -1031,6 +1172,7 @@ describe('Devin host process runner', () => {
           HOME: '/home/service',
           XDG_CONFIG_HOME: '/home/service/.config',
           PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
+          TMPDIR: '/tmp',
           TERM: 'dumb',
           NO_COLOR: '1',
         },
@@ -1053,6 +1195,7 @@ describe('Devin host process runner', () => {
       .mockReturnValueOnce({
         ...canonicalRuntime,
         executable: '/opt/devin-v2/bin/devin',
+        trustedRuntimeReadRoots: ['/opt/devin-v2', '/usr/local', '/usr/bin'],
       });
     const firstRun = harness.runner.run(runnerInput());
     await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledTimes(1));

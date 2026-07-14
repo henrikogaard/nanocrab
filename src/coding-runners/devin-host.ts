@@ -101,6 +101,9 @@ export interface SandboxedDevinLaunchInput {
   workspace: string;
   executable: string;
   args: readonly string[];
+  trustedRuntimeReadRoots?: readonly string[];
+  temporaryDirectory?: string;
+  readOnlyPaths?: readonly string[];
 }
 
 interface DevinSandboxFilesystem {
@@ -117,6 +120,139 @@ const devinSandboxFilesystem: DevinSandboxFilesystem = {
   realpath: (value) => fs.promises.realpath(value),
   readdir: (value, options) => fs.promises.readdir(value, options),
 };
+
+function isSandboxPathAtOrBelow(candidate: string, parent: string): boolean {
+  const relative = path.relative(parent, candidate);
+  return (
+    relative === '' ||
+    (relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  return (
+    isSandboxPathAtOrBelow(left, right) || isSandboxPathAtOrBelow(right, left)
+  );
+}
+
+function assertCanonicalSandboxPath(value: string, label: string): void {
+  if (
+    !path.isAbsolute(value) ||
+    path.resolve(value) !== value ||
+    path.normalize(value) !== value ||
+    value === path.parse(value).root
+  ) {
+    throw new Error(`${label} must be an explicit canonical path`);
+  }
+}
+
+async function assertMinimalLinuxSandboxLayout(
+  input: SandboxedDevinLaunchInput,
+  gitDir: string,
+  deps: DevinSandboxFilesystem,
+): Promise<void> {
+  const trustedRuntimeReadRoots = input.trustedRuntimeReadRoots;
+  const temporaryDirectory = input.temporaryDirectory;
+  const readOnlyPaths = input.readOnlyPaths;
+  assertCanonicalSandboxPath(input.workspace, 'Workspace');
+  if (!temporaryDirectory) throw new Error('Sandbox temp is required');
+  assertCanonicalSandboxPath(temporaryDirectory, 'Sandbox temp');
+  if (
+    !Array.isArray(trustedRuntimeReadRoots) ||
+    trustedRuntimeReadRoots.length === 0
+  ) {
+    throw new Error('Trusted runtime read roots are required');
+  }
+  if (!Array.isArray(readOnlyPaths) || readOnlyPaths.length === 0) {
+    throw new Error('Read-only launch paths are required');
+  }
+
+  const seenRoots = new Set<string>();
+  for (const root of trustedRuntimeReadRoots) {
+    assertCanonicalSandboxPath(root, 'Trusted runtime read root');
+    if (seenRoots.has(root)) throw new Error('Duplicate runtime read root');
+    if ([...seenRoots].some((seenRoot) => pathsOverlap(root, seenRoot))) {
+      throw new Error('Overlapping runtime read roots');
+    }
+    seenRoots.add(root);
+    if (
+      pathsOverlap(root, input.workspace) ||
+      pathsOverlap(root, temporaryDirectory)
+    ) {
+      throw new Error('Runtime read root overlaps a writable root');
+    }
+    if ((await deps.realpath(root)) !== root) {
+      throw new Error('Trusted runtime read root is not canonical');
+    }
+    if (!(await deps.lstat(root)).isDirectory()) {
+      throw new Error('Trusted runtime read root is not a directory');
+    }
+  }
+
+  assertCanonicalSandboxPath(temporaryDirectory, 'Sandbox temp');
+  if ((await deps.realpath(temporaryDirectory)) !== temporaryDirectory) {
+    throw new Error('Sandbox temp is not canonical');
+  }
+  if (!(await deps.lstat(temporaryDirectory)).isDirectory()) {
+    throw new Error('Sandbox temp is not a directory');
+  }
+
+  const seenReadOnlyPaths = new Set<string>();
+  for (const readOnlyPath of readOnlyPaths) {
+    assertCanonicalSandboxPath(readOnlyPath, 'Read-only launch path');
+    if (seenReadOnlyPaths.has(readOnlyPath)) {
+      throw new Error('Duplicate read-only launch path');
+    }
+    seenReadOnlyPaths.add(readOnlyPath);
+    if (
+      pathsOverlap(readOnlyPath, input.workspace) ||
+      pathsOverlap(readOnlyPath, temporaryDirectory) ||
+      trustedRuntimeReadRoots.some((root) => pathsOverlap(readOnlyPath, root))
+    ) {
+      throw new Error('Read-only launch path overlaps a sandbox root');
+    }
+    if ((await deps.realpath(readOnlyPath)) !== readOnlyPath) {
+      throw new Error('Read-only launch path is not canonical');
+    }
+    const stats = await deps.lstat(readOnlyPath);
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+      throw new Error('Read-only launch path is not a regular file');
+    }
+  }
+
+  if (
+    (await deps.realpath(input.workspace)) !== input.workspace ||
+    (await deps.realpath(gitDir)) !== gitDir
+  ) {
+    throw new Error('Workspace sandbox roots are not canonical');
+  }
+  if (
+    !trustedRuntimeReadRoots.some((root) =>
+      isSandboxPathAtOrBelow(input.executable, root),
+    )
+  ) {
+    throw new Error('Devin executable is outside trusted runtime roots');
+  }
+}
+
+function sandboxDirectoryArgs(values: readonly string[]): string[] {
+  const directories = new Set<string>();
+  for (const value of values) {
+    let current = value;
+    while (current !== path.parse(current).root) {
+      directories.add(current);
+      current = path.dirname(current);
+    }
+  }
+  return [...directories]
+    .sort(
+      (left, right) =>
+        left.split(path.sep).length - right.split(path.sep).length,
+    )
+    .flatMap((directory) => ['--dir', directory]);
+}
 
 async function assertNoGitMetadataAliases(
   workspace: string,
@@ -181,20 +317,49 @@ export async function buildSandboxedDevinLaunch(
   const gitDir = path.join(input.workspace, '.git');
   await assertNoGitMetadataAliases(input.workspace, deps);
   if (input.sandboxExecutable === '/usr/bin/bwrap') {
+    await assertMinimalLinuxSandboxLayout(input, gitDir, deps);
+    const trustedRuntimeReadRoots = input.trustedRuntimeReadRoots ?? [];
+    const temporaryDirectory = input.temporaryDirectory ?? '';
+    const readOnlyPaths = input.readOnlyPaths ?? [];
+    const mountDirectories = [
+      ...trustedRuntimeReadRoots,
+      input.workspace,
+      temporaryDirectory,
+      gitDir,
+      ...readOnlyPaths.map((value) => path.dirname(value)),
+    ];
     return {
       executable: input.sandboxExecutable,
       args: [
         '--die-with-parent',
         '--new-session',
         '--unshare-pid',
-        '--bind',
+        '--tmpfs',
         '/',
-        '/',
+        '--dev',
+        '/dev',
         '--proc',
         '/proc',
+        ...sandboxDirectoryArgs(mountDirectories),
+        ...trustedRuntimeReadRoots.flatMap((runtimeRoot) => [
+          '--ro-bind',
+          runtimeRoot,
+          runtimeRoot,
+        ]),
+        '--bind',
+        input.workspace,
+        input.workspace,
         '--ro-bind',
         gitDir,
         gitDir,
+        '--bind',
+        temporaryDirectory,
+        temporaryDirectory,
+        ...readOnlyPaths.flatMap((readOnlyPath) => [
+          '--ro-bind',
+          readOnlyPath,
+          readOnlyPath,
+        ]),
         '--chdir',
         input.workspace,
         '--',
@@ -751,15 +916,23 @@ export function createDevinHostRunner(
       let home: string;
       let devinCredentialPath: string;
       let nanocrabConfigRoot: string;
+      let temporaryDirectory: string;
       try {
-        [workspace, promptFile, home, devinCredentialPath, nanocrabConfigRoot] =
-          await Promise.all([
-            deps.realpath(input.workspace),
-            deps.realpath(input.promptFile),
-            deps.realpath(deps.home),
-            deps.realpath(deps.devinCredentialPath),
-            deps.realpath(deps.nanocrabConfigRoot),
-          ]);
+        [
+          workspace,
+          promptFile,
+          home,
+          devinCredentialPath,
+          nanocrabConfigRoot,
+          temporaryDirectory,
+        ] = await Promise.all([
+          deps.realpath(input.workspace),
+          deps.realpath(input.promptFile),
+          deps.realpath(deps.home),
+          deps.realpath(deps.devinCredentialPath),
+          deps.realpath(deps.nanocrabConfigRoot),
+          deps.realpath(deps.environmentSource.TMPDIR ?? '/tmp'),
+        ]);
       } catch {
         return failedBeforeSpawn(
           input.attemptId,
@@ -854,6 +1027,9 @@ export function createDevinHostRunner(
           workspace,
           executable: runtime.executable,
           args: devinArgs,
+          trustedRuntimeReadRoots: runtime.trustedRuntimeReadRoots,
+          temporaryDirectory,
+          readOnlyPaths: [promptFile, agentConfigPath],
         });
       } catch {
         return failedBeforeSpawn(
@@ -865,9 +1041,13 @@ export function createDevinHostRunner(
 
       let child;
       try {
+        const childEnvironment = buildDevinChildEnvironment(
+          deps.environmentSource,
+        );
+        childEnvironment.TMPDIR = temporaryDirectory;
         child = deps.spawn(launch.executable, launch.args, {
           cwd: workspace,
-          env: buildDevinChildEnvironment(deps.environmentSource),
+          env: childEnvironment,
           shell: false,
           detached: true,
           stdio: ['ignore', 'pipe', 'pipe'],

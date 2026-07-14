@@ -158,12 +158,14 @@ and NanoCrab config remain denied. Model-side write permissions explicitly deny
 the workspace `.git` root and descendants as defense in depth. Before process
 spawn, NanoCrab recursively rejects every workspace symlink and any workspace
 file hard-linked to `.git` metadata. It then wraps the whole Devin process in
-OS isolation. On Linux, Bubblewrap creates a new PID namespace and session,
-binds the host root first, mounts a private `/proc`, then rebinds the workspace
-`.git` read-only. On macOS, `sandbox-exec` denies `.git` writes, file links, and
-symlink creation. Alias validation or sandbox preparation failure aborts the
-attempt before Devin is spawned, so `.git` is read-only to the whole Devin
-process during every stage.
+OS isolation. On Linux, Bubblewrap creates a new PID namespace and session
+from an empty root, exposes only verified runtime directories read-only, binds
+the workspace and sandbox temp explicitly, and rebinds the workspace `.git`
+read-only. Prompt and agent-configuration files are mounted read-only; the
+Devin credential itself is never mounted. On macOS, `sandbox-exec` denies `.git`
+writes, file links, and symlink creation. Alias validation or sandbox
+preparation failure aborts the attempt before Devin is spawned, so `.git` is
+read-only to the whole Devin process during every stage.
 
 The command broker is a separate, stricter boundary. It validates an exact
 command allowlist and routes every accepted inspection, Git, build, and test
