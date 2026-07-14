@@ -22,7 +22,7 @@
 - Required Devin arguments are `--prompt-file`, `--model`, `--permission-mode auto`, `--sandbox`, `--agent-config`, `--respect-workspace-trust true`, and `-p`, spawned with `shell: false`, `detached: true`, and piped stdout/stderr.
 - `CODING_JOB_RUNNER_TIMEOUT_MS` defaults to `CONTAINER_TIMEOUT`; non-finite or non-positive values fail configuration loading; termination grace is exactly `5_000` ms.
 - Built-in model mappings are exactly `claude/claude-sonnet-4-6 -> claude-sonnet-4` and `claude/claude-opus-4-6 -> claude-opus-4.6`; operator mappings extend but never override built-ins.
-- No live/paid Devin invocation, network access, real credential read, release, deployment, version bump, merge, issue closure, or move to `Done` is part of implementation.
+- No live/paid Devin invocation, network access, real credential read, release, deployment, version bump, merge, issue closure, or move to `Done` is part of implementation. The current slice also fails Devin coding readiness closed because no sandbox-safe authentication handoff exists; it must not mount a credential or host auth directory.
 - Each behavior slice follows red-green-refactor, commits only the explicit paths listed in that task, and receives a fresh task review before the next slice.
 
 ---
@@ -964,10 +964,14 @@ export function getVerifiedDevinAliases(): ReadonlySet<string>;
 
 - [ ] **Step 1: Replace the unsupported test with a failing readiness matrix**
 
-Use a fake `execFile` keyed by argument arrays. A healthy sequence must be exactly:
+Use a fake `execFile` keyed by argument arrays. A host metadata probe sequence
+must be exactly `--version` followed by `--help`; it must not invoke
+`auth status` outside the sandbox. Coding readiness converts any healthy host
+metadata result to the fixed unavailable handoff error until a safe auth bridge
+is approved:
 
 ```ts
-[['--version'], ['--help'], ['auth', 'status']];
+[['--version'], ['--help']];
 ```
 
 Assert every call receives the exact scrubbed environment and `timeout: 10_000`; no call includes `-p`, `--prompt-file`, or `--model`. The help fixture must advertise both built-in aliases and the required flags. The credential fake has matching `lstat` and `stat` results for a regular file with `uid === getuid()` and `(mode & 0o777) === 0o600`. The platform fake reports `/usr/bin/bwrap` on Linux or `/usr/bin/sandbox-exec` on macOS.
@@ -976,9 +980,9 @@ Add named tests for:
 
 ```ts
 it(
-  'reports healthy only after version capabilities credential sandbox and auth checks',
+  'reports host capabilities without probing Devin authentication',
 );
-it('reports unauthenticated and discards auth output containing personal data');
+it('does not read or retain Devin authentication output');
 it.each([0o644, 0o640, 0o660, 0o666, 0o400])(
   'rejects credential mode %o',
   (mode) => {},
@@ -991,7 +995,7 @@ it('accepts only configured aliases advertised by non-network help');
 it(
   'stores no auth stdout stderr name email user id team id or credential value',
 );
-it('marks Devin coding supported only when the host probe is healthy');
+it('rejects a healthy host probe when sandbox authentication handoff is unavailable');
 ```
 
 In `agent-profiles.test.ts`, assert mapped `devin/claude/claude-sonnet-4-6` passes and `devin/claude/opus`, `devin/codex/gpt-5.4`, and a provider-catalog-only model fail.
@@ -1004,7 +1008,7 @@ Expected: FAIL because installed Devin is still reported `unsupported` and profi
 
 - [ ] **Step 3: Implement readiness without reading credential contents**
 
-Canonicalize, `lstat`, and `stat` only the configured credential path. Reject when `lstat.isSymbolicLink()` is true or when the canonical path differs from the configured absolute path; require macOS/Linux, a regular file, owner UID match, and exact `0600`. Require `/usr/bin/bwrap` on Linux and `/usr/bin/sandbox-exec` on macOS. Use `--version`, then `--help`, then `auth status`; discard auth stdout/stderr before forming health. Parse only the model examples in help into a set and require every configured mapping value to be advertised. Persist generic details such as `Devin host runner is ready` or `Run devin auth login as the NanoCrab service user`; never interpolate subprocess output.
+Canonicalize, `lstat`, and `stat` only the configured credential path. Reject when `lstat.isSymbolicLink()` is true or when the canonical path differs from the configured absolute path; require macOS/Linux, a regular file, owner UID match, and exact `0600`. Require `/usr/bin/bwrap` on Linux and `/usr/bin/sandbox-exec` on macOS. Use only non-network `--version` and `--help` metadata probes; never invoke `auth status` outside the sandbox. Parse only the model examples in help into a set and require every configured mapping value to be advertised. Persist generic details such as `Devin host runner is ready` for installation metadata, but coding readiness remains unavailable with `Sandboxed Devin authentication handoff is unavailable; no credential or host auth directory is mounted` until a safe auth handoff exists. Never interpolate subprocess output.
 
 When `credentialPath` is `null`, return `error` with the fixed action `Configure an absolute DEVIN_CREDENTIAL_PATH for the NanoCrab service user`; do not scan the home directory.
 

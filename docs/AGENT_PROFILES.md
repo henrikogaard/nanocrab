@@ -123,11 +123,13 @@ requires explicit approval before the fallback runtime is used. If no healthy
 fallback is available and approved, dispatch fails with a clear runtime error.
 
 Devin is a host-native Runner CLI, not a provider and not a container runner.
-NanoCrab itself must run directly on macOS or Linux as the same dedicated OS
-user that owns the authenticated Devin installation. Run interactive
-`devin auth login` as that user, set the credential file to exact mode `0600`,
-and configure its exact canonical absolute path as `DEVIN_CREDENTIAL_PATH`.
-NanoCrab does not guess the path, manage the credential, or read its contents.
+Its coding integration is currently disabled because the empty-root sandbox has
+no safe authentication handoff. Devin readiness and dispatch report
+`Sandboxed Devin authentication handoff is unavailable; no credential or host
+auth directory is mounted` and stop before workspace mutation or process spawn.
+Do not authenticate or assign Devin implementation work until a reviewed
+handoff exists. NanoCrab never guesses, manages, reads, mounts, or forwards
+Devin credentials or a host auth directory.
 
 Runner CLI, provider, and model remain distinct throughout selection,
 attribution, and fallback. The mapped example
@@ -135,10 +137,9 @@ attribution, and fallback. The mapped example
 `claude-opus-4.6`. Operator extensions are configured through
 `DEVIN_CLI_MODEL_ALIASES_JSON`; built-in mappings cannot be overridden.
 
-Assign Devin profiles deliberately. Start with planning/review, then select one
-low-risk issue for implementation only after owner approval. The readiness
-probe must be `healthy` when the profile or Autofix project is assigned, and it
-is repeated after approval immediately before checkout creation or mutation.
+Assigning Devin profiles is not currently supported. The readiness probe is
+intentionally not `healthy`, and it is repeated after approval immediately
+before checkout creation or mutation as a second fail-closed guard.
 For coding jobs, NanoCrab does not silently fall back from an explicitly
 selected runtime. The Approvals UI requires the owner to select a healthy,
 complete replacement Runner CLI / Provider / Model triple before dispatch can

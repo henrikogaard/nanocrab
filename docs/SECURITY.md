@@ -119,20 +119,28 @@ incorrect deliveries before any external side effect occurs.
 
 ### 3e. Devin Host Runner Boundary
 
-Devin is an opt-in host-native Runner CLI, not a provider and not a container
-runner. NanoCrab and the authenticated Devin installation run directly on
-macOS/Linux as the same dedicated service user. The NanoCrab process and the
-narrow Git children it starts for approved clone/fetch/push and evidence
-collection are trusted host processes. The Devin model is not trusted with
-general host access.
+Devin is a host-native Runner CLI, not a provider or container runner. The
+integration is currently disabled and fails closed. The empty-root sandbox has
+no safe authentication handoff, so coding readiness reports
+`Sandboxed Devin authentication handoff is unavailable; no credential or host
+auth directory is mounted`, and dispatch stops before workspace preparation or
+process spawn. No Devin credential contents or host auth directory are read,
+mounted, copied, serialized, or forwarded.
 
-Before a Devin job can run, readiness verifies a configured canonical
-`DEVIN_CREDENTIAL_PATH`, exact service-UID ownership and POSIX mode `0600`,
-authentication status, required CLI capabilities, every configured model alias,
-the platform sandbox executable, and canonical Devin/Node/sandbox executables
-inside verified runtime roots. NanoCrab stats the credential but never reads its
-contents. It does not guess, create, copy, mount, or delete the credential file.
-Mounting Devin credentials into a NanoCrab container is unsupported.
+The following boundary describes the reviewed implementation that remains
+behind this guard; it is not an operator enablement procedure. The NanoCrab
+process and the narrow Git children it starts for approved clone/fetch/push and
+evidence collection are trusted host processes. The Devin model is not trusted
+with general host access.
+
+If a future sandbox-safe authentication handoff is approved, readiness must
+verify a configured canonical `DEVIN_CREDENTIAL_PATH`, exact service-UID
+ownership and POSIX mode `0600`, required CLI capabilities, every configured
+model alias, the platform sandbox executable, and canonical Devin/Node/sandbox
+executables inside verified runtime roots. NanoCrab may stat a credential but
+must never read its contents. It must not guess, create, copy, mount, or delete
+the credential file. Mounting Devin credentials into a NanoCrab container is
+unsupported.
 
 The host child environment is an allowlist: `HOME`, temporary-directory and
 locale variables, plus `XDG_CONFIG_HOME`/`XDG_DATA_HOME`; NanoCrab supplies a
@@ -190,9 +198,10 @@ signing configuration, remote URLs, and author identity therefore do not drive
 the trusted host publication path.
 
 Readiness is repeated after implementation or replacement-runtime approval and
-before checkout creation or mutation. Runtime fallback is never silent for an
-explicit coding runtime: the owner approves a healthy complete Runner CLI /
-Provider / Model triple in the Approvals UI. Process ownership is scoped to the
+before checkout creation or mutation; with the current guard this check always
+fails for Devin. Runtime fallback is never silent for an explicit coding
+runtime: the owner approves a healthy complete Runner CLI / Provider / Model
+triple in the Approvals UI. Process ownership is scoped to the
 exact job, attempt, and unguessable lease token. Cancellation and timeout send
 `SIGTERM` to that owned process group, retain the lease through a five-second
 grace period, then send `SIGKILL` only if the same lease still owns the attempt.

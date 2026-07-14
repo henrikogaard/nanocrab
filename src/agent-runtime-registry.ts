@@ -14,6 +14,8 @@ import type {
 
 const execFileAsync = promisify(execFile);
 const DEVIN_PROBE_TIMEOUT_MS = 10_000;
+export const DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL =
+  'Sandboxed Devin authentication handoff is unavailable; no credential or host auth directory is mounted';
 const DEVIN_REQUIRED_CAPABILITIES = [
   '--prompt-file',
   '--model',
@@ -30,6 +32,14 @@ export interface VerifiedDevinRuntimeContext {
   readonly sandboxExecutable: '/usr/bin/bwrap' | '/usr/bin/sandbox-exec';
   readonly trustedRuntimeReadRoots: readonly string[];
   readonly trustedRuntimeReadFiles?: readonly string[];
+}
+
+/**
+ * Devin remains intentionally disabled until authentication can be handed off
+ * into the empty-root sandbox without mounting or reading host credentials.
+ */
+export function isDevinSandboxAuthHandoffAvailable(): boolean {
+  return false;
 }
 
 interface VerifiedDevinState {
@@ -591,22 +601,6 @@ export async function probeDevinRuntime(
     if ([...configuredAliases].some((alias) => !advertised.has(alias))) {
       return fail(
         'Installed Devin CLI does not advertise every configured model alias',
-        version,
-      );
-    }
-
-    try {
-      await deps.execFile(
-        runtimeContext.executable,
-        ['auth', 'status'],
-        options,
-      );
-    } catch {
-      clearVerifiedDevinState();
-      return devinHealth(
-        'unauthenticated',
-        'Run devin auth login as the NanoCrab service user',
-        checkedAt,
         version,
       );
     }

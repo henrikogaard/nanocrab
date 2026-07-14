@@ -240,6 +240,7 @@ describe('coding jobs', () => {
     let attempt = 0;
     configureCodingJobExecutionForTests({
       createAttemptId: () => `attempt-${++attempt}`,
+      devinSandboxAuthHandoffAvailable: () => true,
       probeReadiness: async (cli) => ({
         cli,
         executable: cli,
@@ -1528,6 +1529,54 @@ describe('coding jobs', () => {
     );
     expect(getCodingJob(job.id)?.executionAttempts).toEqual([]);
     expect(prepareWorkspace).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before workspace mutation when Devin auth handoff is unavailable', async () => {
+    vi.useRealTimers();
+    const prepareWorkspace = vi.fn();
+    const devinRun = vi.fn();
+    configureCodingJobExecutionForTests({
+      devinSandboxAuthHandoffAvailable: () => false,
+      probeReadiness: async (cli) => ({
+        cli,
+        executable: cli,
+        status: 'healthy',
+        version: '1.0.0',
+        checkedAt: new Date(0).toISOString(),
+        detail: 'Devin host runner is ready',
+      }),
+      prepareWorkspace,
+      devinRunner: {
+        run: devinRun,
+        cancel: vi.fn(() => true),
+      },
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Do not run Devin without a sandbox authentication handoff.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => expect(getCodingJob(job.id)?.status).toBe('failed'));
+
+    expect(getCodingJob(job.id)?.failureReason).toContain(
+      'Sandboxed Devin authentication handoff is unavailable',
+    );
+    expect(getCodingJob(job.id)?.executionAttempts).toEqual([]);
+    expect(prepareWorkspace).not.toHaveBeenCalled();
+    expect(devinRun).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
   });
 

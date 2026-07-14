@@ -30,9 +30,11 @@ import type {
   AgentRuntimeSelection,
 } from './types.js';
 import {
+  DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
   getVerifiedDevinAliases,
   getVerifiedDevinRuntimeContext,
   inferLegacyRunnerCli,
+  isDevinSandboxAuthHandoffAvailable,
   resolveDevinCliModelAlias,
   validateCodingRuntimeSelection,
 } from './agent-runtime-registry.js';
@@ -97,6 +99,8 @@ export interface CodingJobExecutionDependencies {
     token: string;
   }): Promise<void>;
   devinRunner: CodingRunnerAdapter;
+  /** True only when the host sandbox has a credential handoff it can safely expose. */
+  devinSandboxAuthHandoffAvailable(): boolean;
   runContainer(
     job: CodingJob,
     repo: CodingRepo,
@@ -1500,6 +1504,7 @@ function productionCodingJobExecutionDependencies(): CodingJobExecutionDependenc
     deleteWorkspaceBranch: (input) =>
       deleteCodingWorkspaceBranch(input, { git: runGit }),
     devinRunner: productionDevinRunnerProxy,
+    devinSandboxAuthHandoffAvailable: isDevinSandboxAuthHandoffAvailable,
     runContainer: runCodingContainer,
     now: nowIso,
   };
@@ -1863,6 +1868,9 @@ async function runCodingJob(
   }
   authorizeCodingImplementation(job);
   const deps = codingJobExecutionDependencies();
+  if (job.runnerCli === 'devin' && !deps.devinSandboxAuthHandoffAvailable()) {
+    throw new Error(DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL);
+  }
   const readiness = await deps.probeReadiness(job.runnerCli);
   if (readiness.status !== 'healthy') throw new Error(readiness.detail);
 

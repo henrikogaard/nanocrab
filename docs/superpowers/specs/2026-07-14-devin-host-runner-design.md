@@ -511,7 +511,14 @@ the Devin installation and authenticated state. Running NanoCrab itself inside
 a container does not make the host runner available; mounting host credentials
 into that container is explicitly unsupported.
 
-A Devin runtime probe is healthy only when all of these checks pass:
+A Devin host runtime probe may inspect non-secret installation metadata, but the
+coding runner is not enabled in this slice. Because the empty-root sandbox has
+no safe authentication handoff, coding readiness is always unavailable with
+the exact detail `Sandboxed Devin authentication handoff is unavailable; no
+credential or host auth directory is mounted`.
+
+If a future handoff is approved, a Devin runtime probe must require all of
+these checks:
 
 1. the allowlisted executable exists and `--version` succeeds within the probe
    timeout;
@@ -521,13 +528,12 @@ A Devin runtime probe is healthy only when all of these checks pass:
 4. the credential is a regular file owned by the NanoCrab service user;
 5. its POSIX mode is exactly `0600`, with no group or world permissions;
 6. sandbox prerequisites for the current platform are available; and
-7. `devin auth status` exits successfully.
+7. authentication is verified inside the approved sandbox handoff.
 
-Authentication output may contain personal account details. Probes discard its
-stdout/stderr and persist only a generic status and detail. A failed auth check
-maps to `unauthenticated`; missing executable maps to `missing`; unsafe
-ownership/mode, missing sandbox support, unsupported CLI capabilities, or other
-failures map to `error` with a non-sensitive operator action.
+No authentication subprocess runs outside that handoff. Authentication output
+may contain personal account details and must never be persisted. Until the
+handoff exists, no credential or host auth directory is mounted, read, or
+forwarded; dispatch fails before workspace mutation or process spawn.
 
 Any credential with mode `0644`, including the pre-implementation state
 observed during design research, fails readiness. NanoCrab reports the exact
@@ -542,13 +548,12 @@ discarded.
 
 Runtime health is checked before dispatch and is repeated after implementation
 approval and complete runtime fallback resolution, immediately before any
-workspace mutation or process spawn. Any changed or unhealthy result fails
+workspace mutation or process spawn. Any changed or unavailable result fails
 closed; NanoCrab does not reuse a stale readiness result or retry with broader
-permissions. A profile assignment opts into the runner, and implementation
-still requires the existing owner approval. If
-Devin is unavailable, the control plane uses its existing explicit fallback
-decision flow; it never silently substitutes another CLI for write-capable
-work.
+permissions. Devin profile assignment and implementation dispatch remain
+disabled until the authentication handoff is approved. If Devin is unavailable,
+the control plane uses its existing explicit fallback decision flow; it never
+silently substitutes another CLI for write-capable work.
 
 ## Security and Privacy Boundaries
 
@@ -719,12 +724,13 @@ change, and verifies green before refactoring.
 
 ### Runtime readiness tests
 
-- version plus successful auth and sandbox checks produce `healthy`;
-- every version, capability, sandbox, and auth subprocess receives the exact
-  scrubbed allowlist and no ambient secret-bearing environment key;
+- installation metadata checks never enable coding readiness by themselves;
+- the current missing-auth-handoff capability produces `error` before dispatch;
+- any future authentication subprocess must run only inside the approved
+  sandbox handoff with the exact scrubbed allowlist and no ambient secret key;
 - a healthy result before approval followed by a failed post-approval probe
   blocks workspace mutation and spawn;
-- failed auth produces `unauthenticated`;
+- a future sandbox-contained auth failure produces `unauthenticated`;
 - unsafe owner or any group/world permission produces `error`;
 - exact mode `0600` passes;
 - required capability/sandbox failure produces `error`;

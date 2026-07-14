@@ -3,6 +3,7 @@ import type fs from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
   inferLegacyRunnerCli,
   getVerifiedDevinAliases,
   getVerifiedDevinRuntimeContext,
@@ -371,7 +372,7 @@ describe('agent runtime registry', () => {
     });
   });
 
-  it('reports healthy only after version capabilities credential sandbox and auth checks', async () => {
+  it('reports host capabilities without probing Devin authentication', async () => {
     const deps = healthyDevinProbe();
 
     await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
@@ -384,7 +385,6 @@ describe('agent runtime registry', () => {
     expect(deps.execFile.mock.calls.map((call) => call[1])).toEqual([
       ['--version'],
       ['--help'],
-      ['auth', 'status'],
     ]);
     for (const call of deps.execFile.mock.calls) {
       expect(call[2]).toEqual({
@@ -454,7 +454,7 @@ describe('agent runtime registry', () => {
     expect(deps.execFile).not.toHaveBeenCalled();
   });
 
-  it('reports unauthenticated and discards auth output containing personal data', async () => {
+  it('does not read or retain Devin authentication output', async () => {
     const deps = healthyDevinProbe({
       execFile: vi.fn(async (_executable: string, args: readonly string[]) => {
         if (args[0] === '--version')
@@ -473,8 +473,8 @@ describe('agent runtime registry', () => {
     const health = await probeDevinRuntime(deps);
 
     expect(health).toMatchObject({
-      status: 'unauthenticated',
-      detail: 'Run devin auth login as the NanoCrab service user',
+      status: 'healthy',
+      detail: 'Devin host runner is ready',
     });
     expect(JSON.stringify(health)).not.toMatch(
       /Jane|person@example|user-123|team-456/,
@@ -652,7 +652,29 @@ describe('agent runtime registry', () => {
           detail: 'Devin host runner is ready',
         }),
       }),
-    ).resolves.toMatchObject({ status: 'healthy' });
+    ).resolves.toMatchObject({
+      status: 'error',
+      detail: DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
+    });
+  });
+
+  it('rejects a healthy host probe when sandbox authentication handoff is unavailable', async () => {
+    await expect(
+      probeCodingRunnerReadiness('devin', {
+        probeHostRuntime: vi.fn().mockResolvedValue({
+          cli: 'devin',
+          executable: 'devin',
+          status: 'healthy',
+          version: '1.1.0',
+          checkedAt: new Date().toISOString(),
+          detail: 'Devin host runner is ready',
+        }),
+      }),
+    ).resolves.toMatchObject({
+      cli: 'devin',
+      status: 'error',
+      detail: DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
+    });
   });
 
   it('reports error status for non-ENOENT failures', async () => {
