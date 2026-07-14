@@ -448,6 +448,9 @@ read-only, and always uses `--unshare-net`, `--unshare-pid`, `--unshare-ipc`,
 Inspection and Git commands bind the workspace read-only; only approved
 implement/direct build and test commands bind it writable. The temporary
 directory remains writable for all commands, and host `/` is never bound.
+The broker canonicalizes the temp directory once and uses that resolved path
+for every command's sandbox mount/profile and child environment; it never
+reuses an unverified symlink spelling after validation.
 macOS allows reads only from the explicit runtime roots, workspace, and
 temporary directory, denies network, allows temp writes for every command, and
 allows workspace writes only for approved implement/direct build and test

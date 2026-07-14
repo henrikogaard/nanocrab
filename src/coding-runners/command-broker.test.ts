@@ -267,6 +267,38 @@ describe('command execution', () => {
     ]);
   });
 
+  it('rejects an inspection temp symlink that resolves into a protected root', async () => {
+    const deps = dependencies({
+      environmentSource: { HOME: home, TMPDIR: '/tmp-link' },
+      realpath: vi.fn(async (value: string) =>
+        value === '/tmp-link' ? protectedPaths[2] : value,
+      ),
+    });
+
+    await expect(runCommandBrokerCli(request(['pwd']), deps)).rejects.toThrow(
+      /protected|temp|root/i,
+    );
+    expect(deps.execute).not.toHaveBeenCalled();
+  });
+
+  it('uses canonical macOS temp paths for inspection profile and environment', async () => {
+    const deps = dependencies({
+      platform: 'darwin',
+      sandboxExecutable: '/usr/bin/sandbox-exec',
+      environmentSource: { HOME: home, TMPDIR: '/private/tmp-link' },
+      realpath: vi.fn(async (value: string) =>
+        value === '/private/tmp-link' ? '/private/tmp' : value,
+      ),
+    });
+
+    await runCommandBrokerCli(request(['pwd'], 'review'), deps);
+
+    const [, args, options] = vi.mocked(deps.execute).mock.calls[0]!;
+    expect(args[1]).toContain('(subpath "/private/tmp")');
+    expect(args[1]).not.toContain('/private/tmp-link');
+    expect(options.env.TMPDIR).toBe('/private/tmp');
+  });
+
   it('requires an approved manifest script before command spawn', async () => {
     const deps = dependencies({
       readFile: vi.fn(async () => JSON.stringify({ scripts: {} })),

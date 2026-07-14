@@ -886,6 +886,9 @@ workspace. Assert broker-injected Git reads use `--no-optional-locks` and
 `GIT_OPTIONAL_LOCKS=0` without accepting user-supplied global options. Assert
 the launcher embeds a canonical Node executable inside an approved runtime
 root and never uses `/usr/bin/env`.
+For every command kind, assert the resolved canonical temp path is reused in
+the sandbox mount/profile and child environment; the original symlink spelling
+must not survive validation.
 
 - [ ] **Step 3: Run and verify red**
 

@@ -787,19 +787,16 @@ export async function runCommandBrokerCli(
     canonicalRequest,
     deps,
   );
-  let executionDependencies: Pick<
+  const executionDependencies: Pick<
     CommandBrokerDependencies,
     'platform' | 'sandboxExecutable' | 'environmentSource'
-  > = deps;
-  if (isBuildCommand(canonicalRequest)) {
-    executionDependencies = {
-      ...deps,
-      environmentSource: {
-        ...deps.environmentSource,
-        TMPDIR: canonicalTemp,
-      },
-    };
-  }
+  > = {
+    ...deps,
+    environmentSource: {
+      ...deps.environmentSource,
+      TMPDIR: canonicalTemp,
+    },
+  };
   const command = buildSandboxedCommand(
     canonicalRequest,
     executionDependencies,
