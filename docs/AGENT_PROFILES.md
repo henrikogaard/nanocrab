@@ -3,11 +3,13 @@
 Agent Profiles are named operating identities for NanoCrab agents. A profile is
 durable policy and attribution layered over the existing NanoCrab execution
 paths: registered groups, web threads, scheduled tasks, coding jobs, report and
-research jobs, approvals, and short-lived isolated containers.
+research jobs, approvals, short-lived isolated containers, and the opt-in
+host-native Devin coding runner.
 
-An Agent Profile is not a long-running container or a permanently online worker.
+An Agent Profile is not a long-running process or a permanently online worker.
 Profiles shape how normal NanoCrab runs are started, attributed, and bounded.
-Containers still start only when an existing run path needs one.
+Container-backed paths start containers only when needed; a Devin coding profile
+starts an attempt-owned host process only through the approved coding-job path.
 
 ## Profile Fields
 

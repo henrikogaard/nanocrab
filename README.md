@@ -145,6 +145,15 @@ mutation. Commit, push, and GitHub PR creation require an approved
 those repo mutations. Job metadata is stored in `store/coding-jobs.json`, and
 registered repos live in `store/coding-repos.json`.
 
+Before evidence or publication, the trusted host recursively rejects unsafe
+`.git` metadata (symlinks, special entries, `commondir`, or object alternates).
+PR publication inventories and stages files without repository filters, creates
+the commit through Git plumbing as `NanoCrab Bot <nanocrab@localhost>`, and
+pushes only to the registered repository's exact GitHub HTTPS URL. Cancellation
+invalidates publication ownership and blocks later PR/state mutation, but it
+cannot terminate a Git push child that already started; that remote branch may
+still update and must be reviewed before retry.
+
 Coding jobs support `claude`, `codex`, `opencode`, `devin`, `pi`, and `mistral`
 runner CLIs with compatible providers/models, plus code-capable Ollama,
 OpenRouter, and custom OpenAI-compatible models through the appropriate CLI.
@@ -576,9 +585,17 @@ Polling loop (src/index.ts)
 Container Runner → Docker container (Claude, Codex/GPT, or local model)
     ↓                    ↓
 Response → Router    Admin Dashboard (Express + plugins)
+
+Coding Jobs → isolated checkout → container-backed CLI or opt-in host-native Devin CLI
 ```
 
-Single Node.js process. Channels self-register at startup. Agents execute in isolated Docker containers. Admin dashboard runs in the same process on a separate port. Plugins are self-contained modules that register routes, sidebar items, and startup hooks.
+Single Node.js process. Channels self-register at startup. Normal agent runs and
+container-backed coding CLIs execute in isolated Docker containers. The opt-in
+Devin coding CLI is the explicit exception: an attempt-owned host process with
+verified readiness, constrained model tools, and OS-sandboxed commands against
+one isolated checkout. Admin dashboard runs in the same process on a separate
+port. Plugins are self-contained modules that register routes, sidebar items,
+and startup hooks.
 
 ### Key Files
 
@@ -593,7 +610,7 @@ Single Node.js process. Channels self-register at startup. Agents execute in iso
 | `src/channels/`            | Channel adapters (WhatsApp, Telegram, Signal)                          |
 | `src/container-runner.ts`  | Spawns agent containers with mounts                                    |
 | `src/credential-proxy.ts`  | Provider credential injection (secrets never enter containers)         |
-| `src/coding-jobs.ts`       | Isolated coding-container orchestration and GitHub PR jobs             |
+| `src/coding-jobs.ts`       | Isolated coding-workspace orchestration across container/host runners  |
 | `src/memory-store.ts`      | Structured long-term memory proposals, approval, and MEMORY.md render  |
 | `src/journal-store.ts`     | Notable-event journal storage and search                               |
 | `src/skill-factory.ts`     | Provider-neutral skill draft, validation, approval, and installation   |

@@ -14,14 +14,18 @@
 
 ### 1. Container Isolation (Primary Boundary)
 
-Agents execute in containers (lightweight Linux VMs), providing:
+Normal agents and container-backed coding CLIs execute in containers
+(lightweight Linux VMs), providing:
 
 - **Process isolation** - Container processes cannot affect the host
 - **Filesystem isolation** - Only explicitly mounted directories are visible
 - **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
 - **Ephemeral containers** - Fresh environment per invocation (`--rm`)
 
-This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
+This is the primary security boundary for those paths. Rather than relying on
+application-level permission checks, the attack surface is limited by what's
+mounted. The opt-in host-native Devin coding exception has its separate
+fail-closed boundary in section 3e.
 
 ### 2. Mount Security
 
@@ -139,20 +143,40 @@ clone/fetch/push uses a separate temporary Git-only `GIT_ASKPASS` helper that
 answers only the approved GitHub HTTPS username/password prompts. Git runs with
 system/global config disabled, hooks and credential helpers disabled, HTTPS-only
 protocol policy, redirects/proxies disabled, fixed argument shapes, and token
-redaction from returned output and errors.
+redaction from returned output and errors. Publication and branch deletion use
+the exact trusted `https://github.com/<owner>/<repo>.git` URL derived from the
+registered repository, rather than a mutable remote alias. Host Git always uses
+the deterministic `NanoCrab Bot <nanocrab@localhost>` author and committer
+identity with UTC time-zone context; repository config cannot replace it.
 
 The Devin agent config exposes constrained model tools: repository read tools,
 write tools only for implement/direct stages, and one immutable command-broker
 launcher. The agent config (`0600`) and launcher (`0555`) are created or opened
 through `O_NOFOLLOW` file handles and verified by owner, mode, identity, size,
 and content; protected job metadata, the credential, service-user SSH/GPG data,
-and NanoCrab config remain denied. The broker validates an exact command
-allowlist and routes every accepted inspection, Git, build, and test command
-through OS isolation. Linux uses Bubblewrap with an empty root, no network, and
-PID/IPC/session/private-proc isolation; macOS uses an explicit `sandbox-exec`
-profile that denies network. Only verified runtime roots, temp, and the selected
-workspace are visible. Inspection and Git receive the workspace read-only;
-implement/direct build and test commands may write only there.
+and NanoCrab config remain denied. Model-side write permissions explicitly deny
+the workspace `.git` root and descendants, so repository metadata is read-only
+to the model even during implement/direct stages. The broker validates an exact
+command allowlist and routes every accepted inspection, Git, build, and test
+command through OS isolation. Linux uses Bubblewrap with an empty root, no
+network, and PID/IPC/session/private-proc isolation; macOS uses an explicit
+`sandbox-exec` profile that denies network. Only verified runtime roots, sandbox
+temp, and the selected workspace are visible. Inspection and Git receive the
+workspace read-only. Every command may write to the sandbox temp directory;
+only implement/direct build and test commands may additionally write to the
+workspace.
+
+Before host evidence collection, publication, or remote branch deletion,
+NanoCrab recursively revalidates `.git` as canonical standalone metadata inside
+the workspace. The validator rejects a symlinked/non-directory `.git`, any
+metadata symlink or special filesystem entry, linked-worktree `commondir`, and
+object alternates. Host evidence and publication enumerate tracked/untracked
+paths in NUL-delimited raw form. Publication hashes files and symlink targets
+with `hash-object --no-filters`, rebuilds the index with `update-index`, then
+uses plumbing-only `write-tree`, `commit-tree --no-gpg-sign`, and `update-ref`
+before the exact approved push. Model-authored attributes, filters, hooks,
+signing configuration, remote URLs, and author identity therefore do not drive
+the trusted host publication path.
 
 Readiness is repeated after implementation or replacement-runtime approval and
 before checkout creation or mutation. Runtime fallback is never silent for an
@@ -161,6 +185,11 @@ Provider / Model triple in the Approvals UI. Process ownership is scoped to the
 exact job, attempt, and unguessable lease token. Cancellation and timeout send
 `SIGTERM` to that owned process group, retain the lease through a five-second
 grace period, then send `SIGKILL` only if the same lease still owns the attempt.
+This process lease covers the Devin/container runner, not a later host Git push
+child. If cancellation arrives after an approved push has started, NanoCrab
+cannot terminate that in-flight Git child; the remote branch may still update.
+The lost publication lease is rechecked after the push and prevents subsequent
+PR creation or job-state mutation by that stale publication.
 
 Devin stdout and stderr pass through independent stateful streaming redactors
 before persistence or display. The redactors carry partial tokens across chunk
@@ -176,8 +205,11 @@ boundary; repository tests do not invoke a live or paid Devin session. The
 Devin Research Preview sandbox is defense in depth, not the sole boundary. A
 residual local TOCTOU risk remains because workspace parent components are
 checked with path-based `lstat`/`realpath` rather than a directory-handle-relative
-`openat` walk. A malicious same-UID host process could race those components;
-use a dedicated service account and do not run untrusted same-UID host software.
+`openat` walk. Git metadata is also recursively checked before trusted host
+operations, but those path-based checks do not pin every component for the
+duration of the later Git child. A malicious same-UID host process could race
+workspace paths or metadata after validation; use a dedicated service account
+and do not run untrusted same-UID host software.
 
 Rollback does not destroy operator state: disable or reassign Devin profiles,
 cancel exact active attempts, preserve each checkout and its evidence, and

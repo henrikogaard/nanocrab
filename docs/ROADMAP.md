@@ -5,7 +5,7 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 ## Current Implementation Status
 
 - Playwright is available in the agent image and uses system Chromium.
-- GitHub coding jobs are launched through short-lived dedicated coding containers with only the job workspace mounted. The Agents dashboard can register repos, pick issues, launch jobs, show output, and link PRs.
+- GitHub coding jobs use isolated per-job workspaces. Container-backed CLIs remain the default; the opt-in Devin CLI is the host-native exception and runs only after host readiness verification with constrained model tools and OS-sandboxed commands. The Agents dashboard can register repos, pick issues, launch jobs, show output, and link PRs.
 - Memory v1 foundation exists: structured memory proposals, dashboard approval/rejection, and generated `groups/global/MEMORY.md`.
 - Journal v1 foundation exists: notable-event recording, scoped event search, dashboard summary listing, and deterministic daily/weekly summary generation from stored message history.
 - Skill Factory v1 foundation exists: `SKILL.md` draft validation, draft storage, dashboard review, owner/admin approval, and installation into `container/skills`.
@@ -181,7 +181,7 @@ Goal: work with GitHub repos and produce PRs while the owner is on the go.
   - DONE: repo registration/allowlist for coding jobs
   - DONE: repo-specific coding rules/preferences are stored separately from secrets and injected into coding prompts.
   - DONE: issue listing, project-board browsing, and issue picking through dashboard/API
-  - DONE: branch creation inside dedicated coding containers
+  - DONE: branch creation inside isolated coding workspaces through the selected container-backed CLI or opt-in host-native Devin CLI.
   - commit signing policy
   - DONE: PR creation when `createPr` is enabled
   - DONE: PR status and CI tracking
