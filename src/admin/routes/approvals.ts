@@ -4,9 +4,12 @@ import {
   ApprovalKind,
   ApprovalStatus,
   createApproval,
+  getApproval,
   listApprovals,
   reviewApproval,
 } from '../../approvals.js';
+import { approveCodingJobRuntimeFallback } from '../../coding-jobs.js';
+import type { AgentRuntimeSelection } from '../../types.js';
 import { executeWebhookDeliveryApproval } from '../../webhook-delivery.js';
 import { requireRole } from '../middleware.js';
 import { auditLog } from '../security.js';
@@ -15,6 +18,28 @@ const router = Router();
 
 function queryString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function completeRuntime(value: unknown): AgentRuntimeSelection {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Coding runtime fallback requires a complete runtime');
+  }
+  const runtime = value as Record<string, unknown>;
+  if (
+    typeof runtime.cli !== 'string' ||
+    !runtime.cli.trim() ||
+    typeof runtime.provider !== 'string' ||
+    !runtime.provider.trim() ||
+    typeof runtime.model !== 'string' ||
+    !runtime.model.trim()
+  ) {
+    throw new Error('Coding runtime fallback requires a complete runtime');
+  }
+  return {
+    cli: runtime.cli as AgentRuntimeSelection['cli'],
+    provider: runtime.provider as AgentRuntimeSelection['provider'],
+    model: runtime.model,
+  };
 }
 
 router.get('/', (req: Request, res: Response) => {
@@ -78,6 +103,26 @@ router.post(
   requireRole('admin'),
   async (req: Request, res: Response) => {
     try {
+      const existing = getApproval(req.params.id as string);
+      if (
+        existing?.kind === 'provider-fallback' &&
+        existing.targetType === 'coding-job' &&
+        existing.targetId
+      ) {
+        const runtime = completeRuntime(req.body.runtime);
+        const job = approveCodingJobRuntimeFallback(
+          existing.targetId,
+          runtime,
+          req.user?.username || 'dashboard',
+        );
+        const approval = getApproval(existing.id);
+        if (!approval || approval.status !== 'approved') {
+          throw new Error('Coding runtime fallback approval was not recorded');
+        }
+        auditLog(req, 'approval_approved', `${approval.kind}/${approval.id}`);
+        res.json({ ok: true, approval, job });
+        return;
+      }
       const approval = reviewApproval(
         req.params.id as string,
         'approved',

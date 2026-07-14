@@ -384,13 +384,13 @@ export async function collectCodingWorkspaceEvidence(
   const [diffStat, changedFiles, untrackedFiles] = await Promise.all([
     runLocalGit(
       deps.git,
-      ['diff', '--stat', 'HEAD'],
+      ['diff', '--no-ext-diff', '--no-textconv', '--stat', 'HEAD'],
       workspace,
       'Git diff evidence collection',
     ),
     runLocalGit(
       deps.git,
-      ['diff', '--name-only', 'HEAD'],
+      ['diff', '--no-ext-diff', '--no-textconv', '--name-only', 'HEAD'],
       workspace,
       'Git changed-file evidence collection',
     ),

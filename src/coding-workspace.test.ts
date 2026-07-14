@@ -109,10 +109,12 @@ function localCheckoutGit() {
 describe('coding workspace', () => {
   it('collects fresh credential-free host Git evidence after a Devin run', async () => {
     const git = vi.fn<GitTransport>(async (args) => {
-      if (args.join(' ') === 'diff --stat HEAD') {
+      if (args.join(' ') === 'diff --no-ext-diff --no-textconv --stat HEAD') {
         return gitResult('src/a.ts | 2 ++\n');
       }
-      if (args.join(' ') === 'diff --name-only HEAD') {
+      if (
+        args.join(' ') === 'diff --no-ext-diff --no-textconv --name-only HEAD'
+      ) {
         return gitResult('src/a.ts\n');
       }
       if (args.join(' ') === 'ls-files --others --exclude-standard') {
@@ -133,6 +135,11 @@ describe('coding workspace', () => {
           'No trusted test evidence was reported by the Devin host runner.',
       },
     });
+    expect(git.mock.calls.map(([args]) => args)).toEqual([
+      ['diff', '--no-ext-diff', '--no-textconv', '--stat', 'HEAD'],
+      ['diff', '--no-ext-diff', '--no-textconv', '--name-only', 'HEAD'],
+      ['ls-files', '--others', '--exclude-standard'],
+    ]);
     for (const [, options] of git.mock.calls) {
       expect(options.cwd).toBe(workspace);
       expect(options.env).toMatchObject({
