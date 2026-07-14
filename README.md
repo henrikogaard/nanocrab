@@ -147,8 +147,10 @@ the approved workspace. Before launch, NanoCrab fails closed on workspace
 symlinks or Git-metadata hardlink aliases and wraps the whole Devin process so
 `.git` is read-only. Linux uses a new PID namespace from an empty root, mounts
 only verified runtime paths plus the workspace, sandbox temp, prompt,
-configuration, and broker files, then rebinds `.git` read-only; macOS denies
-`.git` writes, file links, and symlink creation. Both paths emit diff,
+configuration, and broker files, then rebinds `.git` read-only. macOS host
+launch remains disabled while the authentication handoff and an explicit
+deny-default `sandbox-exec` profile are pending review. The supported Linux
+path emits diff,
 changed-file, and test summaries for dashboard review.
 Implementation requires an approved `coding-implement` record tied to the job
 id before workspace mutation. Commit, push, and GitHub PR creation require an

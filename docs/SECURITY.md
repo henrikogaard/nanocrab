@@ -170,10 +170,14 @@ OS isolation. On Linux, Bubblewrap creates a new PID namespace and session
 from an empty root, exposes only verified runtime directories read-only, binds
 the workspace and sandbox temp explicitly, and rebinds the workspace `.git`
 read-only. Prompt and agent-configuration files are mounted read-only; the
-Devin credential itself is never mounted. On macOS, `sandbox-exec` denies `.git`
-writes, file links, and symlink creation. Alias validation or sandbox
-preparation failure aborts the attempt before Devin is spawned, so `.git` is
-read-only to the whole Devin process during every stage.
+Devin credential itself is never mounted. Devin host launch is currently
+disabled on macOS while authentication handoff remains unavailable; NanoCrab
+does not generate or use a permissive `sandbox-exec` profile. A future handoff
+must first add and review an explicit deny-default profile for runtime roots,
+workspace, and sandbox temp before macOS launch can be enabled. Alias
+validation or sandbox preparation failure aborts the attempt before Devin is
+spawned, so `.git` is read-only to the whole Devin process on supported Linux
+launches.
 
 The command broker is a separate, stricter boundary. It validates an exact
 command allowlist and routes every accepted inspection, Git, build, and test
