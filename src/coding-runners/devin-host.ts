@@ -17,6 +17,9 @@ import type {
 
 export type DevinStageKind = PipelineStageKind | 'direct';
 
+export const DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL =
+  'Sandboxed Devin authentication handoff is unavailable; no credential or host auth directory is mounted';
+
 export interface DevinAgentConfig {
   system_instructions: string;
   allowed_tools: string[];
@@ -377,28 +380,9 @@ export async function buildSandboxedDevinLaunch(
     };
   }
   if (input.sandboxExecutable === '/usr/bin/sandbox-exec') {
-    const gitFilters = `(literal ${JSON.stringify(gitDir)}) (subpath ${JSON.stringify(gitDir)})`;
-    const workspaceWriteDeny =
-      input.stageKind === 'planning' || input.stageKind === 'review'
-        ? `(deny file-write* (subpath ${JSON.stringify(input.workspace)}))`
-        : null;
-    return {
-      executable: input.sandboxExecutable,
-      args: [
-        '-p',
-        [
-          '(version 1)',
-          '(allow default)',
-          '(deny file-link)',
-          '(deny file-write-create (vnode-type SYMLINK))',
-          `(deny file-write* ${gitFilters})`,
-          ...(workspaceWriteDeny ? [workspaceWriteDeny] : []),
-        ].join(' '),
-        '--',
-        input.executable,
-        ...input.args,
-      ],
-    };
+    throw new Error(
+      'Devin macOS sandbox isolation is unavailable while authentication handoff is disabled',
+    );
   }
   throw new Error('Devin process sandbox isolation is unavailable');
 }
@@ -818,6 +802,7 @@ export interface DevinHostRunnerDependencies {
   timers: CodingTimerTransport;
   environmentSource: NodeJS.ProcessEnv;
   knownSecrets: readonly string[];
+  authHandoffAvailable: () => boolean;
   ensureAgentConfig(path: string, data: string): Promise<void>;
   realpath(path: string): Promise<string>;
   getVerifiedRuntimeContext(): VerifiedDevinRuntimeContext | null;
@@ -865,6 +850,7 @@ export function createProductionDevinHostRunner(
     ensureCommandBrokerLauncher: (input) =>
       ensureDevinCommandBrokerLauncher(input, filesystem),
     buildSandboxedLaunch: (input) => buildSandboxedDevinLaunch(input),
+    authHandoffAvailable: () => false,
   });
 }
 
@@ -916,6 +902,12 @@ export function createDevinHostRunner(
 
   return {
     async run(input: CodingRunnerInput): Promise<CodingRunnerResult> {
+      if (!deps.authHandoffAvailable()) {
+        return failedBeforeSpawn(
+          input.attemptId,
+          DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
+        );
+      }
       const runtime = deps.getVerifiedRuntimeContext();
       if (!runtime) {
         return failedBeforeSpawn(

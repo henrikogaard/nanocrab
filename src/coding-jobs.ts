@@ -1423,6 +1423,7 @@ function getProductionDevinRunner(): CodingRunnerAdapter {
     },
     environmentSource: process.env,
     knownSecrets: configuredKnownSecrets(),
+    authHandoffAvailable: isDevinSandboxAuthHandoffAvailable,
     realpath: (value) => fs.promises.realpath(value),
     getVerifiedRuntimeContext: getVerifiedDevinRuntimeContext,
     commandBrokerModulePath: path.join(

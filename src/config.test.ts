@@ -34,8 +34,17 @@ describe('Devin runner configuration', () => {
     ['{"unknown/model":"alias"}', 'unknown provider'],
     ['{"claude/claude-sonnet-4-6":"replacement"}', 'cannot override built-in'],
     ['{"claude/model":""}', 'non-empty string'],
+    ['{"claude/model":"one","claude/model":"two"}', 'duplicate key'],
   ])('rejects invalid DEVIN_CLI_MODEL_ALIASES_JSON %s', (raw, message) => {
     expect(() => parseDevinCliModelAliases(raw)).toThrow(message);
+  });
+
+  it('rejects duplicate aliases even when the duplicate values match', () => {
+    expect(() =>
+      parseDevinCliModelAliases(
+        '{"claude/model":"same","claude/model":"same"}',
+      ),
+    ).toThrow('duplicate key');
   });
 
   it('returns an immutable alias map', () => {

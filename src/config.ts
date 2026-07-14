@@ -25,6 +25,93 @@ export const DEVIN_BUILTIN_MODEL_ALIASES = Object.freeze({
 
 const DEVIN_ALIAS_KEY = /^([a-z0-9-]+)\/(\S+)$/;
 
+function rejectDuplicateJsonObjectKeys(raw: string): void {
+  let index = 0;
+
+  const skipWhitespace = (): void => {
+    while (/\s/.test(raw[index] ?? '')) index += 1;
+  };
+
+  const scanString = (): string => {
+    const start = index;
+    index += 1;
+    let escaped = false;
+    while (index < raw.length) {
+      const character = raw[index++]!;
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '"') {
+        return JSON.parse(raw.slice(start, index)) as string;
+      }
+    }
+    throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be valid JSON');
+  };
+
+  const scanValue = (): void => {
+    skipWhitespace();
+    const character = raw[index];
+    if (character === '"') {
+      scanString();
+      return;
+    }
+    if (character === '{') {
+      index += 1;
+      skipWhitespace();
+      const keys = new Set<string>();
+      if (raw[index] === '}') {
+        index += 1;
+        return;
+      }
+      while (index < raw.length) {
+        skipWhitespace();
+        if (raw[index] !== '"') {
+          throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be valid JSON');
+        }
+        const key = scanString();
+        if (keys.has(key)) {
+          throw new Error(
+            `DEVIN_CLI_MODEL_ALIASES_JSON contains duplicate key ${key}`,
+          );
+        }
+        keys.add(key);
+        skipWhitespace();
+        index += 1; // ':'; JSON.parse already validated the token.
+        scanValue();
+        skipWhitespace();
+        if (raw[index] === '}') {
+          index += 1;
+          return;
+        }
+        index += 1; // ','; JSON.parse already validated the token.
+      }
+      throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be valid JSON');
+    }
+    if (character === '[') {
+      index += 1;
+      skipWhitespace();
+      if (raw[index] === ']') {
+        index += 1;
+        return;
+      }
+      while (index < raw.length) {
+        scanValue();
+        skipWhitespace();
+        if (raw[index] === ']') {
+          index += 1;
+          return;
+        }
+        index += 1; // ','; JSON.parse already validated the token.
+      }
+      throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be valid JSON');
+    }
+    while (index < raw.length && !/[,}\]]/.test(raw[index]!)) index += 1;
+  };
+
+  scanValue();
+}
+
 export function parseDevinCliModelAliases(
   raw: string | undefined,
 ): Readonly<Record<string, string>> {
@@ -38,6 +125,8 @@ export function parseDevinCliModelAliases(
   } catch {
     throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be valid JSON');
   }
+
+  rejectDuplicateJsonObjectKeys(raw);
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be a JSON object');

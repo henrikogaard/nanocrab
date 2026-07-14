@@ -332,17 +332,16 @@ describe('Devin process sandbox', () => {
     );
   });
 
-  it('denies workspace writes for planning on macOS', async () => {
-    const launch = await buildSandboxedDevinLaunch(
-      {
-        ...launchInput,
-        sandboxExecutable: '/usr/bin/sandbox-exec',
-      },
-      trustedSandboxFilesystem,
-    );
-    expect(launch.args[1]).toContain(
-      '(deny file-write* (subpath "/jobs/job/repo"))',
-    );
+  it('fails closed for macOS while authentication handoff is disabled', async () => {
+    await expect(
+      buildSandboxedDevinLaunch(
+        {
+          ...launchInput,
+          sandboxExecutable: '/usr/bin/sandbox-exec',
+        },
+        trustedSandboxFilesystem,
+      ),
+    ).rejects.toThrow('authentication handoff is disabled');
   });
 
   it('rejects a pre-existing workspace alias to Git metadata before macOS launch', async () => {
@@ -396,73 +395,14 @@ describe('Devin process sandbox', () => {
     },
   );
 
-  it.runIf(process.platform === 'darwin')(
-    'allows repository edits while denying direct Git metadata writes',
-    async () => {
-      const root = fs.mkdtempSync(
-        path.join(os.tmpdir(), 'nanocrab-devin-write-'),
-      );
-      const requestedWorkspace = path.join(root, 'repo');
-      fs.mkdirSync(path.join(requestedWorkspace, '.git'), { recursive: true });
-      const workspace = fs.realpathSync(requestedWorkspace);
-      try {
-        const launch = await buildSandboxedDevinLaunch({
-          sandboxExecutable: '/usr/bin/sandbox-exec',
-          workspace,
-          executable: '/bin/sh',
-          args: ['-c', 'echo changed > source.txt; echo exploit > .git/config'],
-        });
-        const result = spawnSync(launch.executable, launch.args, {
-          cwd: workspace,
-          encoding: 'utf8',
-        });
-
-        expect(result.status).not.toBe(0);
-        expect(
-          fs.readFileSync(path.join(workspace, 'source.txt'), 'utf8'),
-        ).toBe('changed\n');
-        expect(fs.existsSync(path.join(workspace, '.git', 'config'))).toBe(
-          false,
-        );
-      } finally {
-        fs.rmSync(root, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it.runIf(process.platform === 'darwin')(
-    'prevents the sandboxed process from creating a new alias to Git metadata',
-    async () => {
-      const root = fs.mkdtempSync(
-        path.join(os.tmpdir(), 'nanocrab-devin-sandbox-'),
-      );
-      const requestedWorkspace = path.join(root, 'repo');
-      fs.mkdirSync(path.join(requestedWorkspace, '.git'), { recursive: true });
-      const workspace = fs.realpathSync(requestedWorkspace);
-      try {
-        const launch = await buildSandboxedDevinLaunch({
-          sandboxExecutable: '/usr/bin/sandbox-exec',
-          workspace,
-          executable: '/bin/sh',
-          args: [
-            '-c',
-            'ln -s .git metadata-alias && echo exploit > metadata-alias/config',
-          ],
-        });
-        const result = spawnSync(launch.executable, launch.args, {
-          cwd: workspace,
-          encoding: 'utf8',
-        });
-
-        expect(result.status).not.toBe(0);
-        expect(fs.existsSync(path.join(workspace, '.git', 'config'))).toBe(
-          false,
-        );
-      } finally {
-        fs.rmSync(root, { recursive: true, force: true });
-      }
-    },
-  );
+  it('does not expose a permissive macOS profile while authentication handoff is disabled', async () => {
+    await expect(
+      buildSandboxedDevinLaunch(
+        { ...launchInput, sandboxExecutable: '/usr/bin/sandbox-exec' },
+        trustedSandboxFilesystem,
+      ),
+    ).rejects.toThrow('authentication handoff is disabled');
+  });
 });
 
 describe('Devin command broker launcher', () => {
@@ -1047,6 +987,8 @@ function runnerHarness(processes = [new FakeCodingProcess(101)]) {
   const getVerifiedRuntimeContext = vi.fn(
     (): typeof canonicalRuntime | null => canonicalRuntime,
   );
+  const authHandoffAvailable = vi.fn(() => true);
+  const realpath = vi.fn(async (value: string) => value);
   const buildSandboxedLaunch = vi.fn((input) =>
     buildSandboxedDevinLaunch(input, trustedSandboxFilesystem),
   );
@@ -1062,8 +1004,9 @@ function runnerHarness(processes = [new FakeCodingProcess(101)]) {
     },
     knownSecrets: ['known-secret-value'],
     ensureAgentConfig: ensureConfig,
-    realpath: async (value) => value,
+    realpath,
     getVerifiedRuntimeContext,
+    authHandoffAvailable,
     buildSandboxedLaunch,
     ensureCommandBrokerLauncher: ensureLauncher,
     commandBrokerModulePath:
@@ -1080,12 +1023,31 @@ function runnerHarness(processes = [new FakeCodingProcess(101)]) {
     ensureConfig,
     ensureLauncher,
     getVerifiedRuntimeContext,
+    authHandoffAvailable,
+    realpath,
     buildSandboxedLaunch,
     groupSignals,
   };
 }
 
 describe('Devin host process runner', () => {
+  it('fails closed before resolving workspace or setting up files without auth handoff', async () => {
+    const harness = runnerHarness();
+    harness.authHandoffAvailable.mockReturnValue(false);
+    const realpath = vi.spyOn(harness, 'realpath');
+    await expect(harness.runner.run(runnerInput())).resolves.toMatchObject({
+      state: 'failed',
+      detail:
+        'Sandboxed Devin authentication handoff is unavailable; no credential or host auth directory is mounted',
+    });
+    expect(harness.authHandoffAvailable).toHaveBeenCalledOnce();
+    expect(realpath).not.toHaveBeenCalled();
+    expect(harness.ensureLauncher).not.toHaveBeenCalled();
+    expect(harness.ensureConfig).not.toHaveBeenCalled();
+    expect(harness.buildSandboxedLaunch).not.toHaveBeenCalled();
+    expect(harness.spawn).not.toHaveBeenCalled();
+  });
+
   it('writes strict config outside the workspace and invokes the verified executable exactly', async () => {
     const process = new FakeCodingProcess(101);
     const harness = runnerHarness([process]);

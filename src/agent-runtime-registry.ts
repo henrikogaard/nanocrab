@@ -5,7 +5,12 @@ import { promisify } from 'util';
 
 import type { AgentProvider } from './agent-provider.js';
 import { DEVIN_CLI_MODEL_ALIASES, DEVIN_CREDENTIAL_PATH } from './config.js';
-import { buildDevinChildEnvironment } from './coding-runners/devin-host.js';
+import {
+  buildDevinChildEnvironment,
+  DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
+} from './coding-runners/devin-host.js';
+
+export { DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL } from './coding-runners/devin-host.js';
 import type {
   AgentCliId,
   AgentRuntimeHealth,
@@ -14,8 +19,6 @@ import type {
 
 const execFileAsync = promisify(execFile);
 const DEVIN_PROBE_TIMEOUT_MS = 10_000;
-export const DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL =
-  'Sandboxed Devin authentication handoff is unavailable; no credential or host auth directory is mounted';
 const DEVIN_REQUIRED_CAPABILITIES = [
   '--prompt-file',
   '--model',
