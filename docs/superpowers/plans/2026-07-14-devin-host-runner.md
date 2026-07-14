@@ -772,6 +772,9 @@ export interface BrokerRequest {
   workspace: string;
   cwd: string;
   argv: readonly string[];
+  home: string;
+  protectedPaths: readonly string[];
+  trustedRuntimeReadRoots: readonly string[];
 }
 
 export type BrokerCommandExecutor = (
@@ -871,6 +874,11 @@ Use `it.each` for the exact allowed read commands and Git subcommands listed in 
 
 Reject absolute/path-traversing executables, `--config`, environment assignment prefixes, NUL/newline args, cwd outside workspace, script names containing install/publish/release/deploy, and missing platform isolation before spawning.
 
+Deep-equal the Linux bind list and macOS profile. Prove package scripts cannot
+read the service home, Devin credential, NanoCrab config, or job metadata while
+the explicit trusted runtime roots remain readable. Reject missing,
+noncanonical, duplicate, and protected/runtime-overlapping roots before spawn.
+
 - [ ] **Step 3: Run and verify red**
 
 Run: `mise exec node@24 -- npm test -- src/coding-runners/command-broker.test.ts src/coding-runners/devin-host.test.ts -t "config|environment|command"`
@@ -879,9 +887,9 @@ Expected: FAIL because the command broker and config builders do not exist.
 
 - [ ] **Step 4: Implement strict config, launcher, and OS sandbox**
 
-Use exact allowlists, not prefix-only acceptance. Parse `<workspace>/package.json` through the injected `readFile` before allowing `npm|pnpm|yarn|bun run <name>`; require the script name to exist and reject names matching `/(install|publish|release|deploy)/i`. Spawn accepted commands through the injected `execute` with `shell: false` and the same scrubbed environment. Linux build/test commands execute `/usr/bin/bwrap` with `--unshare-net`, a read-only `/` bind, a writable canonical workspace bind over itself, a writable canonical temp bind, and `--chdir <canonical-cwd>`. macOS executes `/usr/bin/sandbox-exec -p <profile> -- <command...>`; the generated profile denies network, allows process execution and host reads required to load binaries, and permits writes only below the canonical workspace and canonical temp directory. Read-only inspection commands still receive the scrubbed environment and canonical cwd. If the platform is neither Linux nor macOS, or the exact platform executable is unavailable, readiness fails before this function can be called.
+Use exact allowlists, not prefix-only acceptance. Parse `<workspace>/package.json` through the injected `readFile` before allowing `npm|pnpm|yarn|bun run <name>`; require the script name to exist and reject names matching `/(install|publish|release|deploy)/i`. Spawn accepted commands through the injected `execute` with `shell: false` and the same scrubbed environment. The broker request embeds canonical service-home, protected-path, and trusted-runtime-root values; canonicalize them again and reject missing, noncanonical, duplicate, or overlapping protected/runtime roots before spawn. Linux build/test commands execute `/usr/bin/bwrap` with `--unshare-net` from an empty root, read-only binds for only the explicit trusted runtime roots, writable canonical workspace and temp binds, and `--chdir <canonical-cwd>`; never bind host `/`. macOS executes `/usr/bin/sandbox-exec -p <profile> -- <command...>`; the generated profile denies network, permits reads only below the trusted runtime roots/workspace/temp, and permits writes only below the canonical workspace and canonical temp directory. Service home, credentials, NanoCrab config, and job metadata are absent from both sandbox views. Read-only inspection commands still receive the scrubbed environment and canonical cwd. If the platform is neither Linux nor macOS, the exact platform executable is unavailable, or isolation roots are unsafe, readiness fails before this function can be called.
 
-Write the broker launcher at `<jobRoot>/.nanocrab/bin/nanocrab-job-exec` as a mode-`0555` Node entrypoint outside the writable repository. It imports the built `command-broker.js`, embeds only canonical workspace/stage values, constructs the production `CommandBrokerDependencies` from fixed Node transports and the readiness-approved `/usr/bin/bwrap` or `/usr/bin/sandbox-exec` path, and forwards `process.argv.slice(2)`; no shell or secret is embedded.
+Write the broker launcher at `<jobRoot>/.nanocrab/bin/nanocrab-job-exec` as a mode-`0555` Node entrypoint outside the writable repository. It imports the built `command-broker.js`, embeds only canonical workspace/stage/home/protected-path/runtime-root values, constructs the production `CommandBrokerDependencies` from fixed Node transports and the readiness-approved `/usr/bin/bwrap` or `/usr/bin/sandbox-exec` path, and forwards `process.argv.slice(2)`; no shell or secret value is embedded.
 
 - [ ] **Step 5: Verify green and exact snapshots**
 
@@ -896,7 +904,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit the policy slice**
 
 ```bash
-git add src/coding-runners/command-broker.ts src/coding-runners/command-broker.test.ts src/coding-runners/devin-host.ts src/coding-runners/devin-host.test.ts
+git add docs/superpowers/plans/2026-07-14-devin-host-runner.md docs/superpowers/specs/2026-07-14-devin-host-runner-design.md src/coding-runners/command-broker.ts src/coding-runners/command-broker.test.ts src/coding-runners/devin-host.ts src/coding-runners/devin-host.test.ts
 git commit -m "feat: constrain Devin stage tools and commands"
 ```
 

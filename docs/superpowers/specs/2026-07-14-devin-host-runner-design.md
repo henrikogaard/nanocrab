@@ -435,11 +435,22 @@ than the exact pytest form. File changes use the scoped edit/write tools.
 
 Package scripts are arbitrary code, so allowed build/test commands execute in
 an additional OS process sandbox with workspace-only filesystem access and no
-network namespace. Linux readiness requires `bwrap` network isolation
-(`--unshare-net`); macOS readiness requires the supported local sandbox adapter
-with an explicit network-deny profile. If that platform primitive is absent,
-readiness fails closed. A repository whose build needs network access fails
-with an operator-visible restriction; issue #129 adds no bypass.
+network namespace. The broker receives immutable canonical protected paths and
+an explicit list of canonical trusted runtime read roots. It rejects missing,
+noncanonical, duplicate, or protected/runtime-overlapping roots before spawn.
+Linux starts from an empty `bwrap` root, exposes only the trusted runtime roots
+read-only, binds only the workspace and temporary directory writable, and uses
+`--unshare-net`; it must not bind host `/`. macOS allows reads only from the
+explicit runtime roots, workspace, and temporary directory, denies network,
+and allows writes only below the workspace and temporary directory; it must not
+use a global `allow file-read*`. The service home, Devin credential, NanoCrab
+configuration, and job metadata therefore remain unavailable to package
+scripts. Trusted executable directories below the service home may be exposed
+individually, but exposing the home itself or a root overlapping a protected
+path is denied. If the required platform primitive or isolation inputs are
+absent, readiness fails closed. A repository whose build needs network or an
+unlisted host path fails with an operator-visible restriction; issue #129 adds
+no bypass.
 
 Permission policy by stage:
 
@@ -450,12 +461,12 @@ Permission policy by stage:
 | Review            | Repository workspace only | None                      | Scoped diff, inspection, and read-only verification commands |
 | Direct legacy job | Repository workspace only | Repository workspace only | Same as Implement after the existing implementation approval |
 
-Sensitive paths are explicitly denied as defense in depth, including the
+Sensitive paths are explicitly denied at the tool layer and omitted from the
+subprocess filesystem view as defense in depth, including the
 Devin credential, `.ssh`, `.gnupg`, NanoCrab `.env`, channel authentication,
-mount allowlists, and host credential/config directories. Because the sandbox
-derives readable and writable roots from active `Read(...)` and `Write(...)`
-scopes, the workspace allowlist is authoritative; sensitive-path denies must
-not be used as a substitute for it.
+mount allowlists, job metadata, service home, and host credential/config
+directories. The explicit sandbox roots are authoritative for subprocesses;
+sensitive-path deny strings must not be used as a substitute for OS isolation.
 
 ### Child environment
 
