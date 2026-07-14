@@ -1,12 +1,18 @@
 import type { PathLike } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 
 import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildDevinAgentConfig,
   buildDevinChildEnvironment,
+  createDevinHostRunner,
+  ensureDevinCommandBrokerLauncher,
   writeDevinCommandBrokerLauncher,
 } from './devin-host.js';
+import { createProcessRegistry } from './process-registry.js';
+import type { CodingRunnerInput, SpawnedCodingProcess } from './types.js';
 
 const input = {
   stageKind: 'planning' as const,
@@ -250,5 +256,557 @@ describe('Devin command broker launcher', () => {
       ),
     ).rejects.toThrow(/node|canonical/i);
     expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it('reuses an unchanged immutable launcher without rewriting it', async () => {
+    const writeFile = vi.fn(async () => undefined);
+    const chmod = vi.fn(async () => undefined);
+    const sourceCapture = vi.fn(
+      async (_path: string, _data: string, _options: unknown) => undefined,
+    );
+    const launcherInput = {
+      stageKind: 'direct' as const,
+      workspace: '/jobs/job/repo',
+      jobRoot: '/jobs/job',
+      commandBrokerModulePath:
+        '/opt/nanocrab/dist/coding-runners/command-broker.js',
+      sandboxExecutable: '/usr/bin/bwrap' as const,
+      nodeExecutable: '/usr/bin/node',
+      home: '/home/service',
+      protectedPaths: ['/jobs/job/.nanocrab'],
+      trustedRuntimeReadRoots: ['/usr'],
+    };
+    await writeDevinCommandBrokerLauncher(launcherInput, {
+      mkdir: vi.fn(async () => undefined),
+      writeFile: sourceCapture,
+      chmod: vi.fn(async () => undefined),
+      realpath: async (value) => value,
+    });
+    const source = (
+      sourceCapture.mock.calls as unknown as Array<[string, string]>
+    )[0]![1];
+    await expect(
+      ensureDevinCommandBrokerLauncher(
+        launcherInput,
+        immutableLauncherDependencies({ source, writeFile, chmod }),
+      ),
+    ).resolves.toBe('/jobs/job/.nanocrab/bin/nanocrab-job-exec');
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(chmod).not.toHaveBeenCalled();
+  });
+
+  it('creates the exact immutable launcher when it does not exist', async () => {
+    const dependencies = immutableLauncherDependencies();
+    dependencies.lstat.mockRejectedValueOnce(
+      Object.assign(new Error('missing'), { code: 'ENOENT' }),
+    );
+
+    await expect(
+      ensureDevinCommandBrokerLauncher(
+        {
+          stageKind: 'review',
+          workspace: '/jobs/job/repo',
+          jobRoot: '/jobs/job',
+          commandBrokerModulePath:
+            '/opt/nanocrab/dist/coding-runners/command-broker.js',
+          sandboxExecutable: '/usr/bin/bwrap',
+          nodeExecutable: '/usr/bin/node',
+          home: '/home/service',
+          protectedPaths: ['/jobs/job/.nanocrab'],
+          trustedRuntimeReadRoots: ['/usr'],
+        },
+        dependencies,
+      ),
+    ).resolves.toBe('/jobs/job/.nanocrab/bin/nanocrab-job-exec');
+    expect(dependencies.writeFile).toHaveBeenCalledWith(
+      '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
+      expect.stringMatching(/^#!\/usr\/bin\/node\n/),
+      { encoding: 'utf8', mode: 0o555, flag: 'wx' },
+    );
+    expect(dependencies.chmod).toHaveBeenCalledWith(
+      '/jobs/job/.nanocrab/bin',
+      0o500,
+    );
+  });
+
+  it.each([
+    ['tampered bytes', { source: 'tampered' }],
+    ['launcher symlink', { launcherSymlink: true }],
+    ['wrong launcher mode', { launcherMode: 0o755 }],
+    ['wrong launcher owner', { launcherUid: 999 }],
+    ['parent symlink', { parentSymlink: true }],
+    ['wrong parent mode', { parentMode: 0o700 }],
+  ])('rejects immutable launcher reuse with %s', async (_name, change) => {
+    await expect(
+      ensureDevinCommandBrokerLauncher(
+        {
+          stageKind: 'direct',
+          workspace: '/jobs/job/repo',
+          jobRoot: '/jobs/job',
+          commandBrokerModulePath:
+            '/opt/nanocrab/dist/coding-runners/command-broker.js',
+          sandboxExecutable: '/usr/bin/bwrap',
+          nodeExecutable: '/usr/bin/node',
+          home: '/home/service',
+          protectedPaths: ['/jobs/job/.nanocrab'],
+          trustedRuntimeReadRoots: ['/usr'],
+        },
+        immutableLauncherDependencies(change),
+      ),
+    ).rejects.toThrow(/launcher|immutable|owner|mode|symlink/i);
+  });
+});
+
+function immutableLauncherDependencies(
+  changes: {
+    source?: string;
+    launcherSymlink?: boolean;
+    launcherMode?: number;
+    launcherUid?: number;
+    parentSymlink?: boolean;
+    parentMode?: number;
+    writeFile?: (
+      path: string,
+      data: string,
+      options: { encoding: 'utf8'; mode: number; flag: 'wx' },
+    ) => Promise<void>;
+    chmod?: (path: string, mode: number) => Promise<void>;
+  } = {},
+) {
+  const launcher = {
+    dev: 1,
+    ino: 2,
+    uid: changes.launcherUid ?? 501,
+    mode: changes.launcherMode ?? 0o555,
+    isSymbolicLink: () => changes.launcherSymlink ?? false,
+    isFile: () => true,
+    isDirectory: () => false,
+  } as unknown as import('node:fs').Stats;
+  const parent = {
+    dev: 1,
+    ino: 1,
+    uid: 501,
+    mode: changes.parentMode ?? 0o500,
+    isSymbolicLink: () => changes.parentSymlink ?? false,
+    isFile: () => false,
+    isDirectory: () => true,
+  } as unknown as import('node:fs').Stats;
+  return {
+    mkdir: vi.fn(async () => undefined),
+    writeFile: changes.writeFile ?? vi.fn(async () => undefined),
+    chmod: changes.chmod ?? vi.fn(async () => undefined),
+    realpath: vi.fn(async (value: string) => value),
+    lstat: vi.fn(async (value: string) =>
+      value.endsWith('/bin') ? parent : launcher,
+    ),
+    stat: vi.fn(async (value: string) =>
+      value.endsWith('/bin') ? parent : launcher,
+    ),
+    readFile: vi.fn(async () => changes.source ?? 'expected'),
+    getuid: () => 501,
+  };
+}
+
+class FakeCodingProcess extends EventEmitter implements SpawnedCodingProcess {
+  pid: number;
+  killed = false;
+  stdout = new PassThrough();
+  stderr = new PassThrough();
+  signals: NodeJS.Signals[] = [];
+
+  constructor(pid: number) {
+    super();
+    this.pid = pid;
+  }
+
+  kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
+    this.killed = true;
+    this.signals.push(signal);
+    return true;
+  }
+
+  fail(error = new Error('synthetic spawn failure')): void {
+    this.emit('error', error);
+  }
+
+  close(code: number | null, signal: NodeJS.Signals | null = null): void {
+    this.emit('close', code, signal);
+  }
+}
+
+const canonicalRuntime = {
+  executable: '/opt/devin/bin/devin',
+  nodeExecutable: '/usr/local/bin/node',
+  sandboxExecutable: '/usr/bin/bwrap' as const,
+  trustedRuntimeReadRoots: ['/opt/devin', '/usr/local', '/usr/bin'],
+};
+
+function runnerInput(
+  overrides: Partial<CodingRunnerInput> = {},
+): CodingRunnerInput {
+  return {
+    jobId: 'job',
+    attemptId: 'attempt-1',
+    cli: 'devin',
+    model: 'claude-sonnet-4',
+    stageKind: null,
+    workspace: '/jobs/job/owner__repo',
+    promptFile: '/jobs/job/.nanocrab/prompt.txt',
+    timeoutMs: 1_000,
+    onOutput: vi.fn(),
+    ...overrides,
+  };
+}
+
+function runnerHarness(processes = [new FakeCodingProcess(101)]) {
+  let spawnIndex = 0;
+  const groupSignals: Array<[number, NodeJS.Signals]> = [];
+  const timers = {
+    setTimeout: (callback: () => void, delayMs: number) =>
+      setTimeout(callback, delayMs),
+    clearTimeout: (handle: unknown) => clearTimeout(handle as NodeJS.Timeout),
+  };
+  const registry = createProcessRegistry({
+    randomToken: (() => {
+      let value = 0;
+      return () => `lease-${++value}`;
+    })(),
+    signalGroup: (pid, signal) => groupSignals.push([pid, signal]),
+    timers,
+    graceMs: 50,
+  });
+  const spawn = vi.fn(() => processes[spawnIndex++]!);
+  const writeFile = vi.fn(async () => undefined);
+  const ensureLauncher = vi.fn(
+    async () => '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
+  );
+  const getVerifiedRuntimeContext = vi.fn(
+    (): typeof canonicalRuntime | null => canonicalRuntime,
+  );
+  const runner = createDevinHostRunner({
+    spawn,
+    registry,
+    timers,
+    executable: canonicalRuntime.executable,
+    environmentSource: {
+      HOME: '/home/service',
+      XDG_CONFIG_HOME: '/home/service/.config',
+      PATH: '/untrusted',
+      GITHUB_TOKEN: 'github-secret-value',
+    },
+    knownSecrets: ['known-secret-value'],
+    writeFile,
+    realpath: async (value) => value,
+    getVerifiedRuntimeContext,
+    ensureCommandBrokerLauncher: ensureLauncher,
+    commandBrokerModulePath:
+      '/opt/nanocrab/dist/coding-runners/command-broker.js',
+    devinCredentialPath: '/home/service/.config/devin/credentials.json',
+    home: '/home/service',
+    nanocrabConfigRoot: '/home/service/.config/nanocrab',
+  });
+  return {
+    runner,
+    spawn,
+    registry,
+    writeFile,
+    ensureLauncher,
+    getVerifiedRuntimeContext,
+    groupSignals,
+  };
+}
+
+describe('Devin host process runner', () => {
+  it('writes strict config outside the workspace and invokes the verified executable exactly', async () => {
+    const process = new FakeCodingProcess(101);
+    const harness = runnerHarness([process]);
+    const input = runnerInput();
+    const run = harness.runner.run(input);
+
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledOnce());
+    expect(harness.getVerifiedRuntimeContext).toHaveBeenCalledOnce();
+    expect(harness.ensureLauncher).toHaveBeenCalledWith({
+      stageKind: 'direct',
+      workspace: '/jobs/job/owner__repo',
+      jobRoot: '/jobs/job',
+      commandBrokerModulePath:
+        '/opt/nanocrab/dist/coding-runners/command-broker.js',
+      sandboxExecutable: '/usr/bin/bwrap',
+      nodeExecutable: '/usr/local/bin/node',
+      home: '/home/service',
+      protectedPaths: [
+        '/jobs/job/.nanocrab',
+        '/home/service/.config/devin/credentials.json',
+        '/home/service/.config/nanocrab',
+      ],
+      trustedRuntimeReadRoots: ['/opt/devin', '/usr/local', '/usr/bin'],
+    });
+    expect(harness.writeFile).toHaveBeenCalledWith(
+      '/jobs/job/.nanocrab/devin-agent.json',
+      expect.stringContaining('Write(/jobs/job/owner__repo/**)'),
+      { mode: 0o600 },
+    );
+    expect(harness.spawn).toHaveBeenCalledWith(
+      '/opt/devin/bin/devin',
+      [
+        '--prompt-file',
+        '/jobs/job/.nanocrab/prompt.txt',
+        '--model',
+        'claude-sonnet-4',
+        '--permission-mode',
+        'auto',
+        '--sandbox',
+        '--agent-config',
+        '/jobs/job/.nanocrab/devin-agent.json',
+        '--respect-workspace-trust',
+        'true',
+        '-p',
+      ],
+      {
+        cwd: '/jobs/job/owner__repo',
+        env: {
+          HOME: '/home/service',
+          XDG_CONFIG_HOME: '/home/service/.config',
+          PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
+          TERM: 'dumb',
+          NO_COLOR: '1',
+        },
+        shell: false,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+
+    process.close(0);
+    await expect(run).resolves.toMatchObject({ state: 'succeeded' });
+  });
+
+  it('registers before output, preserves stream order, and bounds only redacted output', async () => {
+    const process = new FakeCodingProcess(102);
+    const harness = runnerHarness([process]);
+    const chunks: Array<{ stream: 'stdout' | 'stderr'; text: string }> = [];
+    const input = runnerInput({ onOutput: (chunk) => chunks.push(chunk) });
+    const owns = vi.spyOn(harness.registry, 'owns');
+    const run = harness.runner.run(input);
+
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledOnce());
+    process.stdout.write('first ');
+    process.stderr.write('second known-');
+    process.stderr.write(`secret-value ${'x'.repeat(1_100_000)}`);
+    process.stdout.write('third');
+    process.close(0);
+    await run;
+
+    expect(owns).toHaveBeenCalled();
+    expect(chunks[0]?.stream).toBe('stdout');
+    expect(chunks.slice(1).every((chunk) => chunk.stream === 'stderr')).toBe(
+      true,
+    );
+    const output = chunks.map((chunk) => chunk.text).join('');
+    expect(output).not.toContain('known-secret-value');
+    expect(output).toContain('[REDACTED]');
+    expect(output.length).toBeLessThanOrEqual(1_048_576);
+  });
+
+  it('maps exit zero to succeeded and nonzero to failed with a redacted stderr tail', async () => {
+    const first = new FakeCodingProcess(103);
+    const second = new FakeCodingProcess(104);
+    const harness = runnerHarness([first, second]);
+    const success = harness.runner.run(runnerInput());
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledTimes(1));
+    first.close(0);
+    await expect(success).resolves.toEqual({
+      attemptId: 'attempt-1',
+      state: 'succeeded',
+      exitCode: 0,
+      signal: null,
+    });
+
+    const failed = harness.runner.run(runnerInput({ attemptId: 'attempt-2' }));
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledTimes(2));
+    second.stderr.write(
+      `prefix known-secret-value ${'z'.repeat(1_100_000)} FINAL-TAIL`,
+    );
+    second.close(7);
+    await expect(failed).resolves.toMatchObject({
+      attemptId: 'attempt-2',
+      state: 'failed',
+      exitCode: 7,
+      signal: null,
+      detail: expect.stringMatching(/^Devin exited with code 7: /),
+    });
+    const result = await failed;
+    expect(result.detail).not.toContain('known-secret-value');
+    expect(result.detail).toContain('FINAL-TAIL');
+    expect(result.detail!.length).toBeLessThan(8_300);
+  });
+
+  it('maps spawn error once and ignores a later close', async () => {
+    const process = new FakeCodingProcess(105);
+    const harness = runnerHarness([process]);
+    const run = harness.runner.run(runnerInput());
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledOnce());
+    process.fail(new Error('known-secret-value filesystem details'));
+    process.close(0);
+    await expect(run).resolves.toEqual({
+      attemptId: 'attempt-1',
+      state: 'failed',
+      exitCode: null,
+      signal: null,
+      detail: 'Devin process failed to start',
+    });
+  });
+
+  it('times out with TERM then KILL and remains timed_out after close', async () => {
+    vi.useFakeTimers();
+    const process = new FakeCodingProcess(106);
+    const harness = runnerHarness([process]);
+    const run = harness.runner.run(runnerInput({ timeoutMs: 100 }));
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(run).resolves.toMatchObject({
+      state: 'timed_out',
+      detail: 'Devin process timed out',
+    });
+    process.close(0);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(harness.groupSignals).toEqual([
+      [-106, 'SIGTERM'],
+      [-106, 'SIGKILL'],
+    ]);
+    vi.useRealTimers();
+  });
+
+  it('cancels the exact attempt and remains cancelled after error or close', async () => {
+    const process = new FakeCodingProcess(107);
+    const harness = runnerHarness([process]);
+    const run = harness.runner.run(runnerInput());
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledOnce());
+    expect(harness.runner.cancel('job', 'other-attempt')).toBe(false);
+    expect(harness.runner.cancel('job', 'attempt-1')).toBe(true);
+    process.fail();
+    process.close(1);
+    await expect(run).resolves.toMatchObject({
+      state: 'cancelled',
+      detail: 'Devin process cancelled',
+    });
+  });
+
+  it('makes repeated cancellation idempotent', async () => {
+    const process = new FakeCodingProcess(108);
+    const harness = runnerHarness([process]);
+    const run = harness.runner.run(runnerInput());
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledOnce());
+    expect(harness.runner.cancel('job', 'attempt-1')).toBe(true);
+    expect(harness.runner.cancel('job', 'attempt-1')).toBe(false);
+    await run;
+    expect(harness.groupSignals).toEqual([[-108, 'SIGTERM']]);
+  });
+
+  it('does not emit stale output after a newer retry owns the job', async () => {
+    const oldProcess = new FakeCodingProcess(109);
+    const newProcess = new FakeCodingProcess(110);
+    const harness = runnerHarness([oldProcess, newProcess]);
+    const oldOutput = vi.fn();
+    const newOutput = vi.fn();
+    void harness.runner.run(runnerInput({ onOutput: oldOutput }));
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledTimes(1));
+    void harness.runner.run(
+      runnerInput({ attemptId: 'attempt-2', onOutput: newOutput }),
+    );
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledTimes(2));
+    oldProcess.stdout.write('stale');
+    newProcess.stdout.write('current');
+    expect(oldOutput).not.toHaveBeenCalled();
+    expect(newOutput).toHaveBeenCalledWith({
+      stream: 'stdout',
+      text: 'current',
+    });
+  });
+
+  it('does not let stale close error or timeout delete a newer lease', async () => {
+    vi.useFakeTimers();
+    const oldProcess = new FakeCodingProcess(111);
+    const newProcess = new FakeCodingProcess(112);
+    const harness = runnerHarness([oldProcess, newProcess]);
+    void harness.runner.run(runnerInput({ timeoutMs: 100 }));
+    await vi.advanceTimersByTimeAsync(10);
+    void harness.runner.run(
+      runnerInput({ attemptId: 'attempt-2', timeoutMs: 1_000 }),
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    oldProcess.fail();
+    oldProcess.close(1);
+    expect(harness.registry.get('job', 'attempt-2')?.process).toBe(newProcess);
+    vi.useRealTimers();
+  });
+
+  it('cancel followed by retry signals only the old process group', async () => {
+    const oldProcess = new FakeCodingProcess(113);
+    const newProcess = new FakeCodingProcess(114);
+    const harness = runnerHarness([oldProcess, newProcess]);
+    const oldRun = harness.runner.run(runnerInput());
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledTimes(1));
+    expect(harness.runner.cancel('job', 'attempt-1')).toBe(true);
+    await oldRun;
+    void harness.runner.run(runnerInput({ attemptId: 'attempt-2' }));
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledTimes(2));
+    expect(harness.groupSignals[0]).toEqual([-113, 'SIGTERM']);
+    expect(harness.groupSignals.every(([pid]) => pid === -113)).toBe(true);
+  });
+
+  it('flushes redactor carry safely on close and error', async () => {
+    const closeProcess = new FakeCodingProcess(115);
+    const errorProcess = new FakeCodingProcess(116);
+    const harness = runnerHarness([closeProcess, errorProcess]);
+    const closeOutput = vi.fn();
+    const closeRun = harness.runner.run(runnerInput({ onOutput: closeOutput }));
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledTimes(1));
+    closeProcess.stdout.write('Bearer final-secret');
+    closeProcess.close(0);
+    await closeRun;
+    expect(JSON.stringify(closeOutput.mock.calls)).not.toContain(
+      'final-secret',
+    );
+    expect(closeOutput).toHaveBeenCalledWith({
+      stream: 'stdout',
+      text: 'Bearer [REDACTED]',
+    });
+
+    const errorOutput = vi.fn();
+    const errorRun = harness.runner.run(
+      runnerInput({ attemptId: 'attempt-2', onOutput: errorOutput }),
+    );
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledTimes(2));
+    errorProcess.stderr.write('sk-final-secret');
+    errorProcess.fail();
+    await errorRun;
+    expect(JSON.stringify(errorOutput.mock.calls)).not.toContain(
+      'final-secret',
+    );
+    expect(errorOutput).toHaveBeenCalledWith({
+      stream: 'stderr',
+      text: 'sk-[REDACTED]',
+    });
+  });
+
+  it('fails closed on missing runtime verification or noncanonical path layout', async () => {
+    const missing = runnerHarness();
+    missing.getVerifiedRuntimeContext.mockReturnValueOnce(null);
+    await expect(missing.runner.run(runnerInput())).resolves.toMatchObject({
+      state: 'failed',
+      detail: 'Devin runtime verification is unavailable',
+    });
+    expect(missing.spawn).not.toHaveBeenCalled();
+
+    const mismatched = runnerHarness();
+    await expect(
+      mismatched.runner.run(
+        runnerInput({ promptFile: '/tmp/.nanocrab/prompt.txt' }),
+      ),
+    ).resolves.toMatchObject({
+      state: 'failed',
+      detail: 'Devin workspace layout is invalid',
+    });
+    expect(mismatched.spawn).not.toHaveBeenCalled();
   });
 });
