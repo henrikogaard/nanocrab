@@ -1,9 +1,13 @@
+import type fs from 'node:fs';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
   inferLegacyRunnerCli,
+  getVerifiedDevinAliases,
   listAgentRuntimeDefinitions,
   probeAgentRuntime,
+  probeDevinRuntime,
   resolveDevinCliModelAlias,
   validateCodingRuntimeSelection,
 } from './agent-runtime-registry.js';
@@ -14,6 +18,64 @@ import {
   isCodingContainerImageAvailable,
   probeCodingRunnerReadiness,
 } from './coding-runner-readiness.js';
+import { buildDevinChildEnvironment } from './coding-runners/devin-host.js';
+
+const DEVIN_HELP = `
+Usage: devin [options]
+  --prompt-file <path>
+  --model <model> (examples: claude-sonnet-4, claude-opus-4.6)
+  --permission-mode <mode>
+  --sandbox
+  --agent-config <path>
+  --respect-workspace-trust <boolean>
+  -p
+`;
+
+function fakeStats(
+  input: {
+    mode?: number;
+    uid?: number;
+    regular?: boolean;
+    symlink?: boolean;
+  } = {},
+): fs.Stats {
+  return {
+    mode: input.mode ?? 0o100600,
+    uid: input.uid ?? 1000,
+    isFile: () => input.regular !== false,
+    isSymbolicLink: () => input.symlink === true,
+  } as fs.Stats;
+}
+
+function healthyDevinProbe(overrides: Record<string, unknown> = {}) {
+  const env = { HOME: '/home/nanocrab', SECRET: 'must-not-leak' };
+  const outputs = new Map([
+    [JSON.stringify(['--version']), { stdout: 'devin 1.1.0\n', stderr: '' }],
+    [JSON.stringify(['--help']), { stdout: DEVIN_HELP, stderr: '' }],
+    [
+      JSON.stringify(['auth', 'status']),
+      { stdout: 'Authenticated as Person <person@example.test>', stderr: '' },
+    ],
+  ]);
+  return {
+    execFile: vi.fn(
+      async (
+        _executable: string,
+        args: readonly string[],
+        _options: { env: NodeJS.ProcessEnv; timeout: number },
+      ) => outputs.get(JSON.stringify(args)) ?? { stdout: '', stderr: '' },
+    ),
+    realpath: vi.fn(async (value: string) => value),
+    stat: vi.fn(async () => fakeStats()),
+    lstat: vi.fn(async () => fakeStats()),
+    getuid: vi.fn(() => 1000),
+    platform: 'linux' as const,
+    commandAvailable: vi.fn(async () => true),
+    env,
+    credentialPath: '/home/nanocrab/.config/devin/credentials.json',
+    ...overrides,
+  };
+}
 
 describe('agent runtime registry', () => {
   it.each([
@@ -281,20 +343,215 @@ describe('agent runtime registry', () => {
     });
   });
 
-  it('reports devin as unsupported when installed', async () => {
-    const execFile = vi.fn().mockResolvedValue({
-      stdout: 'devin 1.1.0\n',
-      stderr: '',
-    });
+  it('reports healthy only after version capabilities credential sandbox and auth checks', async () => {
+    const deps = healthyDevinProbe();
 
-    await expect(
-      probeAgentRuntime('devin', { execFile }),
-    ).resolves.toMatchObject({
+    await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
       cli: 'devin',
       executable: 'devin',
-      status: 'unsupported',
+      status: 'healthy',
       version: '1.1.0',
+      detail: 'Devin host runner is ready',
     });
+    expect(deps.execFile.mock.calls.map((call) => call[1])).toEqual([
+      ['--version'],
+      ['--help'],
+      ['auth', 'status'],
+    ]);
+    for (const call of deps.execFile.mock.calls) {
+      expect(call[2]).toEqual({
+        env: buildDevinChildEnvironment(deps.env),
+        timeout: 10_000,
+      });
+      expect(call[1]).not.toEqual(
+        expect.arrayContaining(['-p', '--prompt-file', '--model']),
+      );
+    }
+    expect(deps.commandAvailable).toHaveBeenCalledWith('/usr/bin/bwrap');
+  });
+
+  it('fails closed before probing when DEVIN_CREDENTIAL_PATH is not configured', async () => {
+    const deps = healthyDevinProbe({ credentialPath: null });
+
+    await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
+      status: 'error',
+      detail:
+        'Configure an absolute DEVIN_CREDENTIAL_PATH for the NanoCrab service user',
+    });
+    expect(deps.realpath).not.toHaveBeenCalled();
+    expect(deps.lstat).not.toHaveBeenCalled();
+    expect(deps.stat).not.toHaveBeenCalled();
+    expect(deps.commandAvailable).not.toHaveBeenCalled();
+    expect(deps.execFile).not.toHaveBeenCalled();
+  });
+
+  it('reports unauthenticated and discards auth output containing personal data', async () => {
+    const deps = healthyDevinProbe({
+      execFile: vi.fn(async (_executable: string, args: readonly string[]) => {
+        if (args[0] === '--version')
+          return { stdout: 'devin 1.1.0', stderr: '' };
+        if (args[0] === '--help') return { stdout: DEVIN_HELP, stderr: '' };
+        throw Object.assign(
+          new Error('Jane Person person@example.test user-123 team-456'),
+          {
+            stdout: 'Jane Person person@example.test user-123',
+            stderr: 'team-456',
+          },
+        );
+      }),
+    });
+
+    const health = await probeDevinRuntime(deps);
+
+    expect(health).toMatchObject({
+      status: 'unauthenticated',
+      detail: 'Run devin auth login as the NanoCrab service user',
+    });
+    expect(JSON.stringify(health)).not.toMatch(
+      /Jane|person@example|user-123|team-456/,
+    );
+  });
+
+  it.each([0o644, 0o640, 0o660, 0o666, 0o400])(
+    'rejects credential mode %o',
+    async (mode) => {
+      const deps = healthyDevinProbe({
+        stat: vi.fn(async () => fakeStats({ mode: 0o100000 | mode })),
+      });
+
+      await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
+        status: 'error',
+      });
+      expect(deps.execFile).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a credential owned by another uid', async () => {
+    const deps = healthyDevinProbe({
+      stat: vi.fn(async () => fakeStats({ uid: 2000 })),
+    });
+
+    await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
+      status: 'error',
+    });
+    expect(deps.execFile).not.toHaveBeenCalled();
+  });
+
+  it('rejects a symlink or non-regular credential', async () => {
+    for (const override of [
+      { lstat: vi.fn(async () => fakeStats({ symlink: true })) },
+      { stat: vi.fn(async () => fakeStats({ regular: false })) },
+    ]) {
+      const deps = healthyDevinProbe(override);
+      await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
+        status: 'error',
+      });
+      expect(deps.execFile).not.toHaveBeenCalled();
+    }
+  });
+
+  it('rejects a CLI missing prompt model config print or sandbox capability', async () => {
+    for (const capability of [
+      '--prompt-file',
+      '--model',
+      '--agent-config',
+      '-p',
+      '--sandbox',
+    ]) {
+      const deps = healthyDevinProbe({
+        execFile: vi.fn(
+          async (_executable: string, args: readonly string[]) => ({
+            stdout:
+              args[0] === '--version'
+                ? 'devin 1.1.0'
+                : DEVIN_HELP.replace(`  ${capability}`, '  --missing'),
+            stderr: '',
+          }),
+        ),
+      });
+
+      await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
+        status: 'error',
+      });
+    }
+  });
+
+  it('rejects missing /usr/bin/bwrap or /usr/bin/sandbox-exec support', async () => {
+    for (const platform of ['linux', 'darwin'] as const) {
+      const deps = healthyDevinProbe({
+        platform,
+        commandAvailable: vi.fn(async () => false),
+      });
+      await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
+        status: 'error',
+      });
+      expect(deps.commandAvailable).toHaveBeenCalledWith(
+        platform === 'linux' ? '/usr/bin/bwrap' : '/usr/bin/sandbox-exec',
+      );
+    }
+  });
+
+  it('accepts only configured aliases advertised by non-network help', async () => {
+    const healthy = healthyDevinProbe();
+    await expect(probeDevinRuntime(healthy)).resolves.toMatchObject({
+      status: 'healthy',
+    });
+    expect(getVerifiedDevinAliases()).toEqual(
+      new Set(['claude-sonnet-4', 'claude-opus-4.6']),
+    );
+
+    const missing = healthyDevinProbe({
+      execFile: vi.fn(async (_executable: string, args: readonly string[]) => ({
+        stdout:
+          args[0] === '--version'
+            ? 'devin 1.1.0'
+            : DEVIN_HELP.replace('claude-opus-4.6', 'not-configured'),
+        stderr: '',
+      })),
+    });
+    await expect(probeDevinRuntime(missing)).resolves.toMatchObject({
+      status: 'error',
+    });
+    expect(getVerifiedDevinAliases()).toEqual(new Set());
+  });
+
+  it('stores no auth stdout stderr name email user id team id or credential value', async () => {
+    const credentialValue = 'credential-secret-value';
+    const deps = healthyDevinProbe({
+      execFile: vi.fn(async (_executable: string, args: readonly string[]) => ({
+        stdout:
+          args[0] === '--version'
+            ? 'devin 1.1.0'
+            : args[0] === '--help'
+              ? DEVIN_HELP
+              : `Name Jane Email jane@example.test User user-id Team team-id ${credentialValue}`,
+        stderr: 'auth diagnostic with personal data',
+      })),
+    });
+
+    const health = await probeDevinRuntime(deps);
+    expect(JSON.stringify(health)).not.toMatch(
+      /Jane|jane@example|user-id|team-id|credential-secret|auth diagnostic/,
+    );
+  });
+
+  it('marks Devin coding supported only when the host probe is healthy', async () => {
+    expect(
+      listAgentRuntimeDefinitions().find(({ cli }) => cli === 'devin'),
+    ).toMatchObject({ codingRunnerSupported: true });
+
+    await expect(
+      probeCodingRunnerReadiness('devin', {
+        probeHostRuntime: vi.fn().mockResolvedValue({
+          cli: 'devin',
+          executable: 'devin',
+          status: 'healthy',
+          version: '1.1.0',
+          checkedAt: new Date().toISOString(),
+          detail: 'Devin host runner is ready',
+        }),
+      }),
+    ).resolves.toMatchObject({ status: 'healthy' });
   });
 
   it('reports error status for non-ENOENT failures', async () => {

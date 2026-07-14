@@ -78,6 +78,9 @@ export async function probeCodingRunnerReadiness(
     inspectContainerImage?: ContainerImageInspector;
   } = {},
 ): Promise<AgentRuntimeHealth> {
+  if (cli === 'devin') {
+    return (options.probeHostRuntime || probeHostRuntime)(cli);
+  }
   if (cli !== 'pi') {
     return (options.probeHostRuntime || probeHostRuntime)(cli);
   }

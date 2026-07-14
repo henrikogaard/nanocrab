@@ -1,8 +1,11 @@
 import { execFile } from 'child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import { promisify } from 'util';
 
 import type { AgentProvider } from './agent-provider.js';
-import { DEVIN_CLI_MODEL_ALIASES } from './config.js';
+import { DEVIN_CLI_MODEL_ALIASES, DEVIN_CREDENTIAL_PATH } from './config.js';
+import { buildDevinChildEnvironment } from './coding-runners/devin-host.js';
 import type {
   AgentCliId,
   AgentRuntimeHealth,
@@ -10,6 +13,39 @@ import type {
 } from './types.js';
 
 const execFileAsync = promisify(execFile);
+const DEVIN_PROBE_TIMEOUT_MS = 10_000;
+const DEVIN_REQUIRED_CAPABILITIES = [
+  '--prompt-file',
+  '--model',
+  '--permission-mode',
+  '--sandbox',
+  '--agent-config',
+  '--respect-workspace-trust',
+  '-p',
+] as const;
+let verifiedDevinAliases: ReadonlySet<string> = new Set();
+
+export interface DevinProbeDependencies {
+  execFile: (
+    executable: string,
+    args: readonly string[],
+    options: { env: NodeJS.ProcessEnv; timeout: number },
+  ) => Promise<{ stdout: string; stderr: string }>;
+  realpath(value: string): Promise<string>;
+  stat(value: string): Promise<fs.Stats>;
+  lstat(value: string): Promise<fs.Stats>;
+  getuid(): number;
+  platform: NodeJS.Platform;
+  commandAvailable(
+    command: '/usr/bin/bwrap' | '/usr/bin/sandbox-exec',
+  ): Promise<boolean>;
+  env: NodeJS.ProcessEnv;
+  credentialPath: string | null;
+}
+
+export function getVerifiedDevinAliases(): ReadonlySet<string> {
+  return new Set(verifiedDevinAliases);
+}
 
 export function inferLegacyRunnerCli(provider: AgentProvider): AgentCliId {
   if (provider === 'claude' || provider === 'codex' || provider === 'pi') {
@@ -110,9 +146,7 @@ const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
     cli: 'devin',
     executable: 'devin',
     versionArgs: Object.freeze(['--version']),
-    codingRunnerSupported: false,
-    detail:
-      'Devin CLI is discoverable for runtime health but is not a selectable agent provider or coding runner. It requires interactive `devin auth login` and does not accept DEVIN_API_KEY/WINDSURF_API_KEY for non-interactive runs, so it cannot be used in unattended coding jobs.',
+    codingRunnerSupported: true,
   }),
   mistral: Object.freeze({
     cli: 'mistral',
@@ -150,7 +184,10 @@ export function isAgentCliId(value: string): value is AgentCliId {
 
 export async function probeAgentRuntime(
   cli: AgentCliId,
-  options?: { execFile?: typeof execFileAsync },
+  options?: {
+    execFile?: typeof execFileAsync;
+    devinDependencies?: DevinProbeDependencies;
+  },
 ): Promise<AgentRuntimeHealth> {
   const definition = RUNTIMES[cli];
   if (!definition) {
@@ -162,6 +199,12 @@ export async function probeAgentRuntime(
       checkedAt: new Date().toISOString(),
       detail: `Unknown CLI id: ${cli}`,
     };
+  }
+
+  if (cli === 'devin') {
+    return probeDevinRuntime(
+      options?.devinDependencies ?? defaultDevinProbeDependencies(),
+    );
   }
 
   const runner = options?.execFile ?? execFileAsync;
@@ -232,6 +275,201 @@ export async function probeAgentRuntime(
       detail: error.message || String(err),
     };
   }
+}
+
+function devinHealth(
+  status: AgentRuntimeHealth['status'],
+  detail: string,
+  checkedAt: string,
+  version: string | null = null,
+): AgentRuntimeHealth {
+  return {
+    cli: 'devin',
+    executable: 'devin',
+    status,
+    version,
+    checkedAt,
+    detail,
+  };
+}
+
+function clearVerifiedDevinAliases(): void {
+  verifiedDevinAliases = new Set();
+}
+
+function parseAdvertisedDevinModelExamples(help: string): Set<string> {
+  const aliases = new Set<string>();
+  for (const line of help.split(/\r?\n/)) {
+    if (!/examples?\s*:/i.test(line)) continue;
+    const examples = line
+      .replace(/^.*?examples?\s*:/i, '')
+      .replace(/[()]/g, ' ');
+    for (const token of examples.split(/[\s,|]+/)) {
+      const alias = token.trim();
+      if (/^[a-z0-9][a-z0-9._-]*$/i.test(alias)) aliases.add(alias);
+    }
+  }
+  return aliases;
+}
+
+function helpAdvertisesCapability(help: string, capability: string): boolean {
+  const escaped = capability.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|\\s)${escaped}(?=\\s|[=<]|$)`, 'm').test(help);
+}
+
+export async function probeDevinRuntime(
+  deps: DevinProbeDependencies,
+): Promise<AgentRuntimeHealth> {
+  const checkedAt = new Date().toISOString();
+  if (deps.credentialPath === null) {
+    clearVerifiedDevinAliases();
+    return devinHealth(
+      'error',
+      'Configure an absolute DEVIN_CREDENTIAL_PATH for the NanoCrab service user',
+      checkedAt,
+    );
+  }
+
+  const fail = (detail: string, version: string | null = null) => {
+    clearVerifiedDevinAliases();
+    return devinHealth('error', detail, checkedAt, version);
+  };
+  const credentialPath = deps.credentialPath;
+  if (!path.isAbsolute(credentialPath)) {
+    return fail(
+      'Configure an absolute DEVIN_CREDENTIAL_PATH for the NanoCrab service user',
+    );
+  }
+  if (deps.platform !== 'linux' && deps.platform !== 'darwin') {
+    return fail('Devin host runner requires Linux or macOS sandbox support');
+  }
+
+  try {
+    const [canonicalPath, linkStats, fileStats] = await Promise.all([
+      deps.realpath(credentialPath),
+      deps.lstat(credentialPath),
+      deps.stat(credentialPath),
+    ]);
+    if (
+      canonicalPath !== credentialPath ||
+      linkStats.isSymbolicLink() ||
+      !fileStats.isFile() ||
+      fileStats.uid !== deps.getuid() ||
+      (fileStats.mode & 0o777) !== 0o600
+    ) {
+      return fail(
+        'DEVIN_CREDENTIAL_PATH must be a canonical service-user-owned regular file with mode 0600',
+      );
+    }
+  } catch {
+    return fail(
+      'DEVIN_CREDENTIAL_PATH must be a canonical service-user-owned regular file with mode 0600',
+    );
+  }
+
+  const sandboxExecutable =
+    deps.platform === 'linux' ? '/usr/bin/bwrap' : '/usr/bin/sandbox-exec';
+  let sandboxAvailable = false;
+  try {
+    sandboxAvailable = await deps.commandAvailable(sandboxExecutable);
+  } catch {
+    sandboxAvailable = false;
+  }
+  if (!sandboxAvailable) {
+    return fail(
+      `Required sandbox executable ${sandboxExecutable} is unavailable`,
+    );
+  }
+
+  const options = {
+    env: buildDevinChildEnvironment(deps.env),
+    timeout: DEVIN_PROBE_TIMEOUT_MS,
+  };
+  let version: string | null = null;
+  try {
+    const versionResult = await deps.execFile('devin', ['--version'], options);
+    version = parseVersion(versionResult.stdout);
+    const helpResult = await deps.execFile('devin', ['--help'], options);
+    if (
+      DEVIN_REQUIRED_CAPABILITIES.some(
+        (capability) =>
+          !helpAdvertisesCapability(helpResult.stdout, capability),
+      )
+    ) {
+      return fail(
+        'Installed Devin CLI lacks required host-runner capabilities',
+        version,
+      );
+    }
+
+    const advertised = parseAdvertisedDevinModelExamples(helpResult.stdout);
+    const configuredAliases = new Set(Object.values(DEVIN_CLI_MODEL_ALIASES));
+    if ([...configuredAliases].some((alias) => !advertised.has(alias))) {
+      return fail(
+        'Installed Devin CLI does not advertise every configured model alias',
+        version,
+      );
+    }
+
+    try {
+      await deps.execFile('devin', ['auth', 'status'], options);
+    } catch {
+      clearVerifiedDevinAliases();
+      return devinHealth(
+        'unauthenticated',
+        'Run devin auth login as the NanoCrab service user',
+        checkedAt,
+        version,
+      );
+    }
+
+    verifiedDevinAliases = new Set(configuredAliases);
+    return devinHealth(
+      'healthy',
+      'Devin host runner is ready',
+      checkedAt,
+      version,
+    );
+  } catch (error: unknown) {
+    const code = (error as { code?: string }).code;
+    clearVerifiedDevinAliases();
+    if (code === 'ENOENT') {
+      return devinHealth('missing', 'executable devin not found', checkedAt);
+    }
+    return devinHealth(
+      'error',
+      'Unable to verify Devin host runner readiness',
+      checkedAt,
+      version,
+    );
+  }
+}
+
+function defaultDevinProbeDependencies(): DevinProbeDependencies {
+  return {
+    execFile: async (executable, args, options) => {
+      const result = await execFileAsync(executable, [...args], options);
+      return {
+        stdout: String(result.stdout ?? ''),
+        stderr: String(result.stderr ?? ''),
+      };
+    },
+    realpath: (value) => fs.promises.realpath(value),
+    stat: (value) => fs.promises.stat(value),
+    lstat: (value) => fs.promises.lstat(value),
+    getuid: () => process.getuid?.() ?? -1,
+    platform: process.platform,
+    commandAvailable: async (command) => {
+      try {
+        await fs.promises.access(command, fs.constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    env: process.env,
+    credentialPath: DEVIN_CREDENTIAL_PATH,
+  };
 }
 
 function parseVersion(output: string): string | null {
