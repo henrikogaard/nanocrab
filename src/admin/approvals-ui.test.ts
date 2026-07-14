@@ -207,6 +207,7 @@ describe('Approval inbox UI wiring', () => {
     const source = fs.readFileSync(appPath, 'utf8');
 
     expect(source).toContain("api('/agents/coding/runtimes')");
+    expect(source).toContain('.then(normalizeCodingRuntimeCatalog)');
     expect(source).toContain('isCodingRuntimeFallbackApproval');
     expect(source).toContain('Runner CLI');
     expect(source).toContain('Provider');

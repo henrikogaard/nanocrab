@@ -97,7 +97,49 @@ function loadCommandPalette() {
   return context.window.NanoCommandPalette;
 }
 
+function loadSharedUi() {
+  const context: any = {
+    window: {},
+    document: {
+      createElement: () => ({ textContent: '', innerHTML: '' }),
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(sharedUiPath, 'utf8'), context);
+  return context.window.NanoShared;
+}
+
 describe('App shell accessibility UI', () => {
+  it('fails closed when a coding runtime catalog response is malformed', () => {
+    const shared = loadSharedUi();
+    const validRuntime = {
+      cli: 'codex',
+      provider: 'codex',
+      model: 'gpt-5.4',
+      cliModel: null,
+      available: true,
+      readiness: {
+        cli: 'codex',
+        executable: 'codex',
+        status: 'healthy',
+        version: '1.0.0',
+        checkedAt: '2026-07-14T00:00:00.000Z',
+        detail: 'ready',
+      },
+    };
+
+    expect(shared.normalizeCodingRuntimeCatalog([validRuntime])).toEqual({
+      runtimes: [validRuntime],
+      error: '',
+    });
+    for (const malformed of [{ ok: true }, [null], [{ cli: 'codex' }]]) {
+      expect(shared.normalizeCodingRuntimeCatalog(malformed)).toEqual({
+        runtimes: [],
+        error: 'Coding runtime catalog returned an unexpected response',
+      });
+    }
+  });
+
   it('adds a keyboard skip link and main content landmark to the dashboard shell', () => {
     const source = fs.readFileSync(appPath, 'utf8');
     const shellSource = fs.readFileSync(shellUiPath, 'utf8');

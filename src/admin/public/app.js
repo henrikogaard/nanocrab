@@ -2272,7 +2272,7 @@ async function renderApprovals(el) {
   const [allApprovals, runtimeCatalog] = await Promise.all([
     api(`/approvals?${query}`),
     api('/agents/coding/runtimes')
-      .then((runtimes) => ({ runtimes, error: '' }))
+      .then(normalizeCodingRuntimeCatalog)
       .catch((err) => ({
         runtimes: [],
         error: err?.message || 'Coding runtime catalog unavailable',

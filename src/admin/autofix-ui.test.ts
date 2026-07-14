@@ -83,6 +83,8 @@ describe('GitHub Autofix Code automation UI', () => {
     const source = fs.readFileSync(pagePath, 'utf8');
 
     expect(source).toContain("api('/agents/coding/runtimes')");
+    expect(source).toContain('normalizeCodingRuntimeCatalog');
+    expect(source).toContain('loadIssues.push(runtimeCatalog.error)');
     expect(source).toContain('Runner CLI');
     expect(source).toContain('Provider');
     expect(source).toContain('Model');

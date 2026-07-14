@@ -1114,10 +1114,16 @@ async function renderAgents(el) {
         loadIssues.push('Coding job queue unavailable');
         return [];
       }),
-      api('/agents/coding/runtimes').catch(() => {
-        loadIssues.push('Coding runtime catalog unavailable');
-        return [];
-      }),
+      api('/agents/coding/runtimes')
+        .then((value) => {
+          const runtimeCatalog = normalizeCodingRuntimeCatalog(value);
+          if (runtimeCatalog.error) loadIssues.push(runtimeCatalog.error);
+          return runtimeCatalog.runtimes;
+        })
+        .catch(() => {
+          loadIssues.push('Coding runtime catalog unavailable');
+          return [];
+        }),
       api('/agents/providers').catch(() => {
         loadIssues.push('Agent provider catalog unavailable');
         return [];

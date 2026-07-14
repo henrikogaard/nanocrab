@@ -632,10 +632,16 @@ async function renderAutofix(el) {
         loadIssues.push('Group delivery targets unavailable');
         return [];
       }),
-      api('/agents/coding/runtimes').catch(() => {
-        loadIssues.push('Coding runtime catalog unavailable');
-        return [];
-      }),
+      api('/agents/coding/runtimes')
+        .then((value) => {
+          const runtimeCatalog = normalizeCodingRuntimeCatalog(value);
+          if (runtimeCatalog.error) loadIssues.push(runtimeCatalog.error);
+          return runtimeCatalog.runtimes;
+        })
+        .catch(() => {
+          loadIssues.push('Coding runtime catalog unavailable');
+          return [];
+        }),
       api('/webhooks/github-health').catch(() => {
         loadIssues.push('GitHub webhook health unavailable');
         return null;
