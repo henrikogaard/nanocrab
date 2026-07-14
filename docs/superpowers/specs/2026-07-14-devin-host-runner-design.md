@@ -66,7 +66,7 @@ The runner must preserve:
 | Execution boundary   | One-shot host-native Devin CLI process                                          |
 | Runtime selection    | Persisted `runnerCli`, sourced from `actualRuntime.cli`                         |
 | Provider identity    | Existing provider/model remain separate from CLI                                |
-| Authentication       | Existing host Devin authentication, used in place                               |
+| Authentication       | Planned future handoff; currently disabled and never mounted/read             |
 | Credential exposure  | No credential copy, mount, argument, generated file, or child environment value |
 | Filesystem isolation | Required Devin sandbox plus strict generated permission scopes                  |
 | Git access           | Dedicated host Git subprocesses with Git-only askpass environment               |
@@ -451,7 +451,8 @@ directory remains writable for all commands, and host `/` is never bound.
 The broker canonicalizes the temp directory once and uses that resolved path
 for every command's sandbox mount/profile and child environment; it never
 reuses an unverified symlink spelling after validation.
-macOS allows reads only from the explicit runtime roots, workspace, and
+The intended future macOS profile allows reads only from the explicit runtime
+roots, workspace, and
 temporary directory, denies network, allows temp writes for every command, and
 allows workspace writes only for approved implement/direct build and test
 commands; it must not use a global `allow file-read*`. The service home, Devin
@@ -461,7 +462,10 @@ service home may be exposed individually, but exposing the home itself or a
 root overlapping a protected path is denied. If the required platform
 primitive or isolation inputs are absent, readiness fails closed. A repository
 whose command needs network or an unlisted host path fails with an
-operator-visible restriction; issue #129 adds no bypass.
+operator-visible restriction; issue #129 adds no bypass. The current
+implementation keeps the Devin host adapter disabled on macOS and does not
+generate this profile until the authentication handoff and profile receive a
+separate security review.
 
 The mode-`0555` broker launcher uses a canonical Node executable validated by
 readiness and rechecked as a descendant of an approved runtime read root. It
