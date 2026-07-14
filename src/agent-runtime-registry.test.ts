@@ -404,6 +404,38 @@ describe('agent runtime registry', () => {
       nodeExecutable: '/usr/local/bin/node',
       sandboxExecutable: '/usr/bin/bwrap',
       trustedRuntimeReadRoots: ['/opt/devin', '/usr/local', '/usr/bin'],
+      trustedRuntimeReadFiles: [],
+    });
+  });
+
+  it('records only canonical optional system files for the host sandbox', async () => {
+    const deps = healthyDevinProbe({
+      trustedRuntimeReadFileCandidates: ['/etc/resolv.conf'],
+    });
+
+    await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
+      status: 'healthy',
+    });
+    expect(getVerifiedDevinRuntimeContext()).toMatchObject({
+      trustedRuntimeReadFiles: ['/etc/resolv.conf'],
+    });
+  });
+
+  it('skips symlinked optional system files without failing readiness', async () => {
+    const deps = healthyDevinProbe({
+      trustedRuntimeReadFileCandidates: ['/etc/resolv.conf'],
+    });
+    deps.realpath.mockImplementation(async (value: string) =>
+      value === '/etc/resolv.conf'
+        ? '/run/systemd/resolve/stub-resolv.conf'
+        : value,
+    );
+
+    await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
+      status: 'healthy',
+    });
+    expect(getVerifiedDevinRuntimeContext()).toMatchObject({
+      trustedRuntimeReadFiles: [],
     });
   });
 

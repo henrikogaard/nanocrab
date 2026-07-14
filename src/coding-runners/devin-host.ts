@@ -98,6 +98,7 @@ export function buildDevinChildEnvironment(
 
 export interface SandboxedDevinLaunchInput {
   sandboxExecutable: '/usr/bin/bwrap' | '/usr/bin/sandbox-exec';
+  stageKind?: DevinStageKind;
   workspace: string;
   executable: string;
   args: readonly string[];
@@ -208,8 +209,7 @@ async function assertMinimalLinuxSandboxLayout(
     seenReadOnlyPaths.add(readOnlyPath);
     if (
       pathsOverlap(readOnlyPath, input.workspace) ||
-      pathsOverlap(readOnlyPath, temporaryDirectory) ||
-      trustedRuntimeReadRoots.some((root) => pathsOverlap(readOnlyPath, root))
+      pathsOverlap(readOnlyPath, temporaryDirectory)
     ) {
       throw new Error('Read-only launch path overlaps a sandbox root');
     }
@@ -321,12 +321,18 @@ export async function buildSandboxedDevinLaunch(
     const trustedRuntimeReadRoots = input.trustedRuntimeReadRoots ?? [];
     const temporaryDirectory = input.temporaryDirectory ?? '';
     const readOnlyPaths = input.readOnlyPaths ?? [];
+    const explicitReadOnlyPaths = readOnlyPaths.filter(
+      (readOnlyPath) =>
+        !trustedRuntimeReadRoots.some((root) =>
+          isSandboxPathAtOrBelow(readOnlyPath, root),
+        ),
+    );
     const mountDirectories = [
       ...trustedRuntimeReadRoots,
       input.workspace,
       temporaryDirectory,
       gitDir,
-      ...readOnlyPaths.map((value) => path.dirname(value)),
+      ...explicitReadOnlyPaths.map((value) => path.dirname(value)),
     ];
     return {
       executable: input.sandboxExecutable,
@@ -346,7 +352,9 @@ export async function buildSandboxedDevinLaunch(
           runtimeRoot,
           runtimeRoot,
         ]),
-        '--bind',
+        input.stageKind === 'planning' || input.stageKind === 'review'
+          ? '--ro-bind'
+          : '--bind',
         input.workspace,
         input.workspace,
         '--ro-bind',
@@ -355,7 +363,7 @@ export async function buildSandboxedDevinLaunch(
         '--bind',
         temporaryDirectory,
         temporaryDirectory,
-        ...readOnlyPaths.flatMap((readOnlyPath) => [
+        ...explicitReadOnlyPaths.flatMap((readOnlyPath) => [
           '--ro-bind',
           readOnlyPath,
           readOnlyPath,
@@ -370,6 +378,10 @@ export async function buildSandboxedDevinLaunch(
   }
   if (input.sandboxExecutable === '/usr/bin/sandbox-exec') {
     const gitFilters = `(literal ${JSON.stringify(gitDir)}) (subpath ${JSON.stringify(gitDir)})`;
+    const workspaceWriteDeny =
+      input.stageKind === 'planning' || input.stageKind === 'review'
+        ? `(deny file-write* (subpath ${JSON.stringify(input.workspace)}))`
+        : null;
     return {
       executable: input.sandboxExecutable,
       args: [
@@ -380,6 +392,7 @@ export async function buildSandboxedDevinLaunch(
           '(deny file-link)',
           '(deny file-write-create (vnode-type SYMLINK))',
           `(deny file-write* ${gitFilters})`,
+          ...(workspaceWriteDeny ? [workspaceWriteDeny] : []),
         ].join(' '),
         '--',
         input.executable,
@@ -917,6 +930,7 @@ export function createDevinHostRunner(
       let devinCredentialPath: string;
       let nanocrabConfigRoot: string;
       let temporaryDirectory: string;
+      let commandBrokerModulePath: string;
       try {
         [
           workspace,
@@ -925,6 +939,7 @@ export function createDevinHostRunner(
           devinCredentialPath,
           nanocrabConfigRoot,
           temporaryDirectory,
+          commandBrokerModulePath,
         ] = await Promise.all([
           deps.realpath(input.workspace),
           deps.realpath(input.promptFile),
@@ -932,6 +947,7 @@ export function createDevinHostRunner(
           deps.realpath(deps.devinCredentialPath),
           deps.realpath(deps.nanocrabConfigRoot),
           deps.realpath(deps.environmentSource.TMPDIR ?? '/tmp'),
+          deps.realpath(deps.commandBrokerModulePath),
         ]);
       } catch {
         return failedBeforeSpawn(
@@ -969,7 +985,7 @@ export function createDevinHostRunner(
           stageKind,
           workspace,
           jobRoot,
-          commandBrokerModulePath: deps.commandBrokerModulePath,
+          commandBrokerModulePath,
           sandboxExecutable: runtime.sandboxExecutable,
           nodeExecutable: runtime.nodeExecutable,
           home,
@@ -1024,12 +1040,19 @@ export function createDevinHostRunner(
       try {
         launch = await deps.buildSandboxedLaunch({
           sandboxExecutable: runtime.sandboxExecutable,
+          stageKind,
           workspace,
           executable: runtime.executable,
           args: devinArgs,
           trustedRuntimeReadRoots: runtime.trustedRuntimeReadRoots,
           temporaryDirectory,
-          readOnlyPaths: [promptFile, agentConfigPath],
+          readOnlyPaths: [
+            promptFile,
+            agentConfigPath,
+            brokerPath,
+            commandBrokerModulePath,
+            ...(runtime.trustedRuntimeReadFiles ?? []),
+          ],
         });
       } catch {
         return failedBeforeSpawn(

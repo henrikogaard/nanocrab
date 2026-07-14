@@ -44,7 +44,11 @@ const trustedSandboxFilesystem = {
           '/usr/local',
           '/usr/bin',
         ].includes(value),
-      isFile: () => value.endsWith('.txt') || value.endsWith('.json'),
+      isFile: () =>
+        value.endsWith('.txt') ||
+        value.endsWith('.json') ||
+        value.endsWith('.js') ||
+        value.endsWith('nanocrab-job-exec'),
       isSymbolicLink: () => false,
     }) as fs.Stats,
   realpath: async (value: string) => value,
@@ -177,6 +181,7 @@ describe('Devin process sandbox', () => {
   const devinArgs = ['--prompt-file', '/jobs/job/.nanocrab/prompt.txt'];
   const launchInput = {
     sandboxExecutable: '/usr/bin/bwrap' as const,
+    stageKind: 'planning' as const,
     workspace: '/jobs/job/repo',
     executable: '/opt/devin/bin/devin',
     args: devinArgs,
@@ -185,6 +190,8 @@ describe('Devin process sandbox', () => {
     readOnlyPaths: [
       '/jobs/job/.nanocrab/prompt.txt',
       '/jobs/job/.nanocrab/devin-agent.json',
+      '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
+      '/opt/nanocrab/dist/coding-runners/command-broker.js',
     ],
   };
 
@@ -222,11 +229,19 @@ describe('Devin process sandbox', () => {
         '--dir',
         '/jobs/job',
         '--dir',
+        '/opt/nanocrab',
+        '--dir',
         '/jobs/job/repo',
         '--dir',
         '/jobs/job/.nanocrab',
         '--dir',
+        '/opt/nanocrab/dist',
+        '--dir',
         '/jobs/job/repo/.git',
+        '--dir',
+        '/jobs/job/.nanocrab/bin',
+        '--dir',
+        '/opt/nanocrab/dist/coding-runners',
         '--ro-bind',
         '/opt/devin',
         '/opt/devin',
@@ -236,7 +251,7 @@ describe('Devin process sandbox', () => {
         '--ro-bind',
         '/usr/bin',
         '/usr/bin',
-        '--bind',
+        '--ro-bind',
         '/jobs/job/repo',
         '/jobs/job/repo',
         '--ro-bind',
@@ -251,6 +266,12 @@ describe('Devin process sandbox', () => {
         '--ro-bind',
         '/jobs/job/.nanocrab/devin-agent.json',
         '/jobs/job/.nanocrab/devin-agent.json',
+        '--ro-bind',
+        '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
+        '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
+        '--ro-bind',
+        '/opt/nanocrab/dist/coding-runners/command-broker.js',
+        '/opt/nanocrab/dist/coding-runners/command-broker.js',
         '--chdir',
         '/jobs/job/repo',
         '--',
@@ -295,6 +316,33 @@ describe('Devin process sandbox', () => {
         trustedSandboxFilesystem,
       ),
     ).rejects.toThrow(/overlap/i);
+  });
+
+  it('accepts broker files already covered by a trusted runtime root', async () => {
+    const launch = await buildSandboxedDevinLaunch(
+      {
+        ...launchInput,
+        readOnlyPaths: ['/usr/bin/command-broker.js'],
+      },
+      trustedSandboxFilesystem,
+    );
+    expect(launch.args).not.toContain('/usr/bin/command-broker.js');
+    expect(launch.args).toEqual(
+      expect.arrayContaining(['--ro-bind', '/usr/bin', '/usr/bin']),
+    );
+  });
+
+  it('denies workspace writes for planning on macOS', async () => {
+    const launch = await buildSandboxedDevinLaunch(
+      {
+        ...launchInput,
+        sandboxExecutable: '/usr/bin/sandbox-exec',
+      },
+      trustedSandboxFilesystem,
+    );
+    expect(launch.args[1]).toContain(
+      '(deny file-write* (subpath "/jobs/job/repo"))',
+    );
   });
 
   it('rejects a pre-existing workspace alias to Git metadata before macOS launch', async () => {
@@ -1068,6 +1116,7 @@ describe('Devin host process runner', () => {
     );
     expect(harness.buildSandboxedLaunch).toHaveBeenCalledWith({
       sandboxExecutable: '/usr/bin/bwrap',
+      stageKind: 'direct',
       workspace: '/jobs/job/owner__repo',
       executable: '/opt/devin/bin/devin',
       args: [
@@ -1089,6 +1138,8 @@ describe('Devin host process runner', () => {
       readOnlyPaths: [
         '/jobs/job/.nanocrab/prompt.txt',
         '/jobs/job/.nanocrab/devin-agent.json',
+        '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
+        '/opt/nanocrab/dist/coding-runners/command-broker.js',
       ],
     });
     expect(harness.spawn).toHaveBeenCalledWith(
@@ -1120,11 +1171,19 @@ describe('Devin host process runner', () => {
         '--dir',
         '/jobs/job',
         '--dir',
+        '/opt/nanocrab',
+        '--dir',
         '/jobs/job/owner__repo',
         '--dir',
         '/jobs/job/.nanocrab',
         '--dir',
+        '/opt/nanocrab/dist',
+        '--dir',
         '/jobs/job/owner__repo/.git',
+        '--dir',
+        '/jobs/job/.nanocrab/bin',
+        '--dir',
+        '/opt/nanocrab/dist/coding-runners',
         '--ro-bind',
         '/opt/devin',
         '/opt/devin',
@@ -1149,6 +1208,12 @@ describe('Devin host process runner', () => {
         '--ro-bind',
         '/jobs/job/.nanocrab/devin-agent.json',
         '/jobs/job/.nanocrab/devin-agent.json',
+        '--ro-bind',
+        '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
+        '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
+        '--ro-bind',
+        '/opt/nanocrab/dist/coding-runners/command-broker.js',
+        '/opt/nanocrab/dist/coding-runners/command-broker.js',
         '--chdir',
         '/jobs/job/owner__repo',
         '--',

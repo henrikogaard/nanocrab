@@ -29,6 +29,7 @@ export interface VerifiedDevinRuntimeContext {
   readonly nodeExecutable: string;
   readonly sandboxExecutable: '/usr/bin/bwrap' | '/usr/bin/sandbox-exec';
   readonly trustedRuntimeReadRoots: readonly string[];
+  readonly trustedRuntimeReadFiles?: readonly string[];
 }
 
 interface VerifiedDevinState {
@@ -61,6 +62,7 @@ export interface DevinProbeDependencies {
   executableSearchDirectories: readonly string[];
   nodeExecutable: string;
   trustedRuntimeRootCandidates: readonly string[];
+  trustedRuntimeReadFileCandidates?: readonly string[];
 }
 
 export function getVerifiedDevinAliases(): ReadonlySet<string> {
@@ -74,6 +76,9 @@ export function getVerifiedDevinRuntimeContext(): VerifiedDevinRuntimeContext | 
     trustedRuntimeReadRoots: [
       ...verifiedDevinState.context.trustedRuntimeReadRoots,
     ],
+    trustedRuntimeReadFiles: verifiedDevinState.context.trustedRuntimeReadFiles
+      ? [...verifiedDevinState.context.trustedRuntimeReadFiles]
+      : [],
   };
 }
 
@@ -407,7 +412,7 @@ async function verifyDevinRuntimeContext(
     try {
       const canonical = await deps.realpath(candidate);
       const stats = await deps.stat(canonical);
-      if (canonical !== candidate || !stats.isDirectory()) return null;
+      if (canonical !== candidate || !stats.isDirectory()) continue;
       if (!canonicalRoots.includes(canonical)) canonicalRoots.push(canonical);
     } catch {
       // Candidates are platform-specific; only verified existing roots survive.
@@ -432,11 +437,32 @@ async function verifyDevinRuntimeContext(
     }
   }
 
+  const trustedRuntimeReadFiles: string[] = [];
+  for (const candidate of deps.trustedRuntimeReadFileCandidates ?? []) {
+    if (
+      !path.isAbsolute(candidate) ||
+      path.parse(candidate).root === candidate
+    ) {
+      return null;
+    }
+    try {
+      const canonical = await deps.realpath(candidate);
+      const stats = await deps.stat(canonical);
+      if (canonical !== candidate || !stats.isFile()) continue;
+      if (!trustedRuntimeReadFiles.includes(canonical)) {
+        trustedRuntimeReadFiles.push(canonical);
+      }
+    } catch {
+      // Platform-specific files are optional when absent on the host.
+    }
+  }
+
   return {
     executable: canonicalDevin,
     nodeExecutable: canonicalNode,
     sandboxExecutable,
     trustedRuntimeReadRoots: trustedRoots,
+    trustedRuntimeReadFiles,
   };
 }
 
@@ -592,6 +618,9 @@ export async function probeDevinRuntime(
         trustedRuntimeReadRoots: Object.freeze([
           ...runtimeContext.trustedRuntimeReadRoots,
         ]),
+        trustedRuntimeReadFiles: Object.freeze([
+          ...(runtimeContext.trustedRuntimeReadFiles ?? []),
+        ]),
       }),
     });
     return devinHealth(
@@ -668,6 +697,14 @@ function defaultDevinProbeDependencies(): DevinProbeDependencies {
       childEnvironment.PATH ?? '',
       process.execPath,
     ),
+    trustedRuntimeReadFileCandidates:
+      process.platform === 'linux'
+        ? [
+            '/etc/resolv.conf',
+            '/etc/hosts',
+            '/etc/ssl/certs/ca-certificates.crt',
+          ]
+        : [],
   };
 }
 
@@ -682,6 +719,8 @@ function defaultTrustedRuntimeRootCandidates(
       .map((directory) => path.dirname(directory)),
     path.dirname(path.dirname(nodeExecutable)),
     '/usr/bin',
+    '/lib',
+    '/lib64',
   ];
   return [
     ...new Set(

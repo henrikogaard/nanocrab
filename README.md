@@ -140,9 +140,11 @@ as an attempt-owned process with constrained model tools and an OS-sandboxed
 command broker that exposes only the approved workspace. Before launch,
 NanoCrab fails closed on workspace symlinks or Git-metadata hardlink aliases and
 wraps the whole Devin process so `.git` is read-only. Linux uses a new PID
-namespace, binds the host root, mounts a private `/proc`, then rebinds `.git`
-read-only; macOS denies `.git` writes, file links, and symlink creation. Both
-paths emit diff, changed-file, and test summaries for dashboard review.
+namespace from an empty root, mounts only verified runtime paths plus the
+workspace, sandbox temp, prompt, configuration, and broker files, then rebinds
+`.git` read-only; macOS denies `.git` writes, file links, and symlink creation.
+Neither path mounts the Devin credential or service home. Both paths emit diff,
+changed-file, and test summaries for dashboard review.
 Implementation requires an approved `coding-implement` record tied to the job
 id before workspace mutation. Commit, push, and GitHub PR creation require an
 approved `coding-open-pr` record tied to the same job id before the trusted host
