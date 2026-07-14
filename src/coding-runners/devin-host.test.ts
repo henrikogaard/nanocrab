@@ -168,27 +168,26 @@ describe('Devin process sandbox', () => {
   const devinArgs = ['--prompt-file', '/jobs/job/.nanocrab/prompt.txt'];
 
   it('overlays Git metadata read-only around the entire Linux Devin process', async () => {
-    await expect(
-      buildSandboxedDevinLaunch(
-        {
-          sandboxExecutable: '/usr/bin/bwrap',
-          workspace: '/jobs/job/repo',
-          executable: '/opt/devin/bin/devin',
-          args: devinArgs,
-        },
-        trustedSandboxFilesystem,
-      ),
-    ).resolves.toEqual({
+    const launch = await buildSandboxedDevinLaunch(
+      {
+        sandboxExecutable: '/usr/bin/bwrap',
+        workspace: '/jobs/job/repo',
+        executable: '/opt/devin/bin/devin',
+        args: devinArgs,
+      },
+      trustedSandboxFilesystem,
+    );
+    expect(launch).toEqual({
       executable: '/usr/bin/bwrap',
       args: [
         '--die-with-parent',
         '--new-session',
         '--unshare-pid',
-        '--proc',
-        '/proc',
         '--bind',
         '/',
         '/',
+        '--proc',
+        '/proc',
         '--ro-bind',
         '/jobs/job/repo/.git',
         '/jobs/job/repo/.git',
@@ -199,6 +198,12 @@ describe('Devin process sandbox', () => {
         ...devinArgs,
       ],
     });
+    expect(launch.args.indexOf('--bind')).toBeLessThan(
+      launch.args.indexOf('--proc'),
+    );
+    expect(launch.args.indexOf('--proc')).toBeLessThan(
+      launch.args.indexOf('--ro-bind'),
+    );
   });
 
   it('rejects a pre-existing workspace alias to Git metadata before macOS launch', async () => {
@@ -995,11 +1000,11 @@ describe('Devin host process runner', () => {
         '--die-with-parent',
         '--new-session',
         '--unshare-pid',
-        '--proc',
-        '/proc',
         '--bind',
         '/',
         '/',
+        '--proc',
+        '/proc',
         '--ro-bind',
         '/jobs/job/owner__repo/.git',
         '/jobs/job/owner__repo/.git',
