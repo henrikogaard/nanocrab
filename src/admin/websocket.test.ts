@@ -34,6 +34,7 @@ import {
   appendToSessionLog,
   readSessionLog,
   finalizeSessionFile,
+  getTerminalSessionAttachment,
   loadHistoricalSessions,
   listTerminalSessions,
   pruneOldSessions,
@@ -110,6 +111,25 @@ describe('file-backed terminal sessions', () => {
         }),
       ]),
     );
+  });
+
+  it('caches an empty finalized session for historical read-only attachment', () => {
+    createSessionFile('term-empty', 'alice');
+    finalizeSessionFile('term-empty');
+
+    expect(listTerminalSessions()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'term-empty',
+          transcriptBytes: 0,
+          active: false,
+        }),
+      ]),
+    );
+    expect(getTerminalSessionAttachment('term-empty')).toEqual({
+      status: 'historical',
+      transcript: '',
+    });
   });
 
   it('loadHistoricalSessions loads from .log files', () => {

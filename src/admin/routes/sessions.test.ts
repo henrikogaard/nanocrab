@@ -386,6 +386,26 @@ describe('terminal session API', () => {
     );
   });
 
+  it('denies transcript disclosure and deletion for disk-only orphan logs', async () => {
+    const orphanPath = path.join(SESSIONS_DIR, 'disk-only-orphan.log');
+    fs.writeFileSync(orphanPath, 'orphan private output\n');
+
+    await withSessionsServer('owner', async (baseUrl) => {
+      const transcript = await fetch(
+        `${baseUrl}/api/sessions/terminal/disk-only-orphan/transcript`,
+      );
+      expect(transcript.status).toBe(403);
+      expect(await transcript.text()).not.toContain('orphan private output');
+
+      const deletion = await fetch(
+        `${baseUrl}/api/sessions/terminal/disk-only-orphan`,
+        { method: 'DELETE' },
+      );
+      expect(deletion.status).toBe(403);
+      expect(fs.existsSync(orphanPath)).toBe(true);
+    });
+  });
+
   it('lists cockpit session summaries with stable fields from transcripts', () => {
     writeTranscript('main', 'run-1', [
       {

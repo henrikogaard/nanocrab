@@ -28,7 +28,7 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { logger } from './logger.js';
-import { buildMistralVibeShellCommand } from './mistral-vibe-adapter.js';
+import { buildMistralVibeShellBlock } from './mistral-vibe-adapter.js';
 import {
   createApproval,
   findPendingApprovalForTarget,
@@ -1048,7 +1048,7 @@ function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
   fs.mkdirSync(metadataDir, { recursive: true });
   if (job.provider === 'mistral') writeVibeConfig(metadataDir, job);
   if (job.provider === 'pi') writePiConfig(metadataDir);
-  const mistralVibeShellCommand = buildMistralVibeShellCommand({
+  const mistralVibeShellBlock = buildMistralVibeShellBlock({
     prompt: '"$PROMPT"',
     maxTurns: '"$CODING_JOB_MAX_TURNS"',
     maxPrice: '"$CODING_JOB_MAX_BUDGET_USD"',
@@ -1146,7 +1146,7 @@ function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
       '  mistral)',
       '    VIBE_HOME=/workspace/coding-job/.nanocrab/vibe-home',
       '    MISTRAL_API_KEY=placeholder',
-      `    ${mistralVibeShellCommand}`,
+      ...mistralVibeShellBlock.map((line) => `    ${line}`),
       '    ;;',
       '  *)',
       '    echo "Unsupported coding provider: $JOB_PROVIDER" >&2',

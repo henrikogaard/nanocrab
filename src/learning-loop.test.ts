@@ -211,6 +211,20 @@ describe('learning-loop', () => {
       ).not.toContain(secret);
     });
 
+    it('uses changed-file field context so ordinary long paths are not treated as secrets', () => {
+      writeTestJobs([
+        createTestJob({
+          changedFiles: [
+            'src/generated/components/m4p9k2v7x3q8n6c1b5z0r4t9y2w7s8d3f6h1j5l0.ts',
+          ],
+        }),
+      ]);
+
+      expect(
+        deriveLearningFromRun('code-test-123', 'test-user'),
+      ).not.toBeNull();
+    });
+
     it('treats placeholder test prose as missing evidence', () => {
       writeTestJobs([
         createTestJob({

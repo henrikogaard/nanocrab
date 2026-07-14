@@ -168,7 +168,9 @@ function isGeneratedPathOrBranch(
   candidate: string,
   source: string,
   offset: number,
+  fieldContext: 'text' | 'path',
 ): boolean {
+  if (fieldContext === 'path') return true;
   const context = source.slice(Math.max(0, offset - 32), offset).toLowerCase();
   if (
     /^(?:nanocrab-code|code)-[a-z0-9-]+$/.test(candidate) &&
@@ -185,7 +187,10 @@ function isGeneratedPathOrBranch(
   );
 }
 
-function redactSecretText(value: string | null | undefined): {
+function redactSecretText(
+  value: string | null | undefined,
+  fieldContext: 'text' | 'path' = 'text',
+): {
   value: string;
   secretFound: boolean;
 } {
@@ -201,7 +206,7 @@ function redactSecretText(value: string | null | undefined): {
   redacted = redacted.replace(
     HIGH_ENTROPY_CANDIDATE_RE,
     (candidate, offset: number, source: string) =>
-      !isGeneratedPathOrBranch(candidate, source, offset) &&
+      !isGeneratedPathOrBranch(candidate, source, offset, fieldContext) &&
       isPlausibleHighEntropySecret(candidate)
         ? replaceSecret()
         : candidate,
@@ -214,8 +219,11 @@ function sanitizeLearningJob(job: CodingJob): {
   secretFound: boolean;
 } {
   let secretFound = false;
-  const sanitize = (value: string | null | undefined): string => {
-    const result = redactSecretText(value);
+  const sanitize = (
+    value: string | null | undefined,
+    fieldContext: 'text' | 'path' = 'text',
+  ): string => {
+    const result = redactSecretText(value, fieldContext);
     secretFound ||= result.secretFound;
     return result.value;
   };
@@ -226,7 +234,7 @@ function sanitizeLearningJob(job: CodingJob): {
     diffSummary: job.diffSummary ? sanitize(job.diffSummary) : null,
     testSummary: job.testSummary ? sanitize(job.testSummary) : null,
     output: sanitize(job.output),
-    changedFiles: job.changedFiles.map(sanitize),
+    changedFiles: job.changedFiles.map((file) => sanitize(file, 'path')),
   };
   return { job: sanitized, secretFound };
 }

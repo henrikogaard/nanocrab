@@ -93,6 +93,25 @@ export function buildMistralVibeShellCommand(
   return [command.command, ...command.args].join(' ');
 }
 
+export function buildMistralVibeShellBlock(
+  values: MistralVibeCommandValues,
+): string[] {
+  const command = buildMistralVibeShellCommand(values);
+  return [
+    'VIBE_STDERR_FILE="$(mktemp)"',
+    'trap \'rm -f "$VIBE_STDERR_FILE"\' EXIT',
+    'set +e',
+    `${command} 2>"$VIBE_STDERR_FILE"`,
+    'VIBE_EXIT_CODE=$?',
+    'set -e',
+    'if [ -s "$VIBE_STDERR_FILE" ]; then cat "$VIBE_STDERR_FILE" >&2; fi',
+    'if [ "$VIBE_EXIT_CODE" -ne 0 ]; then exit "$VIBE_EXIT_CODE"; fi',
+    'if [ -s "$VIBE_STDERR_FILE" ]; then exit 1; fi',
+    'rm -f "$VIBE_STDERR_FILE"',
+    'trap - EXIT',
+  ];
+}
+
 export function buildMistralVibeInvocation(
   input: MistralVibeInput,
 ): MistralVibeInvocation {

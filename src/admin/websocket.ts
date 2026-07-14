@@ -83,10 +83,13 @@ export function authorizeTerminalSessionAccess(
 ): TerminalSessionAccess {
   const indexed = loadSessionIndex().find((entry) => entry.id === sessionId);
   const active = terminals.get(sessionId);
-  const exists = Boolean(
-    indexed || active || historicalSessions.has(sessionId),
-  );
-  if (!exists) return 'not-found';
+  if (!indexed && !active) {
+    const logPath = sessionLogPath(sessionId);
+    const diskOnlyOrphan = Boolean(
+      historicalSessions.has(sessionId) || (logPath && fs.existsSync(logPath)),
+    );
+    return diskOnlyOrphan ? 'forbidden' : 'not-found';
+  }
   const owner = active?.owner || indexed?.owner;
   if (owner) return owner === username ? 'allowed' : 'forbidden';
   return operation === 'read' ? 'allowed' : 'forbidden';
@@ -247,8 +250,21 @@ export function finalizeSessionFile(sessionId: string): void {
     }
     saveSessionIndex(index);
   }
-  const transcript = readSessionLog(sessionId);
-  if (transcript) historicalSessions.set(sessionId, transcript);
+  if (entry) historicalSessions.set(sessionId, readSessionLog(sessionId));
+}
+
+export type TerminalSessionAttachment =
+  | { status: 'historical'; transcript: string }
+  | { status: 'not-found' };
+
+export function getTerminalSessionAttachment(
+  sessionId: string,
+): TerminalSessionAttachment {
+  if (!historicalSessions.has(sessionId)) return { status: 'not-found' };
+  return {
+    status: 'historical',
+    transcript: historicalSessions.get(sessionId) || '',
+  };
 }
 
 export function appendToSessionLog(sessionId: string, data: string): void {
@@ -478,8 +494,8 @@ export function initWebSocket(server: HttpServer): void {
               sessionId: sid,
             });
           } else {
-            const historical = historicalSessions.get(sid);
-            if (historical) {
+            const attachment = getTerminalSessionAttachment(sid);
+            if (attachment.status === 'historical') {
               send(ws, {
                 type: 'terminal_attach_result',
                 data: { status: 'historical', readOnly: true },
@@ -487,7 +503,7 @@ export function initWebSocket(server: HttpServer): void {
               });
               send(ws, {
                 type: 'terminal_output',
-                data: historical.slice(-50000),
+                data: attachment.transcript.slice(-50000),
                 sessionId: sid,
               });
               send(ws, {

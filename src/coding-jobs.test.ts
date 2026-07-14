@@ -1,4 +1,5 @@
 import fs from 'fs';
+import path from 'path';
 import { execFileSync, spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
@@ -87,6 +88,10 @@ import { readEnvFile } from './env.js';
 import { buildMistralVibeShellCommand } from './mistral-vibe-adapter.js';
 
 const mockedReadEnvFile = vi.mocked(readEnvFile);
+const { spawnSync: realSpawnSync } =
+  await vi.importActual<typeof import('node:child_process')>(
+    'node:child_process',
+  );
 
 const TEST_ROOT = '/tmp/nanocrab-coding-jobs-test';
 
@@ -115,6 +120,42 @@ function createFakeProcess() {
   proc.kill = vi.fn();
   proc.pid = 12345;
   return proc;
+}
+
+function runGeneratedMistralCase(
+  runScript: string,
+  fakeStderr = '',
+  fakeExit = 0,
+): ReturnType<typeof realSpawnSync> {
+  const match = runScript.match(/[ ]{2}mistral\)\n([\s\S]*?)\n[ ]{4};;/);
+  if (!match) throw new Error('Generated Mistral case was not found');
+  const fakeBin = path.join(TEST_ROOT, 'fake-vibe-bin');
+  fs.mkdirSync(fakeBin, { recursive: true });
+  fs.writeFileSync(
+    path.join(fakeBin, 'vibe'),
+    [
+      '#!/bin/sh',
+      'printf \'%s\\n\' \'{"result":"ok"}\'',
+      'if [ -n "${FAKE_VIBE_STDERR:-}" ]; then',
+      '  printf \'%s\\n\' "$FAKE_VIBE_STDERR" >&2',
+      'fi',
+      'exit "${FAKE_VIBE_EXIT:-0}"',
+      '',
+    ].join('\n'),
+    { mode: 0o700 },
+  );
+  return realSpawnSync('bash', ['-c', match[1]], {
+    encoding: 'utf-8',
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH || ''}`,
+      PROMPT: 'test prompt',
+      CODING_JOB_MAX_TURNS: '5',
+      CODING_JOB_MAX_BUDGET_USD: '1',
+      FAKE_VIBE_STDERR: fakeStderr,
+      FAKE_VIBE_EXIT: String(fakeExit),
+    },
+  });
 }
 
 describe('coding jobs', () => {
@@ -1001,16 +1042,36 @@ describe('coding jobs', () => {
       const jobRoot = firstMount.split(':')[0];
       const metadataDir = `${jobRoot}/.nanocrab`;
 
-      expect(fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8')).toContain(
+      const runScript = fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8');
+      expect(runScript).toContain(
         buildMistralVibeShellCommand({
           prompt: '"$PROMPT"',
           maxTurns: '"$CODING_JOB_MAX_TURNS"',
           maxPrice: '"$CODING_JOB_MAX_BUDGET_USD"',
         }),
       );
-      expect(fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8')).not.toMatch(
-        /--auto-approve|--workdir|--trust/,
+      expect(runScript).not.toMatch(/--auto-approve|--workdir|--trust/);
+      const successfulVibe = runGeneratedMistralCase(runScript);
+      expect(successfulVibe.status).toBe(0);
+      expect(successfulVibe.stdout).toContain('{"result":"ok"}');
+      expect(successfulVibe.stderr).toBe('');
+
+      const warningVibe = runGeneratedMistralCase(
+        runScript,
+        'provider warning',
       );
+      expect(warningVibe.status).not.toBe(0);
+      expect(warningVibe.stdout).toContain('{"result":"ok"}');
+      expect(warningVibe.stderr).toContain('provider warning');
+
+      const failedVibe = runGeneratedMistralCase(
+        runScript,
+        'provider failure',
+        7,
+      );
+      expect(failedVibe.status).toBe(7);
+      expect(failedVibe.stdout).toContain('{"result":"ok"}');
+      expect(failedVibe.stderr).toContain('provider failure');
       const config = fs.readFileSync(
         `${metadataDir}/vibe-home/config.toml`,
         'utf-8',
@@ -1045,7 +1106,10 @@ describe('coding jobs', () => {
     approveCodingJob(job.id, 'owner');
 
     await vi.waitFor(() => {
-      expect(getCodingJob(job.id)?.status).toBe('completed');
+      expect(getCodingJob(job.id)).toMatchObject({
+        status: 'completed',
+        failureReason: null,
+      });
     });
   });
 
