@@ -132,7 +132,108 @@ describe('App shell accessibility UI', () => {
       runtimes: [validRuntime],
       error: '',
     });
-    for (const malformed of [{ ok: true }, [null], [{ cli: 'codex' }]]) {
+    const validUnavailableRuntime = {
+      ...validRuntime,
+      cli: 'devin',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      cliModel: 'claude-sonnet-4',
+      available: false,
+      readiness: {
+        ...validRuntime.readiness,
+        cli: 'devin',
+        executable: 'devin',
+        status: 'unauthenticated',
+        version: null,
+        detail: 'Devin CLI is not authenticated',
+      },
+    };
+    expect(
+      shared.normalizeCodingRuntimeCatalog([validUnavailableRuntime]),
+    ).toEqual({ runtimes: [validUnavailableRuntime], error: '' });
+    const malformedRuntimeEntries = [
+      { ...validRuntime, cli: ' ' },
+      { ...validRuntime, provider: '' },
+      { ...validRuntime, model: ' gpt-5.4 ' },
+      { ...validRuntime, cliModel: undefined },
+      { ...validRuntime, cliModel: 42 },
+      { ...validRuntime, cliModel: ' ' },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, status: 'unknown' },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, status: undefined },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, cli: 'claude' },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, cli: undefined },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, executable: null },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, executable: ' ' },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, executable: undefined },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, version: 1 },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, version: ' ' },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, version: undefined },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, checkedAt: 'not-a-date' },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, checkedAt: undefined },
+      },
+      {
+        ...validRuntime,
+        readiness: {
+          ...validRuntime.readiness,
+          checkedAt: '2026-07-14 00:00:00',
+        },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, detail: ' ' },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, detail: undefined },
+      },
+      { ...validRuntime, available: false },
+      {
+        ...validRuntime,
+        available: true,
+        readiness: { ...validRuntime.readiness, status: 'missing' },
+      },
+    ];
+    for (const malformed of [
+      { ok: true },
+      [null],
+      [{ cli: 'codex' }],
+      ...malformedRuntimeEntries.map((runtime) => [runtime]),
+    ]) {
       expect(shared.normalizeCodingRuntimeCatalog(malformed)).toEqual({
         runtimes: [],
         error: 'Coding runtime catalog returned an unexpected response',

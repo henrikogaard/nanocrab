@@ -7,18 +7,47 @@
   }
 
   function normalizeCodingRuntimeCatalog(value) {
+    const healthStatuses = new Set([
+      'healthy',
+      'missing',
+      'unsupported',
+      'unauthenticated',
+      'error',
+    ]);
+    const isTrimmedText = (input) =>
+      typeof input === 'string' && input.length > 0 && input === input.trim();
+    const isNullableTrimmedText = (input) =>
+      input === null || isTrimmedText(input);
+    const isIsoTimestamp = (input) => {
+      if (!isTrimmedText(input)) return false;
+      const timestamp = Date.parse(input);
+      return (
+        Number.isFinite(timestamp) &&
+        new Date(timestamp).toISOString() === input
+      );
+    };
     const valid =
       Array.isArray(value) &&
       value.every(
         (runtime) =>
           runtime &&
-          typeof runtime.cli === 'string' &&
-          typeof runtime.provider === 'string' &&
-          typeof runtime.model === 'string' &&
+          typeof runtime === 'object' &&
+          !Array.isArray(runtime) &&
+          isTrimmedText(runtime.cli) &&
+          isTrimmedText(runtime.provider) &&
+          isTrimmedText(runtime.model) &&
+          isNullableTrimmedText(runtime.cliModel) &&
           typeof runtime.available === 'boolean' &&
           runtime.readiness &&
-          typeof runtime.readiness.status === 'string' &&
-          typeof runtime.readiness.detail === 'string',
+          typeof runtime.readiness === 'object' &&
+          !Array.isArray(runtime.readiness) &&
+          runtime.readiness.cli === runtime.cli &&
+          healthStatuses.has(runtime.readiness.status) &&
+          isTrimmedText(runtime.readiness.executable) &&
+          isNullableTrimmedText(runtime.readiness.version) &&
+          isIsoTimestamp(runtime.readiness.checkedAt) &&
+          isTrimmedText(runtime.readiness.detail) &&
+          runtime.available === (runtime.readiness.status === 'healthy'),
       );
     if (!valid) {
       return {
