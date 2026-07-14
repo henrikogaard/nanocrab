@@ -45,6 +45,14 @@ export interface CodingWorkspaceEvidence {
   };
 }
 
+export interface CodingWorkspacePublicationInput {
+  workspace: string;
+  branch: string;
+  commitMessage: string;
+  token: string;
+  assertOwnership(): void;
+}
+
 type AskpassFactory = (
   token: string,
 ) => Promise<{ path: string; dispose(): Promise<void> }>;
@@ -69,6 +77,8 @@ const HARDENED_GIT_CONFIG = [
   ['credential.helper', ''],
   ['credential.interactive', 'never'],
   ['core.hooksPath', '/dev/null'],
+  ['commit.gpgSign', 'false'],
+  ['tag.gpgSign', 'false'],
   ['core.fsmonitor', 'false'],
   ['core.untrackedCache', 'false'],
   ['core.sshCommand', 'false'],
@@ -372,6 +382,83 @@ async function runLocalGit(
   }
   requireGitSuccess(result, operation);
   return result;
+}
+
+export async function publishCodingWorkspace(
+  input: CodingWorkspacePublicationInput,
+  deps: Pick<CodingWorkspaceDeps, 'git' | 'createAskpass'>,
+): Promise<{ commitSha: string }> {
+  if (
+    !path.isAbsolute(input.workspace) ||
+    path.normalize(input.workspace) !== input.workspace
+  ) {
+    throw new Error('Coding workspace publication path must be canonical');
+  }
+  validateCodingBranch(input.branch);
+  if (!input.commitMessage.trim()) {
+    throw new Error('Coding workspace commit message is required');
+  }
+
+  input.assertOwnership();
+  await runLocalGit(deps.git, ['add', '-A'], input.workspace, 'Git staging');
+  input.assertOwnership();
+  await runLocalGit(
+    deps.git,
+    ['commit', '--no-verify', '-m', input.commitMessage],
+    input.workspace,
+    'Git commit',
+  );
+  input.assertOwnership();
+  const revision = await runLocalGit(
+    deps.git,
+    ['rev-parse', '--verify', 'HEAD'],
+    input.workspace,
+    'Git revision lookup',
+  );
+  const commitSha = revision.stdout.trim();
+  if (!/^[0-9a-f]{7,64}$/i.test(commitSha)) {
+    throw new Error('Git revision lookup returned an invalid commit');
+  }
+  input.assertOwnership();
+  const push = await runApprovedHostGit(
+    [
+      'push',
+      'origin',
+      `${input.branch}:refs/heads/${input.branch}`,
+      '--force-with-lease',
+    ],
+    {
+      cwd: input.workspace,
+      token: input.token,
+      git: deps.git,
+      createAskpass: deps.createAskpass ?? createTemporaryAskpass,
+    },
+  );
+  requireGitSuccess(push, 'Approved Git push');
+  return { commitSha };
+}
+
+export async function deleteCodingWorkspaceBranch(
+  input: { workspace: string; branch: string; token: string },
+  deps: Pick<CodingWorkspaceDeps, 'git' | 'createAskpass'>,
+): Promise<void> {
+  if (
+    !path.isAbsolute(input.workspace) ||
+    path.normalize(input.workspace) !== input.workspace
+  ) {
+    throw new Error('Coding workspace deletion path must be canonical');
+  }
+  validateCodingBranch(input.branch);
+  const result = await runApprovedHostGit(
+    ['push', 'origin', `:${input.branch}`],
+    {
+      cwd: input.workspace,
+      token: input.token,
+      git: deps.git,
+      createAskpass: deps.createAskpass ?? createTemporaryAskpass,
+    },
+  );
+  requireGitSuccess(result, 'Approved Git branch deletion');
 }
 
 export async function collectCodingWorkspaceEvidence(

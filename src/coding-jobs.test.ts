@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { execFileSync, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
@@ -55,10 +55,6 @@ vi.mock('./provider-router.js', () => ({
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
-  execFileSync: vi.fn((command: string, args: string[]) => {
-    if (command === 'git' && args[0] === 'rev-parse') return 'abc123def456\n';
-    return '';
-  }),
   spawn: vi.fn(() => {
     throw new Error('spawn should not run while coding jobs are queued');
   }),
@@ -218,7 +214,6 @@ describe('coding jobs', () => {
     vi.useFakeTimers();
     fs.rmSync(TEST_ROOT, { recursive: true, force: true });
     vi.mocked(spawn).mockClear();
-    vi.mocked(execFileSync).mockClear();
     mockedReadEnvFile.mockReturnValue({ GITHUB_TOKEN: 'test-token' });
     vi.mocked(resolveProviderFallbackForAction).mockReset();
     vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
@@ -276,6 +271,8 @@ describe('coding jobs', () => {
             'No trusted test evidence was reported by the Devin host runner.',
         },
       }),
+      publishWorkspace: async () => ({ commitSha: 'abc123def456' }),
+      deleteWorkspaceBranch: async () => undefined,
     });
   });
 
@@ -2406,6 +2403,82 @@ describe('coding jobs', () => {
     expect(opened.testSummary).toContain('vitest passed');
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/repos/owner/repo/pulls'),
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('does not let a cancelled publication lease commit, push, or overwrite cancellation', async () => {
+    vi.useRealTimers();
+    const fetchMock = mockGitHubFetch((url) => {
+      if (url.includes('/pulls')) {
+        return { html_url: 'https://github.com/owner/repo/pull/10' };
+      }
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.mkdirSync(`${jobRoot}/owner__repo`, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/changed-files.txt`, 'src/a.ts\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+      createPr: true,
+    });
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_pr_approval');
+    });
+    const approval = createApproval({
+      kind: 'coding-open-pr',
+      title: 'Approve PR',
+      summary: 'Allow this job to publish a PR.',
+      targetType: 'coding-job',
+      targetId: job.id,
+    });
+    reviewApproval(approval.id, 'approved', 'owner');
+    const gitCalls: string[] = [];
+    configureCodingJobExecutionForTests({
+      publishWorkspace: async (input) => {
+        input.assertOwnership();
+        gitCalls.push('add');
+        cancelCodingJob(job.id, 'owner');
+        input.assertOwnership();
+        gitCalls.push('commit');
+        return { commitSha: 'should-not-persist' };
+      },
+    });
+
+    await expect(openCodingJobPr(job.id, 'owner')).rejects.toThrow(
+      /publication ownership was lost/i,
+    );
+
+    expect(gitCalls).toEqual(['add']);
+    expect(getCodingJob(job.id)).toMatchObject({
+      status: 'cancelled',
+      commitSha: null,
+      pushed: false,
+      prUrl: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('/pulls'),
       expect.objectContaining({ method: 'POST' }),
     );
   });

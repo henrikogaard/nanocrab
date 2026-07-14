@@ -11,6 +11,7 @@ vi.mock('./config.js', () => ({
 
 import {
   collectCodingWorkspaceEvidence,
+  publishCodingWorkspace,
   prepareCodingWorkspace,
   runApprovedHostGit,
   validateCodingBranch,
@@ -107,6 +108,106 @@ function localCheckoutGit() {
 }
 
 describe('coding workspace', () => {
+  it('publishes changes only through hardened local Git and approved askpass push', async () => {
+    const assertOwnership = vi.fn();
+    const git = vi.fn<GitTransport>(async (args) =>
+      gitResult(args[0] === 'rev-parse' ? 'abc123def456\n' : ''),
+    );
+    const dispose = vi.fn(async () => undefined);
+    const createAskpass = vi.fn(async () => ({
+      path: '/private/tmp/askpass/helper.sh',
+      dispose,
+    }));
+
+    const result = await publishCodingWorkspace(
+      {
+        workspace,
+        branch: 'nanocrab/issue-129',
+        commitMessage: 'fix: publish safely',
+        token,
+        assertOwnership,
+      },
+      { git, createAskpass },
+    );
+
+    expect(result).toEqual({ commitSha: 'abc123def456' });
+    expect(git.mock.calls.map(([args]) => args)).toEqual([
+      ['add', '-A'],
+      ['commit', '--no-verify', '-m', 'fix: publish safely'],
+      ['rev-parse', '--verify', 'HEAD'],
+      [
+        'push',
+        'origin',
+        'nanocrab/issue-129:refs/heads/nanocrab/issue-129',
+        '--force-with-lease',
+      ],
+    ]);
+    expect(assertOwnership).toHaveBeenCalledTimes(4);
+    for (const [, options] of git.mock.calls.slice(0, 3)) {
+      expect(options.env).toMatchObject({
+        PATH: '/usr/local/bin:/usr/bin:/bin',
+        GIT_CONFIG_SYSTEM: '/dev/null',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_NOSYSTEM: '1',
+      });
+      expect(options.env).not.toHaveProperty('HOME');
+      expect(options.env).not.toHaveProperty('GIT_ASKPASS');
+      expect(options.env).not.toHaveProperty('NANOCRAB_GIT_TOKEN');
+      const config = Array.from(
+        { length: Number(options.env.GIT_CONFIG_COUNT) },
+        (_, index) => [
+          options.env[`GIT_CONFIG_KEY_${index}`],
+          options.env[`GIT_CONFIG_VALUE_${index}`],
+        ],
+      );
+      expect(config).toEqual(
+        expect.arrayContaining([
+          ['credential.helper', ''],
+          ['credential.interactive', 'never'],
+          ['core.hooksPath', '/dev/null'],
+          ['commit.gpgSign', 'false'],
+          ['tag.gpgSign', 'false'],
+        ]),
+      );
+    }
+    expect(git.mock.calls[3][1].env).toMatchObject({
+      GIT_ASKPASS: '/private/tmp/askpass/helper.sh',
+      NANOCRAB_GIT_TOKEN: token,
+    });
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('sanitizes local publication failures before they reach coding-job state', async () => {
+    const git = vi.fn<GitTransport>(async () => {
+      throw new Error(`repo hook leaked ${token}`);
+    });
+
+    await expect(
+      publishCodingWorkspace(
+        {
+          workspace,
+          branch: 'nanocrab/issue-129',
+          commitMessage: 'fix: publish safely',
+          token,
+          assertOwnership: vi.fn(),
+        },
+        { git },
+      ),
+    ).rejects.toThrow('Git staging failed');
+    await expect(
+      publishCodingWorkspace(
+        {
+          workspace,
+          branch: 'nanocrab/issue-129',
+          commitMessage: 'fix: publish safely',
+          token,
+          assertOwnership: vi.fn(),
+        },
+        { git },
+      ),
+    ).rejects.not.toThrow(token);
+  });
+
   it('collects fresh credential-free host Git evidence after a Devin run', async () => {
     const git = vi.fn<GitTransport>(async (args) => {
       if (args.join(' ') === 'diff --no-ext-diff --no-textconv --stat HEAD') {

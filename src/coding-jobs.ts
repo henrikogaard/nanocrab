@@ -46,7 +46,10 @@ import { codingProcessRegistry } from './coding-runners/process-registry.js';
 import { probeCodingRunnerReadiness } from './coding-runner-readiness.js';
 import {
   collectCodingWorkspaceEvidence,
+  deleteCodingWorkspaceBranch,
+  publishCodingWorkspace,
   prepareCodingWorkspace,
+  type CodingWorkspacePublicationInput,
   type CodingWorkspaceEvidence,
   type CodingWorkspaceInput,
   type PreparedCodingWorkspace,
@@ -84,6 +87,14 @@ export interface CodingJobExecutionDependencies {
     input: CodingWorkspaceInput,
   ): Promise<PreparedCodingWorkspace>;
   collectWorkspaceEvidence(workspace: string): Promise<CodingWorkspaceEvidence>;
+  publishWorkspace(
+    input: CodingWorkspacePublicationInput,
+  ): Promise<{ commitSha: string }>;
+  deleteWorkspaceBranch(input: {
+    workspace: string;
+    branch: string;
+    token: string;
+  }): Promise<void>;
   devinRunner: CodingRunnerAdapter;
   runContainer(
     job: CodingJob,
@@ -1478,6 +1489,9 @@ function productionCodingJobExecutionDependencies(): CodingJobExecutionDependenc
       }),
     collectWorkspaceEvidence: (workspace) =>
       collectCodingWorkspaceEvidence(workspace, { git: runGit }),
+    publishWorkspace: (input) => publishCodingWorkspace(input, { git: runGit }),
+    deleteWorkspaceBranch: (input) =>
+      deleteCodingWorkspaceBranch(input, { git: runGit }),
     devinRunner: productionDevinRunnerProxy,
     runContainer: runCodingContainer,
     now: nowIso,
@@ -2594,6 +2608,21 @@ export async function openCodingJobPr(
     throw new Error(`PR creation denied by policy: ${policy.explanation}`);
   }
   applyCodingJobTransition(job, 'open_pr');
+  const publicationLease = job.transitionHistory.length;
+  const ownsPublication = (): boolean => {
+    const current = getCodingJob(job.id);
+    return Boolean(
+      current &&
+      current.status === 'open_pr' &&
+      current.activeAttemptId === null &&
+      current.transitionHistory.length === publicationLease,
+    );
+  };
+  const assertPublicationOwnership = (): void => {
+    if (!ownsPublication()) {
+      throw new Error('Coding job publication ownership was lost');
+    }
+  };
 
   try {
     const repoPath = job.workspace;
@@ -2609,29 +2638,17 @@ export async function openCodingJobPr(
     const commitMessage =
       readTextFile(path.join(metadataDir, 'commit-message.txt')) ||
       `chore: NanoCrab coding job ${job.id}`;
-    const { execFileSync } = await import('child_process');
-    execFileSync('git', ['add', '-A'], { cwd: repoPath, stdio: 'pipe' });
-    execFileSync('git', ['commit', '-m', commitMessage], {
-      cwd: repoPath,
-      stdio: 'pipe',
-    });
-    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: repoPath,
-      encoding: 'utf-8',
-    }).trim();
-    execFileSync(
-      'git',
-      [
-        'push',
-        'origin',
-        `${job.branch}:refs/heads/${job.branch}`,
-        '--force-with-lease',
-      ],
-      {
-        cwd: repoPath,
-        stdio: 'pipe',
-      },
-    );
+    const token = getGitHubToken();
+    if (!token) throw new Error('GITHUB_TOKEN is not configured');
+    const { commitSha: sha } =
+      await codingJobExecutionDependencies().publishWorkspace({
+        workspace: repoPath,
+        branch: job.branch,
+        commitMessage,
+        token,
+        assertOwnership: assertPublicationOwnership,
+      });
+    assertPublicationOwnership();
     const pr = (await githubApi(`/repos/${job.repo}/pulls`, {
       method: 'POST',
       body: JSON.stringify({
@@ -2657,6 +2674,7 @@ export async function openCodingJobPr(
         base: repo.defaultBranch,
       }),
     })) as { html_url?: string };
+    assertPublicationOwnership();
     job.commitSha = sha;
     job.prUrl = pr.html_url || null;
     job.pushed = true;
@@ -2678,8 +2696,10 @@ export async function openCodingJobPr(
     return job;
   } catch (err) {
     const failureReason = err instanceof Error ? err.message : String(err);
-    applyCodingJobTransition(job, 'failed', failureReason);
-    updateJobOutput(job, `\n\nPR creation failed: ${failureReason}\n`);
+    const current = getCodingJob(job.id);
+    if (!ownsPublication() || !current) throw err;
+    applyCodingJobTransition(current, 'failed', failureReason);
+    updateJobOutput(current, `\n\nPR creation failed: ${failureReason}\n`);
     throw err;
   }
 }
@@ -2833,11 +2853,14 @@ export async function revertCodingJob(
     return job;
   }
   try {
-    const { execFileSync } = await import('child_process');
-    execFileSync('git', ['push', 'origin', `:${job.branch}`], {
-      cwd: job.workspace,
-      stdio: 'pipe',
-    });
+    const token = getGitHubToken();
+    if (token) {
+      await codingJobExecutionDependencies().deleteWorkspaceBranch({
+        workspace: job.workspace,
+        branch: job.branch,
+        token,
+      });
+    }
   } catch {
     // Branch may not exist remotely yet.
   }
