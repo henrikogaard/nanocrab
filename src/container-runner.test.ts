@@ -132,7 +132,9 @@ import {
   runContainerAgent,
   ContainerOutput,
   cancelContainerProcess,
+  clearContainerProcessRegistry,
   getContainerProcessKeys,
+  registerContainerProcess,
 } from './container-runner.js';
 import { spawn } from 'child_process';
 import { readEnvFile } from './env.js';
@@ -936,6 +938,7 @@ describe('container-runner process registry', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    clearContainerProcessRegistry();
     fakeProc = createFakeProcess();
     killSpy = vi.spyOn(process, 'kill').mockReturnValue(true);
   });
@@ -980,5 +983,58 @@ describe('container-runner process registry', () => {
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
+  });
+
+  it('requires an exact attempt to cancel a leased container process', () => {
+    const leaseToken = registerContainerProcess(
+      'coding-job',
+      fakeProc as never,
+      'coding-container',
+      'attempt-a',
+    );
+    expect(leaseToken).toEqual(expect.any(String));
+
+    const staleResult = cancelContainerProcess(
+      'coding-job',
+      'cancel coding job',
+      'attempt-b',
+    );
+    expect(staleResult.cancelled).toBe(false);
+    expect(killSpy).not.toHaveBeenCalled();
+
+    const ownerResult = cancelContainerProcess(
+      'coding-job',
+      'cancel coding job',
+      'attempt-a',
+    );
+    expect(ownerResult).toEqual({
+      cancelled: true,
+      containerName: 'coding-container',
+    });
+    expect(killSpy).toHaveBeenCalledWith(-12345, 'SIGTERM');
+  });
+
+  it('lets the first terminal event clean up without a stale event deleting a retry', () => {
+    registerContainerProcess(
+      'coding-job',
+      fakeProc as never,
+      'old-container',
+      'attempt-a',
+    );
+    fakeProc.emit('error', new Error('spawn failed'));
+
+    const retryProc = createFakeProcess();
+    registerContainerProcess(
+      'coding-job',
+      retryProc as never,
+      'new-container',
+      'attempt-b',
+    );
+    fakeProc.emit('close', 1);
+
+    expect(getContainerProcessKeys()).toEqual(['coding-job']);
+    expect(
+      cancelContainerProcess('coding-job', undefined, 'attempt-b'),
+    ).toEqual({ cancelled: true, containerName: 'new-container' });
   });
 });

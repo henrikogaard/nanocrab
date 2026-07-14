@@ -61,6 +61,7 @@ import {
   getAllowedConnectorToolPatterns,
   normalizeConnectorId,
 } from './connector-permissions.js';
+import { codingProcessRegistry } from './coding-runners/process-registry.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCRAB_OUTPUT_START---';
@@ -93,69 +94,87 @@ export interface ContainerOutput {
 }
 
 interface ContainerProcessRecord {
-  proc: ChildProcess;
+  attemptId: string;
+  leaseToken: string;
   containerName: string;
-  startedAt: number;
 }
 
 const containerProcessRegistry = new Map<string, ContainerProcessRecord>();
+let legacyContainerAttempt = 0;
 
 export function registerContainerProcess(
   key: string,
   proc: ChildProcess,
   containerName: string,
-): void {
-  containerProcessRegistry.set(key, {
-    proc,
-    containerName,
-    startedAt: Date.now(),
+  attemptId?: string,
+): string {
+  const resolvedAttemptId =
+    attemptId ?? `legacy-container-attempt-${++legacyContainerAttempt}`;
+  const lease = codingProcessRegistry.register({
+    jobId: key,
+    attemptId: resolvedAttemptId,
+    process: proc,
   });
-  proc.on('close', () => containerProcessRegistry.delete(key));
-  proc.on('error', () => containerProcessRegistry.delete(key));
+  const record = {
+    attemptId: resolvedAttemptId,
+    leaseToken: lease.leaseToken,
+    containerName,
+  };
+  containerProcessRegistry.set(key, record);
+
+  const cleanUpCapturedLease = () => {
+    codingProcessRegistry.compareAndDelete(lease);
+    if (containerProcessRegistry.get(key)?.leaseToken === lease.leaseToken) {
+      containerProcessRegistry.delete(key);
+    }
+  };
+  proc.once('close', cleanUpCapturedLease);
+  proc.once('error', cleanUpCapturedLease);
+  return lease.leaseToken;
 }
 
 export function cancelContainerProcess(
   key: string,
   reason?: string,
+  attemptId?: string,
 ): { cancelled: boolean; containerName?: string; error?: string } {
   const record = containerProcessRegistry.get(key);
-  if (!record) {
+  if (!record || (attemptId !== undefined && attemptId !== record.attemptId)) {
     return { cancelled: false, error: `No active container for key: ${key}` };
   }
-  const { proc, containerName } = record;
-  containerProcessRegistry.delete(key);
+  const { containerName } = record;
+  const lease = codingProcessRegistry.get(key, record.attemptId);
+  if (!lease || lease.leaseToken !== record.leaseToken) {
+    containerProcessRegistry.delete(key);
+    return { cancelled: false, error: `No active container for key: ${key}` };
+  }
   logger.info({ key, containerName, reason }, 'Cancelling container process');
 
-  if (!proc.killed) {
-    let terminated = false;
-    if (proc.pid && proc.pid > 0) {
-      try {
-        process.kill(-proc.pid, 'SIGTERM');
-        terminated = true;
-      } catch (err) {
-        logger.warn(
-          { key, err },
-          'Failed to terminate process group, falling back to proc.kill',
-        );
-      }
-    }
-    if (!terminated) {
-      try {
-        proc.kill('SIGTERM');
-      } catch (err) {
-        logger.warn({ key, err }, 'Failed to terminate container process');
-      }
-    }
+  if (!codingProcessRegistry.terminate(lease, 'cancelled')) {
+    return { cancelled: false, error: `No active container for key: ${key}` };
   }
 
   return { cancelled: true, containerName };
 }
 
 export function getContainerProcessKeys(): string[] {
-  return Array.from(containerProcessRegistry.keys());
+  return Array.from(containerProcessRegistry.entries()).flatMap(
+    ([key, record]) => {
+      const lease = codingProcessRegistry.get(key, record.attemptId);
+      if (lease?.leaseToken === record.leaseToken) return [key];
+      containerProcessRegistry.delete(key);
+      return [];
+    },
+  );
 }
 
 export function clearContainerProcessRegistry(): void {
+  for (const [key, record] of containerProcessRegistry) {
+    const lease = codingProcessRegistry.get(key, record.attemptId);
+    if (lease?.leaseToken === record.leaseToken) {
+      codingProcessRegistry.compareAndDelete(lease);
+    }
+  }
   containerProcessRegistry.clear();
 }
 
