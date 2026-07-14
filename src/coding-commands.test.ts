@@ -9,6 +9,11 @@ vi.mock('./config.js', () => ({
   CONTAINER_IMAGE: 'nanocrab-agent:test',
   CREDENTIAL_PROXY_PORT: 3001,
   DATA_DIR: '/tmp/nanocrab-coding-commands-test/data',
+  DEVIN_CLI_MODEL_ALIASES: {
+    'claude/claude-sonnet-4-6': 'claude-sonnet-4',
+    'claude/claude-opus-4-6': 'claude-opus-4.6',
+  },
+  DEVIN_CREDENTIAL_PATH: null,
   TIMEZONE: 'UTC',
 }));
 
@@ -36,6 +41,7 @@ vi.mock('./credential-proxy.js', () => ({
 }));
 
 vi.mock('child_process', () => ({
+  execFile: vi.fn(),
   spawn: vi.fn(() => {
     throw new Error('spawn should not run in command tests');
   }),

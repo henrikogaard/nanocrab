@@ -6,6 +6,11 @@ vi.mock('../config.js', () => ({
     '/tmp/nanocrab-cp-decisions-test/data/coding-workspaces',
   CONTAINER_IMAGE: 'nanocrab-agent:test',
   CREDENTIAL_PROXY_PORT: 3001,
+  DEVIN_CLI_MODEL_ALIASES: {
+    'claude/claude-sonnet-4-6': 'claude-sonnet-4',
+    'claude/claude-opus-4-6': 'claude-opus-4.6',
+  },
+  DEVIN_CREDENTIAL_PATH: null,
   DATA_DIR: '/tmp/nanocrab-cp-decisions-test/data',
   TIMEZONE: 'UTC',
 }));
