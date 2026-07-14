@@ -22,6 +22,11 @@ function codingJobStatusBadge(status) {
   return 'badge-error';
 }
 
+function runtimeLabel(runtime) {
+  if (!runtime) return 'runtime unavailable';
+  return [runtime.cli, runtime.provider, runtime.model].join(' / ');
+}
+
 function codingDenyNoteId(id) {
   return `coding-deny-note-${String(id || '').replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 }
@@ -1061,6 +1066,7 @@ async function renderAgents(el) {
       codingRepos,
       codingRepoRules,
       codingJobs,
+      codingRuntimes,
       agentProviders,
       pendingQuestions,
       agentMsgs,
@@ -1106,6 +1112,10 @@ async function renderAgents(el) {
       }),
       api('/agents/coding/jobs').catch(() => {
         loadIssues.push('Coding job queue unavailable');
+        return [];
+      }),
+      api('/agents/coding/runtimes').catch(() => {
+        loadIssues.push('Coding runtime catalog unavailable');
         return [];
       }),
       api('/agents/providers').catch(() => {
@@ -1311,15 +1321,12 @@ async function renderAgents(el) {
       .join('');
 
     const enabledPlugins = plugins.filter((p) => p.enabled);
-    const codingProviderOptions = agentProviders
-      .filter((p) => p.codingCapable)
-      .map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`)
+    const codingCliOptions = [...new Set(codingRuntimes.map((runtime) => runtime.cli))]
+      .map((cli) => `<option value="${esc(cli)}">${esc(cli)}</option>`)
       .join('');
-    const codingModelsByProvider = {};
     const codingProvidersById = {};
     agentProviders.forEach((p) => {
       codingProvidersById[p.id] = p;
-      codingModelsByProvider[p.id] = (p.models || []).filter((model) => model.codingCapable !== false);
     });
     const codingRepoOptions = codingRepos
       .map(
@@ -1382,7 +1389,15 @@ async function renderAgents(el) {
         <div class="agent-task-main">
           <div class="agent-task-head">
             <span class="badge badge-muted agent-mini-badge">${esc(job.repo)}</span>
-            <span class="badge badge-accent agent-mini-badge">${esc(job.provider)}/${esc(job.model)}</span>
+            <span class="badge badge-accent agent-mini-badge">${esc(
+              runtimeLabel(
+                job.actualRuntime || {
+                  cli: job.runnerCli,
+                  provider: job.provider,
+                  model: job.model,
+                },
+              ),
+            )}</span>
             ${job.issueNumber ? `<span class="badge badge-info agent-mini-badge">#${job.issueNumber}</span>` : ''}
             <span class="agent-task-prompt">${esc((job.issueTitle || job.prompt || job.id).slice(0, 100))}</span>
           </div>
@@ -1675,8 +1690,9 @@ async function renderAgents(el) {
               <option value="freeform">Freeform task</option>
             </select></div>
             <div class="form-group"><label>Issue #</label><input class="search-input" id="assign-coding-issue-number" placeholder="optional"></div>
-            <div class="form-group"><label>Provider</label><select class="search-input" id="assign-coding-provider-select" onchange="updateAssignCodingModels()">${codingProviderOptions || '<option value="claude">Claude</option>'}</select></div>
-            <div class="form-group"><label>Model</label><select class="search-input" id="assign-coding-model-select"><option value="">Default model</option></select></div>
+            <div class="form-group"><label>Runner CLI</label><select class="search-input" id="assign-coding-cli-select" onchange="updateAssignCodingRuntime()" ${codingRuntimes.length ? '' : 'disabled'}>${codingCliOptions || '<option value="">Runtime catalog unavailable</option>'}</select></div>
+            <div class="form-group"><label>Provider</label><select class="search-input" id="assign-coding-provider-select" onchange="updateAssignCodingRuntimeProvider()" ${codingRuntimes.length ? '' : 'disabled'}></select></div>
+            <div class="form-group"><label>Model</label><select class="search-input" id="assign-coding-model-select" onchange="updateAssignCodingRuntimeState()" ${codingRuntimes.length ? '' : 'disabled'}></select></div>
             <div class="form-group"><label>Mode</label><select class="search-input" id="assign-coding-plan-mode">
               <option value="plan-first">Plan first</option>
               <option value="implement-now">Implement after approval</option>
@@ -1689,8 +1705,10 @@ async function renderAgents(el) {
             <div class="field-hint">Implementation approval is still required before repository writes, PR creation, or retry/cancel handoff changes proceed.</div>
           </div>
           <label class="assign-check"><input type="checkbox" id="assign-coding-create-pr" checked> Create a draft PR when changes are ready</label>
+          <div class="field-hint" id="assign-coding-runtime-readiness" role="status" aria-live="polite">Select a complete coding runtime.</div>
+          <div class="field-hint is-hidden" id="assign-coding-runtime-warning"></div>
           <div class="assign-action-row">
-            <button class="btn btn-primary" onclick="startAssignedCodingJob()">Start Code Assignment</button>
+            <button class="btn btn-primary" id="assign-coding-dispatch" onclick="startAssignedCodingJob()" ${codingRuntimes.length ? '' : 'disabled'}>Start Code Assignment</button>
             <button class="btn btn-ghost" onclick="document.getElementById('coding-repo-new')?.focus()">Register Repo Below</button>
           </div>
         </div>
@@ -1700,13 +1718,16 @@ async function renderAgents(el) {
             <div class="form-group"><label>Owner</label><input class="search-input" id="assign-af-owner" placeholder="owner"></div>
             <div class="form-group"><label>Repo</label><input class="search-input" id="assign-af-repo" placeholder="nanocrab"></div>
             <div class="form-group"><label>Trigger label</label><input class="search-input" id="assign-af-label" value="autofix"></div>
-            <div class="form-group"><label>Provider</label><select class="search-input" id="assign-af-provider" onchange="updateAssignAutofixModels()">${codingProviderOptions || '<option value="claude">Claude</option>'}</select></div>
-            <div class="form-group"><label>Model</label><select class="search-input" id="assign-af-model"><option value="">Default model</option></select></div>
+            <div class="form-group"><label>Runner CLI</label><select class="search-input" id="assign-af-cli" onchange="updateAssignAutofixRuntime()" ${codingRuntimes.length ? '' : 'disabled'}>${codingCliOptions || '<option value="">Runtime catalog unavailable</option>'}</select></div>
+            <div class="form-group"><label>Provider</label><select class="search-input" id="assign-af-provider" onchange="updateAssignAutofixRuntimeProvider()" ${codingRuntimes.length ? '' : 'disabled'}></select></div>
+            <div class="form-group"><label>Model</label><select class="search-input" id="assign-af-model" onchange="updateAssignAutofixRuntimeState()" ${codingRuntimes.length ? '' : 'disabled'}></select></div>
             <div class="form-group"><label>Max active jobs</label><input class="search-input" id="assign-af-max-active" type="number" min="1" step="1" value="1"></div>
           </div>
           <label class="assign-check"><input type="checkbox" id="assign-af-create-pr" checked> Open PR flow after implementation</label>
+          <div class="field-hint" id="assign-af-runtime-readiness" role="status" aria-live="polite">Select a complete coding runtime.</div>
+          <div class="field-hint is-hidden" id="assign-af-runtime-warning"></div>
           <div class="assign-action-row">
-            <button class="btn btn-primary" onclick="assignCreateAutofixProject()">Enable Auto-Pickup</button>
+            <button class="btn btn-primary" id="assign-af-dispatch" onclick="assignCreateAutofixProject()" ${codingRuntimes.length ? '' : 'disabled'}>Enable Auto-Pickup</button>
             <button class="btn btn-ghost" onclick="navigate('autofix')">Open Autofix Settings</button>
             <button class="btn btn-ghost" onclick="navigate('webhooks')">Check Webhook</button>
           </div>
@@ -1745,15 +1766,18 @@ async function renderAgents(el) {
           <div class="agent-coding-panel">
             <div class="agent-coding-panel-head">
               <span>Pick next issue</span>
-              <small>Choose labels, provider, and whether the agent should open a draft PR.</small>
+              <small>Choose labels, runtime, and whether the agent should open a draft PR.</small>
             </div>
             <div class="agent-coding-pick-grid">
               <select class="search-input" id="coding-repo-select">${codingRepoOptions || '<option value="">No repos registered</option>'}</select>
-              <select class="search-input" id="coding-provider-select" onchange="updateCodingModels()">${codingProviderOptions || '<option value="claude">Claude</option>'}</select>
-              <select class="search-input" id="coding-model-select"><option value="">Default model</option></select>
+              <label>Runner CLI<select class="search-input" id="coding-cli-select" onchange="updateCodingRuntime()" ${codingRuntimes.length ? '' : 'disabled'}>${codingCliOptions || '<option value="">Runtime catalog unavailable</option>'}</select></label>
+              <label>Provider<select class="search-input" id="coding-provider-select" onchange="updateCodingRuntimeProvider()" ${codingRuntimes.length ? '' : 'disabled'}></select></label>
+              <label>Model<select class="search-input" id="coding-model-select" onchange="updateCodingRuntimeState()" ${codingRuntimes.length ? '' : 'disabled'}></select></label>
               <input class="search-input" id="coding-labels" placeholder="labels, comma-separated">
               <label class="agent-coding-check"><input type="checkbox" id="coding-create-pr" checked> Create draft PR when changes are ready</label>
-              <button class="btn btn-sm btn-primary" onclick="pickCodingIssue()">Pick Issue</button>
+              <div class="field-hint" id="coding-runtime-readiness" role="status" aria-live="polite">Select a complete coding runtime.</div>
+              <div class="field-hint is-hidden" id="coding-runtime-warning"></div>
+              <button class="btn btn-sm btn-primary" id="coding-dispatch" onclick="pickCodingIssue()" ${codingRuntimes.length ? '' : 'disabled'}>Pick Issue</button>
             </div>
           </div>
         </div>
@@ -1974,11 +1998,11 @@ async function renderAgents(el) {
     // Init model dropdowns
     window._toolModels = JSON.parse(modelOptionsJson);
     updateTaskModels();
-    window._codingModelsByProvider = codingModelsByProvider;
+    window._codingRuntimeOptions = codingRuntimes;
     window._codingProvidersById = codingProvidersById;
-    updateCodingModels();
-    updateAssignCodingModels();
-    updateAssignAutofixModels();
+    updateCodingRuntime();
+    updateAssignCodingRuntime();
+    updateAssignAutofixRuntime();
   } catch (e) {
     el.innerHTML = renderAgentRecoveryState('load', e.message);
   }
@@ -2347,47 +2371,146 @@ window.saveRepoCodingRule = async function () {
   }
 };
 
-window.updateCodingModels = function () {
-  const providerEl = document.getElementById('coding-provider-select');
-  const modelEl = document.getElementById('coding-model-select');
-  if (!providerEl || !modelEl) return;
-  const modelsByProvider = window._codingModelsByProvider || {};
-  const provider = (window._codingProvidersById || {})[providerEl.value] || {};
-  const models = modelsByProvider[providerEl.value] || [];
-  const defaultAllowed = codingProviderAllowsDefaultModel(provider, models);
-  modelEl.innerHTML = `${defaultAllowed ? '<option value="">Default model</option>' : ''}${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
-};
-
-function codingProviderAllowsDefaultModel(provider, models) {
-  if (!provider || !provider.defaultModel) return true;
-  const defaultModel = (models || []).find((model) => model.id === provider.defaultModel);
-  return defaultModel ? defaultModel.codingCapable !== false : provider.codingCapable === true;
+function codingRuntimeOptionsForCli(cli) {
+  return (window._codingRuntimeOptions || []).filter(
+    (runtime) => runtime.cli === cli,
+  );
 }
 
-window.updateAssignCodingModels = function () {
-  const providerEl = document.getElementById('assign-coding-provider-select');
-  const modelEl = document.getElementById('assign-coding-model-select');
-  if (!providerEl || !modelEl) return;
-  const provider = (window._codingProvidersById || {})[providerEl.value] || {};
-  const models = (window._codingModelsByProvider || {})[providerEl.value] || [];
-  const defaultAllowed = codingProviderAllowsDefaultModel(provider, models);
-  modelEl.innerHTML = `${defaultAllowed ? '<option value="">Default model</option>' : ''}${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
+function codingRuntimeOptionsForProvider(cli, provider) {
+  return codingRuntimeOptionsForCli(cli).filter(
+    (runtime) => runtime.provider === provider,
+  );
+}
+
+function codingRuntimeSelection(prefix) {
+  const cli = document.getElementById(`${prefix}-cli-select`)?.value;
+  const provider = document.getElementById(`${prefix}-provider-select`)?.value;
+  const model = document.getElementById(`${prefix}-model-select`)?.value;
+  return codingRuntimeOptionsForProvider(cli, provider).find(
+    (runtime) => runtime.model === model,
+  );
+}
+
+function updateCodingRuntimeStateFor(prefix) {
+  const runtime = codingRuntimeSelection(prefix);
+  const readiness = document.getElementById(`${prefix}-runtime-readiness`);
+  const warning = document.getElementById(`${prefix}-runtime-warning`);
+  const dispatch = document.getElementById(`${prefix}-dispatch`);
+  const healthy = runtime?.readiness.status === 'healthy';
+  if (readiness) {
+    readiness.textContent = runtime
+      ? `${runtimeLabel(runtime)}: ${runtime.readiness.detail}`
+      : 'No compatible runtime option is selected.';
+  }
+  if (warning) {
+    warning.textContent =
+      runtime?.cli === 'devin'
+        ? "Devin sends the prompt, selected repository content, and tool results to Devin's external service."
+        : '';
+    warning.classList.toggle('is-hidden', runtime?.cli !== 'devin');
+  }
+  if (dispatch) dispatch.disabled = !healthy;
+  return runtime;
+}
+
+function updateCodingRuntimeProviderFor(prefix) {
+  const cli = document.getElementById(`${prefix}-cli-select`)?.value;
+  const provider = document.getElementById(`${prefix}-provider-select`)?.value;
+  const modelEl = document.getElementById(`${prefix}-model-select`);
+  if (!modelEl) return;
+  modelEl.innerHTML = codingRuntimeOptionsForProvider(cli, provider)
+    .map(
+      (runtime) =>
+        `<option value="${esc(runtime.model)}">${esc(runtime.model)}${runtime.available ? '' : ' (unavailable)'}</option>`,
+    )
+    .join('');
+  updateCodingRuntimeStateFor(prefix);
+}
+
+function updateCodingRuntimeFor(prefix) {
+  const cli = document.getElementById(`${prefix}-cli-select`)?.value;
+  const providerEl = document.getElementById(`${prefix}-provider-select`);
+  if (!providerEl) return;
+  const providers = [...new Set(codingRuntimeOptionsForCli(cli).map((runtime) => runtime.provider))];
+  providerEl.innerHTML = providers
+    .map((provider) => `<option value="${esc(provider)}">${esc(provider)}</option>`)
+    .join('');
+  updateCodingRuntimeProviderFor(prefix);
+}
+
+window.updateCodingRuntime = () => updateCodingRuntimeFor('coding');
+window.updateCodingRuntimeProvider = () =>
+  updateCodingRuntimeProviderFor('coding');
+window.updateCodingRuntimeState = () => updateCodingRuntimeStateFor('coding');
+window.updateAssignCodingRuntime = () =>
+  updateCodingRuntimeFor('assign-coding');
+window.updateAssignCodingRuntimeProvider = () =>
+  updateCodingRuntimeProviderFor('assign-coding');
+window.updateAssignCodingRuntimeState = () =>
+  updateCodingRuntimeStateFor('assign-coding');
+
+function assignAutofixRuntimeSelection() {
+  const cli = document.getElementById('assign-af-cli')?.value;
+  const provider = document.getElementById('assign-af-provider')?.value;
+  const model = document.getElementById('assign-af-model')?.value;
+  return codingRuntimeOptionsForProvider(cli, provider).find(
+    (runtime) => runtime.model === model,
+  );
+}
+
+function updateAssignAutofixRuntimeState() {
+  const runtime = assignAutofixRuntimeSelection();
+  const readiness = document.getElementById('assign-af-runtime-readiness');
+  const warning = document.getElementById('assign-af-runtime-warning');
+  const dispatch = document.getElementById('assign-af-dispatch');
+  const healthy = runtime?.readiness.status === 'healthy';
+  if (readiness) {
+    readiness.textContent = runtime
+      ? `${runtimeLabel(runtime)}: ${runtime.readiness.detail}`
+      : 'No compatible runtime option is selected.';
+  }
+  if (warning) {
+    warning.textContent =
+      runtime?.cli === 'devin'
+        ? "Devin sends the prompt, selected repository content, and tool results to Devin's external service."
+        : '';
+    warning.classList.toggle('is-hidden', runtime?.cli !== 'devin');
+  }
+  if (dispatch) dispatch.disabled = !healthy;
+  return runtime;
+}
+
+window.updateAssignAutofixRuntimeProvider = function () {
+  const cli = document.getElementById('assign-af-cli')?.value;
+  const provider = document.getElementById('assign-af-provider')?.value;
+  const modelEl = document.getElementById('assign-af-model');
+  if (!modelEl) return;
+  modelEl.innerHTML = codingRuntimeOptionsForProvider(cli, provider)
+    .map(
+      (runtime) =>
+        `<option value="${esc(runtime.model)}">${esc(runtime.model)}${runtime.available ? '' : ' (unavailable)'}</option>`,
+    )
+    .join('');
+  updateAssignAutofixRuntimeState();
 };
 
-window.updateAssignAutofixModels = function () {
+window.updateAssignAutofixRuntime = function () {
+  const cli = document.getElementById('assign-af-cli')?.value;
   const providerEl = document.getElementById('assign-af-provider');
-  const modelEl = document.getElementById('assign-af-model');
-  if (!providerEl || !modelEl) return;
-  const provider = (window._codingProvidersById || {})[providerEl.value] || {};
-  const models = (window._codingModelsByProvider || {})[providerEl.value] || [];
-  const defaultAllowed = codingProviderAllowsDefaultModel(provider, models);
-  modelEl.innerHTML = `${defaultAllowed ? '<option value="">Default model</option>' : ''}${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
+  if (!providerEl) return;
+  const providers = [...new Set(codingRuntimeOptionsForCli(cli).map((runtime) => runtime.provider))];
+  providerEl.innerHTML = providers
+    .map((provider) => `<option value="${esc(provider)}">${esc(provider)}</option>`)
+    .join('');
+  updateAssignAutofixRuntimeProvider();
 };
+
+window.updateAssignAutofixRuntimeState = updateAssignAutofixRuntimeState;
 
 window.pickCodingIssue = async function () {
   const repo = document.getElementById('coding-repo-select')?.value;
-  const provider = document.getElementById('coding-provider-select')?.value;
-  const model = document.getElementById('coding-model-select')?.value;
+  const selectedRuntime = codingRuntimeSelection('coding');
   const labels = document
     .getElementById('coding-labels')
     ?.value?.split(',')
@@ -2399,14 +2522,18 @@ window.pickCodingIssue = async function () {
     toast('Register/select a repo first', 'warning');
     return;
   }
+  if (!selectedRuntime || selectedRuntime.readiness.status !== 'healthy') {
+    toast('Choose an available Runner CLI, Provider, and Model', 'warning');
+    return;
+  }
+  const { cli, provider, model } = selectedRuntime;
   try {
     const r = await api('/agents/coding/pick-issue', {
       method: 'POST',
       body: JSON.stringify({
         repo,
         labels,
-        provider,
-        model: model || undefined,
+        actualRuntime: { cli, provider, model },
         createPr,
       }),
     });
@@ -2442,8 +2569,7 @@ window.startAssignedCodingJob = async function () {
   const repo = document.getElementById('assign-coding-repo-select')?.value;
   const targetType =
     document.getElementById('assign-coding-target-type')?.value || 'auto';
-  const provider = document.getElementById('assign-coding-provider-select')?.value;
-  const model = document.getElementById('assign-coding-model-select')?.value;
+  const selectedRuntime = codingRuntimeSelection('assign-coding');
   const prompt =
     document.getElementById('assign-coding-prompt')?.value?.trim() || '';
   const planMode =
@@ -2463,6 +2589,11 @@ window.startAssignedCodingJob = async function () {
     document.getElementById('assign-coding-repo-select')?.focus();
     return;
   }
+  if (!selectedRuntime || selectedRuntime.readiness.status !== 'healthy') {
+    toast('Choose an available Runner CLI, Provider, and Model', 'warning');
+    return;
+  }
+  const { cli, provider, model } = selectedRuntime;
   if (targetType === 'issue-number' && (!issueNumber || Number.isNaN(issueNumber))) {
     toast('Enter a valid issue number', 'warning');
     document.getElementById('assign-coding-issue-number')?.focus();
@@ -2481,8 +2612,7 @@ window.startAssignedCodingJob = async function () {
             body: JSON.stringify({
               repo,
               labels,
-              provider,
-              model: model || undefined,
+              actualRuntime: { cli, provider, model },
               createPr,
             }),
           })
@@ -2493,8 +2623,7 @@ window.startAssignedCodingJob = async function () {
               issueNumber:
                 targetType === 'issue-number' ? issueNumber : undefined,
               prompt: assignedCodingPrompt(prompt, planMode),
-              provider,
-              model: model || undefined,
+              actualRuntime: { cli, provider, model },
               createPr,
             }),
           });
@@ -2533,6 +2662,12 @@ window.assignCreateAutofixProject = async function () {
     (owner ? repoEl : ownerEl)?.focus();
     return;
   }
+  const selectedRuntime = assignAutofixRuntimeSelection();
+  if (!selectedRuntime || selectedRuntime.readiness.status !== 'healthy') {
+    toast('Choose an available Runner CLI, Provider, and Model', 'warning');
+    return;
+  }
+  const { cli, provider, model } = selectedRuntime;
   try {
     const r = await api('/autofix/projects', {
       method: 'POST',
@@ -2542,9 +2677,7 @@ window.assignCreateAutofixProject = async function () {
         triggerLabel:
           document.getElementById('assign-af-label')?.value?.trim() ||
           'autofix',
-        provider: document.getElementById('assign-af-provider')?.value,
-        model:
-          document.getElementById('assign-af-model')?.value || undefined,
+        runtime: { cli, provider, model },
         createPr: document.getElementById('assign-af-create-pr')?.checked,
         maxActiveJobs: Number(
           document.getElementById('assign-af-max-active')?.value || 1,
@@ -2664,7 +2797,15 @@ window.viewCodingJob = async function (id) {
       <div class="task-output-head">
         <div class="task-output-badges">
           <span class="badge badge-muted">${esc(job.repo)}</span>
-          <span class="badge badge-accent">${esc(job.provider)}/${esc(job.model)}</span>
+          <span class="badge badge-accent">${esc(
+            runtimeLabel(
+              job.actualRuntime || {
+                cli: job.runnerCli,
+                provider: job.provider,
+                model: job.model,
+              },
+            ),
+          )}</span>
           <span class="badge ${statusBadge}">${esc(job.status)}</span>
           ${job.issueNumber ? `<span class="badge badge-info">#${job.issueNumber}</span>` : ''}
           ${job.prUrl ? `<a href="${esc(job.prUrl)}" target="_blank" class="task-output-link">Pull request</a>` : ''}

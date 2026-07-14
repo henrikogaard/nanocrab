@@ -491,11 +491,21 @@ describe('coding jobs', () => {
       labels: ['autofix', 'p0'],
       assignee: 'henrik',
       milestone: 'P0 Closure',
+      actualRuntime: {
+        cli: 'codex',
+        provider: 'codex',
+        model: 'gpt-5.4',
+      },
       requestedBy: 'dashboard',
     });
 
     expect(result?.issue.number).toBe(42);
     expect(result?.job.issueNumber).toBe(42);
+    expect(result?.job.actualRuntime).toEqual({
+      cli: 'codex',
+      provider: 'codex',
+      model: 'gpt-5.4',
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/repos/owner/repo/issues/42'),
       expect.any(Object),

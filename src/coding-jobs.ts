@@ -2165,6 +2165,7 @@ export async function pickGitHubIssue(input: {
   labels?: string[];
   provider?: string;
   model?: string;
+  actualRuntime?: AgentRuntimeSelection | null;
   assignee?: string;
   milestone?: string;
   issueNumber?: number;
@@ -2186,6 +2187,7 @@ export async function pickGitHubIssue(input: {
     issueNumber: issue.number,
     provider: input.provider,
     model: input.model,
+    actualRuntime: input.actualRuntime,
     createPr: input.createPr,
     requestedBy: input.requestedBy,
   });

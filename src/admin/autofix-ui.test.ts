@@ -56,7 +56,9 @@ describe('GitHub Autofix Code automation UI', () => {
     expect(source).toContain(
       "loadIssues.push('Group delivery targets unavailable')",
     );
-    expect(source).toContain("loadIssues.push('Provider catalog unavailable')");
+    expect(source).toContain(
+      "loadIssues.push('Coding runtime catalog unavailable')",
+    );
     expect(source).toContain(
       "loadIssues.push('GitHub webhook health unavailable')",
     );
@@ -69,22 +71,43 @@ describe('GitHub Autofix Code automation UI', () => {
     expect(source).not.toContain("api('/autofix/projects').catch(() => [])");
     expect(source).not.toContain("api('/autofix/jobs').catch(() => [])");
     expect(source).not.toContain("api('/groups').catch(() => [])");
-    expect(source).not.toContain("api('/agents/providers').catch(() => [])");
+    expect(source).not.toContain(
+      "api('/agents/coding/runtimes').catch(() => [])",
+    );
     expect(source).not.toContain(
       "api('/webhooks/github-health').catch(() => null)",
     );
   });
 
-  it('uses provider coding capability metadata for Autofix provider choices', () => {
+  it('uses complete runtime compatibility metadata for Autofix choices', () => {
     const source = fs.readFileSync(pagePath, 'utf8');
 
-    expect(source).toContain('(provider) => provider.codingCapable');
-    expect(source).toContain('providerMap[provider.id]');
-    expect(source).toContain('model.codingCapable !== false');
-    expect(source).toContain('autofixProviderAllowsDefaultModel');
-    expect(source).toContain('provider.defaultModel');
-    expect(source).not.toContain("provider.id !== 'ollama'");
-    expect(source).not.toContain("provider.id === 'claude' ||");
+    expect(source).toContain("api('/agents/coding/runtimes')");
+    expect(source).toContain('Runner CLI');
+    expect(source).toContain('Provider');
+    expect(source).toContain('Model');
+    expect(source).toContain('autofixRuntimeOptionsForCli');
+    expect(source).toContain('autofixRuntimeOptionsForProvider');
+    expect(source).toContain('readiness.detail');
+    expect(source).toContain("readiness.status === 'healthy'");
+    expect(source).toContain(
+      "Devin sends the prompt, selected repository content, and tool results to Devin's external service.",
+    );
+    expect(source).toContain('runtime: { cli, provider, model }');
+    expect(source).toContain('actualRuntime: { cli, provider, model }');
+    expect(source).not.toContain("provider === 'devin'");
+  });
+
+  it('renders the complete actual coding runtime on projects and jobs', () => {
+    const source = fs.readFileSync(pagePath, 'utf8');
+
+    expect(source).toContain('function runtimeLabel(runtime)');
+    expect(source).toContain('runtimeLabel(');
+    expect(source).toContain('j.actualRuntime || {');
+    expect(source).toContain('cli: j.runnerCli');
+    expect(source).toContain(
+      "[runtime.cli, runtime.provider, runtime.model].join(' / ')",
+    );
   });
 
   it('keeps scan, add project, webhook, issue picking, and review actions wired', () => {
