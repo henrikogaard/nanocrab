@@ -511,22 +511,26 @@ function sandboxProfile(
   workspace: string,
   temporaryDirectory: string,
   trustedRuntimeReadRoots: readonly string[],
+  workspaceWritable: boolean,
 ): string {
   const readableRoots = [
     ...trustedRuntimeReadRoots,
     workspace,
     temporaryDirectory,
   ];
-  return [
+  const rules = [
     '(version 1)',
     '(deny default)',
     '(allow process-exec)',
     '(allow process-fork)',
     '(deny network*)',
     `(allow file-read* ${readableRoots.map(sandboxPathFilters).join(' ')})`,
-    `(allow file-write* (subpath ${JSON.stringify(workspace)}))`,
     `(allow file-write* (subpath ${JSON.stringify(temporaryDirectory)}))`,
-  ].join(' ');
+  ];
+  if (workspaceWritable) {
+    rules.push(`(allow file-write* (subpath ${JSON.stringify(workspace)}))`);
+  }
+  return rules.join(' ');
 }
 
 function sandboxDirectoryArgs(values: readonly string[]): string[] {
@@ -554,16 +558,7 @@ export function buildSandboxedCommand(
   >,
 ): { executable: string; args: string[]; env: NodeJS.ProcessEnv } {
   validateBrokerCommand(request);
-  if (!isBuildCommand(request)) {
-    return {
-      executable: request.argv[0]!,
-      args: request.argv.slice(1),
-      env: buildDevinChildEnvironment({
-        ...deps.environmentSource,
-        HOME: request.home,
-      }),
-    };
-  }
+  const workspaceWritable = isBuildCommand(request);
   const configuredTemporaryDirectory = deps.environmentSource.TMPDIR ?? '/tmp';
   if (!path.isAbsolute(configuredTemporaryDirectory)) {
     throw new Error('Sandbox temp path is invalid');
@@ -583,6 +578,10 @@ export function buildSandboxedCommand(
       executable: deps.sandboxExecutable,
       args: [
         '--unshare-net',
+        '--unshare-pid',
+        '--unshare-ipc',
+        '--new-session',
+        '--die-with-parent',
         '--tmpfs',
         '/',
         '--dev',
@@ -599,7 +598,7 @@ export function buildSandboxedCommand(
           runtimeRoot,
           runtimeRoot,
         ]),
-        '--bind',
+        workspaceWritable ? '--bind' : '--ro-bind',
         request.workspace,
         request.workspace,
         '--bind',
@@ -625,6 +624,7 @@ export function buildSandboxedCommand(
           request.workspace,
           temporaryDirectory,
           request.trustedRuntimeReadRoots,
+          workspaceWritable,
         ),
         '--',
         ...request.argv,
@@ -734,6 +734,7 @@ async function canonicalizeInspectionPaths(
 function hardenedGitArgs(args: readonly string[]): string[] {
   const [subcommand, ...rest] = args;
   const result = [
+    '--no-optional-locks',
     '--no-pager',
     '-c',
     'core.fsmonitor=false',
@@ -747,6 +748,17 @@ function hardenedGitArgs(args: readonly string[]): string[] {
   }
   result.push(...rest);
   return result;
+}
+
+function replaceSandboxedArgv(
+  command: { args: string[] },
+  argv: readonly string[],
+): void {
+  const separator = command.args.indexOf('--');
+  if (separator < 0) {
+    throw new Error('Sandbox command separator is missing');
+  }
+  command.args.splice(separator + 1, command.args.length, ...argv);
 }
 
 export async function runCommandBrokerCli(
@@ -792,11 +804,12 @@ export async function runCommandBrokerCli(
     canonicalRequest,
     executionDependencies,
   );
-  if (command.executable === 'git') {
-    command.args = hardenedGitArgs(command.args);
-  } else if (INSPECTION_EXECUTABLES.has(command.executable)) {
-    command.args = canonicalArgv.slice(1);
+  let brokerArgv = canonicalArgv;
+  if (canonicalRequest.argv[0] === 'git') {
+    brokerArgv = ['git', ...hardenedGitArgs(canonicalRequest.argv.slice(1))];
+    command.env.GIT_OPTIONAL_LOCKS = '0';
   }
+  replaceSandboxedArgv(command, brokerArgv);
   return deps.execute(command.executable, command.args, {
     cwd: canonicalCwd,
     env: command.env,

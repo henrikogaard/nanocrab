@@ -182,19 +182,89 @@ function dependencies(
 }
 
 describe('command execution', () => {
-  it('canonicalizes workspace and cwd before executing an inspection command', async () => {
+  it('canonicalizes workspace and cwd before sandboxing an inspection command', async () => {
     const deps = dependencies();
 
-    await expect(runCommandBrokerCli(request(['pwd']), deps)).resolves.toBe(0);
+    await expect(
+      runCommandBrokerCli(request(['pwd'], 'implement'), deps),
+    ).resolves.toBe(0);
 
     expect(deps.realpath).toHaveBeenNthCalledWith(1, workspace);
     expect(deps.realpath).toHaveBeenNthCalledWith(2, workspace);
-    expect(deps.execute).toHaveBeenCalledWith('pwd', [], {
-      cwd: workspace,
-      env: expect.not.objectContaining({ GITHUB_TOKEN: expect.anything() }),
-      shell: false,
-      stdio: 'inherit',
-    });
+    expect(deps.execute).toHaveBeenCalledWith(
+      '/usr/bin/bwrap',
+      expect.any(Array),
+      {
+        cwd: workspace,
+        env: expect.not.objectContaining({ GITHUB_TOKEN: expect.anything() }),
+        shell: false,
+        stdio: 'inherit',
+      },
+    );
+    const args = vi.mocked(deps.execute).mock.calls[0]![1];
+    expect(args).toEqual(
+      expect.arrayContaining([
+        '--unshare-net',
+        '--unshare-pid',
+        '--unshare-ipc',
+        '--new-session',
+        '--die-with-parent',
+        '--proc',
+        '/proc',
+        '--ro-bind',
+        workspace,
+        workspace,
+        '--',
+        'pwd',
+      ]),
+    );
+    expect(
+      args.some(
+        (value, index) =>
+          value === '--bind' &&
+          args[index + 1] === workspace &&
+          args[index + 2] === workspace,
+      ),
+    ).toBe(false);
+  });
+
+  it('sandboxes Git reads and disables optional locks before execution', async () => {
+    const deps = dependencies();
+
+    await runCommandBrokerCli(request(['git', 'status', '--short']), deps);
+
+    const [, args, options] = vi.mocked(deps.execute).mock.calls[0]!;
+    expect(args.slice(args.lastIndexOf('--') + 1)).toEqual([
+      'git',
+      '--no-optional-locks',
+      '--no-pager',
+      '-c',
+      'core.fsmonitor=false',
+      '-c',
+      'core.untrackedCache=false',
+      'status',
+      '--short',
+    ]);
+    expect(options.env).toEqual(
+      expect.objectContaining({ GIT_OPTIONAL_LOCKS: '0' }),
+    );
+    expect(args).toEqual(
+      expect.arrayContaining(['--ro-bind', workspace, workspace]),
+    );
+  });
+
+  it('preserves an inspection command separator when rewriting canonical paths', async () => {
+    const deps = dependencies();
+
+    await runCommandBrokerCli(request(['cat', '--', 'package.json']), deps);
+
+    const args = vi.mocked(deps.execute).mock.calls[0]![1];
+    const sandboxSeparator = args.indexOf('--');
+    expect(args.slice(sandboxSeparator + 1)).toEqual([
+      'cat',
+      '--',
+      `${workspace}/package.json`,
+    ]);
   });
 
   it('requires an approved manifest script before command spawn', async () => {
@@ -281,6 +351,10 @@ describe('command execution', () => {
     expect(args).toEqual(
       expect.arrayContaining([
         '--unshare-net',
+        '--unshare-pid',
+        '--unshare-ipc',
+        '--new-session',
+        '--die-with-parent',
         '--tmpfs',
         '/',
         '--ro-bind',
@@ -316,6 +390,16 @@ describe('command execution', () => {
       shell: false,
       stdio: 'inherit',
     });
+    const procIndex = args.indexOf('--proc');
+    for (const isolationFlag of [
+      '--unshare-pid',
+      '--unshare-ipc',
+      '--new-session',
+      '--die-with-parent',
+    ]) {
+      expect(args.indexOf(isolationFlag)).toBeGreaterThan(-1);
+      expect(args.indexOf(isolationFlag)).toBeLessThan(procIndex);
+    }
   });
 
   it('builds a macOS network-deny profile with workspace-only writes', () => {
@@ -338,6 +422,22 @@ describe('command execution', () => {
     for (const protectedPath of [home, ...protectedPaths]) {
       expect(result.args[1]).not.toContain(protectedPath);
     }
+  });
+
+  it('gives macOS inspection commands no workspace write permission', () => {
+    const result = buildSandboxedCommand(request(['pwd'], 'review'), {
+      platform: 'darwin',
+      sandboxExecutable: '/usr/bin/sandbox-exec',
+      environmentSource: { HOME: home, TMPDIR: '/tmp' },
+    });
+
+    expect(result.executable).toBe('/usr/bin/sandbox-exec');
+    expect(result.args[1]).toContain(`(allow file-read*`);
+    expect(result.args[1]).toContain(`(subpath "${workspace}")`);
+    expect(result.args[1]).not.toContain(
+      `(allow file-write* (subpath "${workspace}"))`,
+    );
+    expect(result.args[1]).toContain(`(allow file-write* (subpath "/tmp"))`);
   });
 
   it.each([

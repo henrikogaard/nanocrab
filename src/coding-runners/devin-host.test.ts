@@ -1,3 +1,5 @@
+import type { PathLike } from 'node:fs';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -141,6 +143,7 @@ describe('Devin command broker launcher', () => {
     const mkdir = vi.fn(async () => undefined);
     const writeFile = vi.fn(async () => undefined);
     const chmod = vi.fn(async () => undefined);
+    const realpath = vi.fn(async (value: PathLike) => value.toString());
 
     await expect(
       writeDevinCommandBrokerLauncher(
@@ -151,6 +154,7 @@ describe('Devin command broker launcher', () => {
           commandBrokerModulePath:
             '/opt/nanocrab/dist/coding-runners/command-broker.js',
           sandboxExecutable: '/usr/bin/bwrap',
+          nodeExecutable: '/usr/bin/node',
           home: '/home/service',
           protectedPaths: [
             '/jobs/job/.nanocrab',
@@ -159,7 +163,7 @@ describe('Devin command broker launcher', () => {
           ],
           trustedRuntimeReadRoots: ['/usr'],
         },
-        { mkdir, writeFile, chmod },
+        { mkdir, writeFile, chmod, realpath },
       ),
     ).resolves.toBe('/jobs/job/.nanocrab/bin/nanocrab-job-exec');
 
@@ -169,13 +173,15 @@ describe('Devin command broker launcher', () => {
     });
     expect(writeFile).toHaveBeenCalledWith(
       '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
-      expect.stringMatching(/^#!\/usr\/bin\/env node\n/),
+      expect.stringMatching(/^#!\/usr\/bin\/node\n/),
       { encoding: 'utf8', mode: 0o555, flag: 'wx' },
     );
     const source = (
       writeFile.mock.calls as unknown as Array<[string, string]>
     )[0]![1];
     expect(source).toContain('runCommandBrokerCli');
+    expect(source).toMatch(/^#!\/usr\/bin\/node\n/);
+    expect(source).not.toContain('/usr/bin/env');
     expect(source).toContain('process.argv.slice(2)');
     expect(source).toContain('shell: false');
     expect(source).toContain(JSON.stringify('/jobs/job/repo "quoted"'));
@@ -191,5 +197,58 @@ describe('Devin command broker launcher', () => {
       0o555,
     );
     expect(chmod).toHaveBeenCalledWith('/jobs/job/.nanocrab/bin', 0o500);
+  });
+
+  it('rejects a Node executable outside trusted runtime roots before writing', async () => {
+    const mkdir = vi.fn(async () => undefined);
+    const writeFile = vi.fn(async () => undefined);
+    const chmod = vi.fn(async () => undefined);
+    const realpath = vi.fn(async (value: PathLike) => value.toString());
+
+    await expect(
+      writeDevinCommandBrokerLauncher(
+        {
+          stageKind: 'implement',
+          workspace: '/jobs/job/repo',
+          jobRoot: '/jobs/job',
+          commandBrokerModulePath:
+            '/opt/nanocrab/dist/coding-runners/command-broker.js',
+          sandboxExecutable: '/usr/bin/bwrap',
+          nodeExecutable: '/tmp/untrusted-node',
+          home: '/home/service',
+          protectedPaths: ['/jobs/job/.nanocrab'],
+          trustedRuntimeReadRoots: ['/usr'],
+        },
+        { mkdir, writeFile, chmod, realpath },
+      ),
+    ).rejects.toThrow(/node|runtime|trusted/i);
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it('rejects a noncanonical Node executable before writing', async () => {
+    const writeFile = vi.fn(async () => undefined);
+    await expect(
+      writeDevinCommandBrokerLauncher(
+        {
+          stageKind: 'review',
+          workspace: '/jobs/job/repo',
+          jobRoot: '/jobs/job',
+          commandBrokerModulePath:
+            '/opt/nanocrab/dist/coding-runners/command-broker.js',
+          sandboxExecutable: '/usr/bin/bwrap',
+          nodeExecutable: '/usr/local/bin/node',
+          home: '/home/service',
+          protectedPaths: ['/jobs/job/.nanocrab'],
+          trustedRuntimeReadRoots: ['/usr'],
+        },
+        {
+          mkdir: vi.fn(async () => undefined),
+          writeFile,
+          chmod: vi.fn(async () => undefined),
+          realpath: vi.fn(async () => '/usr/bin/node'),
+        },
+      ),
+    ).rejects.toThrow(/node|canonical/i);
+    expect(writeFile).not.toHaveBeenCalled();
   });
 });

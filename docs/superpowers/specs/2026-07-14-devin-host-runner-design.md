@@ -410,8 +410,9 @@ than substring assertions, lock the expected schema for every stage.
 
 The sole executable permission targets an immutable NanoCrab command broker
 outside the writable repository. The broker validates an argv array, canonical
-cwd, and stage, then uses `shell: false` and a scrubbed environment. Planning
-and review allow only:
+cwd, and stage, then uses `shell: false` and a scrubbed environment. Every
+accepted command, including read inspections and Git, runs inside the approved
+OS sandbox. Planning and review allow only:
 
 - `pwd`, `ls`, workspace-scoped `find`, `rg`, `grep`, `cat`, `head`, `tail`,
   `wc`, `file`, and `stat`; and
@@ -432,25 +433,37 @@ network clients (`curl`, `wget`, `ssh`, `scp`, `rsync`, `nc`, `socat`); shells;
 Docker/Podman/Kubernetes/infrastructure tools; privilege/service managers;
 destructive file commands and in-place editors; and direct interpreters other
 than the exact pytest form. File changes use the scoped edit/write tools.
+Broker-injected Git reads use both `--no-optional-locks` and
+`GIT_OPTIONAL_LOCKS=0`; user argv still cannot contain Git global options.
 
-Package scripts are arbitrary code, so allowed build/test commands execute in
-an additional OS process sandbox with workspace-only filesystem access and no
-network namespace. The broker receives immutable canonical protected paths and
+Repository-controlled Git configuration, filters, attributes, and package
+scripts are executable attack surfaces, so every brokered command executes in
+an OS process sandbox with workspace-only filesystem access and no network
+namespace. The broker receives immutable canonical protected paths and
 an explicit list of canonical trusted runtime read roots. It rejects missing,
 noncanonical, duplicate, or protected/runtime-overlapping roots before spawn.
 Linux starts from an empty `bwrap` root, exposes only the trusted runtime roots
-read-only, binds only the workspace and temporary directory writable, and uses
-`--unshare-net`; it must not bind host `/`. macOS allows reads only from the
-explicit runtime roots, workspace, and temporary directory, denies network,
-and allows writes only below the workspace and temporary directory; it must not
-use a global `allow file-read*`. The service home, Devin credential, NanoCrab
-configuration, and job metadata therefore remain unavailable to package
-scripts. Trusted executable directories below the service home may be exposed
-individually, but exposing the home itself or a root overlapping a protected
-path is denied. If the required platform primitive or isolation inputs are
-absent, readiness fails closed. A repository whose build needs network or an
-unlisted host path fails with an operator-visible restriction; issue #129 adds
-no bypass.
+read-only, and always uses `--unshare-net`, `--unshare-pid`, `--unshare-ipc`,
+`--new-session`, and `--die-with-parent` before mounting a private `/proc`.
+Inspection and Git commands bind the workspace read-only; only approved
+implement/direct build and test commands bind it writable. The temporary
+directory remains writable for all commands, and host `/` is never bound.
+macOS allows reads only from the explicit runtime roots, workspace, and
+temporary directory, denies network, allows temp writes for every command, and
+allows workspace writes only for approved implement/direct build and test
+commands; it must not use a global `allow file-read*`. The service home, Devin
+credential, NanoCrab configuration, and job metadata therefore remain
+unavailable to brokered subprocesses. Trusted executable directories below the
+service home may be exposed individually, but exposing the home itself or a
+root overlapping a protected path is denied. If the required platform
+primitive or isolation inputs are absent, readiness fails closed. A repository
+whose command needs network or an unlisted host path fails with an
+operator-visible restriction; issue #129 adds no bypass.
+
+The mode-`0555` broker launcher uses a canonical Node executable validated by
+readiness and rechecked as a descendant of an approved runtime read root. It
+embeds that absolute executable directly in the shebang; `/usr/bin/env`, ambient
+`PATH` lookup, and repository-controlled runtimes are not permitted.
 
 Permission policy by stage:
 

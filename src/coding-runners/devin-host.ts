@@ -87,13 +87,25 @@ interface DevinBrokerLauncherDependencies {
   mkdir: typeof fs.promises.mkdir;
   writeFile: typeof fs.promises.writeFile;
   chmod: typeof fs.promises.chmod;
+  realpath(path: string): Promise<string>;
 }
 
 const launcherDependencies: DevinBrokerLauncherDependencies = {
   mkdir: fs.promises.mkdir,
   writeFile: fs.promises.writeFile,
   chmod: fs.promises.chmod,
+  realpath: (value) => fs.promises.realpath(value),
 };
+
+function isAtOrBelow(candidate: string, parent: string): boolean {
+  const relative = path.relative(parent, candidate);
+  return (
+    relative === '' ||
+    (relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
+}
 
 export async function writeDevinCommandBrokerLauncher(
   input: {
@@ -102,6 +114,7 @@ export async function writeDevinCommandBrokerLauncher(
     jobRoot: string;
     commandBrokerModulePath: string;
     sandboxExecutable: '/usr/bin/bwrap' | '/usr/bin/sandbox-exec';
+    nodeExecutable: string;
     home: string;
     protectedPaths: readonly string[];
     trustedRuntimeReadRoots: readonly string[];
@@ -111,7 +124,23 @@ export async function writeDevinCommandBrokerLauncher(
   const directory = path.join(input.jobRoot, '.nanocrab', 'bin');
   const launcherPath = path.join(directory, 'nanocrab-job-exec');
   const moduleUrl = pathToFileURL(input.commandBrokerModulePath).href;
-  const source = `#!/usr/bin/env node
+  const canonicalNodeExecutable = await dependencies.realpath(
+    input.nodeExecutable,
+  );
+  if (
+    canonicalNodeExecutable !== input.nodeExecutable ||
+    !path.isAbsolute(canonicalNodeExecutable) ||
+    path.normalize(canonicalNodeExecutable) !== canonicalNodeExecutable ||
+    /[\0\n\r\t ]/.test(canonicalNodeExecutable) ||
+    !input.trustedRuntimeReadRoots.some((runtimeRoot) =>
+      isAtOrBelow(canonicalNodeExecutable, runtimeRoot),
+    )
+  ) {
+    throw new Error(
+      'Node executable is not canonical or inside a trusted runtime root',
+    );
+  }
+  const source = `#!${canonicalNodeExecutable}
 import { spawn } from 'node:child_process';
 import { readFile, realpath } from 'node:fs/promises';
 import { runCommandBrokerCli } from ${JSON.stringify(moduleUrl)};
