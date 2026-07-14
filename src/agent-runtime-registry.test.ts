@@ -276,6 +276,26 @@ describe('agent runtime registry', () => {
     expect(result.checkedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
   });
 
+  it('fails the public Devin runtime probe closed without touching probe dependencies', async () => {
+    const deps = healthyDevinProbe({
+      credentialPath: '/home/nanocrab/.config/devin/credentials.json',
+    });
+
+    await expect(
+      probeAgentRuntime('devin', { devinDependencies: deps }),
+    ).resolves.toMatchObject({
+      cli: 'devin',
+      status: 'error',
+      detail: DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
+    });
+    expect(deps.realpath).not.toHaveBeenCalled();
+    expect(deps.lstat).not.toHaveBeenCalled();
+    expect(deps.stat).not.toHaveBeenCalled();
+    expect(deps.commandAvailable).not.toHaveBeenCalled();
+    expect(deps.resolveExecutable).not.toHaveBeenCalled();
+    expect(deps.execFile).not.toHaveBeenCalled();
+  });
+
   it('reports Pi coding readiness from the image and credential route, not host CLI', async () => {
     const hostProbe = vi.fn();
 
@@ -659,22 +679,25 @@ describe('agent runtime registry', () => {
   });
 
   it('rejects a healthy host probe when sandbox authentication handoff is unavailable', async () => {
+    const hostProbe = vi.fn().mockResolvedValue({
+      cli: 'devin',
+      executable: 'devin',
+      status: 'healthy',
+      version: '1.1.0',
+      checkedAt: new Date().toISOString(),
+      detail: 'Devin host runner is ready',
+    });
+
     await expect(
       probeCodingRunnerReadiness('devin', {
-        probeHostRuntime: vi.fn().mockResolvedValue({
-          cli: 'devin',
-          executable: 'devin',
-          status: 'healthy',
-          version: '1.1.0',
-          checkedAt: new Date().toISOString(),
-          detail: 'Devin host runner is ready',
-        }),
+        probeHostRuntime: hostProbe,
       }),
     ).resolves.toMatchObject({
       cli: 'devin',
       status: 'error',
       detail: DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
     });
+    expect(hostProbe).not.toHaveBeenCalled();
   });
 
   it('reports error status for non-ENOENT failures', async () => {

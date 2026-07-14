@@ -83,6 +83,16 @@ export async function probeCodingRunnerReadiness(
   } = {},
 ): Promise<AgentRuntimeHealth> {
   if (cli === 'devin') {
+    if (!isDevinSandboxAuthHandoffAvailable()) {
+      return {
+        cli: 'devin',
+        executable: 'devin',
+        status: 'error',
+        version: null,
+        checkedAt: new Date().toISOString(),
+        detail: DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
+      };
+    }
     const health = await (options.probeHostRuntime || probeHostRuntime)(cli);
     if (health.status === 'healthy' && !isDevinSandboxAuthHandoffAvailable()) {
       return {

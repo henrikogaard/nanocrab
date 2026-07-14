@@ -247,6 +247,14 @@ export async function probeAgentRuntime(
   }
 
   if (cli === 'devin') {
+    if (!isDevinSandboxAuthHandoffAvailable()) {
+      clearVerifiedDevinState();
+      return devinHealth(
+        'error',
+        DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
+        new Date().toISOString(),
+      );
+    }
     return probeDevinRuntime(
       options?.devinDependencies ?? defaultDevinProbeDependencies(),
     );

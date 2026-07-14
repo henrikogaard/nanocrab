@@ -670,7 +670,7 @@ work.
 | Failure                          | Job/runtime result                          | Operator-visible behavior                                  |
 | -------------------------------- | ------------------------------------------- | ---------------------------------------------------------- |
 | Executable missing               | Runtime `missing`; dispatch blocked         | Install Devin on the NanoCrab host                         |
-| Authentication absent/expired    | Runtime `unauthenticated`; dispatch blocked | Run interactive `devin auth login` as the service user     |
+| Authentication handoff unavailable | Runtime `error` with `Sandboxed Devin authentication handoff is unavailable; no credential or host auth directory is mounted`; dispatch blocked | Remains disabled pending a reviewed sandbox-safe authentication handoff; do not authenticate Devin for NanoCrab |
 | Credential ownership/mode unsafe | Runtime `error`; dispatch blocked           | Correct ownership and set mode `0600`                      |
 | Sandbox/capability unavailable   | Runtime `error`; dispatch blocked           | Upgrade/configure the CLI; no unsandboxed retry            |
 | Git workspace preparation fails  | Coding job `failed` before Devin spawn      | Preserve metadata and sanitized Git failure                |
@@ -843,18 +843,18 @@ boundary and may incur cost.
 
 1. Land the adapter, readiness checks, docs, and fake-transport tests while
    leaving existing agent profiles unchanged.
-2. On the target host, install a supported Devin CLI, authenticate as the
-   dedicated NanoCrab service user, set the credential mode to `0600`, and
-   verify the non-sensitive runtime health result.
-3. Assign Devin to one planning or review profile first and exercise only a
-   deliberately selected low-risk issue after owner approval.
-4. Inspect output redaction, filesystem scope, timeout/cancellation, branch,
-   diff, and audit evidence.
-5. Assign Devin to implement work only after that operator verification.
+2. Keep Devin coding readiness and dispatch disabled. Do not install,
+   authenticate, or assign Devin implementation work for NanoCrab while the
+   sandbox-safe authentication handoff is unavailable.
+3. If a reviewed handoff is approved later, verify the non-sensitive runtime
+   health result and assign Devin to one planning or review profile first.
+4. Exercise only a deliberately selected low-risk issue after owner approval;
+   inspect output redaction, filesystem scope, timeout/cancellation, branch,
+   diff, and audit evidence before considering any write-capable assignment.
 
-Profile assignment is the opt-in; this slice does not add a second global
-feature flag. Existing profiles and container jobs are unchanged until an
-operator selects Devin.
+Devin profile assignment remains disabled in this slice. Existing profiles and
+container jobs are unchanged until a future reviewed handoff explicitly enables
+the runtime.
 
 ## Rollback
 

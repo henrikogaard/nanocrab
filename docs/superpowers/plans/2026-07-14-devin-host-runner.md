@@ -1449,9 +1449,8 @@ The path is an example for the dedicated service account, not a claim that NanoC
 
 README and `docs/AGENT_PROFILES.md` must state:
 
-- NanoCrab itself runs directly on macOS/Linux as the same dedicated OS user that owns the authenticated Devin installation;
-- run interactive `devin auth login` as that user and set the credential to exact `0600`;
-- profile assignment is opt-in; start with planning/review, then a deliberately selected low-risk issue after owner approval;
+- keep Devin disabled pending a reviewed sandbox-safe authentication handoff; do not run `devin auth login` for NanoCrab or assign Devin implementation work;
+- after a reviewed handoff exists, profile assignment may be opt-in; start with planning/review, then a deliberately selected low-risk issue after owner approval;
 - CLI/provider/model remain distinct and a mapped example is `devin / claude / claude-opus-4-6`;
 - readiness is repeated after approval before workspace mutation;
 - no silent fallback; owner must approve a complete replacement triple;
