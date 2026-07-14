@@ -55,6 +55,26 @@ const TRUSTED_GIT_ENV: NodeJS.ProcessEnv = {
   LC_ALL: 'C.UTF-8',
 };
 
+const CREDENTIALED_GIT_CONFIG = [
+  ['credential.helper', ''],
+  ['credential.interactive', 'never'],
+  ['core.hooksPath', '/dev/null'],
+  ['core.fsmonitor', 'false'],
+  ['core.untrackedCache', 'false'],
+  ['core.sshCommand', 'false'],
+  ['protocol.allow', 'never'],
+  ['protocol.https.allow', 'always'],
+  ['protocol.http.allow', 'never'],
+  ['protocol.ssh.allow', 'never'],
+  ['protocol.file.allow', 'never'],
+  ['protocol.ext.allow', 'never'],
+  ['remote.origin.proxy', ''],
+  ['http.proxy', ''],
+  ['http.curloptResolve', ''],
+  ['http.followRedirects', 'false'],
+  ['http.sslVerify', 'true'],
+] as const;
+
 const EMPTY_GIT_STATE: PreparedCodingWorkspace['gitState'] = {
   staged: '',
   unstaged: '',
@@ -155,8 +175,8 @@ async function createTemporaryAskpass(): ReturnType<AskpassFactory> {
   const helper = [
     '#!/bin/sh',
     'case "$1" in',
-    "  *Username*) printf '%s\\n' 'x-access-token' ;;",
-    '  *Password*) printf \'%s\\n\' "$NANOCRAB_GIT_TOKEN" ;;',
+    "  *Username*https://github.com\\'*|*Username*https://github.com/*) printf '%s\\n' 'x-access-token' ;;",
+    "  *Password*https://x-access-token@github.com\\'*|*Password*https://x-access-token@github.com/*) printf '%s\\n' \"$NANOCRAB_GIT_TOKEN\" ;;",
     '  *) exit 1 ;;',
     'esac',
     '',
@@ -184,6 +204,82 @@ function redact(value: string, token: string): string {
   return token ? value.split(token).join('[REDACTED]') : value;
 }
 
+function validateApprovedHostGitArgs(args: readonly string[]): void {
+  if (
+    args.length === 5 &&
+    args[0] === 'clone' &&
+    args[1] === '--depth' &&
+    args[2] === '50' &&
+    /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/.test(
+      args[3],
+    ) &&
+    path.isAbsolute(args[4])
+  ) {
+    const repo = args[3].slice('https://github.com/'.length, -'.git'.length);
+    validateCodingRepoSlug(repo);
+    return;
+  }
+
+  if (
+    args.length === 5 &&
+    args[0] === 'fetch' &&
+    args[1] === 'origin' &&
+    args[3] === '--depth' &&
+    args[4] === '50'
+  ) {
+    validateCodingBranch(args[2]);
+    return;
+  }
+
+  if (args.length === 3 && args[0] === 'push' && args[1] === 'origin') {
+    const branch = args[2].startsWith(':') ? args[2].slice(1) : args[2];
+    validateCodingBranch(branch);
+    return;
+  }
+
+  if (
+    args.length === 4 &&
+    args[0] === 'push' &&
+    args[1] === 'origin' &&
+    args[3] === '--force-with-lease'
+  ) {
+    const separator = args[2].indexOf(':');
+    const branch = args[2].slice(0, separator);
+    const destination = args[2].slice(separator + 1);
+    validateCodingBranch(branch);
+    if (separator < 1 || destination !== `refs/heads/${branch}`) {
+      throw new Error('Git arguments are not an approved remote operation');
+    }
+    return;
+  }
+
+  throw new Error('Git arguments are not an approved remote operation');
+}
+
+function credentialedGitEnvironment(
+  helperPath: string,
+  token: string,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...TRUSTED_GIT_ENV,
+    GIT_CONFIG_SYSTEM: '/dev/null',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_ALLOW_PROTOCOL: 'https',
+    GIT_PROTOCOL_FROM_USER: '0',
+    GIT_SSH_COMMAND: 'false',
+    GIT_ASKPASS: helperPath,
+    GIT_TERMINAL_PROMPT: '0',
+    NANOCRAB_GIT_TOKEN: token,
+    GIT_CONFIG_COUNT: String(CREDENTIALED_GIT_CONFIG.length),
+  };
+  CREDENTIALED_GIT_CONFIG.forEach(([key, value], index) => {
+    env[`GIT_CONFIG_KEY_${index}`] = key;
+    env[`GIT_CONFIG_VALUE_${index}`] = value;
+  });
+  return env;
+}
+
 export async function runApprovedHostGit(
   args: readonly string[],
   options: {
@@ -197,6 +293,7 @@ export async function runApprovedHostGit(
   if (args.some((argument) => argument.includes(options.token))) {
     throw new Error('Git arguments must not contain credentials');
   }
+  validateApprovedHostGitArgs(args);
 
   let helper: Awaited<ReturnType<AskpassFactory>> | undefined;
   try {
@@ -204,12 +301,7 @@ export async function runApprovedHostGit(
     const result = await options.git(args, {
       cwd: options.cwd,
       timeoutMs: GIT_TIMEOUT_MS,
-      env: {
-        ...TRUSTED_GIT_ENV,
-        GIT_ASKPASS: helper.path,
-        GIT_TERMINAL_PROMPT: '0',
-        NANOCRAB_GIT_TOKEN: options.token,
-      },
+      env: credentialedGitEnvironment(helper.path, options.token),
     });
     return {
       stdout: redact(result.stdout, options.token),
@@ -315,6 +407,39 @@ function parseStatus(
   };
 }
 
+async function validateWorkspaceParentChain(
+  requestedWorkspace: string,
+  requestedJobRoot: string,
+  canonicalJobRoot: string,
+  deps: CodingWorkspaceDeps,
+): Promise<void> {
+  const requestedParent = path.dirname(requestedWorkspace);
+  const relativeParent = path.relative(requestedJobRoot, requestedParent);
+  if (!relativeParent) return;
+
+  let current = requestedJobRoot;
+  for (const component of relativeParent.split(path.sep)) {
+    current = path.join(current, component);
+    let currentStats: fs.Stats;
+    try {
+      currentStats = await deps.lstat(current);
+    } catch (error) {
+      if (isMissing(error)) return;
+      throw new Error('Unable to inspect coding workspace parent', {
+        cause: error,
+      });
+    }
+    if (currentStats.isSymbolicLink()) {
+      throw new Error('Coding workspace parent must not be a symlink');
+    }
+    if (!currentStats.isDirectory()) {
+      throw new Error('Coding workspace parent must be a directory');
+    }
+    const canonicalParent = await deps.realpath(current);
+    assertBelow(canonicalParent, canonicalJobRoot, 'Coding workspace parent');
+  }
+}
+
 async function inspectExistingCheckout(
   input: CodingWorkspaceInput,
   deps: CodingWorkspaceDeps,
@@ -399,6 +524,10 @@ export async function prepareCodingWorkspace(
   await deps.mkdir(jobsRoot, { recursive: true });
   const canonicalJobsRoot = await deps.realpath(jobsRoot);
   await deps.mkdir(jobRoot, { recursive: true });
+  const jobRootStats = await deps.lstat(jobRoot);
+  if (jobRootStats.isSymbolicLink() || !jobRootStats.isDirectory()) {
+    throw new Error('Coding job root must be a real directory');
+  }
   const canonicalJobRoot = await deps.realpath(jobRoot);
   assertBelow(canonicalJobRoot, canonicalJobsRoot, 'Coding job root');
   await deps.mkdir(metadataDir, { recursive: true });
@@ -407,6 +536,13 @@ export async function prepareCodingWorkspace(
     canonicalMetadataDir,
     canonicalJobRoot,
     'Coding metadata directory',
+  );
+
+  await validateWorkspaceParentChain(
+    requestedWorkspace,
+    jobRoot,
+    canonicalJobRoot,
+    deps,
   );
 
   const exists = await pathExists(requestedWorkspace, deps.lstat);
