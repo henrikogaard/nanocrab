@@ -30,6 +30,7 @@ const STREAMING_SENSITIVE_KEYS = [
   'cookie',
   'token',
 ] as const;
+const STREAMING_TOKEN_DELIMITER = /[\s"',&]/;
 const SECRET_VALUE_PATTERNS = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]+/g,
   /\bsk-[A-Za-z0-9._-]+/g,
@@ -147,6 +148,7 @@ export function createStreamingLogRedactor(options?: {
     longestKnownSecret,
   );
   let carry = '';
+  let discardingOpenToken = false;
   let flushed = false;
 
   const redact = (value: string): string =>
@@ -160,7 +162,15 @@ export function createStreamingLogRedactor(options?: {
         );
       }
 
+      if (discardingOpenToken) {
+        const delimiterIndex = chunk.search(STREAMING_TOKEN_DELIMITER);
+        if (delimiterIndex === -1) return '';
+        chunk = chunk.slice(delimiterIndex);
+        discardingOpenToken = false;
+      }
+
       carry += chunk;
+      carry = redactKnownSecrets(carry, knownSecretPattern);
       const openSuffix = findOpenSuffix(carry, knownSecrets);
       const completePrefix = carry.slice(0, openSuffix);
       carry = carry.slice(openSuffix);
@@ -170,6 +180,7 @@ export function createStreamingLogRedactor(options?: {
         const redactedCarry = redact(carry);
         output += redactedCarry === carry ? '[REDACTED]' : redactedCarry;
         carry = '';
+        discardingOpenToken = true;
       }
 
       return output;
@@ -180,6 +191,7 @@ export function createStreamingLogRedactor(options?: {
       flushed = true;
       const output = redact(carry);
       carry = '';
+      discardingOpenToken = false;
       return output;
     },
   };

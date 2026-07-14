@@ -40,6 +40,17 @@ describe('createStreamingLogRedactor', () => {
     expect(redactor.write('short') + redactor.flush()).toBe('short');
   });
 
+  it('redacts a self-overlapping known literal across every boundary', () => {
+    const secret = 'aaaaaaaa';
+    for (const [left, right] of everySplit(secret)) {
+      const redactor = createStreamingLogRedactor({ knownSecrets: [secret] });
+      const persisted =
+        redactor.write(left) + redactor.write(right) + redactor.flush();
+      expect(persisted).toBe('[REDACTED]');
+      expect(persisted).not.toContain(secret);
+    }
+  });
+
   it('flush emits a safe suffix exactly once', () => {
     const redactor = createStreamingLogRedactor();
     expect(redactor.write('Authorization: Bearer final-token')).toBe(
@@ -76,6 +87,19 @@ describe('createStreamingLogRedactor', () => {
 
     expect(persisted).toBe('Bearer [REDACTED]');
     expect(redactor.flush()).toBe('');
+  });
+
+  it('discards an overflowing open token until its delimiter', () => {
+    const redactor = createStreamingLogRedactor({ carryLength: 16 });
+
+    const persisted =
+      redactor.write('Bearer abcdefghi') +
+      redactor.write('jklmnop ') +
+      redactor.flush();
+
+    expect(persisted).toBe('Bearer [REDACTED] ');
+    expect(persisted).not.toContain('jklmnop');
+    expect(persisted).not.toContain('abcdefghijklmnop');
   });
 });
 
