@@ -130,6 +130,7 @@ Introduce a provider-neutral coding-runner contract under
 ```ts
 interface CodingRunnerInput {
   jobId: string;
+  attemptId: string;
   cli: AgentCliId;
   model: string;
   stageKind: PipelineStageKind | null;
@@ -145,6 +146,7 @@ interface CodingRunnerOutputChunk {
 }
 
 interface CodingRunnerResult {
+  attemptId: string;
   state: 'succeeded' | 'failed' | 'timed_out' | 'cancelled';
   exitCode: number | null;
   signal: NodeJS.Signals | null;
@@ -153,7 +155,7 @@ interface CodingRunnerResult {
 
 interface CodingRunnerAdapter {
   run(input: CodingRunnerInput): Promise<CodingRunnerResult>;
-  cancel(jobId: string): boolean;
+  cancel(jobId: string, attemptId: string): boolean;
 }
 ```
 
@@ -165,6 +167,29 @@ Existing container execution remains in `coding-jobs.ts` for this slice, while
 runner resolution provides the new adapter seam. A shared process registry owns
 both host and container processes. `container-runner.ts` keeps compatibility
 wrapper exports so current callers and tests do not change unnecessarily.
+
+### Execution attempts and process leases
+
+Every invocation, including a retry of the same job, receives a fresh opaque
+`attemptId`. The JSON job record persists `activeAttemptId` and an append-only
+`executionAttempts` history; legacy records normalize these fields on read, so
+no SQLite migration is required. An attempt records its ID, timestamps,
+terminal state, and sanitized detail. A retry may begin only after the prior
+attempt's terminal state has been persisted.
+
+The process registry entry is `{ jobId, attemptId, leaseToken, process }`.
+Registration returns a unique, unguessable `leaseToken`. All output, timeout,
+cancel, error, and close callbacks capture both identifiers and must verify
+that the registry still contains the same `(jobId, attemptId, leaseToken)`
+before mutating the job. Cleanup is compare-and-delete: it removes the entry
+only when all three identifiers match. A stale callback may settle its own
+adapter promise, but cannot append output, change state, cancel, or delete the
+process lease for a newer attempt.
+
+Cancellation reads the persisted `activeAttemptId` and calls
+`cancel(jobId, attemptId)`. A job-ID-only cancellation API is prohibited. This
+makes cancel-then-retry safe even when the old process emits delayed `error` or
+`close` events after the new attempt has registered.
 
 ### Runner selection and identity
 
@@ -178,13 +203,38 @@ For a new job:
 2. Otherwise infer the current executable from the selected provider:
    - `claude` -> `claude`;
    - `codex` -> `codex`;
-   - `opencode`, `openrouter`, `ollama`, and `openai-compatible` -> `opencode`.
+   - `opencode`, `openrouter`, `ollama`, and `openai-compatible` -> `opencode`;
+   - `pi` -> `pi`; and
+   - `mistral` -> `mistral`.
 3. Validate that the resulting CLI has a supported coding adapter before the
    job becomes dispatchable.
 
 For persisted jobs without `runnerCli`, `ensureJobDefaults` applies the same
 legacy inference. This is an in-memory/read-time JSON normalization; no data
 rewrite or SQLite migration is required.
+
+Legacy `pi` and `mistral` values remain truthful even while no coding adapter
+exists for them: normalization preserves the CLI and compatibility validation
+blocks dispatch. It must never reinterpret either value as a different
+executable.
+
+After provider/model fallback resolution, validate the full
+`runnerCli / provider / model` triple before persisting it and again immediately
+before dispatch. Compatibility is:
+
+- `claude` CLI with the `claude` provider;
+- `codex` CLI with the `codex` provider;
+- `opencode` CLI with `opencode`, `openrouter`, `ollama`, or
+  `openai-compatible`;
+- `devin` CLI with an approved `claude` or `codex` provider and a non-empty
+  model present in that provider's allowed runtime catalog; and
+- `pi` or `mistral` preserved but non-dispatchable until its adapter exists.
+
+A fallback returning only provider/model must not retain an incompatible CLI.
+The fallback decision must supply and approve a complete
+`AgentRuntimeSelection`; otherwise dispatch is rejected and a new control-plane
+decision is requested. `actualRuntime`, `runnerCli`, provider, and model are
+updated atomically so persisted identity cannot contradict the executable.
 
 The UI, audit context, output header, and stage evidence display
 `runnerCli / provider / model`. A Devin profile can therefore truthfully show,
@@ -213,10 +263,23 @@ The repository directory is the only agent-writable root. Prompt and agent
 configuration files live in the metadata parent, outside that root. The Devin
 CLI may read them at startup, but agent tools cannot modify them.
 
-Before starting Devin, a host workspace helper performs the same clone, fetch,
-default-branch reset, and job-branch creation currently performed by the
-container script. It uses argument arrays and an injectable Git transport. For
-private repositories, `GITHUB_TOKEN` is exposed only to these short-lived Git
+Workspace preparation distinguishes first execution from retry. On the first
+attempt, when the recorded attempt history is empty and the checkout is absent,
+the host helper performs clone, fetch, default-branch reset, and job-branch
+creation using argument arrays and an injectable Git transport. If a workspace
+unexpectedly already exists, the helper validates it as described below or
+rejects it; it never deletes or resets it.
+
+For any retry or existing checkout, the helper canonicalizes the path, rejects
+symlink escape, and verifies a regular Git checkout whose credential-free
+origin exactly matches the registered repository, current branch exactly
+matches `job.branch`, and Git metadata is internally consistent. It records
+staged, unstaged, and untracked state, then resumes in place. It must not fetch,
+reset, checkout, clean, delete, or otherwise rewrite the checkout. Origin,
+branch, ownership, or corruption mismatch fails before spawn. This preserves
+dirty and unpushed work from a timed-out or cancelled attempt.
+
+For private repositories, `GITHUB_TOKEN` is exposed only to the first-run Git
 subprocesses through a mode-`0700` askpass helper and a Git-specific environment.
 The token is not embedded in a remote URL, `.git/config`, prompt, output, or
 Devin environment.
@@ -248,9 +311,76 @@ tool and command scopes must be explicitly allowed there. If the installed CLI
 cannot execute the scoped job non-interactively with this configuration, the
 job fails; NanoCrab must not retry with broader permissions.
 
-The generated configuration exposes only file reading/search, stage-appropriate
-editing, and command execution required for repository work. It contains no
-MCP servers, browser, connectors, computer-use tools, or host-control tools.
+The generated configuration uses this exact schema (with canonical realpaths
+JSON-escaped before interpolation):
+
+```json
+{
+  "system_instructions": "<stage-specific instructions>",
+  "allowed_tools": ["read", "grep", "glob", "exec"],
+  "permissions": {
+    "allow": [
+      "Read(<canonical-workspace>/**)",
+      "Exec(<canonical-job-root>/.nanocrab/bin/nanocrab-job-exec)"
+    ],
+    "ask": [],
+    "deny": [
+      "Read(<canonical-job-root>/.nanocrab/**)",
+      "Read(<canonical-devin-credential>)",
+      "Read(<canonical-home>/.ssh/**)",
+      "Read(<canonical-home>/.gnupg/**)",
+      "Read(<canonical-nanocrab-config-root>/**)",
+      "Write(<canonical-job-root>/.nanocrab/**)",
+      "Write(<canonical-devin-credential>)",
+      "Write(<canonical-home>/.ssh/**)",
+      "Write(<canonical-home>/.gnupg/**)",
+      "Write(<canonical-nanocrab-config-root>/**)"
+    ]
+  }
+}
+```
+
+Implement/direct uses
+`["read", "grep", "glob", "edit", "write", "exec"]` and adds only
+`Write(<canonical-workspace>/**)` to `allow`. Planning/review uses the shown
+read-only shape. The CLI reads its prompt/config before model tool permissions
+apply; the metadata deny therefore constrains agent tools without preventing
+startup. The configuration contains no MCP servers, browser, connectors,
+computer-use tools, or host-control tools. Exact deep-equality fixtures, rather
+than substring assertions, lock the expected schema for every stage.
+
+The sole executable permission targets an immutable NanoCrab command broker
+outside the writable repository. The broker validates an argv array, canonical
+cwd, and stage, then uses `shell: false` and a scrubbed environment. Planning
+and review allow only:
+
+- `pwd`, `ls`, workspace-scoped `find`, `rg`, `grep`, `cat`, `head`, `tail`,
+  `wc`, `file`, and `stat`; and
+- Git read operations: `status`, `diff`, `log`, `show`, `ls-files`,
+  `branch --show-current`, and `rev-parse`.
+
+Implement/direct additionally allow dependency-free build/test commands:
+`npm test`, approved `npm run <manifest-script>`, corresponding
+`pnpm`/`yarn`/`bun` test or run commands, `cargo test|check|build`,
+`go test|build|vet`, `pytest`, and `python -m pytest`. Manifest scripts whose
+names indicate install, publish, release, or deploy are denied. Dependencies
+must be prepared before the model starts.
+
+All other commands are denied, including Git mutation (`commit`, `push`,
+`tag`, `reset`, `checkout`, `switch`, `rebase`, `merge`, `clean`, `stash`,
+`worktree`, `config`, or `remote`); package installation/removal/publication;
+network clients (`curl`, `wget`, `ssh`, `scp`, `rsync`, `nc`, `socat`); shells;
+Docker/Podman/Kubernetes/infrastructure tools; privilege/service managers;
+destructive file commands and in-place editors; and direct interpreters other
+than the exact pytest form. File changes use the scoped edit/write tools.
+
+Package scripts are arbitrary code, so allowed build/test commands execute in
+an additional OS process sandbox with workspace-only filesystem access and no
+network namespace. Linux readiness requires `bwrap` network isolation
+(`--unshare-net`); macOS readiness requires the supported local sandbox adapter
+with an explicit network-deny profile. If that platform primitive is absent,
+readiness fails closed. A repository whose build needs network access fails
+with an operator-visible restriction; issue #129 adds no bypass.
 
 Permission policy by stage:
 
@@ -318,8 +448,18 @@ observed during design research, fails readiness. NanoCrab reports the exact
 required `0600` mode but does not modify, copy, delete, or rotate the
 credential.
 
-Runtime health remains a pre-dispatch check. A profile assignment opts into the
-runner, and implementation still requires the existing owner approval. If
+Every version, capability, sandbox, and authentication probe runs with the same
+explicitly scrubbed host environment allowlist used by the runner. No probe
+inherits `process.env`; auth probing may receive `HOME`/XDG locations but no
+provider, GitHub, channel, proxy, or arbitrary `DEVIN_*` secret. Probe output is
+discarded.
+
+Runtime health is checked before dispatch and is repeated after implementation
+approval and complete runtime fallback resolution, immediately before any
+workspace mutation or process spawn. Any changed or unhealthy result fails
+closed; NanoCrab does not reuse a stale readiness result or retry with broader
+permissions. A profile assignment opts into the runner, and implementation
+still requires the existing owner approval. If
 Devin is unavailable, the control plane uses its existing explicit fallback
 decision flow; it never silently substitutes another CLI for write-capable
 work.
@@ -358,7 +498,7 @@ enter:
 - a container mount; or
 - test fixtures.
 
-Output passes through `redactLogString` before persistence. Audit events record
+Output passes through a stateful streaming redactor before persistence. Audit events record
 only job identity, runtime identity, paths already considered operator-visible,
 terminal state, and non-sensitive failure categories. Neither auth-status
 output nor a serialized environment is logged.
@@ -382,10 +522,16 @@ weaken permissions to make a job succeed.
 
 ## Output and Evidence
 
-The adapter emits stream-tagged chunks. `coding-jobs.ts` redacts each chunk,
-preserves stdout/stderr attribution in the persisted job output, and retains
-the existing output cap. A command that prints a secret-like value therefore
-does not persist it verbatim.
+The adapter creates an independent `createStreamingLogRedactor` for stdout and
+stderr. It uses delimiter-aware carryover so credential-key assignments,
+`Bearer` values, `sk-` tokens, and already-held known secret literals remain
+recognizable when split at any chunk boundary. Relevant Git/provider/NanoCrab
+secret values of at least eight characters are passed from existing in-memory
+configuration; the runner must not read Devin credential contents merely to
+populate the redactor. Raw carry is never persisted. Close/error flushes the
+remaining carry through redaction before persistence, and the existing bounded
+tail is applied only to safe output. `redactLogString` remains available for
+complete strings, but per-chunk stateless redaction is prohibited here.
 
 NanoCrab `job.id` and `runId` are canonical. `runnerCli`, provider, model,
 agent profile, pipeline, stage, decision, workspace, and branch remain explicit
@@ -403,9 +549,10 @@ completion validation, or the Project swimlane decision gate.
 Add `CODING_JOB_RUNNER_TIMEOUT_MS`, defaulting to `CONTAINER_TIMEOUT`. Reject
 non-finite, non-positive configuration rather than treating it as unlimited.
 
-Each active runner owns one detached process group keyed by `job.id`. Exactly
-one terminal result may win. Completion clears timeout and escalation timers
-and removes the registry entry.
+Each active runner owns one detached process group under its
+`(jobId, attemptId, leaseToken)` registry lease. Exactly one terminal result may
+win for that attempt. Completion clears timeout and escalation timers and uses
+compare-and-delete; it cannot remove a newer attempt's entry.
 
 Timeout flow:
 
@@ -417,10 +564,11 @@ Timeout flow:
    reports a signal or exit code.
 6. Transition the coding job to `failed` with a sanitized timeout reason.
 
-Cancellation uses the same TERM-to-KILL path but resolves `cancelled` and keeps
-the coding job in its existing explicit cancellation transition. Repeated
-cancellation is idempotent. Spawn errors, timeout callbacks, cancellation, and
-close events must not overwrite one another.
+Cancellation targets the exact persisted active attempt, uses the same
+TERM-to-KILL path, resolves `cancelled`, and keeps the coding job in its existing
+explicit cancellation transition. Repeated cancellation of that attempt is
+idempotent. Spawn errors, timeout callbacks, cancellation, and close events
+must not overwrite one another, and stale events cannot mutate a retry.
 
 Timeout and cancellation preserve workspace, branch, output, changed files,
 commit/PR fields, and audit history. They never delete a checkout or unpushed
@@ -446,23 +594,33 @@ propose a fallback through its existing owner decision mechanism.
 
 ## Exact Change Surface
 
-| Path                                     | Intended change                                                                                                          |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `src/coding-runners/types.ts`            | New adapter input, output, result, and injectable transport contracts                                                    |
-| `src/coding-runners/devin-host.ts`       | New host runner: arguments, strict config, environment, output, timeout, and cancellation                                |
-| `src/coding-runners/process-registry.ts` | Host/container-neutral process ownership and TERM-to-KILL escalation                                                     |
-| `src/coding-workspace.ts`                | Host checkout preparation with injectable Git transport and Git-only credential environment                              |
-| `src/coding-jobs.ts`                     | Persist/normalize `runnerCli`, select adapter from the CLI, map terminal results, reuse diff/PR flow, route cancellation |
-| `src/agent-runtime-registry.ts`          | Auth-, sandbox-, ownership-, and mode-aware Devin readiness; coding support enabled only when healthy                    |
-| `src/agent-runtime-registry.test.ts`     | Readiness and privacy regression coverage                                                                                |
-| `src/coding-jobs.test.ts`                | Selection, legacy normalization, state mapping, evidence, and cancellation integration coverage                          |
-| `src/coding-runners/devin-host.test.ts`  | Fake process/timer/filesystem tests for the adapter                                                                      |
-| `src/coding-workspace.test.ts`           | Fake Git tests for workspace and credential scoping                                                                      |
-| `README.md`                              | Supported runtime and host deployment/operator summary                                                                   |
-| `docs/SECURITY.md`                       | Host credential, sandbox, external-processing, environment, and residual-risk boundary                                   |
-| `docs/AGENT_PROFILES.md`                 | Truthful CLI/provider/model display and readiness/fallback behavior                                                      |
-| `docs/ROADMAP.md`                        | Mark Devin coding support complete only after implementation and evidence                                                |
-| `.env.example`                           | Document runner timeout configuration                                                                                    |
+| Path                                       | Intended change                                                                                                          |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `src/coding-runners/types.ts`              | New adapter input, output, result, and injectable transport contracts                                                    |
+| `src/coding-runners/devin-host.ts`         | New host runner: arguments, strict config, environment, output, timeout, and cancellation                                |
+| `src/coding-runners/process-registry.ts`   | Attempt-aware process leases, compare-and-delete ownership, and TERM-to-KILL escalation                                  |
+| `src/coding-runners/command-broker.ts`     | Exact stage command policy plus sandboxed, network-denied build/test execution                                           |
+| `src/coding-workspace.ts`                  | Host checkout preparation with injectable Git transport and Git-only credential environment                              |
+| `src/coding-jobs.ts`                       | Persist/normalize `runnerCli`, select adapter from the CLI, map terminal results, reuse diff/PR flow, route cancellation |
+| `src/logger.ts`                            | Stateful streaming redactor with known-secret replacement and safe final flush                                           |
+| `src/logger.test.ts`                       | Every-boundary split-token and known-secret streaming regression coverage                                                |
+| `src/agent-runtime-registry.ts`            | Auth-, sandbox-, ownership-, and mode-aware Devin readiness; coding support enabled only when healthy                    |
+| `src/agent-runtime-registry.test.ts`       | Readiness and privacy regression coverage                                                                                |
+| `src/coding-jobs.test.ts`                  | Selection, legacy normalization, state mapping, evidence, and cancellation integration coverage                          |
+| `src/coding-runners/devin-host.test.ts`    | Fake process/timer/filesystem tests for the adapter                                                                      |
+| `src/coding-workspace.test.ts`             | Fake Git tests for workspace and credential scoping                                                                      |
+| `src/admin/routes/agents.ts`               | Validate and return compatible CLI/provider/model selections and readiness                                               |
+| `src/admin/public/pages/agents.js`         | Display and edit the complete runtime triple with compatibility filtering                                                |
+| `src/admin/agents-ui.test.ts`              | Agent UI runtime identity, filtering, and readiness coverage                                                             |
+| `src/admin/plugins/autofix/routes.ts`      | Accept, validate, persist, and expose complete runtime selections for autofix jobs                                       |
+| `src/admin/plugins/autofix/routes.test.ts` | Server-side fallback and incompatible-triple rejection coverage                                                          |
+| `src/admin/public/pages/autofix.js`        | Autofix selection and job cards show actual CLI/provider/model                                                           |
+| `src/admin/autofix-ui.test.ts`             | Autofix UI compatibility and actual-runtime display coverage                                                             |
+| `README.md`                                | Supported runtime and host deployment/operator summary                                                                   |
+| `docs/SECURITY.md`                         | Host credential, sandbox, external-processing, environment, and residual-risk boundary                                   |
+| `docs/AGENT_PROFILES.md`                   | Truthful CLI/provider/model display and readiness/fallback behavior                                                      |
+| `docs/ROADMAP.md`                          | Mark Devin coding support complete only after implementation and evidence                                                |
+| `.env.example`                             | Document runner timeout configuration                                                                                    |
 
 No database migration, container image change, credential-proxy route, provider
 definition, version bump, deployment, or release is part of this work.
@@ -476,6 +634,10 @@ change, and verifies green before refactoring.
 ### Runtime readiness tests
 
 - version plus successful auth and sandbox checks produce `healthy`;
+- every version, capability, sandbox, and auth subprocess receives the exact
+  scrubbed allowlist and no ambient secret-bearing environment key;
+- a healthy result before approval followed by a failed post-approval probe
+  blocks workspace mutation and spawn;
 - failed auth produces `unauthenticated`;
 - unsafe owner or any group/world permission produces `error`;
 - exact mode `0600` passes;
@@ -489,21 +651,42 @@ change, and verifies green before refactoring.
 
 - exact executable and argument array, with `shell: false`, detached process,
   selected cwd/model/prompt/config, and no shell interpolation;
-- generated scopes are read-only for planning/review and workspace-only
-  read/write for implement/direct jobs;
+- generated agent configuration deep-equals the exact expected object for each
+  stage, including canonical/escaped paths, exact tool names, empty `ask`, and
+  no extra permission;
+- the command broker accepts every enumerated stage command and rejects every
+  denied Git, package, network, shell, infrastructure, privilege, destructive,
+  and interpreter form, including argument-smuggling variants;
+- build/test subprocesses receive workspace-only filesystem scope, network
+  denial, `shell: false`, and the scrubbed environment; missing platform
+  isolation fails before spawn;
 - sensitive host paths are denied and metadata is outside the writable root;
 - environment allowlist excludes representative GitHub, provider, Devin,
   channel, cookie, and proxy secrets;
-- stdout/stderr ordering and attribution, redaction, and bounding;
+- stdout/stderr ordering, attribution, and bounding after redaction;
+- every recognized secret pattern and each known-secret literal split at every
+  possible chunk boundary, including end-of-stream flush, persists no raw
+  secret substring;
 - exit zero, nonzero, and spawn error terminal mapping;
 - timeout and manual cancellation with fake timers;
 - `SIGTERM` then `SIGKILL` escalation and registry cleanup;
-- first-terminal-event-wins races; and
+- first-terminal-event-wins races;
+- compare-and-delete refuses a mismatched attempt or lease;
+- stale output, close, error, and timeout callbacks cannot mutate or remove a
+  newly registered retry;
+- cancel followed immediately by retry signals only the exact old attempt; and
 - repeated cancellation is idempotent.
 
 ### Workspace tests
 
-- clone/fetch/checkout use argument arrays and the expected branch;
+- first-attempt clone/fetch/checkout use argument arrays and the expected
+  branch;
+- a valid existing retry checkout resumes with staged, unstaged, untracked, and
+  unpushed work unchanged and performs no fetch/reset/checkout/clean/delete;
+- an unexpected first-run checkout is validated and resumed or rejected, never
+  reset;
+- origin mismatch, branch mismatch, corrupt metadata, and symlink escape reject
+  before spawn;
 - unsafe repository/branch/path input is rejected before Git;
 - the Git fake receives a token only through the Git-specific askpass
   environment;
@@ -515,8 +698,14 @@ change, and verifies green before refactoring.
 
 - `actualRuntime.cli === 'devin'` selects the host adapter, never Docker;
 - CLI/provider/model attribution survives persistence and reload;
-- legacy jobs infer the same existing container executable as before;
+- legacy jobs infer `pi -> pi` and `mistral -> mistral` as well as the existing
+  Claude, Codex, and OpenCode mappings;
 - unsupported CLI/provider/model combinations fail before dispatch;
+- provider fallback cannot persist or dispatch an incompatible retained CLI;
+- an explicitly approved fallback atomically replaces the complete runtime
+  triple;
+- agents and autofix routes reject incompatible triples server-side, while
+  their UIs filter choices and display actual CLI/provider/model;
 - approval -> implement -> test/PR approval remains intact;
 - timeout maps to failed and cancellation maps to cancelled;
 - cancellation preserves workspace, branch, commit, push, and PR evidence; and
