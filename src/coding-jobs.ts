@@ -92,6 +92,7 @@ export interface CodingJobExecutionDependencies {
   ): Promise<{ commitSha: string }>;
   deleteWorkspaceBranch(input: {
     workspace: string;
+    repo: string;
     branch: string;
     token: string;
   }): Promise<void>;
@@ -1443,10 +1444,15 @@ const productionDevinRunnerProxy: CodingRunnerAdapter = {
 
 function runGit(
   args: readonly string[],
-  options: { cwd?: string; env: NodeJS.ProcessEnv; timeoutMs: number },
+  options: {
+    cwd?: string;
+    env: NodeJS.ProcessEnv;
+    timeoutMs: number;
+    stdin?: string;
+  },
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       'git',
       [...args],
       {
@@ -1472,6 +1478,7 @@ function runGit(
         });
       },
     );
+    if (options.stdin !== undefined) child.stdin?.end(options.stdin);
   });
 }
 
@@ -2643,6 +2650,7 @@ export async function openCodingJobPr(
     const { commitSha: sha } =
       await codingJobExecutionDependencies().publishWorkspace({
         workspace: repoPath,
+        repo: job.repo,
         branch: job.branch,
         commitMessage,
         token,
@@ -2857,6 +2865,7 @@ export async function revertCodingJob(
     if (token) {
       await codingJobExecutionDependencies().deleteWorkspaceBranch({
         workspace: job.workspace,
+        repo: job.repo,
         branch: job.branch,
         token,
       });

