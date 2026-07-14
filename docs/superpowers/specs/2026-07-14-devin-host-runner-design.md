@@ -177,6 +177,21 @@ no SQLite migration is required. An attempt records its ID, timestamps,
 terminal state, and sanitized detail. A retry may begin only after the prior
 attempt's terminal state has been persisted.
 
+Attempt setup has an explicit order after approval, runtime fallback resolution,
+compatibility validation, and the fail-closed readiness recheck:
+
+1. Read and retain `priorAttempts = [...job.executionAttempts]`.
+2. Compute `isFirstRun = priorAttempts.length === 0`. The attempt about to be
+   created is explicitly not part of this decision.
+3. Generate `attemptId`, append a `preparing` attempt, set `activeAttemptId`, and
+   persist the job atomically before any workspace operation.
+4. Pass the captured `isFirstRun` into workspace preparation.
+5. After preparation, register the process lease and spawn. A preparation or
+   spawn failure terminally updates this same persisted attempt.
+
+Thus the first invocation is first-run even though its current attempt has been
+persisted before workspace preparation; every later invocation is a retry.
+
 The process registry entry is `{ jobId, attemptId, leaseToken, process }`.
 Registration returns a unique, unguessable `leaseToken`. All output, timeout,
 cancel, error, and close callbacks capture both identifiers and must verify
@@ -206,17 +221,20 @@ For a new job:
    - `opencode`, `openrouter`, `ollama`, and `openai-compatible` -> `opencode`;
    - `pi` -> `pi`; and
    - `mistral` -> `mistral`.
-3. Validate that the resulting CLI has a supported coding adapter before the
-   job becomes dispatchable.
+3. Validate that the resulting CLI has a supported execution route before the
+   job becomes dispatchable: the new host adapter for Devin or the existing
+   container route for Claude, Codex, OpenCode, Pi, and Mistral.
 
 For persisted jobs without `runnerCli`, `ensureJobDefaults` applies the same
 legacy inference. This is an in-memory/read-time JSON normalization; no data
 rewrite or SQLite migration is required.
 
-Legacy `pi` and `mistral` values remain truthful even while no coding adapter
-exists for them: normalization preserves the CLI and compatibility validation
-blocks dispatch. It must never reinterpret either value as a different
-executable.
+Legacy `pi` and `mistral` values remain truthful and dispatchable through their
+existing container runner cases (`pi` and `vibe`, respectively). A new
+host-native adapter is not required for either CLI. Runner resolution must
+distinguish "has the new host-native adapter" from "is supported by the
+existing container route" and must never reinterpret either value as a
+different executable.
 
 After provider/model fallback resolution, validate the full
 `runnerCli / provider / model` triple before persisting it and again immediately
@@ -226,11 +244,45 @@ before dispatch. Compatibility is:
 - `codex` CLI with the `codex` provider;
 - `opencode` CLI with `opencode`, `openrouter`, `ollama`, or
   `openai-compatible`;
-- `devin` CLI with an approved `claude` or `codex` provider and a non-empty
-  model present in that provider's allowed runtime catalog; and
-- `pi` or `mistral` preserved but non-dispatchable until its adapter exists.
+- `pi` CLI with the `pi` provider through the existing container route;
+- `mistral` CLI with the `mistral` provider through the existing container
+  route; and
+- `devin` CLI only when the provider/model pair has an explicit Devin CLI model
+  mapping described below.
 
-A fallback returning only provider/model must not retain an incompatible CLI.
+Devin model compatibility is a separate allowlist from
+`AGENT_PROVIDER_MODELS`. Add a typed `DEVIN_CLI_MODEL_ALIASES` configuration
+whose key is `<provider>/<provider-model>` and whose value is the exact string
+passed to `devin --model`. The environment representation is
+`DEVIN_CLI_MODEL_ALIASES_JSON`, a JSON object of string keys and string values;
+unknown providers, empty values, duplicate/conflicting keys, and non-object
+input fail configuration loading. Operator entries extend but cannot silently
+override built-in entries. The initial built-in mappings are deliberately narrow:
+
+| Runtime provider/model     | Devin CLI alias   |
+| -------------------------- | ----------------- |
+| `claude/claude-sonnet-4-6` | `claude-sonnet-4` |
+| `claude/claude-opus-4-6`   | `claude-opus-4.6` |
+
+These two aliases are present in the installed CLI's non-network `--help`
+output. Although that output also mentions shorthand `opus` and `codex`, they
+are not initially enabled because neither identifies an exact provider model.
+Additional mappings require explicit operator configuration and must satisfy
+the same syntax/alias validation. Runtime startup/readiness runs only
+`--version` and `--help` with the scrubbed environment, extracts the documented
+model examples, and caches the verified alias set; it never starts a prompt,
+auth model call, or paid session. Passing this non-paid check establishes CLI
+alias recognition, not model entitlement. Per-job compatibility consults only
+the already-validated configuration and cached set. An absent, malformed,
+unrecognized, or ambiguous mapping therefore rejects the triple before the
+per-job readiness check, workspace mutation, or any new Devin process.
+
+A fallback returning only provider/model must not retain an incompatible CLI or
+reuse the old Devin model alias. For Devin, the approved target provider/model
+must have its own explicit `DEVIN_CLI_MODEL_ALIASES` entry; otherwise the
+fallback is rejected before dispatch. For Pi and Mistral, an approved fallback
+to their matching provider retains their existing container route.
+
 The fallback decision must supply and approve a complete
 `AgentRuntimeSelection`; otherwise dispatch is rejected and a new control-plane
 decision is requested. `actualRuntime`, `runnerCli`, provider, and model are
@@ -263,12 +315,13 @@ The repository directory is the only agent-writable root. Prompt and agent
 configuration files live in the metadata parent, outside that root. The Devin
 CLI may read them at startup, but agent tools cannot modify them.
 
-Workspace preparation distinguishes first execution from retry. On the first
-attempt, when the recorded attempt history is empty and the checkout is absent,
-the host helper performs clone, fetch, default-branch reset, and job-branch
-creation using argument arrays and an injectable Git transport. If a workspace
-unexpectedly already exists, the helper validates it as described below or
-rejects it; it never deletes or resets it.
+Workspace preparation distinguishes first execution from retry using the
+captured `isFirstRun` value from attempt setup. `isFirstRun` means no _prior_
+attempts and excludes the already-persisted current attempt. When it is true and
+the checkout is absent, the host helper performs clone, fetch, default-branch
+reset, and job-branch creation using argument arrays and an injectable Git
+transport. If a workspace unexpectedly already exists, the helper validates it
+as described below or rejects it; it never deletes or resets it.
 
 For any retry or existing checkout, the helper canonicalizes the path, rejects
 symlink escape, and verifies a regular Git checkout whose credential-free
@@ -279,10 +332,16 @@ reset, checkout, clean, delete, or otherwise rewrite the checkout. Origin,
 branch, ownership, or corruption mismatch fails before spawn. This preserves
 dirty and unpushed work from a timed-out or cancelled attempt.
 
-For private repositories, `GITHUB_TOKEN` is exposed only to the first-run Git
-subprocesses through a mode-`0700` askpass helper and a Git-specific environment.
-The token is not embedded in a remote URL, `.git/config`, prompt, output, or
-Devin environment.
+Every approved host Git operation that requires remote authentication uses one
+shared `runApprovedHostGit` seam. This includes first-run clone/fetch and later
+fetch or push operations when the existing lifecycle has separately approved
+them. The seam exposes `GITHUB_TOKEN` only to that single short-lived Git child
+through a mode-`0700` askpass helper and a minimal Git-specific environment,
+then removes the helper. Local read/diff/commit operations receive no token.
+Retries do not fetch merely because they are retries; an authenticated fetch is
+allowed only when the lifecycle explicitly requests and approves it. The token
+is never placed in a remote URL, `.git/config`, prompt, generated agent config,
+output, general Node environment, command broker, or Devin environment.
 
 After Devin exits successfully, NanoCrab uses the existing diff, untracked-file,
 test-summary, commit, push, PR, and evidence paths. Devin continues to receive
@@ -620,7 +679,7 @@ propose a fallback through its existing owner decision mechanism.
 | `docs/SECURITY.md`                         | Host credential, sandbox, external-processing, environment, and residual-risk boundary                                   |
 | `docs/AGENT_PROFILES.md`                   | Truthful CLI/provider/model display and readiness/fallback behavior                                                      |
 | `docs/ROADMAP.md`                          | Mark Devin coding support complete only after implementation and evidence                                                |
-| `.env.example`                             | Document runner timeout configuration                                                                                    |
+| `.env.example`                             | Document runner timeout and typed Devin CLI model-alias configuration                                                    |
 
 No database migration, container image change, credential-proxy route, provider
 definition, version bump, deployment, or release is part of this work.
@@ -642,6 +701,12 @@ change, and verifies green before refactoring.
 - unsafe owner or any group/world permission produces `error`;
 - exact mode `0600` passes;
 - required capability/sandbox failure produces `error`;
+- the scrubbed, non-network `--help` probe accepts only configured Devin model
+  aliases it actually advertises and never invokes print mode or a model;
+- each initial Devin mapping resolves to its exact CLI alias, while `opus`,
+  `codex`, unknown aliases, and provider-catalog-only models are rejected;
+- malformed alias JSON, unknown providers, conflicts, and attempts to override
+  a built-in entry fail configuration loading;
 - stored health detail contains no name, email, user/team ID, auth output, or
   credential value; and
 - Devin changes from installed-but-unsupported to coding-supported only for a
@@ -681,6 +746,10 @@ change, and verifies green before refactoring.
 
 - first-attempt clone/fetch/checkout use argument arrays and the expected
   branch;
+- attempt setup snapshots zero prior attempts, persists the current attempt,
+  and still passes `isFirstRun: true` to first workspace preparation;
+- setup with one terminal prior attempt persists a new current attempt and
+  passes `isFirstRun: false` without resetting the workspace;
 - a valid existing retry checkout resumes with staged, unstaged, untracked, and
   unpushed work unchanged and performs no fetch/reset/checkout/clean/delete;
 - an unexpected first-run checkout is validated and resumed or rejected, never
@@ -688,8 +757,10 @@ change, and verifies green before refactoring.
 - origin mismatch, branch mismatch, corrupt metadata, and symlink escape reject
   before spawn;
 - unsafe repository/branch/path input is rejected before Git;
-- the Git fake receives a token only through the Git-specific askpass
-  environment;
+- clone, approved fetch, and approved push fakes receive a token only through
+  the short-lived Git-specific askpass environment;
+- local Git and unapproved remote operations receive no token, and retry alone
+  does not trigger fetch;
 - the Devin fake never receives that token;
 - credentials are absent from remotes, generated files, output, and errors; and
 - retry reuses the same preserved workspace without deleting unrelated data.
@@ -700,7 +771,12 @@ change, and verifies green before refactoring.
 - CLI/provider/model attribution survives persistence and reload;
 - legacy jobs infer `pi -> pi` and `mistral -> mistral` as well as the existing
   Claude, Codex, and OpenCode mappings;
+- legacy Pi and Mistral jobs remain dispatchable through their existing
+  container `pi` and `vibe` cases, not the Devin host adapter;
 - unsupported CLI/provider/model combinations fail before dispatch;
+- Devin accepts only the exact initial or operator-configured verified mapping,
+  passes its mapped alias to `--model`, and rejects provider-catalog membership
+  alone without running a per-job Devin process;
 - provider fallback cannot persist or dispatch an incompatible retained CLI;
 - an explicitly approved fallback atomically replaces the complete runtime
   triple;
