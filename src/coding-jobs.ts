@@ -1,13 +1,17 @@
-import { spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'node:os';
 import path from 'path';
+import { fileURLToPath } from 'node:url';
 
 import {
   CODING_WORKSPACE_DIR,
+  CODING_JOB_RUNNER_TIMEOUT_MS,
   CONTAINER_IMAGE,
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
+  DEVIN_CREDENTIAL_PATH,
   STORE_DIR,
   TIMEZONE,
 } from './config.js';
@@ -20,12 +24,31 @@ import {
   isAgentProvider,
   isCodingCapableProvider,
 } from './agent-provider.js';
-import type { AgentCliId, AgentRuntimeSelection } from './types.js';
+import type {
+  AgentCliId,
+  AgentRuntimeHealth,
+  AgentRuntimeSelection,
+} from './types.js';
 import {
+  getVerifiedDevinAliases,
+  getVerifiedDevinRuntimeContext,
   inferLegacyRunnerCli,
+  resolveDevinCliModelAlias,
   validateCodingRuntimeSelection,
 } from './agent-runtime-registry.js';
-import type { CodingExecutionAttempt } from './coding-runners/types.js';
+import type {
+  CodingExecutionAttempt,
+  CodingRunnerAdapter,
+  CodingRunnerResult,
+} from './coding-runners/types.js';
+import { createProductionDevinHostRunner } from './coding-runners/devin-host.js';
+import { codingProcessRegistry } from './coding-runners/process-registry.js';
+import { probeCodingRunnerReadiness } from './coding-runner-readiness.js';
+import {
+  prepareCodingWorkspace,
+  type CodingWorkspaceInput,
+  type PreparedCodingWorkspace,
+} from './coding-workspace.js';
 import {
   CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
@@ -51,6 +74,21 @@ import {
   registerContainerProcess,
   cancelContainerProcess,
 } from './container-runner.js';
+
+export interface CodingJobExecutionDependencies {
+  createAttemptId(): string;
+  probeReadiness(cli: AgentCliId): Promise<AgentRuntimeHealth>;
+  prepareWorkspace(
+    input: CodingWorkspaceInput,
+  ): Promise<PreparedCodingWorkspace>;
+  devinRunner: CodingRunnerAdapter;
+  runContainer(
+    job: CodingJob,
+    repo: CodingRepo,
+    attemptId: string,
+  ): Promise<number>;
+  now(): string;
+}
 
 export { validateStageCompletion } from './control-plane/run-evidence.js';
 export type { StageRunEvidence } from './control-plane/run-evidence.js';
@@ -1212,34 +1250,15 @@ function codingContainerMounts(job: CodingJob): Array<{
   return mounts;
 }
 
-function runCodingContainer(job: CodingJob, repo: CodingRepo): Promise<number> {
-  const policy = evaluatePolicy({
-    actor: job.requestedBy,
-    actorId: job.id,
-    actionType: 'coding.implement',
-    resource: job.repo,
-    dryRun: job.dryRun,
-    context: { branch: job.branch, provider: job.provider, model: job.model },
-  });
-  logAuditEvent({
-    actor: job.requestedBy,
-    actorId: job.id,
-    actionType: 'coding.implement',
-    resource: job.repo,
-    decision:
-      policy.decision === 'denied'
-        ? 'denied'
-        : job.dryRun
-          ? 'simulated'
-          : 'approved',
-    correlationId: job.id,
-    context: policy,
-  });
-  if (policy.decision === 'denied') {
-    throw new Error(
-      `Coding implementation denied by policy: ${policy.explanation}`,
-    );
-  }
+function runCodingContainer(
+  job: CodingJob,
+  repo: CodingRepo,
+  attemptId: string,
+): Promise<number> {
+  const appendAttemptOutput = (text: string): void => {
+    const current = getCodingJob(job.id);
+    if (current?.activeAttemptId === attemptId) updateJobOutput(current, text);
+  };
   const jobRoot = writeCodingJobFiles(job, repo);
   const envFilePath = writeDockerEnvFile(buildCodingContainerEnv(job, repo));
   const safeName = job.id.replace(/[^a-zA-Z0-9_.-]/g, '-');
@@ -1273,8 +1292,7 @@ function runCodingContainer(job: CodingJob, repo: CodingRepo): Promise<number> {
   args.push(CONTAINER_IMAGE);
   args.push('/workspace/coding-job/.nanocrab/run.sh');
 
-  updateJobOutput(
-    job,
+  appendAttemptOutput(
     `\n\nStarting coding container ${containerName} with workspace ${jobRoot}\n`,
   );
   logAuditEvent({
@@ -1296,12 +1314,12 @@ function runCodingContainer(job: CodingJob, repo: CodingRepo): Promise<number> {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
-    registerContainerProcess(job.id, proc, containerName);
+    registerContainerProcess(job.id, proc, containerName, attemptId);
     proc.stdout?.on('data', (data: Buffer) => {
-      updateJobOutput(job, data.toString());
+      appendAttemptOutput(data.toString());
     });
     proc.stderr?.on('data', (data: Buffer) => {
-      updateJobOutput(job, data.toString());
+      appendAttemptOutput(data.toString());
     });
     proc.on('error', (err) => {
       removeDockerEnvFile(envFilePath);
@@ -1312,6 +1330,223 @@ function runCodingContainer(job: CodingJob, repo: CodingRepo): Promise<number> {
       resolve(code ?? 1);
     });
   });
+}
+
+function authorizeCodingImplementation(job: CodingJob): void {
+  const policy = evaluatePolicy({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'coding.implement',
+    resource: job.repo,
+    dryRun: job.dryRun,
+    context: { branch: job.branch, provider: job.provider, model: job.model },
+  });
+  logAuditEvent({
+    actor: job.requestedBy,
+    actorId: job.id,
+    actionType: 'coding.implement',
+    resource: job.repo,
+    decision:
+      policy.decision === 'denied'
+        ? 'denied'
+        : job.dryRun
+          ? 'simulated'
+          : 'approved',
+    correlationId: job.id,
+    context: policy,
+  });
+  if (policy.decision === 'denied') {
+    throw new Error(
+      `Coding implementation denied by policy: ${policy.explanation}`,
+    );
+  }
+}
+
+const CODING_SECRET_KEYS = [
+  'GITHUB_TOKEN',
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'OPENCODE_API_KEY',
+  'OPENROUTER_API_KEY',
+  'MISTRAL_API_KEY',
+  'OLLAMA_API_KEY',
+  'AGENT_PROVIDER_API_KEY',
+  'NANOCRAB_API_KEY',
+] as const;
+
+let productionDevinRunner: CodingRunnerAdapter | null = null;
+let codingJobExecutionOverrides: Partial<CodingJobExecutionDependencies> | null =
+  null;
+
+function configuredKnownSecrets(): string[] {
+  const env = readEnvFile([...CODING_SECRET_KEYS]);
+  return [
+    ...new Set(
+      CODING_SECRET_KEYS.map((key) => process.env[key] || env[key]).filter(
+        (value): value is string => Boolean(value && value.length >= 8),
+      ),
+    ),
+  ];
+}
+
+function getProductionDevinRunner(): CodingRunnerAdapter {
+  if (productionDevinRunner) return productionDevinRunner;
+  const home = process.env.HOME || os.homedir();
+  productionDevinRunner = createProductionDevinHostRunner({
+    spawn,
+    registry: codingProcessRegistry,
+    timers: {
+      setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+      clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
+    },
+    environmentSource: process.env,
+    knownSecrets: configuredKnownSecrets(),
+    realpath: (value) => fs.promises.realpath(value),
+    getVerifiedRuntimeContext: getVerifiedDevinRuntimeContext,
+    commandBrokerModulePath: path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      'coding-runners',
+      'command-broker.js',
+    ),
+    devinCredentialPath:
+      DEVIN_CREDENTIAL_PATH ||
+      path.join(home, '.config', 'devin', 'credentials.json'),
+    home,
+    nanocrabConfigRoot: path.join(home, '.config', 'nanocrab'),
+    signalProcessGroup: (pid, signal) => process.kill(pid, signal),
+  });
+  return productionDevinRunner;
+}
+
+function runGit(
+  args: readonly string[],
+  options: { cwd?: string; env: NodeJS.ProcessEnv; timeoutMs: number },
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'git',
+      [...args],
+      {
+        cwd: options.cwd,
+        env: options.env,
+        timeout: options.timeoutMs,
+        encoding: 'utf8',
+      },
+      (error, stdout, stderr) => {
+        if (error && !('code' in error)) {
+          reject(error);
+          return;
+        }
+        resolve({
+          stdout: String(stdout ?? ''),
+          stderr: String(stderr ?? ''),
+          exitCode:
+            error && typeof error.code === 'number'
+              ? error.code
+              : error
+                ? 1
+                : 0,
+        });
+      },
+    );
+  });
+}
+
+function productionCodingJobExecutionDependencies(): CodingJobExecutionDependencies {
+  return {
+    createAttemptId: () => crypto.randomUUID(),
+    probeReadiness: probeCodingRunnerReadiness,
+    prepareWorkspace: (input) =>
+      prepareCodingWorkspace(input, {
+        git: runGit,
+        realpath: (value) => fs.promises.realpath(value),
+        lstat: (value) => fs.promises.lstat(value),
+        mkdir: fs.promises.mkdir,
+        githubToken: getGitHubToken(),
+      }),
+    devinRunner: getProductionDevinRunner(),
+    runContainer: runCodingContainer,
+    now: nowIso,
+  };
+}
+
+function codingJobExecutionDependencies(): CodingJobExecutionDependencies {
+  return {
+    ...productionCodingJobExecutionDependencies(),
+    ...(codingJobExecutionOverrides || {}),
+  };
+}
+
+export function configureCodingJobExecutionForTests(
+  overrides: Partial<CodingJobExecutionDependencies> | null,
+): void {
+  codingJobExecutionOverrides = overrides
+    ? { ...(codingJobExecutionOverrides || {}), ...overrides }
+    : null;
+}
+
+function sanitizeAttemptDetail(detail: string | undefined): string | undefined {
+  if (!detail) return undefined;
+  return Array.from(detail)
+    .map((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 0x1f || code === 0x7f ? ' ' : character;
+    })
+    .join('')
+    .trim()
+    .slice(0, 2_000);
+}
+
+function terminalizeAttempt(
+  jobId: string,
+  attemptId: string,
+  state: CodingExecutionAttempt['state'],
+  detail?: string,
+): CodingJob | null {
+  const latest = getCodingJob(jobId);
+  if (!latest || latest.activeAttemptId !== attemptId) return null;
+  const attempt = latest.executionAttempts.find(
+    (item) => item.id === attemptId,
+  );
+  if (
+    !attempt ||
+    attempt.state === 'succeeded' ||
+    attempt.state === 'failed' ||
+    attempt.state === 'timed_out' ||
+    attempt.state === 'cancelled'
+  ) {
+    return null;
+  }
+  attempt.state = state;
+  attempt.completedAt = codingJobExecutionDependencies().now();
+  const safeDetail = sanitizeAttemptDetail(detail);
+  if (safeDetail) attempt.detail = safeDetail;
+  else delete attempt.detail;
+  latest.activeAttemptId = null;
+  upsertCodingJob(latest);
+  return latest;
+}
+
+function runningAttempt(jobId: string, attemptId: string): CodingJob | null {
+  const latest = getCodingJob(jobId);
+  if (!latest || latest.activeAttemptId !== attemptId) return null;
+  const attempt = latest.executionAttempts.find(
+    (item) => item.id === attemptId,
+  );
+  if (!attempt || attempt.state !== 'preparing') return null;
+  attempt.state = 'running';
+  upsertCodingJob(latest);
+  return latest;
+}
+
+function runnerFailureMessage(
+  job: CodingJob,
+  result: CodingRunnerResult,
+): string {
+  return (
+    sanitizeAttemptDetail(result.detail) ||
+    `${job.runnerCli} coding runner ${result.state}`
+  );
 }
 
 function requirePrProviderFallbackApproval(
@@ -1488,14 +1723,51 @@ async function runCodingJob(job: CodingJob): Promise<void> {
           `${fallback.provider} is not a coding-job runtime`,
       );
     }
+  }
+
+  const fallbackWithCli = fallback as typeof fallback & {
+    cli?: AgentCliId;
+    runtime?: AgentRuntimeSelection;
+  };
+  const proposedRuntime =
+    fallbackWithCli.runtime ||
+    (fallbackWithCli.cli
+      ? {
+          cli: fallbackWithCli.cli,
+          provider: fallback.provider,
+          model: fallback.model,
+        }
+      : null);
+  const runtimeChanged =
+    fallback.provider !== job.provider || fallback.model !== job.model;
+  if (job.actualRuntime && runtimeChanged && !proposedRuntime) {
     updateJobOutput(
       job,
-      `\n\nUsing approved provider fallback ${job.provider}/${job.model} -> ${fallback.provider}/${fallback.model}\n`,
+      '\n\nProvider fallback must include an approved CLI, provider, and model; a control-plane decision is required.\n',
     );
-    job.provider = fallback.provider;
-    job.model = fallback.model;
     upsertCodingJob(job);
+    return;
   }
+  const selectedRuntime = proposedRuntime ||
+    job.actualRuntime || {
+      cli: runtimeChanged
+        ? inferLegacyRunnerCli(fallback.provider)
+        : job.runnerCli,
+      provider: fallback.provider,
+      model: fallback.model,
+    };
+  validateCodingRuntimeSelection(selectedRuntime);
+  if (runtimeChanged || proposedRuntime) {
+    updateJobOutput(
+      job,
+      `\n\nUsing approved runtime ${job.runnerCli}/${job.provider}/${job.model} -> ${selectedRuntime.cli}/${selectedRuntime.provider}/${selectedRuntime.model}\n`,
+    );
+  }
+  job.actualRuntime = selectedRuntime;
+  job.runnerCli = selectedRuntime.cli;
+  job.provider = selectedRuntime.provider as CodingProvider;
+  job.model = selectedRuntime.model;
+  upsertCodingJob(job);
 
   if (
     job.status === 'await_approval' &&
@@ -1526,17 +1798,104 @@ async function runCodingJob(job: CodingJob): Promise<void> {
   if (job.status === 'await_approval') {
     applyCodingJobTransition(job, 'implement');
   }
-  const exitCode = await runCodingContainer(job, repo);
-  const refreshed = getCodingJob(job.id) || job;
-  if (refreshed.status === 'cancelled') {
-    updateJobOutput(refreshed, '\n\nCoding job cancelled.\n');
-    return;
+  authorizeCodingImplementation(job);
+  const deps = codingJobExecutionDependencies();
+  const readiness = await deps.probeReadiness(job.runnerCli);
+  if (readiness.status !== 'healthy') throw new Error(readiness.detail);
+
+  const priorAttempts = [...job.executionAttempts];
+  const isFirstRun = priorAttempts.length === 0;
+  const attemptId = deps.createAttemptId();
+  job.executionAttempts.push({
+    id: attemptId,
+    state: 'preparing',
+    startedAt: deps.now(),
+    completedAt: null,
+  });
+  job.activeAttemptId = attemptId;
+  upsertCodingJob(job);
+
+  let runnerResult: CodingRunnerResult;
+  try {
+    const prepared = await deps.prepareWorkspace({
+      jobId: job.id,
+      repo: job.repo,
+      defaultBranch: repo.defaultBranch,
+      branch: job.branch,
+      workspace: job.workspace,
+      isFirstRun,
+    });
+    writeCodingJobFiles(job, repo);
+    if (!runningAttempt(job.id, attemptId)) return;
+    if (job.runnerCli === 'devin') {
+      const advertisedAliases = getVerifiedDevinAliases();
+      const modelAlias = resolveDevinCliModelAlias(
+        selectedRuntime,
+        undefined,
+        advertisedAliases.size > 0 ? advertisedAliases : undefined,
+      );
+      runnerResult = await deps.devinRunner.run({
+        jobId: job.id,
+        attemptId,
+        cli: 'devin',
+        model: modelAlias,
+        stageKind: job.stageKind || null,
+        workspace: prepared.workspace,
+        promptFile: path.join(prepared.metadataDir, 'prompt.txt'),
+        timeoutMs: CODING_JOB_RUNNER_TIMEOUT_MS,
+        onOutput: (chunk) => {
+          const currentAttempt = getCodingJob(job.id);
+          if (currentAttempt?.activeAttemptId === attemptId) {
+            updateJobOutput(currentAttempt, chunk.text);
+          }
+        },
+      });
+    } else {
+      const exitCode = await deps.runContainer(job, repo, attemptId);
+      runnerResult = {
+        attemptId,
+        state: exitCode === 0 ? 'succeeded' : 'failed',
+        exitCode,
+        signal: null,
+        ...(exitCode === 0
+          ? {}
+          : {
+              detail: `${job.provider} coding container exited with code ${exitCode}`,
+            }),
+      };
+    }
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    terminalizeAttempt(job.id, attemptId, 'failed', detail);
+    throw error;
   }
-  if (exitCode !== 0) {
-    throw new Error(
-      `${job.provider} coding container exited with code ${exitCode}`,
+
+  if (runnerResult.attemptId !== attemptId) {
+    const detail = 'Coding runner returned a mismatched attempt identifier';
+    terminalizeAttempt(job.id, attemptId, 'failed', detail);
+    throw new Error(detail);
+  }
+  const refreshedBeforeTerminal = getCodingJob(job.id);
+  if (refreshedBeforeTerminal?.activeAttemptId !== attemptId) return;
+  if (runnerResult.state !== 'succeeded') {
+    const failureReason = runnerFailureMessage(job, runnerResult);
+    const refreshed = terminalizeAttempt(
+      job.id,
+      attemptId,
+      runnerResult.state,
+      failureReason,
     );
+    if (!refreshed) return;
+    if (runnerResult.state === 'cancelled') {
+      if (refreshed.status !== 'cancelled') {
+        applyCodingJobTransition(refreshed, 'cancelled', failureReason);
+      }
+      return;
+    }
+    throw new Error(failureReason);
   }
+  const refreshed = terminalizeAttempt(job.id, attemptId, 'succeeded');
+  if (!refreshed || refreshed.status === 'cancelled') return;
   Object.assign(job, refreshed);
   applyCodingJobTransition(job, 'test');
 
@@ -1816,10 +2175,24 @@ function recordJobApproval(
 }
 
 export function cancelCodingJob(jobId: string, by = 'dashboard'): CodingJob {
-  const job = getCodingJob(jobId);
+  let job = getCodingJob(jobId);
   if (!job) throw new Error(`Coding job not found: ${jobId}`);
 
-  cancelContainerProcess(jobId, 'cancel coding job');
+  const attemptId = job.activeAttemptId;
+  if (attemptId) {
+    if (job.runnerCli === 'devin') {
+      codingJobExecutionDependencies().devinRunner.cancel(job.id, attemptId);
+    } else {
+      cancelContainerProcess(job.id, 'cancel coding job', attemptId);
+    }
+    job =
+      terminalizeAttempt(
+        job.id,
+        attemptId,
+        'cancelled',
+        'Cancelled by owner',
+      ) || job;
+  }
   recordJobApproval(job, 'cancel', by);
   applyCodingJobTransition(job, 'cancelled');
   upsertCodingJob(job);
@@ -1859,6 +2232,14 @@ export async function retryCodingJob(
   if (!job) throw new Error(`Coding job not found: ${jobId}`);
   if (job.status !== 'failed' && job.status !== 'cancelled') {
     throw new Error(`Cannot retry coding job from ${job.status}`);
+  }
+  if (
+    job.activeAttemptId ||
+    job.executionAttempts.some((attempt) =>
+      ['preparing', 'running'].includes(attempt.state),
+    )
+  ) {
+    throw new Error('Cannot retry coding job while an attempt is active');
   }
   applyCodingJobTransition(job, 'queued');
   job.completedAt = null;
@@ -1924,12 +2305,13 @@ export function approveCodingJob(jobId: string, by = 'dashboard'): CodingJob {
     if (!latest) return;
     void runCodingJob(latest).catch((err) => {
       const failureReason = err instanceof Error ? err.message : String(err);
-      if (latest.status === 'cancelled') {
-        updateJobOutput(latest, '\n\nCoding job cancelled.\n');
+      const failed = getCodingJob(job.id) || latest;
+      if (failed.status === 'cancelled') {
+        updateJobOutput(failed, '\n\nCoding job cancelled.\n');
         return;
       }
-      applyCodingJobTransition(latest, 'failed', failureReason);
-      updateJobOutput(latest, `\n\nCoding job failed: ${failureReason}\n`);
+      applyCodingJobTransition(failed, 'failed', failureReason);
+      updateJobOutput(failed, `\n\nCoding job failed: ${failureReason}\n`);
     });
   });
   return job;
