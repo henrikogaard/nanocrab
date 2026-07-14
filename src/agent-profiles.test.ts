@@ -367,6 +367,55 @@ describe('agent profile persistence', () => {
     ).toThrow(/model.*not supported/i);
   });
 
+  it('enforces Devin alias compatibility for coding profiles', () => {
+    expect(() =>
+      buildAgentProfile({
+        handle: 'devin-coder',
+        displayName: 'Devin Coder',
+        taskKinds: ['coding_job'],
+        primaryRuntime: {
+          cli: 'devin',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+        },
+      }),
+    ).not.toThrow();
+
+    for (const runtime of [
+      { cli: 'devin', provider: 'claude', model: 'opus' },
+      { cli: 'devin', provider: 'codex', model: 'gpt-5.4' },
+      {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-haiku-4-5-20251001',
+      },
+    ] as const) {
+      expect(() =>
+        buildAgentProfile({
+          handle: 'devin-coder',
+          displayName: 'Devin Coder',
+          stageRoles: ['implement'],
+          primaryRuntime: runtime,
+        }),
+      ).toThrow(/Devin CLI model alias/i);
+    }
+  });
+
+  it('still rejects provider-catalog-invalid models for non-Devin coding profiles', () => {
+    expect(() =>
+      buildAgentProfile({
+        handle: 'codex-coder',
+        displayName: 'Codex Coder',
+        taskKinds: ['coding_job'],
+        primaryRuntime: {
+          cli: 'codex',
+          provider: 'codex',
+          model: 'claude-sonnet-4-6',
+        },
+      }),
+    ).toThrow(/model.*not supported/i);
+  });
+
   it.each([0, -1, 1.5, Number.NaN])(
     'rejects non-positive or non-integer maxConcurrency %s',
     (maxConcurrency) => {

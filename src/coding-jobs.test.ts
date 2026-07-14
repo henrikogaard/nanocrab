@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { execFileSync, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
@@ -9,10 +9,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./config.js', () => ({
   STORE_DIR: '/tmp/nanocrab-coding-jobs-test/store',
   CODING_WORKSPACE_DIR: '/tmp/nanocrab-coding-jobs-test/data/coding-workspaces',
+  CODING_JOB_RUNNER_TIMEOUT_MS: 30_000,
   CONTAINER_IMAGE: 'nanocrab-agent:test',
   CREDENTIAL_PROXY_PORT: 3001,
   DATA_DIR: '/tmp/nanocrab-coding-jobs-test/data',
   TIMEZONE: 'UTC',
+  DEVIN_CLI_MODEL_ALIASES: {
+    'claude/claude-sonnet-4-6': 'claude-sonnet-4',
+  },
+  DEVIN_CREDENTIAL_PATH: '/tmp/nanocrab-coding-jobs-test/devin.json',
 }));
 
 vi.mock('./env.js', () => ({
@@ -49,10 +54,7 @@ vi.mock('./provider-router.js', () => ({
 }));
 
 vi.mock('child_process', () => ({
-  execFileSync: vi.fn((command: string, args: string[]) => {
-    if (command === 'git' && args[0] === 'rev-parse') return 'abc123def456\n';
-    return '';
-  }),
+  execFile: vi.fn(),
   spawn: vi.fn(() => {
     throw new Error('spawn should not run while coding jobs are queued');
   }),
@@ -60,9 +62,11 @@ vi.mock('child_process', () => ({
 
 import {
   approveCodingJob,
+  approveCodingJobRuntimeFallback,
   buildCodingPrompt,
   cancelCodingJob,
   cleanupCodingJob,
+  configureCodingJobExecutionForTests,
   getGitHubToken,
   githubGraphql,
   listGitHubIssues,
@@ -74,13 +78,14 @@ import {
   pickGitHubIssue,
   refreshCodingJobCi,
   registerCodingRepo,
+  retryCodingJob,
   startCodingJob,
   transitionCodingJob,
 } from './coding-jobs.js';
 import { listLearningProposals } from './learning-loop.js';
 import { upsertRepoRule } from './repo-preferences.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
-import { createApproval, reviewApproval } from './approvals.js';
+import { createApproval, listApprovals, reviewApproval } from './approvals.js';
 import { listAuditEvents } from './audit-log.js';
 import { _closeDatabase, _initTestDatabase } from './db.js';
 import { resetPolicyRules, savePolicyRules } from './policy-engine.js';
@@ -94,6 +99,38 @@ const { spawnSync: realSpawnSync } =
   );
 
 const TEST_ROOT = '/tmp/nanocrab-coding-jobs-test';
+
+function writeLegacyJob({ provider }: { provider: string }): void {
+  fs.mkdirSync(`${TEST_ROOT}/store`, { recursive: true });
+  fs.writeFileSync(
+    `${TEST_ROOT}/store/coding-jobs.json`,
+    JSON.stringify(
+      [
+        {
+          id: 'code-legacy',
+          repo: 'owner/repo',
+          type: 'prompt',
+          prompt: 'Legacy job',
+          issueNumber: null,
+          issueTitle: null,
+          provider,
+          model: 'legacy-model',
+          status: 'queued',
+          branch: 'nanocrab/legacy',
+          workspace: '/tmp/workspace',
+          createPr: false,
+          prUrl: null,
+          output: '',
+          requestedBy: 'dashboard',
+          createdAt: new Date(0).toISOString(),
+          completedAt: null,
+        },
+      ],
+      null,
+      2,
+    ),
+  );
+}
 
 function mockGitHubFetch(
   handler: (url: string) => unknown,
@@ -120,6 +157,20 @@ function createFakeProcess() {
   proc.kill = vi.fn();
   proc.pid = 12345;
   return proc;
+}
+
+function mutateStoredJob(
+  jobId: string,
+  mutate: (job: Record<string, unknown>) => void,
+): void {
+  const file = `${TEST_ROOT}/store/coding-jobs.json`;
+  const jobs = JSON.parse(fs.readFileSync(file, 'utf-8')) as Array<
+    Record<string, unknown>
+  >;
+  const job = jobs.find((candidate) => candidate.id === jobId);
+  if (!job) throw new Error(`Missing test job ${jobId}`);
+  mutate(job);
+  fs.writeFileSync(file, `${JSON.stringify(jobs, null, 2)}\n`);
 }
 
 function runGeneratedMistralCase(
@@ -163,7 +214,6 @@ describe('coding jobs', () => {
     vi.useFakeTimers();
     fs.rmSync(TEST_ROOT, { recursive: true, force: true });
     vi.mocked(spawn).mockClear();
-    vi.mocked(execFileSync).mockClear();
     mockedReadEnvFile.mockReturnValue({ GITHUB_TOKEN: 'test-token' });
     vi.mocked(resolveProviderFallbackForAction).mockReset();
     vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
@@ -187,9 +237,48 @@ describe('coding jobs', () => {
     }
     _initTestDatabase();
     resetPolicyRules();
+    let attempt = 0;
+    configureCodingJobExecutionForTests({
+      createAttemptId: () => `attempt-${++attempt}`,
+      devinSandboxAuthHandoffAvailable: () => true,
+      probeReadiness: async (cli) => ({
+        cli,
+        executable: cli,
+        status: 'healthy',
+        version: 'test',
+        checkedAt: new Date(0).toISOString(),
+        detail: 'ready',
+      }),
+      prepareWorkspace: async (input) => {
+        const jobRoot = path.dirname(input.workspace);
+        const metadataDir = path.join(jobRoot, '.nanocrab');
+        fs.mkdirSync(input.workspace, { recursive: true });
+        fs.mkdirSync(metadataDir, { recursive: true });
+        return {
+          jobRoot,
+          metadataDir,
+          workspace: input.workspace,
+          resumed: !input.isFirstRun,
+          gitState: { staged: '', unstaged: '', untracked: '', unpushed: '' },
+        };
+      },
+      collectWorkspaceEvidence: async () => ({
+        diffStat: '',
+        changedFiles: [],
+        untrackedFiles: [],
+        testEvidence: {
+          status: 'not_reported',
+          summary:
+            'No trusted test evidence was reported by the Devin host runner.',
+        },
+      }),
+      publishWorkspace: async () => ({ commitSha: 'abc123def456' }),
+      deleteWorkspaceBranch: async () => undefined,
+    });
   });
 
   afterEach(() => {
+    configureCodingJobExecutionForTests(null);
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -400,11 +489,21 @@ describe('coding jobs', () => {
       labels: ['autofix', 'p0'],
       assignee: 'henrik',
       milestone: 'P0 Closure',
+      actualRuntime: {
+        cli: 'codex',
+        provider: 'codex',
+        model: 'gpt-5.4',
+      },
       requestedBy: 'dashboard',
     });
 
     expect(result?.issue.number).toBe(42);
     expect(result?.job.issueNumber).toBe(42);
+    expect(result?.job.actualRuntime).toEqual({
+      cli: 'codex',
+      provider: 'codex',
+      model: 'gpt-5.4',
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/repos/owner/repo/issues/42'),
       expect.any(Object),
@@ -603,6 +702,44 @@ describe('coding jobs', () => {
     expect(job.decisionId).toBe('decision_1');
     expect(job.actualRuntime).toEqual(actualRuntime);
     expect(loadCodingJobs()[0].actualRuntime).toEqual(actualRuntime);
+  });
+
+  it('persists runner CLI from the complete actual runtime', async () => {
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Use Devin',
+      requestedBy: 'control-plane',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    expect(job.runnerCli).toBe('devin');
+    expect(loadCodingJobs()[0].runnerCli).toBe('devin');
+    expect(job.executionAttempts).toEqual([]);
+    expect(job.activeAttemptId).toBeNull();
+  });
+
+  it.each([
+    ['claude', 'claude'],
+    ['codex', 'codex'],
+    ['opencode', 'opencode'],
+    ['openrouter', 'opencode'],
+    ['ollama', 'opencode'],
+    ['openai-compatible', 'opencode'],
+    ['pi', 'pi'],
+    ['mistral', 'mistral'],
+  ])('normalizes legacy provider %s to runner %s', (provider, runnerCli) => {
+    writeLegacyJob({ provider });
+    expect(loadCodingJobs()[0]).toMatchObject({
+      runnerCli,
+      activeAttemptId: null,
+      executionAttempts: [],
+    });
   });
 
   it('normalizes missing agent profile attribution fields to null', () => {
@@ -949,7 +1086,7 @@ describe('coding jobs', () => {
     expect(proposal.extractedLesson).toMatch(/^---\nname: skill-/);
   });
 
-  it('writes Pi run.sh and config files when running with the pi provider', async () => {
+  it('preserves legacy Pi and Mistral dispatch contract for Pi', async () => {
     vi.useRealTimers();
     mockGitHubFetch(() => ({ default_branch: 'main' }));
     await registerCodingRepo({ repo: 'owner/repo' });
@@ -975,9 +1112,11 @@ describe('coding jobs', () => {
       const jobRoot = firstMount.split(':')[0];
       const metadataDir = `${jobRoot}/.nanocrab`;
 
-      expect(fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8')).toContain(
+      const runScript = fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8');
+      expect(runScript).toContain(
         'pi -p "$PROMPT" --mode json --model "$PI_JOB_MODEL" --provider openrouter --no-session',
       );
+      expect(runScript).not.toContain('devin');
       const models = JSON.parse(
         fs.readFileSync(`${metadataDir}/pi-agent/models.json`, 'utf-8'),
       );
@@ -1016,7 +1155,899 @@ describe('coding jobs', () => {
     });
   });
 
-  it('writes Mistral Vibe run.sh and config.toml when running with the mistral provider', async () => {
+  it('persists a preparing attempt before first workspace mutation', async () => {
+    vi.useRealTimers();
+    const events: string[] = [];
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    configureCodingJobExecutionForTests({
+      createAttemptId: () => 'attempt-1',
+      now: () => '2026-07-14T10:00:00.000Z',
+      probeReadiness: async (cli) => {
+        events.push(`probe:${cli}`);
+        return {
+          cli,
+          executable: cli,
+          status: 'healthy',
+          version: '1.0.0',
+          checkedAt: '2026-07-14T10:00:00.000Z',
+          detail: 'ready',
+        };
+      },
+      prepareWorkspace: async (input) => {
+        const persisted = getCodingJob(input.jobId)!;
+        events.push(
+          `persist:${persisted.activeAttemptId}:${persisted.executionAttempts[0]?.state}`,
+        );
+        events.push(`workspace:first=${input.isFirstRun}`);
+        return {
+          jobRoot: path.dirname(input.workspace),
+          metadataDir: path.join(path.dirname(input.workspace), '.nanocrab'),
+          workspace: input.workspace,
+          resumed: false,
+          gitState: { staged: '', unstaged: '', untracked: '', unpushed: '' },
+        };
+      },
+      devinRunner: {
+        run: async (input) => {
+          events.push(`runner:${input.attemptId}`);
+          return {
+            attemptId: input.attemptId,
+            state: 'succeeded',
+            exitCode: 0,
+            signal: null,
+          };
+        },
+        cancel: vi.fn(() => true),
+      },
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => {
+      expect(events, JSON.stringify(getCodingJob(job.id))).toHaveLength(4);
+    });
+
+    expect(events).toEqual([
+      'probe:devin',
+      'persist:attempt-1:preparing',
+      'workspace:first=true',
+      'runner:attempt-1',
+    ]);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(getCodingJob(job.id)?.executionAttempts).toEqual([
+      {
+        id: 'attempt-1',
+        state: 'succeeded',
+        startedAt: '2026-07-14T10:00:00.000Z',
+        completedAt: '2026-07-14T10:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('uses fresh host evidence for Devin changes and preserves the PR approval gate', async () => {
+    vi.useRealTimers();
+    configureCodingJobExecutionForTests({
+      collectWorkspaceEvidence: async () => ({
+        diffStat: 'src/host.ts | 3 +++',
+        changedFiles: ['src/host.ts'],
+        untrackedFiles: ['src/new-host.ts'],
+        testEvidence: {
+          status: 'not_reported',
+          summary:
+            'No trusted test evidence was reported by the Devin host runner.',
+        },
+      }),
+      prepareWorkspace: async (input) => {
+        const jobRoot = path.dirname(input.workspace);
+        const metadataDir = path.join(jobRoot, '.nanocrab');
+        fs.mkdirSync(input.workspace, { recursive: true });
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(metadataDir, 'diff-stat.txt'),
+          'src/stale.ts | 99 +++++++++++++++++++++++++++++++++++++\n',
+        );
+        fs.writeFileSync(
+          path.join(metadataDir, 'changed-files.txt'),
+          'src/stale.ts\n',
+        );
+        fs.writeFileSync(
+          path.join(metadataDir, 'untracked.txt'),
+          'stale.txt\n',
+        );
+        fs.writeFileSync(
+          path.join(metadataDir, 'test-summary.txt'),
+          'untrusted stale tests passed\n',
+        );
+        return {
+          jobRoot,
+          metadataDir,
+          workspace: input.workspace,
+          resumed: false,
+          gitState: { staged: '', unstaged: '', untracked: '', unpushed: '' },
+        };
+      },
+      devinRunner: {
+        run: async (input) => ({
+          attemptId: input.attemptId,
+          state: 'succeeded',
+          exitCode: 0,
+          signal: null,
+        }),
+        cancel: vi.fn(() => true),
+      },
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Collect trusted evidence.',
+      requestedBy: 'owner',
+      createPr: true,
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_pr_approval'),
+    );
+
+    expect(getCodingJob(job.id)).toMatchObject({
+      diffSummary: 'src/host.ts | 3 +++',
+      changedFiles: ['src/host.ts', 'src/new-host.ts'],
+      testSummary:
+        'No trusted test evidence was reported by the Devin host runner.',
+    });
+    expect(getCodingJob(job.id)?.changedFiles).not.toContain('src/stale.ts');
+    await expect(openCodingJobPr(job.id, 'owner')).rejects.toThrow(
+      'PR approval is required',
+    );
+    expect(getCodingJob(job.id)?.transitionHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ to: 'test' }),
+        expect.objectContaining({ to: 'await_pr_approval' }),
+      ]),
+    );
+  });
+
+  it('completes a no-change Devin success using fresh host evidence and ignores stale metadata', async () => {
+    vi.useRealTimers();
+    configureCodingJobExecutionForTests({
+      collectWorkspaceEvidence: async () => ({
+        diffStat: '',
+        changedFiles: [],
+        untrackedFiles: [],
+        testEvidence: {
+          status: 'not_reported',
+          summary:
+            'No trusted test evidence was reported by the Devin host runner.',
+        },
+      }),
+      prepareWorkspace: async (input) => {
+        const jobRoot = path.dirname(input.workspace);
+        const metadataDir = path.join(jobRoot, '.nanocrab');
+        fs.mkdirSync(input.workspace, { recursive: true });
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(metadataDir, 'diff-stat.txt'),
+          'stale | 1 +\n',
+        );
+        fs.writeFileSync(
+          path.join(metadataDir, 'untracked.txt'),
+          'stale.txt\n',
+        );
+        return {
+          jobRoot,
+          metadataDir,
+          workspace: input.workspace,
+          resumed: false,
+          gitState: { staged: '', unstaged: '', untracked: '', unpushed: '' },
+        };
+      },
+      devinRunner: {
+        run: async (input) => ({
+          attemptId: input.attemptId,
+          state: 'succeeded',
+          exitCode: 0,
+          signal: null,
+        }),
+        cancel: vi.fn(() => true),
+      },
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Produce no changes.',
+      requestedBy: 'owner',
+      createPr: true,
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('completed'),
+    );
+    expect(getCodingJob(job.id)).toMatchObject({
+      diffSummary: null,
+      changedFiles: [],
+      prUrl: null,
+    });
+  });
+
+  it('ignores attempt A preparation rejection after cancellation and retry B ownership', async () => {
+    vi.useRealTimers();
+    let attemptNumber = 0;
+    let rejectAttemptA!: (error: Error) => void;
+    let finishAttemptB!: (
+      result: import('./coding-runners/types.js').CodingRunnerResult,
+    ) => void;
+    configureCodingJobExecutionForTests({
+      createAttemptId: () => `attempt-${++attemptNumber}`,
+      collectWorkspaceEvidence: async () => ({
+        diffStat: '',
+        changedFiles: [],
+        untrackedFiles: [],
+        testEvidence: {
+          status: 'not_reported',
+          summary:
+            'No trusted test evidence was reported by the Devin host runner.',
+        },
+      }),
+      prepareWorkspace: (input) => {
+        if (attemptNumber === 1) {
+          return new Promise((_, reject) => {
+            rejectAttemptA = reject;
+          });
+        }
+        const jobRoot = path.dirname(input.workspace);
+        const metadataDir = path.join(jobRoot, '.nanocrab');
+        fs.mkdirSync(input.workspace, { recursive: true });
+        fs.mkdirSync(metadataDir, { recursive: true });
+        return Promise.resolve({
+          jobRoot,
+          metadataDir,
+          workspace: input.workspace,
+          resumed: true,
+          gitState: { staged: '', unstaged: '', untracked: '', unpushed: '' },
+        });
+      },
+      devinRunner: {
+        run: (input) =>
+          new Promise((resolve) => {
+            expect(input.attemptId).toBe('attempt-2');
+            finishAttemptB = resolve;
+          }),
+        cancel: vi.fn(() => true),
+      },
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Keep retry ownership.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.activeAttemptId).toBe('attempt-1'),
+    );
+    cancelCodingJob(job.id, 'owner');
+    await retryCodingJob(job.id, 'owner');
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.activeAttemptId).toBe('attempt-2'),
+    );
+
+    rejectAttemptA(new Error('late preparation failure from attempt A'));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(getCodingJob(job.id)).toMatchObject({
+      status: 'implement',
+      activeAttemptId: 'attempt-2',
+      executionAttempts: [
+        expect.objectContaining({ id: 'attempt-1', state: 'cancelled' }),
+        expect.objectContaining({ id: 'attempt-2', state: 'running' }),
+      ],
+    });
+
+    finishAttemptB({
+      attemptId: 'attempt-2',
+      state: 'succeeded',
+      exitCode: 0,
+      signal: null,
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('completed'),
+    );
+  });
+
+  it('blocks workspace and spawn when the post-approval probe becomes unhealthy', async () => {
+    vi.useRealTimers();
+    const prepareWorkspace = vi.fn();
+    configureCodingJobExecutionForTests({
+      probeReadiness: async (cli) => ({
+        cli,
+        executable: cli,
+        status: 'error',
+        version: null,
+        checkedAt: new Date(0).toISOString(),
+        detail: 'Devin readiness changed after approval',
+      }),
+      prepareWorkspace,
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Do not mutate an unready workspace.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => expect(getCodingJob(job.id)?.status).toBe('failed'));
+    expect(getCodingJob(job.id)?.failureReason).toContain(
+      'Devin readiness changed after approval',
+    );
+    expect(getCodingJob(job.id)?.executionAttempts).toEqual([]);
+    expect(prepareWorkspace).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before workspace mutation when Devin auth handoff is unavailable', async () => {
+    vi.useRealTimers();
+    const prepareWorkspace = vi.fn();
+    const devinRun = vi.fn();
+    configureCodingJobExecutionForTests({
+      devinSandboxAuthHandoffAvailable: () => false,
+      probeReadiness: async (cli) => ({
+        cli,
+        executable: cli,
+        status: 'healthy',
+        version: '1.0.0',
+        checkedAt: new Date(0).toISOString(),
+        detail: 'Devin host runner is ready',
+      }),
+      prepareWorkspace,
+      devinRunner: {
+        run: devinRun,
+        cancel: vi.fn(() => true),
+      },
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Do not run Devin without a sandbox authentication handoff.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => expect(getCodingJob(job.id)?.status).toBe('failed'));
+
+    expect(getCodingJob(job.id)?.failureReason).toContain(
+      'Sandboxed Devin authentication handoff is unavailable',
+    );
+    expect(getCodingJob(job.id)?.executionAttempts).toEqual([]);
+    expect(prepareWorkspace).not.toHaveBeenCalled();
+    expect(devinRun).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('maps timed_out to failed and does not silently fall back after a Devin runner failure', async () => {
+    vi.useRealTimers();
+    configureCodingJobExecutionForTests({
+      devinRunner: {
+        run: async (input) => ({
+          attemptId: input.attemptId,
+          state: 'timed_out',
+          exitCode: null,
+          signal: 'SIGTERM',
+          detail: 'runner exceeded deadline',
+        }),
+        cancel: vi.fn(() => true),
+      },
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Time out safely.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => expect(getCodingJob(job.id)?.status).toBe('failed'));
+    expect(getCodingJob(job.id)).toMatchObject({
+      failureReason: 'runner exceeded deadline',
+      activeAttemptId: null,
+      executionAttempts: [
+        expect.objectContaining({
+          state: 'timed_out',
+          detail: 'runner exceeded deadline',
+        }),
+      ],
+    });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('cancels using the persisted activeAttemptId', async () => {
+    vi.useRealTimers();
+    const cancel = vi.fn(() => true);
+    let finish!: (
+      value: import('./coding-runners/types.js').CodingRunnerResult,
+    ) => void;
+    configureCodingJobExecutionForTests({
+      createAttemptId: () => 'attempt-active',
+      devinRunner: {
+        run: (input) =>
+          new Promise((resolve) => {
+            finish = resolve;
+            expect(input.attemptId).toBe('attempt-active');
+          }),
+        cancel,
+      },
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Cancel the exact attempt.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.activeAttemptId).toBe('attempt-active'),
+    );
+    cancelCodingJob(job.id, 'owner');
+    finish({
+      attemptId: 'attempt-active',
+      state: 'succeeded',
+      exitCode: 0,
+      signal: null,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(cancel).toHaveBeenCalledWith(job.id, 'attempt-active');
+    expect(getCodingJob(job.id)).toMatchObject({
+      status: 'cancelled',
+      activeAttemptId: null,
+      executionAttempts: [expect.objectContaining({ state: 'cancelled' })],
+    });
+  });
+
+  it('retries only after the prior terminal attempt is persisted and preserves evidence', async () => {
+    vi.useRealTimers();
+    let run = 0;
+    const firstRunValues: boolean[] = [];
+    configureCodingJobExecutionForTests({
+      createAttemptId: () => `attempt-${run + 1}`,
+      prepareWorkspace: async (input) => {
+        firstRunValues.push(input.isFirstRun);
+        const jobRoot = path.dirname(input.workspace);
+        const metadataDir = path.join(jobRoot, '.nanocrab');
+        fs.mkdirSync(input.workspace, { recursive: true });
+        fs.mkdirSync(metadataDir, { recursive: true });
+        return {
+          jobRoot,
+          metadataDir,
+          workspace: input.workspace,
+          resumed: !input.isFirstRun,
+          gitState: { staged: '', unstaged: '', untracked: '', unpushed: '' },
+        };
+      },
+      devinRunner: {
+        run: async (input) => {
+          run += 1;
+          return {
+            attemptId: input.attemptId,
+            state: run === 1 ? 'timed_out' : 'succeeded',
+            exitCode: run === 1 ? null : 0,
+            signal: run === 1 ? 'SIGTERM' : null,
+            detail: run === 1 ? 'timeout' : undefined,
+          };
+        },
+        cancel: vi.fn(() => true),
+      },
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Retry without losing evidence.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => expect(getCodingJob(job.id)?.status).toBe('failed'));
+    mutateStoredJob(job.id, (stored) => {
+      stored.diffSummary = 'kept diff';
+      stored.changedFiles = ['src/kept.ts'];
+      stored.commitSha = 'abc123';
+      stored.prUrl = 'https://example.test/pr/1';
+      stored.pushed = true;
+    });
+    await retryCodingJob(job.id, 'owner');
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('completed'),
+    );
+    expect(firstRunValues).toEqual([true, false]);
+    expect(getCodingJob(job.id)).toMatchObject({
+      diffSummary: 'kept diff',
+      changedFiles: ['src/kept.ts'],
+      commitSha: 'abc123',
+      prUrl: 'https://example.test/pr/1',
+      pushed: true,
+      executionAttempts: [
+        expect.objectContaining({ id: 'attempt-1', state: 'timed_out' }),
+        expect.objectContaining({ id: 'attempt-2', state: 'succeeded' }),
+      ],
+    });
+  });
+
+  it('creates a real owner decision for provider-model-only fallback on an explicit runtime', async () => {
+    vi.useRealTimers();
+    vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
+      approved: true,
+      profile: {
+        id: 'default_coding',
+        label: 'Coding',
+        purpose: 'default_coding',
+        provider: 'codex',
+        model: 'gpt-5.4',
+        toolPolicy: 'approval-required',
+        updatedAt: new Date(0).toISOString(),
+      },
+      provider: 'codex',
+      model: 'gpt-5.4',
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Require complete fallback.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.output).toContain(
+        'control-plane decision is required',
+      ),
+    );
+    expect(resolveProviderFallbackForAction).toHaveBeenCalledWith({
+      purpose: 'default_coding',
+      action: 'coding-implementation',
+      requester: 'owner',
+      correlationId: job.id,
+      sourceProvider: 'claude',
+      sourceModel: 'claude-sonnet-4-6',
+    });
+    const [decision] = listApprovals({
+      kind: 'provider-fallback',
+      targetType: 'coding-job',
+      targetId: job.id,
+    });
+    expect(decision).toMatchObject({
+      status: 'pending',
+      correlationId: job.id,
+      payload: {
+        jobId: job.id,
+        sourceRuntime: {
+          cli: 'devin',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+        },
+        proposedProvider: 'codex',
+        proposedModel: 'gpt-5.4',
+      },
+    });
+    expect(getCodingJob(job.id)).toMatchObject({
+      status: 'await_approval',
+      runnerCli: 'devin',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      executionAttempts: [],
+    });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('resumes with an owner-approved complete fallback runtime triple', async () => {
+    vi.useRealTimers();
+    vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
+      approved: true,
+      profile: {
+        id: 'default_coding',
+        label: 'Coding',
+        purpose: 'default_coding',
+        provider: 'codex',
+        model: 'gpt-5.4',
+        toolPolicy: 'approval-required',
+        updatedAt: new Date(0).toISOString(),
+      },
+      provider: 'codex',
+      model: 'gpt-5.4',
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Apply complete fallback.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(
+        listApprovals({
+          kind: 'provider-fallback',
+          targetType: 'coding-job',
+          targetId: job.id,
+        }),
+      ).toHaveLength(1),
+    );
+
+    await approveCodingJobRuntimeFallback(
+      job.id,
+      { cli: 'codex', provider: 'codex', model: 'gpt-5.4' },
+      'owner',
+    );
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.output).toContain(
+        'Implementation is awaiting approval',
+      ),
+    );
+    expect(getCodingJob(job.id)).toMatchObject({
+      runnerCli: 'codex',
+      provider: 'codex',
+      model: 'gpt-5.4',
+      actualRuntime: { cli: 'codex', provider: 'codex', model: 'gpt-5.4' },
+      executionAttempts: [],
+    });
+    expect(
+      listApprovals({
+        kind: 'provider-fallback',
+        targetType: 'coding-job',
+        targetId: job.id,
+      })[0],
+    ).toMatchObject({ status: 'approved', reviewedBy: 'owner' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('re-probes Devin readiness before approving a runtime fallback', async () => {
+    vi.useRealTimers();
+    vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
+      approved: true,
+      profile: {
+        id: 'default_coding',
+        label: 'Coding',
+        purpose: 'default_coding',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+        toolPolicy: 'approval-required',
+        updatedAt: new Date(0).toISOString(),
+      },
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Reject an unhealthy Devin fallback.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'codex',
+        provider: 'codex',
+        model: 'gpt-5.4',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(
+        listApprovals({
+          kind: 'provider-fallback',
+          targetType: 'coding-job',
+          targetId: job.id,
+        }),
+      ).toHaveLength(1),
+    );
+    const original = getCodingJob(job.id);
+    expect(original).toBeDefined();
+    configureCodingJobExecutionForTests({
+      probeReadiness: async (cli) => ({
+        cli,
+        executable: cli,
+        status: cli === 'devin' ? 'missing' : 'healthy',
+        version: null,
+        checkedAt: new Date(0).toISOString(),
+        detail: cli === 'devin' ? 'Devin credential unavailable' : 'ready',
+      }),
+    });
+
+    await expect(
+      approveCodingJobRuntimeFallback(
+        job.id,
+        {
+          cli: 'devin',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+        },
+        'owner',
+      ),
+    ).rejects.toThrow('devin / claude / claude-sonnet-4-6 is unavailable');
+
+    configureCodingJobExecutionForTests({
+      probeReadiness: async () => {
+        throw new Error('Devin credential store unreadable');
+      },
+    });
+    await expect(
+      approveCodingJobRuntimeFallback(
+        job.id,
+        {
+          cli: 'devin',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+        },
+        'owner',
+      ),
+    ).rejects.toThrow(
+      'devin / claude / claude-sonnet-4-6 readiness check failed: Devin credential store unreadable',
+    );
+
+    expect(getCodingJob(job.id)).toMatchObject({
+      status: original!.status,
+      actualRuntime: original!.actualRuntime,
+      runnerCli: original!.runnerCli,
+      provider: original!.provider,
+      model: original!.model,
+      output: original!.output,
+    });
+    expect(
+      listApprovals({
+        kind: 'provider-fallback',
+        targetType: 'coding-job',
+        targetId: job.id,
+      })[0],
+    ).toMatchObject({
+      status: 'pending',
+      reviewedAt: null,
+      reviewedBy: null,
+    });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects a catalog-only Devin model before a per-job Devin process', async () => {
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    await expect(
+      startCodingJob({
+        repo: 'owner/repo',
+        prompt: 'Reject catalog-only model.',
+        requestedBy: 'owner',
+        actualRuntime: {
+          cli: 'devin',
+          provider: 'claude',
+          model: 'catalog-only-model',
+        },
+      }),
+    ).rejects.toThrow('no configured Devin CLI model alias');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('maps cancelled to the explicit cancelled state', async () => {
+    vi.useRealTimers();
+    configureCodingJobExecutionForTests({
+      devinRunner: {
+        run: async (input) => ({
+          attemptId: input.attemptId,
+          state: 'cancelled',
+          exitCode: null,
+          signal: 'SIGTERM',
+          detail: 'cancelled by runner',
+        }),
+        cancel: vi.fn(() => true),
+      },
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Return cancellation.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('cancelled'),
+    );
+    expect(getCodingJob(job.id)).toMatchObject({
+      activeAttemptId: null,
+      executionAttempts: [expect.objectContaining({ state: 'cancelled' })],
+    });
+  });
+
+  it('preserves legacy Pi and Mistral dispatch contract for Mistral', async () => {
     vi.useRealTimers();
     mockGitHubFetch(() => ({ default_branch: 'main' }));
     await registerCodingRepo({ repo: 'owner/repo' });
@@ -1050,6 +2081,7 @@ describe('coding jobs', () => {
           maxPrice: '"$CODING_JOB_MAX_BUDGET_USD"',
         }),
       );
+      expect(runScript).not.toContain('devin');
       expect(runScript).not.toMatch(/--auto-approve|--workdir|--trust/);
       const successfulVibe = runGeneratedMistralCase(runScript);
       expect(successfulVibe.status).toBe(0);
@@ -1337,6 +2369,8 @@ describe('coding jobs', () => {
       action: 'pr-creation',
       requester: 'owner',
       correlationId: job.id,
+      sourceProvider: job.provider,
+      sourceModel: job.model,
     });
     expect(getCodingJob(job.id)?.output).toContain(
       'Provider fallback for PR creation is awaiting approval',
@@ -1418,6 +2452,82 @@ describe('coding jobs', () => {
     expect(opened.testSummary).toContain('vitest passed');
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/repos/owner/repo/pulls'),
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('does not let a cancelled publication lease commit, push, or overwrite cancellation', async () => {
+    vi.useRealTimers();
+    const fetchMock = mockGitHubFetch((url) => {
+      if (url.includes('/pulls')) {
+        return { html_url: 'https://github.com/owner/repo/pull/10' };
+      }
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo' });
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.mkdirSync(`${jobRoot}/owner__repo`, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/changed-files.txt`, 'src/a.ts\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      requestedBy: 'whatsapp_main',
+      createPr: true,
+    });
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_pr_approval');
+    });
+    const approval = createApproval({
+      kind: 'coding-open-pr',
+      title: 'Approve PR',
+      summary: 'Allow this job to publish a PR.',
+      targetType: 'coding-job',
+      targetId: job.id,
+    });
+    reviewApproval(approval.id, 'approved', 'owner');
+    const gitCalls: string[] = [];
+    configureCodingJobExecutionForTests({
+      publishWorkspace: async (input) => {
+        input.assertOwnership();
+        gitCalls.push('add');
+        cancelCodingJob(job.id, 'owner');
+        input.assertOwnership();
+        gitCalls.push('commit');
+        return { commitSha: 'should-not-persist' };
+      },
+    });
+
+    await expect(openCodingJobPr(job.id, 'owner')).rejects.toThrow(
+      /publication ownership was lost/i,
+    );
+
+    expect(gitCalls).toEqual(['add']);
+    expect(getCodingJob(job.id)).toMatchObject({
+      status: 'cancelled',
+      commitSha: null,
+      pushed: false,
+      prUrl: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('/pulls'),
       expect.objectContaining({ method: 'POST' }),
     );
   });

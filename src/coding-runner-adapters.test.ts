@@ -261,7 +261,7 @@ describe('coding-runner adapters', () => {
       expect(supportedClis).toContain('opencode');
       expect(supportedClis).toContain('pi');
       expect(supportedClis).toContain('mistral');
-      expect(supportedClis).not.toContain('devin');
+      expect(supportedClis).toContain('devin');
     });
   });
 });

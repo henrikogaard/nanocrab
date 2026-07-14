@@ -28,12 +28,12 @@ maintenance tasks.
 
 NanoCrab opens around **Copilot / Cowork / Code / More**.
 
-| Focus | Use It For |
-| ---- | ---------- |
-| Copilot | ChatGPT-style plain conversations with provider/model selection, optional title, generated title fallback, and thread history. |
-| Cowork | durable project, document, MCP, and artifact work with project files, project chats, source context, reports, approvals, and local drafts. |
-| Code | repository automation, tests, PRs, snippets, and coding-agent handoffs through Git & Code, Autofix, GitHub Copilot, and terminal/developer tools. |
-| More | Platform operations: dashboard, agents, tasks, workflows, reports, artifacts, approvals, channels, messages, integrations, webhooks, credentials, security, audit, monitoring, backup, usage, groups, sessions, marketplace, and help. |
+| Focus   | Use It For                                                                                                                                                                                                                             |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Copilot | ChatGPT-style plain conversations with provider/model selection, optional title, generated title fallback, and thread history.                                                                                                         |
+| Cowork  | durable project, document, MCP, and artifact work with project files, project chats, source context, reports, approvals, and local drafts.                                                                                             |
+| Code    | repository automation, tests, PRs, snippets, and coding-agent handoffs through Git & Code, Autofix, GitHub Copilot, and terminal/developer tools.                                                                                      |
+| More    | Platform operations: dashboard, agents, tasks, workflows, reports, artifacts, approvals, channels, messages, integrations, webhooks, credentials, security, audit, monitoring, backup, usage, groups, sessions, marketplace, and help. |
 
 ### Capability overview
 
@@ -193,6 +193,10 @@ an agent profile with the matching `stageRoles`.
    coding-runner readiness. This is evaluated separately from host CLI
    discovery: Pi requires the coding container image and an OpenRouter
    credential route, but it does not require a host `pi` executable.
+   Devin is the opt-in host-native exception: NanoCrab must run as the same
+   dedicated OS user that owns the authenticated Devin installation, and the
+   readiness detail must be `healthy` before assignment and again after
+   approval before workspace mutation.
 
 ### Workflow
 
@@ -359,20 +363,20 @@ The draft should show:
 
 ### Schedule Types
 
-| Type | Best For |
-| ---- | -------- |
-| Cron | Weekday or calendar-like schedules, such as every weekday at 09:00. |
-| Interval | Repeating checks, such as every 30 minutes. |
-| One-time | Reminders, one-off reports, or delayed follow-up work. |
+| Type     | Best For                                                            |
+| -------- | ------------------------------------------------------------------- |
+| Cron     | Weekday or calendar-like schedules, such as every weekday at 09:00. |
+| Interval | Repeating checks, such as every 30 minutes.                         |
+| One-time | Reminders, one-off reports, or delayed follow-up work.              |
 
 ### Delivery Modes
 
-| Mode | Behavior |
-| ---- | -------- |
-| Dashboard | Store output in the task run history only. Good default for noisy jobs. |
-| Chat | Send the result to the target group. Use approvals for sensitive outputs. |
-| File | Write reviewable output under `store/task-deliveries/`. |
-| Webhook | Create an approval-gated delivery request before calling an external URL. |
+| Mode      | Behavior                                                                  |
+| --------- | ------------------------------------------------------------------------- |
+| Dashboard | Store output in the task run history only. Good default for noisy jobs.   |
+| Chat      | Send the result to the target group. Use approvals for sensitive outputs. |
+| File      | Write reviewable output under `store/task-deliveries/`.                   |
+| Webhook   | Create an approval-gated delivery request before calling an external URL. |
 
 ### Safety Controls
 
@@ -486,16 +490,20 @@ npm run mock:admin:build
 
 ## Troubleshooting
 
-| Symptom | First Place To Check |
-| ------- | -------------------- |
-| Dashboard does not load | `npm run setup -- --dry-run`, service logs, reverse proxy config, firewall. |
-| Provider fails | **Monitoring -> Inference Health**, provider credentials, base URL, model name. |
-| Channel does not respond | Channel auth state, group registration, trigger name, message logs. |
-| Coding job stuck | **Agents -> GitHub Coding Jobs**, job timeline, approvals, container logs. |
-| Routine did not run | **Tasks** run history, paused state, schedule timezone, max active runs. |
-| Webhook did not send | Pending delivery approval, webhook target, connector policy, audit log. |
-| Memory feels wrong | **Memory** proposals, approved records, stale/contradicted markers. |
-| Update fails | Dirty worktree, Node version, Docker availability, setup logs. |
+| Symptom                  | First Place To Check                                                                                                                                                                                                                                |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dashboard does not load  | `npm run setup -- --dry-run`, service logs, reverse proxy config, firewall.                                                                                                                                                                         |
+| Provider fails           | **Monitoring -> Inference Health**, provider credentials, base URL, model name.                                                                                                                                                                     |
+| Channel does not respond | Channel auth state, group registration, trigger name, message logs.                                                                                                                                                                                 |
+| Coding job stuck         | **Agents -> GitHub Coding Jobs**, job timeline, approvals, selected runner readiness/detail, and job output. Check container logs for container-backed runners; for Devin, check NanoCrab service logs and host readiness/auth/sandbox diagnostics. |
+| Routine did not run      | **Tasks** run history, paused state, schedule timezone, max active runs.                                                                                                                                                                            |
+| Webhook did not send     | Pending delivery approval, webhook target, connector policy, audit log.                                                                                                                                                                             |
+| Memory feels wrong       | **Memory** proposals, approved records, stale/contradicted markers.                                                                                                                                                                                 |
+| Update fails             | Dirty worktree, Node version, Docker availability, setup logs.                                                                                                                                                                                      |
+
+For a Devin launch-isolation error, inspect the workspace before retrying:
+launch preparation fails closed before spawn if it contains any symlink or
+Git-metadata hardlink alias.
 
 Useful logs and checks:
 

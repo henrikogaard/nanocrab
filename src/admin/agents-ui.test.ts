@@ -889,17 +889,35 @@ describe('Agents launcher UI', () => {
     expect(styles).toContain('.agent-profile-invoke-input');
   });
 
-  it('uses provider coding capability metadata for coding selectors', () => {
+  it('uses complete runtime compatibility metadata for coding selectors', () => {
     const source = fs.readFileSync(agentsPagePath, 'utf8');
 
-    expect(source).toContain('.filter((p) => p.codingCapable)');
-    expect(source).toContain('codingProvidersById');
-    expect(source).toContain('model.codingCapable !== false');
-    expect(source).toContain('codingProviderAllowsDefaultModel');
-    expect(source).toContain('provider.defaultModel');
-    expect(source).not.toContain("provider.id !== 'ollama'");
-    expect(source).not.toContain(
-      "['claude', 'codex', 'opencode'].includes(p.id)",
+    expect(source).toContain("api('/agents/coding/runtimes')");
+    expect(source).toContain('normalizeCodingRuntimeCatalog');
+    expect(source).toContain('loadIssues.push(runtimeCatalog.error)');
+    expect(source).toContain('Runner CLI');
+    expect(source).toContain('Provider');
+    expect(source).toContain('Model');
+    expect(source).toContain('codingRuntimeOptionsForCli');
+    expect(source).toContain('codingRuntimeOptionsForProvider');
+    expect(source).toContain('readiness.detail');
+    expect(source).toContain("readiness.status === 'healthy'");
+    expect(source).toContain(
+      "Devin sends the prompt, selected repository content, and tool results to Devin's external service.",
+    );
+    expect(source).toContain('actualRuntime: { cli, provider, model }');
+    expect(source).not.toContain("provider === 'devin'");
+  });
+
+  it('renders the complete actual coding runtime on job cards and details', () => {
+    const source = fs.readFileSync(agentsPagePath, 'utf8');
+
+    expect(source).toContain('function runtimeLabel(runtime)');
+    expect(source).toContain('runtimeLabel(');
+    expect(source).toContain('job.actualRuntime || {');
+    expect(source).toContain('cli: job.runnerCli');
+    expect(source).toContain(
+      "[runtime.cli, runtime.provider, runtime.model].join(' / ')",
     );
   });
 

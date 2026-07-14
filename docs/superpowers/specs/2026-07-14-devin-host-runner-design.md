@@ -66,7 +66,7 @@ The runner must preserve:
 | Execution boundary   | One-shot host-native Devin CLI process                                          |
 | Runtime selection    | Persisted `runnerCli`, sourced from `actualRuntime.cli`                         |
 | Provider identity    | Existing provider/model remain separate from CLI                                |
-| Authentication       | Existing host Devin authentication, used in place                               |
+| Authentication       | Planned future handoff; currently disabled and never mounted/read             |
 | Credential exposure  | No credential copy, mount, argument, generated file, or child environment value |
 | Filesystem isolation | Required Devin sandbox plus strict generated permission scopes                  |
 | Git access           | Dedicated host Git subprocesses with Git-only askpass environment               |
@@ -410,8 +410,9 @@ than substring assertions, lock the expected schema for every stage.
 
 The sole executable permission targets an immutable NanoCrab command broker
 outside the writable repository. The broker validates an argv array, canonical
-cwd, and stage, then uses `shell: false` and a scrubbed environment. Planning
-and review allow only:
+cwd, and stage, then uses `shell: false` and a scrubbed environment. Every
+accepted command, including read inspections and Git, runs inside the approved
+OS sandbox. Planning and review allow only:
 
 - `pwd`, `ls`, workspace-scoped `find`, `rg`, `grep`, `cat`, `head`, `tail`,
   `wc`, `file`, and `stat`; and
@@ -432,14 +433,44 @@ network clients (`curl`, `wget`, `ssh`, `scp`, `rsync`, `nc`, `socat`); shells;
 Docker/Podman/Kubernetes/infrastructure tools; privilege/service managers;
 destructive file commands and in-place editors; and direct interpreters other
 than the exact pytest form. File changes use the scoped edit/write tools.
+Broker-injected Git reads use both `--no-optional-locks` and
+`GIT_OPTIONAL_LOCKS=0`; user argv still cannot contain Git global options.
 
-Package scripts are arbitrary code, so allowed build/test commands execute in
-an additional OS process sandbox with workspace-only filesystem access and no
-network namespace. Linux readiness requires `bwrap` network isolation
-(`--unshare-net`); macOS readiness requires the supported local sandbox adapter
-with an explicit network-deny profile. If that platform primitive is absent,
-readiness fails closed. A repository whose build needs network access fails
-with an operator-visible restriction; issue #129 adds no bypass.
+Repository-controlled Git configuration, filters, attributes, and package
+scripts are executable attack surfaces, so every brokered command executes in
+an OS process sandbox with workspace-only filesystem access and no network
+namespace. The broker receives immutable canonical protected paths and
+an explicit list of canonical trusted runtime read roots. It rejects missing,
+noncanonical, duplicate, or protected/runtime-overlapping roots before spawn.
+Linux starts from an empty `bwrap` root, exposes only the trusted runtime roots
+read-only, and always uses `--unshare-net`, `--unshare-pid`, `--unshare-ipc`,
+`--new-session`, and `--die-with-parent` before mounting a private `/proc`.
+Inspection and Git commands bind the workspace read-only; only approved
+implement/direct build and test commands bind it writable. The temporary
+directory remains writable for all commands, and host `/` is never bound.
+The broker canonicalizes the temp directory once and uses that resolved path
+for every command's sandbox mount/profile and child environment; it never
+reuses an unverified symlink spelling after validation.
+The intended future macOS profile allows reads only from the explicit runtime
+roots, workspace, and
+temporary directory, denies network, allows temp writes for every command, and
+allows workspace writes only for approved implement/direct build and test
+commands; it must not use a global `allow file-read*`. The service home, Devin
+credential, NanoCrab configuration, and job metadata therefore remain
+unavailable to brokered subprocesses. Trusted executable directories below the
+service home may be exposed individually, but exposing the home itself or a
+root overlapping a protected path is denied. If the required platform
+primitive or isolation inputs are absent, readiness fails closed. A repository
+whose command needs network or an unlisted host path fails with an
+operator-visible restriction; issue #129 adds no bypass. The current
+implementation keeps the Devin host adapter disabled on macOS and does not
+generate this profile until the authentication handoff and profile receive a
+separate security review.
+
+The mode-`0555` broker launcher uses a canonical Node executable validated by
+readiness and rechecked as a descendant of an approved runtime read root. It
+embeds that absolute executable directly in the shebang; `/usr/bin/env`, ambient
+`PATH` lookup, and repository-controlled runtimes are not permitted.
 
 Permission policy by stage:
 
@@ -450,12 +481,12 @@ Permission policy by stage:
 | Review            | Repository workspace only | None                      | Scoped diff, inspection, and read-only verification commands |
 | Direct legacy job | Repository workspace only | Repository workspace only | Same as Implement after the existing implementation approval |
 
-Sensitive paths are explicitly denied as defense in depth, including the
+Sensitive paths are explicitly denied at the tool layer and omitted from the
+subprocess filesystem view as defense in depth, including the
 Devin credential, `.ssh`, `.gnupg`, NanoCrab `.env`, channel authentication,
-mount allowlists, and host credential/config directories. Because the sandbox
-derives readable and writable roots from active `Read(...)` and `Write(...)`
-scopes, the workspace allowlist is authoritative; sensitive-path denies must
-not be used as a substitute for it.
+mount allowlists, job metadata, service home, and host credential/config
+directories. The explicit sandbox roots are authoritative for subprocesses;
+sensitive-path deny strings must not be used as a substitute for OS isolation.
 
 ### Child environment
 
@@ -484,7 +515,14 @@ the Devin installation and authenticated state. Running NanoCrab itself inside
 a container does not make the host runner available; mounting host credentials
 into that container is explicitly unsupported.
 
-A Devin runtime probe is healthy only when all of these checks pass:
+A Devin host runtime probe may inspect non-secret installation metadata, but the
+coding runner is not enabled in this slice. Because the empty-root sandbox has
+no safe authentication handoff, coding readiness is always unavailable with
+the exact detail `Sandboxed Devin authentication handoff is unavailable; no
+credential or host auth directory is mounted`.
+
+If a future handoff is approved, a Devin runtime probe must require all of
+these checks:
 
 1. the allowlisted executable exists and `--version` succeeds within the probe
    timeout;
@@ -494,13 +532,12 @@ A Devin runtime probe is healthy only when all of these checks pass:
 4. the credential is a regular file owned by the NanoCrab service user;
 5. its POSIX mode is exactly `0600`, with no group or world permissions;
 6. sandbox prerequisites for the current platform are available; and
-7. `devin auth status` exits successfully.
+7. authentication is verified inside the approved sandbox handoff.
 
-Authentication output may contain personal account details. Probes discard its
-stdout/stderr and persist only a generic status and detail. A failed auth check
-maps to `unauthenticated`; missing executable maps to `missing`; unsafe
-ownership/mode, missing sandbox support, unsupported CLI capabilities, or other
-failures map to `error` with a non-sensitive operator action.
+No authentication subprocess runs outside that handoff. Authentication output
+may contain personal account details and must never be persisted. Until the
+handoff exists, no credential or host auth directory is mounted, read, or
+forwarded; dispatch fails before workspace mutation or process spawn.
 
 Any credential with mode `0644`, including the pre-implementation state
 observed during design research, fails readiness. NanoCrab reports the exact
@@ -515,13 +552,12 @@ discarded.
 
 Runtime health is checked before dispatch and is repeated after implementation
 approval and complete runtime fallback resolution, immediately before any
-workspace mutation or process spawn. Any changed or unhealthy result fails
+workspace mutation or process spawn. Any changed or unavailable result fails
 closed; NanoCrab does not reuse a stale readiness result or retry with broader
-permissions. A profile assignment opts into the runner, and implementation
-still requires the existing owner approval. If
-Devin is unavailable, the control plane uses its existing explicit fallback
-decision flow; it never silently substitutes another CLI for write-capable
-work.
+permissions. Devin profile assignment and implementation dispatch remain
+disabled until the authentication handoff is approved. If Devin is unavailable,
+the control plane uses its existing explicit fallback decision flow; it never
+silently substitutes another CLI for write-capable work.
 
 ## Security and Privacy Boundaries
 
@@ -638,7 +674,7 @@ work.
 | Failure                          | Job/runtime result                          | Operator-visible behavior                                  |
 | -------------------------------- | ------------------------------------------- | ---------------------------------------------------------- |
 | Executable missing               | Runtime `missing`; dispatch blocked         | Install Devin on the NanoCrab host                         |
-| Authentication absent/expired    | Runtime `unauthenticated`; dispatch blocked | Run interactive `devin auth login` as the service user     |
+| Authentication handoff unavailable | Runtime `error` with `Sandboxed Devin authentication handoff is unavailable; no credential or host auth directory is mounted`; dispatch blocked | Remains disabled pending a reviewed sandbox-safe authentication handoff; do not authenticate Devin for NanoCrab |
 | Credential ownership/mode unsafe | Runtime `error`; dispatch blocked           | Correct ownership and set mode `0600`                      |
 | Sandbox/capability unavailable   | Runtime `error`; dispatch blocked           | Upgrade/configure the CLI; no unsandboxed retry            |
 | Git workspace preparation fails  | Coding job `failed` before Devin spawn      | Preserve metadata and sanitized Git failure                |
@@ -692,12 +728,13 @@ change, and verifies green before refactoring.
 
 ### Runtime readiness tests
 
-- version plus successful auth and sandbox checks produce `healthy`;
-- every version, capability, sandbox, and auth subprocess receives the exact
-  scrubbed allowlist and no ambient secret-bearing environment key;
+- installation metadata checks never enable coding readiness by themselves;
+- the current missing-auth-handoff capability produces `error` before dispatch;
+- any future authentication subprocess must run only inside the approved
+  sandbox handoff with the exact scrubbed allowlist and no ambient secret key;
 - a healthy result before approval followed by a failed post-approval probe
   blocks workspace mutation and spawn;
-- failed auth produces `unauthenticated`;
+- a future sandbox-contained auth failure produces `unauthenticated`;
 - unsafe owner or any group/world permission produces `error`;
 - exact mode `0600` passes;
 - required capability/sandbox failure produces `error`;
@@ -810,18 +847,18 @@ boundary and may incur cost.
 
 1. Land the adapter, readiness checks, docs, and fake-transport tests while
    leaving existing agent profiles unchanged.
-2. On the target host, install a supported Devin CLI, authenticate as the
-   dedicated NanoCrab service user, set the credential mode to `0600`, and
-   verify the non-sensitive runtime health result.
-3. Assign Devin to one planning or review profile first and exercise only a
-   deliberately selected low-risk issue after owner approval.
-4. Inspect output redaction, filesystem scope, timeout/cancellation, branch,
-   diff, and audit evidence.
-5. Assign Devin to implement work only after that operator verification.
+2. Keep Devin coding readiness and dispatch disabled. Do not install,
+   authenticate, or assign Devin implementation work for NanoCrab while the
+   sandbox-safe authentication handoff is unavailable.
+3. If a reviewed handoff is approved later, verify the non-sensitive runtime
+   health result and assign Devin to one planning or review profile first.
+4. Exercise only a deliberately selected low-risk issue after owner approval;
+   inspect output redaction, filesystem scope, timeout/cancellation, branch,
+   diff, and audit evidence before considering any write-capable assignment.
 
-Profile assignment is the opt-in; this slice does not add a second global
-feature flag. Existing profiles and container jobs are unchanged until an
-operator selects Devin.
+Devin profile assignment remains disabled in this slice. Existing profiles and
+container jobs are unchanged until a future reviewed handoff explicitly enables
+the runtime.
 
 ## Rollback
 

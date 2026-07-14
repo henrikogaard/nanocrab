@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
-import { STORE_DIR } from '../../config.js';
+import { DEVIN_CLI_MODEL_ALIASES, STORE_DIR } from '../../config.js';
 import { auditLog } from '../security.js';
 import { logger } from '../../logger.js';
 import {
@@ -17,9 +17,18 @@ import {
   DEFAULT_AGENT_MODELS,
   getAgentProviderConfig,
   getProviderAvailability,
+  isAgentProvider,
   isCodingCapableProvider,
   codingProviderUnavailableReason,
 } from '../../agent-provider.js';
+import {
+  isAgentCliId,
+  listAgentRuntimeDefinitions,
+  resolveDevinCliModelAlias,
+  validateCodingRuntimeSelection,
+} from '../../agent-runtime-registry.js';
+import { probeCodingRunnerReadiness } from '../../coding-runner-readiness.js';
+import type { AgentRuntimeHealth, AgentRuntimeSelection } from '../../types.js';
 import {
   getAllRegisteredGroups as _getAllRegisteredGroups,
   getNonWebRegisteredGroups,
@@ -139,6 +148,144 @@ router.get('/providers', (_req: Request, res: Response) => {
       };
     }),
   );
+});
+
+interface CodingRuntimeOption extends AgentRuntimeSelection {
+  cliModel: string | null;
+  available: boolean;
+  readiness: AgentRuntimeHealth;
+}
+
+function codingRuntimeIdentity(input: unknown): string {
+  const runtime = input as Partial<AgentRuntimeSelection> | null;
+  return [runtime?.cli, runtime?.provider, runtime?.model]
+    .map((part) =>
+      typeof part === 'string' && part.trim() ? part.trim() : '(missing)',
+    )
+    .join(' / ');
+}
+
+async function parseCodingRuntimeSelection(
+  input: unknown,
+): Promise<AgentRuntimeSelection> {
+  const identity = codingRuntimeIdentity(input);
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error(
+      `Invalid coding runtime ${identity}: expected a complete CLI, provider, and model selection`,
+    );
+  }
+  const raw = input as Record<string, unknown>;
+  if (
+    typeof raw.cli !== 'string' ||
+    !isAgentCliId(raw.cli) ||
+    typeof raw.provider !== 'string' ||
+    !isAgentProvider(raw.provider) ||
+    typeof raw.model !== 'string' ||
+    !raw.model.trim()
+  ) {
+    throw new Error(
+      `Invalid coding runtime ${identity}: expected a complete CLI, provider, and model selection`,
+    );
+  }
+  const runtime: AgentRuntimeSelection = {
+    cli: raw.cli,
+    provider: raw.provider,
+    model: raw.model.trim(),
+  };
+  try {
+    validateCodingRuntimeSelection(runtime);
+  } catch (err) {
+    throw new Error(
+      `Invalid coding runtime ${identity}: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+  if (runtime.cli === 'devin') {
+    const readiness = await probeCodingRunnerReadiness('devin');
+    if (readiness.status !== 'healthy') {
+      throw new Error(
+        `Coding runtime ${identity} is unavailable: ${readiness.detail}`,
+      );
+    }
+  }
+  return runtime;
+}
+
+router.get('/coding/runtimes', async (_req: Request, res: Response) => {
+  try {
+    const definitions = listAgentRuntimeDefinitions().filter(
+      (runtime) => runtime.codingRunnerSupported,
+    );
+    const readiness = new Map(
+      await Promise.all(
+        definitions.map(
+          async (runtime) =>
+            [
+              runtime.cli,
+              await probeCodingRunnerReadiness(runtime.cli),
+            ] as const,
+        ),
+      ),
+    );
+    const config = getAgentProviderConfig();
+    const candidates = new Map<string, AgentRuntimeSelection>();
+    for (const definition of definitions) {
+      if (definition.cli === 'devin') {
+        for (const key of Object.keys(DEVIN_CLI_MODEL_ALIASES)) {
+          const separator = key.indexOf('/');
+          const provider = key.slice(0, separator);
+          const model = key.slice(separator + 1);
+          if (!isAgentProvider(provider) || !model) continue;
+          const runtime = { cli: definition.cli, provider, model } as const;
+          candidates.set(`${runtime.cli}/${key}`, runtime);
+        }
+        continue;
+      }
+      for (const provider of Object.keys(AGENT_PROVIDER_DEFINITIONS).filter(
+        isAgentProvider,
+      )) {
+        const models = new Set([
+          config.modelsByProvider[provider] || DEFAULT_AGENT_MODELS[provider],
+          ...(AGENT_PROVIDER_MODELS[provider] || []),
+        ]);
+        for (const model of models) {
+          if (!model || !isCodingCapableProvider(provider, model)) continue;
+          const runtime = { cli: definition.cli, provider, model };
+          try {
+            validateCodingRuntimeSelection(runtime);
+            candidates.set(
+              `${runtime.cli}/${runtime.provider}/${runtime.model}`,
+              runtime,
+            );
+          } catch {
+            // Only expose complete triples accepted by the server validator.
+          }
+        }
+      }
+    }
+    const options: CodingRuntimeOption[] = Array.from(candidates.values()).map(
+      (runtime) => {
+        const runtimeReadiness = readiness.get(runtime.cli);
+        if (!runtimeReadiness) {
+          throw new Error(
+            `Missing readiness for coding runtime ${runtime.cli}`,
+          );
+        }
+        return {
+          ...runtime,
+          cliModel:
+            runtime.cli === 'devin' ? resolveDevinCliModelAlias(runtime) : null,
+          available: runtimeReadiness.status === 'healthy',
+          readiness: runtimeReadiness,
+        };
+      },
+    );
+    res.json(options);
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 router.get('/boundaries', (_req: Request, res: Response) => {
@@ -425,6 +572,9 @@ router.get('/coding/issues', async (req: Request, res: Response) => {
 
 router.post('/coding/jobs', async (req: Request, res: Response) => {
   try {
+    const actualRuntime = await parseCodingRuntimeSelection(
+      req.body.actualRuntime,
+    );
     const job = await startCodingJob({
       repo: req.body.repo,
       prompt: req.body.prompt,
@@ -432,8 +582,7 @@ router.post('/coding/jobs', async (req: Request, res: Response) => {
         typeof req.body.issueNumber === 'number'
           ? req.body.issueNumber
           : undefined,
-      provider: req.body.provider,
-      model: req.body.model,
+      actualRuntime,
       createPr: req.body.createPr === true,
       branchName: req.body.branchName,
       requestedBy: req.user?.username || 'dashboard',
@@ -449,11 +598,13 @@ router.post('/coding/jobs', async (req: Request, res: Response) => {
 
 router.post('/coding/pick-issue', async (req: Request, res: Response) => {
   try {
+    const actualRuntime = await parseCodingRuntimeSelection(
+      req.body.actualRuntime,
+    );
     const result = await pickGitHubIssue({
       repo: req.body.repo,
       labels: Array.isArray(req.body.labels) ? req.body.labels : undefined,
-      provider: req.body.provider,
-      model: req.body.model,
+      actualRuntime,
       createPr: req.body.createPr === true,
       requestedBy: req.user?.username || 'dashboard',
     });

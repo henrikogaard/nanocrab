@@ -21,6 +21,11 @@ vi.mock('../../config.js', () => ({
   DATA_DIR,
   GROUPS_DIR,
   ASSISTANT_NAME: 'Assistant',
+  DEVIN_CLI_MODEL_ALIASES: {
+    'claude/claude-sonnet-4-6': 'claude-sonnet-4',
+    'claude/claude-opus-4-6': 'claude-opus-4.6',
+  },
+  DEVIN_CREDENTIAL_PATH: null,
 }));
 
 vi.mock('../../logger.js', () => ({
@@ -742,6 +747,12 @@ describe('/api/agent-profiles', () => {
 
       const mistral = body.find((h) => h.cli === 'mistral');
       expect(mistral?.executable).toBe('vibe');
+
+      expect(body.find((h) => h.cli === 'devin')).toMatchObject({
+        status: 'error',
+        detail:
+          'Sandboxed Devin authentication handoff is unavailable; no credential or host auth directory is mounted',
+      });
     });
   });
 });

@@ -5966,6 +5966,55 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       },
     ];
   }
+  if (pathname === '/agents/coding/runtimes') {
+    return [
+      {
+        cli: 'codex',
+        provider: 'codex',
+        model: 'gpt-5.4',
+        cliModel: null,
+        available: true,
+        readiness: {
+          cli: 'codex',
+          executable: 'codex',
+          status: 'healthy',
+          version: '0.101.0',
+          checkedAt: iso(1),
+          detail: 'version 0.101.0',
+        },
+      },
+      {
+        cli: 'opencode',
+        provider: 'openrouter',
+        model: 'openai/gpt-oss-120b',
+        cliModel: null,
+        available: false,
+        readiness: {
+          cli: 'opencode',
+          executable: 'opencode',
+          status: 'missing',
+          version: null,
+          checkedAt: iso(1),
+          detail: 'executable opencode not found',
+        },
+      },
+      {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+        cliModel: 'claude-sonnet-4',
+        available: true,
+        readiness: {
+          cli: 'devin',
+          executable: 'devin',
+          status: 'healthy',
+          version: '2.7.1',
+          checkedAt: iso(1),
+          detail: 'Devin CLI authenticated and ready',
+        },
+      },
+    ];
+  }
   if (pathname === '/agents/coding/jobs') {
     return [
       {
@@ -5977,6 +6026,12 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         issueTitle: 'Add provider profiles to dashboard',
         provider: 'codex',
         model: 'gpt-5.4',
+        runnerCli: 'codex',
+        actualRuntime: {
+          cli: 'codex',
+          provider: 'codex',
+          model: 'gpt-5.4',
+        },
         status: 'running',
         branch: 'nanocrab/issue-42-code-mock-1',
         workspace: '/mock/coding/jobs/code-mock-1/nanocrab',
@@ -6000,6 +6055,12 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       issueTitle: 'Add provider profiles to dashboard',
       provider: 'codex',
       model: 'gpt-5.4',
+      runnerCli: 'codex',
+      actualRuntime: {
+        cli: 'codex',
+        provider: 'codex',
+        model: 'gpt-5.4',
+      },
       status: 'running',
       branch: 'nanocrab/issue-42-code-mock-1',
       workspace: '/mock/coding/jobs/code-mock-1/nanocrab',
@@ -6142,6 +6203,12 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         triggerLabel: 'autofix',
         provider: 'codex',
         model: 'gpt-5.4',
+        runnerCli: 'codex',
+        runtime: {
+          cli: 'codex',
+          provider: 'codex',
+          model: 'gpt-5.4',
+        },
         notifyJid: 'wa:alliance-command',
         autoReview: true,
         createPr: true,
@@ -6176,6 +6243,12 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
         issueTitle: 'Add dashboard mock mode',
         provider: 'codex',
         model: 'gpt-5.4',
+        runnerCli: 'codex',
+        actualRuntime: {
+          cli: 'codex',
+          provider: 'codex',
+          model: 'gpt-5.4',
+        },
         status: 'await_pr_approval',
         branch: 'nanocrab/issue-43-af-job-1',
         prUrl: null,
@@ -6241,6 +6314,12 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       issueTitle: 'Add dashboard mock mode',
       provider: 'codex',
       model: 'gpt-5.4',
+      runnerCli: 'codex',
+      actualRuntime: {
+        cli: 'codex',
+        provider: 'codex',
+        model: 'gpt-5.4',
+      },
       status: 'await_pr_approval',
       branch: 'nanocrab/issue-43-af-job-1',
       prUrl: null,

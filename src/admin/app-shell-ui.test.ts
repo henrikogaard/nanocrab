@@ -97,7 +97,171 @@ function loadCommandPalette() {
   return context.window.NanoCommandPalette;
 }
 
+function loadSharedUi() {
+  const context: any = {
+    window: {},
+    document: {
+      createElement: () => ({ textContent: '', innerHTML: '' }),
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(sharedUiPath, 'utf8'), context);
+  return context.window.NanoShared;
+}
+
 describe('App shell accessibility UI', () => {
+  it('fails closed when a coding runtime catalog response is malformed', () => {
+    const shared = loadSharedUi();
+    const validRuntime = {
+      cli: 'codex',
+      provider: 'codex',
+      model: 'gpt-5.4',
+      cliModel: null,
+      available: true,
+      readiness: {
+        cli: 'codex',
+        executable: 'codex',
+        status: 'healthy',
+        version: '1.0.0',
+        checkedAt: '2026-07-14T00:00:00.000Z',
+        detail: 'ready',
+      },
+    };
+
+    expect(shared.normalizeCodingRuntimeCatalog([validRuntime])).toEqual({
+      runtimes: [validRuntime],
+      error: '',
+    });
+    const validUnavailableRuntime = {
+      ...validRuntime,
+      cli: 'devin',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      cliModel: 'claude-sonnet-4',
+      available: false,
+      readiness: {
+        ...validRuntime.readiness,
+        cli: 'devin',
+        executable: 'devin',
+        status: 'unauthenticated',
+        version: null,
+        detail: 'Devin CLI is not authenticated',
+      },
+    };
+    expect(
+      shared.normalizeCodingRuntimeCatalog([validUnavailableRuntime]),
+    ).toEqual({ runtimes: [validUnavailableRuntime], error: '' });
+    const validErrorRuntime = {
+      ...validRuntime,
+      cli: 'opencode',
+      provider: 'openrouter',
+      model: 'openai/gpt-oss-120b',
+      available: false,
+      readiness: {
+        ...validRuntime.readiness,
+        cli: 'opencode',
+        executable: 'opencode',
+        status: 'error',
+        version: null,
+        detail: 'Failed to start opencode\nstderr: connection refused\n',
+      },
+    };
+    expect(
+      shared.normalizeCodingRuntimeCatalog([validRuntime, validErrorRuntime]),
+    ).toEqual({
+      runtimes: [validRuntime, validErrorRuntime],
+      error: '',
+    });
+    const malformedRuntimeEntries = [
+      { ...validRuntime, cli: ' ' },
+      { ...validRuntime, provider: '' },
+      { ...validRuntime, model: ' gpt-5.4 ' },
+      { ...validRuntime, cliModel: undefined },
+      { ...validRuntime, cliModel: 42 },
+      { ...validRuntime, cliModel: ' ' },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, status: 'unknown' },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, status: undefined },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, cli: 'claude' },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, cli: undefined },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, executable: null },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, executable: ' ' },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, executable: undefined },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, version: 1 },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, version: ' ' },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, version: undefined },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, checkedAt: 'not-a-date' },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, checkedAt: undefined },
+      },
+      {
+        ...validRuntime,
+        readiness: {
+          ...validRuntime.readiness,
+          checkedAt: '2026-07-14 00:00:00',
+        },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, detail: ' ' },
+      },
+      {
+        ...validRuntime,
+        readiness: { ...validRuntime.readiness, detail: undefined },
+      },
+      { ...validRuntime, available: false },
+      {
+        ...validRuntime,
+        available: true,
+        readiness: { ...validRuntime.readiness, status: 'missing' },
+      },
+    ];
+    for (const malformed of [
+      { ok: true },
+      [null],
+      [{ cli: 'codex' }],
+      ...malformedRuntimeEntries.map((runtime) => [runtime]),
+    ]) {
+      expect(shared.normalizeCodingRuntimeCatalog(malformed)).toEqual({
+        runtimes: [],
+        error: 'Coding runtime catalog returned an unexpected response',
+      });
+    }
+  });
+
   it('adds a keyboard skip link and main content landmark to the dashboard shell', () => {
     const source = fs.readFileSync(appPath, 'utf8');
     const shellSource = fs.readFileSync(shellUiPath, 'utf8');

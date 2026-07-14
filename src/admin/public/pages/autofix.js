@@ -22,6 +22,11 @@ function autofixStatusBadge(status) {
   return 'badge-error';
 }
 
+function runtimeLabel(runtime) {
+  if (!runtime) return 'runtime unavailable';
+  return [runtime.cli, runtime.provider, runtime.model].join(' / ');
+}
+
 function autofixDenyNoteId(id) {
   return `autofix-deny-note-${String(id || '').replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 }
@@ -400,6 +405,16 @@ function renderAutofixWorkbench(data = {}) {
   const issues = data.issues || [];
   const boards = data.projectBoards || [];
   const selectedRepo = data.selectedRepo || repos[0]?.fullName || '';
+  const selectedProject = (data.projects || []).find(
+    (project) => `${project.owner}/${project.repo}` === selectedRepo,
+  );
+  const selectedRuntime = (window._autofixRuntimeOptions || []).find(
+    (runtime) =>
+      runtime.cli === selectedProject?.runtime?.cli &&
+      runtime.provider === selectedProject?.runtime?.provider &&
+      runtime.model === selectedProject?.runtime?.model,
+  );
+  const runtimeReady = selectedRuntime?.readiness.status === 'healthy';
   const repoOptions = repos
     .map(
       (repo) =>
@@ -442,7 +457,7 @@ function renderAutofixWorkbench(data = {}) {
               ${
                 activeJob
                   ? `<button class="btn btn-sm btn-ghost" onclick="viewAutofixJob('${esc(activeJob.id)}')">${esc(activeJob.status)}</button>`
-                  : `<button class="btn btn-sm btn-primary" onclick="autofixAssignIssueFromWorkbench('${esc(selectedRepo)}',${issue.number},this)">Assign coding task</button>`
+                  : `<button class="btn btn-sm btn-primary" onclick="autofixAssignIssueFromWorkbench('${esc(selectedRepo)}',${issue.number},this)" ${runtimeReady ? '' : 'disabled'}>Assign coding task</button>`
               }
             </div>
           </div>`;
@@ -468,6 +483,8 @@ function renderAutofixWorkbench(data = {}) {
       <input class="search-input" id="af-workbench-milestone" placeholder="milestone">
       <button class="btn btn-sm btn-primary" onclick="autofixLoadWorkbench()">Search</button>
     </div>
+    <div class="field-hint" role="status">${selectedRuntime ? `${esc(runtimeLabel(selectedRuntime))}: ${esc(selectedRuntime.readiness.detail)}` : 'No complete runtime is configured for this repository.'}</div>
+    ${selectedRuntime?.cli === 'devin' ? `<div class="field-hint">Devin sends the prompt, selected repository content, and tool results to Devin's external service.</div>` : ''}
     <section class="autofix-section-card">
       <div class="card-title">Project boards <span class="badge badge-muted autofix-count-badge">${boards.length}</span></div>
       ${boardRows}
@@ -558,9 +575,28 @@ window.autofixAssignIssueFromWorkbench = async function (repo, issueNumber, btn)
     btn.textContent = 'Assigning...';
   }
   try {
+    const project = (window._autofixProjects || []).find(
+      (candidate) => `${candidate.owner}/${candidate.repo}` === repo,
+    );
+    const runtime = project?.runtime;
+    const runtimeOption = (window._autofixRuntimeOptions || []).find(
+      (option) =>
+        option.cli === runtime?.cli &&
+        option.provider === runtime?.provider &&
+        option.model === runtime?.model,
+    );
+    if (!runtime || runtimeOption?.readiness.status !== 'healthy') {
+      toast('This project does not have an available complete runtime', 'warning');
+      return;
+    }
+    const { cli, provider, model } = runtime;
     const r = await api('/autofix/workbench/assign', {
       method: 'POST',
-      body: JSON.stringify({ repo, issueNumber }),
+      body: JSON.stringify({
+        repo,
+        issueNumber,
+        actualRuntime: { cli, provider, model },
+      }),
     });
     if (!r.ok) {
       toast(autofixActionErrorMessage('run', r.error), 'error');
@@ -583,7 +619,7 @@ async function renderAutofix(el) {
   el.innerHTML = renderAutofixLoadingState('cockpit');
   try {
     const loadIssues = [];
-    const [projects, jobs, groups, providers, webhookHealth] = await Promise.all([
+    const [projects, jobs, groups, runtimes, webhookHealth] = await Promise.all([
       api('/autofix/projects').catch(() => {
         loadIssues.push('Autofix project list unavailable');
         return [];
@@ -596,29 +632,26 @@ async function renderAutofix(el) {
         loadIssues.push('Group delivery targets unavailable');
         return [];
       }),
-      api('/agents/providers').catch(() => {
-        loadIssues.push('Provider catalog unavailable');
-        return [];
-      }),
+      api('/agents/coding/runtimes')
+        .then((value) => {
+          const runtimeCatalog = normalizeCodingRuntimeCatalog(value);
+          if (runtimeCatalog.error) loadIssues.push(runtimeCatalog.error);
+          return runtimeCatalog.runtimes;
+        })
+        .catch(() => {
+          loadIssues.push('Coding runtime catalog unavailable');
+          return [];
+        }),
       api('/webhooks/github-health').catch(() => {
         loadIssues.push('GitHub webhook health unavailable');
         return null;
       }),
     ]);
 
-    const codingProviders = (Array.isArray(providers) ? providers : []).filter(
-      (provider) => provider.codingCapable,
-    );
-    const providerOptions =
-      codingProviders
-        .map((provider) => `<option value="${esc(provider.id)}">${esc(provider.name)}</option>`)
-        .join('') || '<option value="claude">Claude</option>';
-    const modelMap = {};
-    const providerMap = {};
-    for (const provider of codingProviders) {
-      providerMap[provider.id] = provider;
-      modelMap[provider.id] = (provider.models || []).filter((model) => model.codingCapable !== false);
-    }
+    const runtimeOptions = Array.isArray(runtimes) ? runtimes : [];
+    const cliOptions = [...new Set(runtimeOptions.map((runtime) => runtime.cli))]
+      .map((cli) => `<option value="${esc(cli)}">${esc(cli)}</option>`)
+      .join('');
     const healthClass =
       webhookHealth?.status === 'ready'
         ? 'badge-success'
@@ -646,6 +679,13 @@ async function renderAutofix(el) {
     const projectCards = projects
       .map(
         (p) => {
+          const runtimeOption = runtimeOptions.find(
+            (runtime) =>
+              runtime.cli === p.runtime?.cli &&
+              runtime.provider === p.runtime?.provider &&
+              runtime.model === p.runtime?.model,
+          );
+          const runtimeReady = runtimeOption?.readiness.status === 'healthy';
           const autoPickBadge = p.autoPickEnabled
             ? '<span class="badge badge-success autofix-mini-badge">Auto-pick</span>'
             : '<span class="badge badge-muted autofix-mini-badge">Manual</span>';
@@ -654,12 +694,20 @@ async function renderAutofix(el) {
         <div class="autofix-row-body">
           <strong>${esc(p.owner)}/${esc(p.repo)}</strong>
           <span class="badge badge-muted autofix-mini-badge">label: ${esc(p.triggerLabel)}</span>
-          <span class="badge badge-muted autofix-mini-badge">${esc(p.provider || 'claude')}/${esc(p.model)}</span>
+          <span class="badge badge-muted autofix-mini-badge">${esc(
+            runtimeLabel(p.runtime || {
+              cli: p.runnerCli,
+              provider: p.provider,
+              model: p.model,
+            }),
+          )}</span>
           <span class="badge badge-muted autofix-mini-badge">max ${esc(p.maxActiveJobs || 1)}</span>
           ${p.createPr === false ? '<span class="badge badge-warning autofix-mini-badge">No PR</span>' : '<span class="badge badge-info autofix-mini-badge">PR flow</span>'}
           ${p.autoReview ? '<span class="badge badge-success autofix-mini-badge">Auto-review</span>' : ''}
           ${autoPickBadge}
           <div class="autofix-row-meta">${esc(p.workDir)}</div>
+          <div class="field-hint">${runtimeOption ? esc(runtimeOption.readiness.detail) : 'Configured runtime is not present in the compatible runtime catalog.'}</div>
+          ${runtimeOption?.cli === 'devin' ? `<div class="field-hint">Devin sends the prompt, selected repository content, and tool results to Devin's external service.</div>` : ''}
           <div class="autofix-project-controls">
             <label class="autofix-inline-control">
               <input type="checkbox" ${p.autoPickEnabled ? 'checked' : ''} onchange="autofixUpdateProject('${esc(p.id)}',{autoPickEnabled:this.checked})">
@@ -674,7 +722,7 @@ async function renderAutofix(el) {
           </div>
         </div>
         <div class="autofix-row-actions">
-          <button class="btn btn-sm btn-primary" onclick="autofixPickIssue('${esc(p.id)}','${esc(p.owner)}','${esc(p.repo)}','${esc(p.triggerLabel)}')">Fix Issue</button>
+          <button class="btn btn-sm btn-primary" onclick="autofixPickIssue('${esc(p.id)}','${esc(p.owner)}','${esc(p.repo)}','${esc(p.triggerLabel)}')" ${runtimeReady ? '' : 'disabled'}>Fix Issue</button>
           <button class="btn btn-sm btn-ghost autofix-remove-action" onclick="autofixDeleteProject('${esc(p.id)}',this)">Remove</button>
         </div>
       </div>
@@ -691,7 +739,15 @@ async function renderAutofix(el) {
           <strong>${esc(j.repo)}#${j.issueNumber}</strong>
           <span class="autofix-job-title">${esc((j.issueTitle || '').slice(0, 60))}</span>
           ${j.prUrl ? `<a href="${esc(j.prUrl)}" target="_blank" class="autofix-row-link">View PR</a>` : ''}
-          <div class="autofix-job-meta">${esc(j.provider || 'claude')}/${esc(j.model || '')} \u2022 ${timeAgo(j.startedAt || j.createdAt)} \u2022 ${esc(j.branch || '')}</div>
+          <div class="autofix-job-meta">${esc(
+            runtimeLabel(
+              j.actualRuntime || {
+                cli: j.runnerCli,
+                provider: j.provider,
+                model: j.model,
+              },
+            ),
+          )} \u2022 ${timeAgo(j.startedAt || j.createdAt)} \u2022 ${esc(j.branch || '')}</div>
         </div>
         <div class="autofix-row-actions">
           <span class="badge ${sc} autofix-count-badge">${j.status}</span>
@@ -733,10 +789,11 @@ async function renderAutofix(el) {
         </div>
         <div class="grid grid-2">
           <div class="form-group"><label>Trigger label</label><input class="search-input autofix-full-input" id="af-label" value="autofix"></div>
-          <div class="form-group"><label>Provider</label><select class="search-input autofix-full-input" id="af-provider" onchange="autofixUpdateModels()">${providerOptions}</select></div>
+          <div class="form-group"><label>Runner CLI</label><select class="search-input autofix-full-input" id="af-cli" onchange="autofixUpdateRuntime()" ${runtimeOptions.length ? '' : 'disabled'}>${cliOptions || '<option value="">Runtime catalog unavailable</option>'}</select></div>
         </div>
         <div class="grid grid-2">
-          <div class="form-group"><label>Model</label><select class="search-input autofix-full-input" id="af-model"><option value="">Default model</option></select></div>
+          <div class="form-group"><label>Provider</label><select class="search-input autofix-full-input" id="af-provider" onchange="autofixUpdateRuntimeProvider()" ${runtimeOptions.length ? '' : 'disabled'}></select></div>
+          <div class="form-group"><label>Model</label><select class="search-input autofix-full-input" id="af-model" onchange="autofixUpdateRuntimeState()" ${runtimeOptions.length ? '' : 'disabled'}></select></div>
           <div class="form-group"><label>Max active jobs</label><input class="search-input autofix-full-input" id="af-max-active" type="number" min="1" step="1" value="1"></div>
         </div>
         <div class="grid grid-2">
@@ -751,6 +808,8 @@ async function renderAutofix(el) {
         <label class="autofix-check-control">
           <input type="checkbox" id="af-autoreview"> Auto-review new PRs with the selected model
         </label>
+        <div class="field-hint" id="af-runtime-readiness" role="status" aria-live="polite">Select a complete coding runtime.</div>
+        <div class="field-hint is-hidden" id="af-runtime-warning"></div>
         <label class="autofix-check-control">
           <input type="checkbox" id="af-create-pr" checked> Open PR flow after implementation
         </label>
@@ -765,7 +824,7 @@ async function renderAutofix(el) {
           </label>
         </div>
         <div class="autofix-form-actions">
-          <button class="btn btn-primary" onclick="autofixAddProject()">Add Project</button>
+          <button class="btn btn-primary" id="af-runtime-dispatch" onclick="autofixAddProject()" ${runtimeOptions.length ? '' : 'disabled'}>Add Project</button>
           <button class="btn btn-ghost" onclick="toggleAutofixAddForm(false)">Cancel</button>
         </div>
       </div>
@@ -788,37 +847,88 @@ async function renderAutofix(el) {
           : ''
       }
     `;
-    window._autofixModelsByProvider = modelMap;
-    window._autofixProvidersById = providerMap;
-    autofixUpdateModels();
+    window._autofixRuntimeOptions = runtimeOptions;
+    window._autofixProjects = projects;
+    autofixUpdateRuntime();
   } catch (e) {
     el.innerHTML = renderAutofixRecoveryState('load', e.message);
   }
 }
 
-window.autofixUpdateModels = function () {
-  const providerEl = document.getElementById('af-provider');
-  const modelEl = document.getElementById('af-model');
-  if (!providerEl || !modelEl) return;
-  const provider = (window._autofixProvidersById || {})[providerEl.value] || {};
-  const models = (window._autofixModelsByProvider || {})[providerEl.value] || [];
-  const defaultAllowed = autofixProviderAllowsDefaultModel(provider, models);
-  modelEl.innerHTML = `${defaultAllowed ? '<option value="">Default model</option>' : ''}${models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('')}`;
+function autofixRuntimeOptionsForCli(cli) {
+  return (window._autofixRuntimeOptions || []).filter(
+    (runtime) => runtime.cli === cli,
+  );
+}
+
+function autofixRuntimeOptionsForProvider(cli, provider) {
+  return autofixRuntimeOptionsForCli(cli).filter(
+    (runtime) => runtime.provider === provider,
+  );
+}
+
+function autofixRuntimeSelection() {
+  const cli = document.getElementById('af-cli')?.value;
+  const provider = document.getElementById('af-provider')?.value;
+  const model = document.getElementById('af-model')?.value;
+  return autofixRuntimeOptionsForProvider(cli, provider).find(
+    (runtime) => runtime.model === model,
+  );
+}
+
+window.autofixUpdateRuntimeState = function () {
+  const runtime = autofixRuntimeSelection();
+  const readiness = document.getElementById('af-runtime-readiness');
+  const warning = document.getElementById('af-runtime-warning');
+  const dispatch = document.getElementById('af-runtime-dispatch');
+  const healthy = runtime?.readiness.status === 'healthy';
+  if (readiness) {
+    readiness.textContent = runtime
+      ? `${runtimeLabel(runtime)}: ${runtime.readiness.detail}`
+      : 'No compatible runtime option is selected.';
+  }
+  if (warning) {
+    warning.textContent =
+      runtime?.cli === 'devin'
+        ? "Devin sends the prompt, selected repository content, and tool results to Devin's external service."
+        : '';
+    warning.classList.toggle('is-hidden', runtime?.cli !== 'devin');
+  }
+  if (dispatch) dispatch.disabled = !healthy;
+  return runtime;
 };
 
-function autofixProviderAllowsDefaultModel(provider, models) {
-  if (!provider || !provider.defaultModel) return true;
-  const defaultModel = (models || []).find((model) => model.id === provider.defaultModel);
-  return defaultModel ? defaultModel.codingCapable !== false : provider.codingCapable === true;
-}
+window.autofixUpdateRuntimeProvider = function () {
+  const cli = document.getElementById('af-cli')?.value;
+  const provider = document.getElementById('af-provider')?.value;
+  const modelEl = document.getElementById('af-model');
+  if (!modelEl) return;
+  modelEl.innerHTML = autofixRuntimeOptionsForProvider(cli, provider)
+    .map(
+      (runtime) =>
+        `<option value="${esc(runtime.model)}">${esc(runtime.model)}${runtime.available ? '' : ' (unavailable)'}</option>`,
+    )
+    .join('');
+  autofixUpdateRuntimeState();
+};
+
+window.autofixUpdateRuntime = function () {
+  const cli = document.getElementById('af-cli')?.value;
+  const providerEl = document.getElementById('af-provider');
+  if (!providerEl) return;
+  const providers = [...new Set(autofixRuntimeOptionsForCli(cli).map((runtime) => runtime.provider))];
+  providerEl.innerHTML = providers
+    .map((provider) => `<option value="${esc(provider)}">${esc(provider)}</option>`)
+    .join('');
+  autofixUpdateRuntimeProvider();
+};
 
 window.autofixAddProject = async function () {
   const owner = document.getElementById('af-owner').value.trim();
   const repo = document.getElementById('af-repo').value.trim();
   const triggerLabel =
     document.getElementById('af-label').value.trim() || 'autofix';
-  const provider = document.getElementById('af-provider').value;
-  const model = document.getElementById('af-model').value;
+  const selectedRuntime = autofixRuntimeSelection();
   const workDir = document.getElementById('af-workdir').value.trim();
   const notifyJid = document.getElementById('af-notify').value;
   const autoReview = document.getElementById('af-autoreview').checked;
@@ -832,6 +942,11 @@ window.autofixAddProject = async function () {
     toast('Owner and repo required', 'warning');
     return;
   }
+  if (!selectedRuntime || selectedRuntime.readiness.status !== 'healthy') {
+    toast('Choose an available Runner CLI, Provider, and Model', 'warning');
+    return;
+  }
+  const { cli, provider, model } = selectedRuntime;
   try {
     const r = await api('/autofix/projects', {
       method: 'POST',
@@ -839,8 +954,7 @@ window.autofixAddProject = async function () {
         owner,
         repo,
         triggerLabel,
-        provider,
-        model,
+        runtime: { cli, provider, model },
         workDir,
         notifyJid,
         autoReview,
@@ -998,9 +1112,23 @@ window.autofixRun = async function (projectId, issueNumber, btn) {
   btn.disabled = true;
   btn.textContent = 'Starting...';
   try {
+    const runtime = (window._autofixProjects || []).find(
+      (project) => project.id === projectId,
+    )?.runtime;
+    if (!runtime) {
+      toast('This project does not have a complete coding runtime', 'warning');
+      btn.disabled = false;
+      btn.textContent = 'Fix';
+      return;
+    }
+    const { cli, provider, model } = runtime;
     const r = await api('/autofix/run', {
       method: 'POST',
-      body: JSON.stringify({ projectId, issueNumber }),
+      body: JSON.stringify({
+        projectId,
+        issueNumber,
+        actualRuntime: { cli, provider, model },
+      }),
     });
     if (r.ok) {
       toast('Autofix started', 'success');
@@ -1080,6 +1208,15 @@ window.viewAutofixJob = async function (id) {
       <div class="autofix-review-head">
         <div>
           <strong>${esc(job.repo)}#${job.issueNumber}</strong> \u2014 ${esc(job.issueTitle)}
+          <span class="badge badge-accent autofix-status-badge">${esc(
+            runtimeLabel(
+              job.actualRuntime || {
+                cli: job.runnerCli,
+                provider: job.provider,
+                model: job.model,
+              },
+            ),
+          )}</span>
           <span class="badge ${sc} autofix-status-badge">${job.status}</span>
           ${job.prUrl ? `<a href="${esc(job.prUrl)}" target="_blank" class="autofix-row-link">View PR</a>` : ''}
         </div>

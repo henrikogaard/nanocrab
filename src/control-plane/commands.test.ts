@@ -32,6 +32,11 @@ vi.mock('../config.js', () => ({
   CONTAINER_IMAGE: 'nanocrab:test',
   CONTAINER_HOST_GATEWAY: 'host.docker.internal',
   CREDENTIAL_PROXY_PORT: 8080,
+  DEVIN_CLI_MODEL_ALIASES: {
+    'claude/claude-sonnet-4-6': 'claude-sonnet-4',
+    'claude/claude-opus-4-6': 'claude-opus-4.6',
+  },
+  DEVIN_CREDENTIAL_PATH: null,
   TIMEZONE: 'UTC',
   DOCKER_SOCKET_GID: 0,
   getTriggerPattern: (trigger: string = '@Andy') =>

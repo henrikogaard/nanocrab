@@ -1999,6 +1999,107 @@ function approvalQueryFromFilters() {
   return params.toString();
 }
 
+function isCodingRuntimeFallbackApproval(approval) {
+  return (
+    approval?.kind === 'provider-fallback' &&
+    approval?.targetType === 'coding-job'
+  );
+}
+
+function approvalRuntimeOptionsForCli(cli) {
+  return (window._approvalCodingRuntimes || []).filter(
+    (runtime) => runtime.cli === cli,
+  );
+}
+
+function approvalRuntimeOptionsForProvider(cli, provider) {
+  return approvalRuntimeOptionsForCli(cli).filter(
+    (runtime) => runtime.provider === provider,
+  );
+}
+
+function approvalRuntimeSelection(id) {
+  const cli = document.getElementById(`approval-runtime-cli-${id}`)?.value;
+  const provider = document.getElementById(
+    `approval-runtime-provider-${id}`,
+  )?.value;
+  const model = document.getElementById(`approval-runtime-model-${id}`)?.value;
+  return approvalRuntimeOptionsForProvider(cli, provider).find(
+    (runtime) => runtime.model === model,
+  );
+}
+
+function renderApprovalRuntimeControls(id) {
+  if (window._approvalCodingRuntimeError) {
+    return `<div class="approval-readiness is-attention" role="status">Coding runtime catalog unavailable: ${esc(window._approvalCodingRuntimeError)}</div>`;
+  }
+  const runtimes = window._approvalCodingRuntimes || [];
+  if (!runtimes.length) {
+    return '<div class="approval-readiness is-attention" role="status">No compatible coding runtimes are available.</div>';
+  }
+  const cliOptions = [...new Set(runtimes.map((runtime) => runtime.cli))]
+    .map((cli) => `<option value="${esc(cli)}">${esc(cli)}</option>`)
+    .join('');
+  return `<div class="approval-runtime-controls">
+    <label class="approval-note-label">Runner CLI<select class="search-input" id="approval-runtime-cli-${esc(id)}" onchange="updateApprovalRuntime('${esc(id)}')">${cliOptions}</select></label>
+    <label class="approval-note-label">Provider<select class="search-input" id="approval-runtime-provider-${esc(id)}" onchange="updateApprovalRuntimeProvider('${esc(id)}')"></select></label>
+    <label class="approval-note-label">Model<select class="search-input" id="approval-runtime-model-${esc(id)}" onchange="updateApprovalRuntimeState('${esc(id)}')"></select></label>
+    <div class="approval-readiness" id="approval-runtime-readiness-${esc(id)}" role="status" aria-live="polite">Select a complete coding runtime.</div>
+    <div class="approval-readiness is-attention is-hidden" id="approval-runtime-warning-${esc(id)}"></div>
+  </div>`;
+}
+
+window.updateApprovalRuntimeState = function (id) {
+  const runtime = approvalRuntimeSelection(id);
+  const readiness = document.getElementById(`approval-runtime-readiness-${id}`);
+  const warning = document.getElementById(`approval-runtime-warning-${id}`);
+  const submit = document.getElementById(`approval-runtime-submit-${id}`);
+  const healthy = runtime?.readiness.status === 'healthy';
+  if (readiness) {
+    readiness.textContent = runtime
+      ? `${runtime.cli} / ${runtime.provider} / ${runtime.model}: ${runtime.readiness.detail}`
+      : 'No compatible coding runtime is selected.';
+    readiness.classList.toggle('is-attention', !healthy);
+    readiness.classList.toggle('is-ready', healthy);
+  }
+  if (warning) {
+    warning.textContent =
+      runtime?.cli === 'devin'
+        ? "Devin sends the prompt, selected repository content, and tool results to Devin's external service."
+        : '';
+    warning.classList.toggle('is-hidden', runtime?.cli !== 'devin');
+  }
+  if (submit) submit.disabled = !healthy;
+  return runtime;
+};
+
+window.updateApprovalRuntimeProvider = function (id) {
+  const cli = document.getElementById(`approval-runtime-cli-${id}`)?.value;
+  const provider = document.getElementById(
+    `approval-runtime-provider-${id}`,
+  )?.value;
+  const modelEl = document.getElementById(`approval-runtime-model-${id}`);
+  if (!modelEl) return;
+  modelEl.innerHTML = approvalRuntimeOptionsForProvider(cli, provider)
+    .map(
+      (runtime) =>
+        `<option value="${esc(runtime.model)}">${esc(runtime.model)}${runtime.available ? '' : ' (unavailable)'}</option>`,
+    )
+    .join('');
+  updateApprovalRuntimeState(id);
+};
+
+window.updateApprovalRuntime = function (id) {
+  const cli = document.getElementById(`approval-runtime-cli-${id}`)?.value;
+  const providerEl = document.getElementById(`approval-runtime-provider-${id}`);
+  if (!providerEl) return;
+  const providers = [...new Set(approvalRuntimeOptionsForCli(cli).map((runtime) => runtime.provider))];
+  providerEl.innerHTML = providers
+    .map((provider) => `<option value="${esc(provider)}">${esc(provider)}</option>`)
+    .join('');
+  updateApprovalRuntimeProvider(id);
+};
+
 function renderApprovalCard(approval) {
   const expires =
     approval.expiresAt && approval.status === 'pending'
@@ -2168,7 +2269,19 @@ async function renderApprovals(el) {
   };
   window._approvalFilters = filters;
   const query = approvalQueryFromFilters();
-  const allApprovals = await api(`/approvals?${query}`);
+  const [allApprovals, runtimeCatalog] = await Promise.all([
+    api(`/approvals?${query}`),
+    api('/agents/coding/runtimes')
+      .then(normalizeCodingRuntimeCatalog)
+      .catch((err) => ({
+        runtimes: [],
+        error: err?.message || 'Coding runtime catalog unavailable',
+      })),
+  ]);
+  window._approvalCodingRuntimes = Array.isArray(runtimeCatalog.runtimes)
+    ? runtimeCatalog.runtimes
+    : [];
+  window._approvalCodingRuntimeError = runtimeCatalog.error;
   const approvals = allApprovals.filter((approval) => {
     if (filters.externalWrites === '1' && !isExternalWriteApproval(approval)) {
       return false;
@@ -2327,17 +2440,22 @@ async function renderApprovals(el) {
 window.showApprovalNotePanel = function (id, decision) {
   const panel = document.querySelector(`[data-note-panel="${CSS.escape(id)}"]`);
   if (!panel) return;
+  const approval = window._approvalById?.[id];
+  const needsRuntime =
+    decision === 'approve' && isCodingRuntimeFallbackApproval(approval);
   panel.classList.remove('is-hidden');
   panel.innerHTML = `
     <label class="approval-note-label">
       ${decision === 'approve' ? 'Approval note' : 'Denial note'}
       <textarea class="search-input approval-note-input" id="approval-note-${esc(id)}" placeholder="Optional: explain the decision, source, or follow-up needed."></textarea>
     </label>
+    ${needsRuntime ? renderApprovalRuntimeControls(id) : ''}
     <div class="approval-note-actions">
       <button class="btn btn-sm btn-ghost" type="button" onclick="fillApprovalDecisionNoteTemplate('${esc(id)}','${esc(decision)}')">Use note template</button>
       <button class="btn btn-sm btn-ghost" onclick="document.querySelector('[data-note-panel=&quot;${esc(id)}&quot;]')?.classList.add('is-hidden')">Cancel</button>
-      <button class="btn btn-sm ${decision === 'approve' ? 'btn-primary' : 'btn-danger'}" onclick="reviewInboxApproval('${esc(id)}','${esc(decision)}', document.getElementById('approval-note-${esc(id)}')?.value || '')">${decision === 'approve' ? 'Approve' : 'Deny'}</button>
+      <button class="btn btn-sm ${decision === 'approve' ? 'btn-primary' : 'btn-danger'}" ${needsRuntime ? `id="approval-runtime-submit-${esc(id)}" disabled` : ''} onclick="reviewInboxApproval('${esc(id)}','${esc(decision)}', document.getElementById('approval-note-${esc(id)}')?.value || '')">${decision === 'approve' ? 'Approve' : 'Deny'}</button>
     </div>`;
+  if (needsRuntime) updateApprovalRuntime(id);
   panel.querySelector('textarea')?.focus();
 };
 
@@ -2411,9 +2529,20 @@ window.copyApprovalPolicyRunbook = async function () {
 
 async function reviewInboxApproval(id, decision, note) {
   try {
+    const approval = window._approvalById?.[id];
+    const body = { note: note || undefined };
+    if (decision === 'approve' && isCodingRuntimeFallbackApproval(approval)) {
+      const runtime = approvalRuntimeSelection(id);
+      if (!runtime || runtime.readiness.status !== 'healthy') {
+        toast('Choose a healthy complete coding runtime before approval', 'warning');
+        return;
+      }
+      const { cli, provider, model } = runtime;
+      body.runtime = { cli, provider, model };
+    }
     const data = await api(`/approvals/${encodeURIComponent(id)}/${decision}`, {
       method: 'POST',
-      body: JSON.stringify({ note: note || undefined }),
+      body: JSON.stringify(body),
     });
     if (data.error) throw new Error(data.error);
     toast(

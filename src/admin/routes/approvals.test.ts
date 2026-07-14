@@ -5,6 +5,10 @@ import http from 'http';
 import os from 'os';
 import path from 'path';
 
+const { approveCodingJobRuntimeFallback } = vi.hoisted(() => ({
+  approveCodingJobRuntimeFallback: vi.fn(),
+}));
+
 const STORE_DIR = path.join(
   os.tmpdir(),
   `nanocrab-admin-approvals-${Date.now()}`,
@@ -32,7 +36,12 @@ vi.mock('../security.js', () => ({
   auditLog: vi.fn(),
 }));
 
+vi.mock('../../coding-jobs.js', () => ({
+  approveCodingJobRuntimeFallback,
+}));
+
 const { default: approvalsRouter } = await import('./approvals.js');
+const { getApproval, reviewApproval } = await import('../../approvals.js');
 
 function app(): express.Express {
   const server = express();
@@ -66,8 +75,225 @@ function writeApprovals(records: Array<Record<string, unknown>>): void {
 }
 
 describe('approval admin routes', () => {
+  let codingJobRuntime: Record<string, string>;
+
   beforeEach(() => {
     fs.rmSync(STORE_DIR, { recursive: true, force: true });
+    approveCodingJobRuntimeFallback.mockReset();
+    codingJobRuntime = {
+      cli: 'devin',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+    };
+  });
+
+  function writeCodingRuntimeFallbackApproval(
+    proposedProvider = 'codex',
+    proposedModel = 'gpt-5.4',
+  ): void {
+    writeApprovals([
+      {
+        id: 'coding-runtime-fallback',
+        kind: 'provider-fallback',
+        title: 'Select fallback coding runtime',
+        summary: 'Choose a complete runtime.',
+        risk: 'high',
+        requester: 'control-plane',
+        targetType: 'coding-job',
+        targetId: 'job-129',
+        payload: {
+          sourceRuntime: codingJobRuntime,
+          proposedProvider,
+          proposedModel,
+        },
+        status: 'pending',
+        correlationId: 'job-129',
+        createdAt: '2026-07-14T10:00:00.000Z',
+        reviewedAt: null,
+        reviewedBy: null,
+        decisionNote: null,
+      },
+    ]);
+  }
+
+  it('approves a coding-job provider fallback through the complete runtime owner API', async () => {
+    writeCodingRuntimeFallbackApproval();
+    approveCodingJobRuntimeFallback.mockImplementation((jobId, runtime, by) => {
+      expect(jobId).toBe('job-129');
+      expect(by).toBe('owner');
+      codingJobRuntime = { ...runtime };
+      reviewApproval('coding-runtime-fallback', 'approved', by);
+      return { id: jobId, actualRuntime: runtime };
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        new URL('/approvals/coding-runtime-fallback/approve', baseUrl),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            runtime: { cli: 'codex', provider: 'codex', model: 'gpt-5.4' },
+          }),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        approval: { status: string };
+      };
+      expect(body.approval.status).toBe('approved');
+    });
+    expect(approveCodingJobRuntimeFallback).toHaveBeenCalledWith(
+      'job-129',
+      { cli: 'codex', provider: 'codex', model: 'gpt-5.4' },
+      'owner',
+    );
+    expect(codingJobRuntime).toEqual({
+      cli: 'codex',
+      provider: 'codex',
+      model: 'gpt-5.4',
+    });
+  });
+
+  it('rejects a coding-job provider fallback without a complete runtime and preserves pending state', async () => {
+    writeCodingRuntimeFallbackApproval();
+    const originalRuntime = { ...codingJobRuntime };
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        new URL('/approvals/coding-runtime-fallback/approve', baseUrl),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ note: 'missing runtime' }),
+        },
+      );
+      expect(response.status).toBe(400);
+      expect((await response.json()) as { error: string }).toMatchObject({
+        error: expect.stringContaining('complete runtime'),
+      });
+    });
+    expect(approveCodingJobRuntimeFallback).not.toHaveBeenCalled();
+    expect(getApproval('coding-runtime-fallback')?.status).toBe('pending');
+    expect(codingJobRuntime).toEqual(originalRuntime);
+  });
+
+  it('rejects an incompatible coding-job runtime and preserves pending state', async () => {
+    writeCodingRuntimeFallbackApproval();
+    const originalRuntime = { ...codingJobRuntime };
+    approveCodingJobRuntimeFallback.mockImplementation(() => {
+      throw new Error(
+        'coding runtime CLI codex is not compatible with provider claude',
+      );
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        new URL('/approvals/coding-runtime-fallback/approve', baseUrl),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            runtime: { cli: 'codex', provider: 'claude', model: 'gpt-5.4' },
+          }),
+        },
+      );
+      expect(response.status).toBe(400);
+      expect((await response.json()) as { error: string }).toMatchObject({
+        error: expect.stringContaining('not compatible'),
+      });
+    });
+    expect(getApproval('coding-runtime-fallback')?.status).toBe('pending');
+    expect(codingJobRuntime).toEqual(originalRuntime);
+  });
+
+  it('returns 400 when Devin readiness changes before approval and preserves pending state', async () => {
+    codingJobRuntime = {
+      cli: 'codex',
+      provider: 'codex',
+      model: 'gpt-5.4',
+    };
+    writeCodingRuntimeFallbackApproval('claude', 'claude-sonnet-4-6');
+    const originalRuntime = { ...codingJobRuntime };
+    approveCodingJobRuntimeFallback.mockRejectedValue(
+      new Error(
+        'Coding runtime devin / claude / claude-sonnet-4-6 is unavailable: Devin credential unavailable',
+      ),
+    );
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        new URL('/approvals/coding-runtime-fallback/approve', baseUrl),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            runtime: {
+              cli: 'devin',
+              provider: 'claude',
+              model: 'claude-sonnet-4-6',
+            },
+          }),
+        },
+      );
+      expect(response.status).toBe(400);
+      expect((await response.json()) as { error: string }).toMatchObject({
+        error: expect.stringContaining(
+          'devin / claude / claude-sonnet-4-6 is unavailable',
+        ),
+      });
+    });
+    expect(approveCodingJobRuntimeFallback).toHaveBeenCalledWith(
+      'job-129',
+      {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+      'owner',
+    );
+    expect(getApproval('coding-runtime-fallback')?.status).toBe('pending');
+    expect(codingJobRuntime).toEqual(originalRuntime);
+  });
+
+  it('keeps generic approval kinds on the existing review path', async () => {
+    writeApprovals([
+      {
+        id: 'generic-upload',
+        kind: 'upload',
+        title: 'Upload artifact',
+        summary: 'Approve a normal upload.',
+        risk: 'medium',
+        requester: 'owner',
+        targetType: 'upload',
+        targetId: 'artifact-1',
+        payload: {},
+        status: 'pending',
+        createdAt: '2026-07-14T10:00:00.000Z',
+        reviewedAt: null,
+        reviewedBy: null,
+        decisionNote: null,
+      },
+    ]);
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        new URL('/approvals/generic-upload/approve', baseUrl),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ note: 'approved normally' }),
+        },
+      );
+      expect(response.status).toBe(200);
+    });
+    expect(getApproval('generic-upload')).toMatchObject({
+      status: 'approved',
+      reviewedBy: 'owner',
+      decisionNote: 'approved normally',
+    });
+    expect(approveCodingJobRuntimeFallback).not.toHaveBeenCalled();
   });
 
   it('passes inbox filters through GET /approvals', async () => {

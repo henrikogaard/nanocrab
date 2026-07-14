@@ -1,6 +1,10 @@
 import { createRequire } from 'node:module';
 
 import { readEnvFile } from './env.js';
+import {
+  DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
+  isDevinSandboxAuthHandoffAvailable,
+} from './agent-runtime-registry.js';
 import type { AgentCliId, AgentRuntimeHealth } from './types.js';
 
 const require = createRequire(import.meta.url);
@@ -78,6 +82,27 @@ export async function probeCodingRunnerReadiness(
     inspectContainerImage?: ContainerImageInspector;
   } = {},
 ): Promise<AgentRuntimeHealth> {
+  if (cli === 'devin') {
+    if (!isDevinSandboxAuthHandoffAvailable()) {
+      return {
+        cli: 'devin',
+        executable: 'devin',
+        status: 'error',
+        version: null,
+        checkedAt: new Date().toISOString(),
+        detail: DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
+      };
+    }
+    const health = await (options.probeHostRuntime || probeHostRuntime)(cli);
+    if (health.status === 'healthy' && !isDevinSandboxAuthHandoffAvailable()) {
+      return {
+        ...health,
+        status: 'error',
+        detail: DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
+      };
+    }
+    return health;
+  }
   if (cli !== 'pi') {
     return (options.probeHostRuntime || probeHostRuntime)(cli);
   }

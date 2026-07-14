@@ -91,7 +91,7 @@ Additional plugins can be installed from git URLs via the Marketplace page, or c
 - **Assign Work Wizard** — start a freeform coding task from templates, assign Code work by next matching issue, explicit issue number, or freeform repo prompt, choose plan-first vs implement-after-approval intent, or enable Autofix auto-pickup from the Code/Cowork agent surfaces
 - **GitHub Coding Jobs** — register enabled repos, browse issues and GitHub project boards in the web UI, assign an issue to a NanoCrab coding agent, inspect diffs/output/tests/CI, approve implementation, approve PRs, retry, cancel, and revert
 - **Repo Coding Rules** — save reviewed repo preferences such as required runtimes, test commands, and safety conventions; approved rules are injected into coding-job prompts without exposing secrets.
-- **Isolated Coding Jobs** — WhatsApp/Signal/Telegram agents can request repo coding jobs through MCP; an ephemeral coding container clones and edits inside `data/coding-workspaces`
+- **Isolated Coding Jobs** — WhatsApp/Signal/Telegram agents can request repo coding jobs through MCP; container-backed CLIs run in an ephemeral coding container. The Devin host-runner integration is present but fail-closed until a sandbox-safe authentication handoff exists.
 - **Mobile Coding Commands** — the main control group can use `/code repos`, `/code start`, `/code pick`, `/code status`, and `/code approve|cancel|retry|open-pr` to drive coding jobs from chat.
 - **Routines & Scheduled Tasks** — blueprint-driven routines, exact cron/interval jobs, dashboard/chat/file/webhook delivery modes, approval-gated webhooks, named routine sessions, chained task context, script-gated heartbeat checks, heartbeat quiet hours/stale policies, active-run limits, run history, and run-now controls
 - **GitHub Autofix Pipeline** — webhook-driven or poller-driven: issue created/labeled or auto-picked → configured provider/model starts an approval-gated coding job → reviewed PR publish → bot notifies you; dashboard settings include auto-pick cadence, PR behavior, and max active jobs
@@ -132,19 +132,48 @@ dashboard. Each project stores `autoPickEnabled`, `pollIntervalMinutes`, and
 skips duplicates that already have active jobs, and honors each project's
 `maxActiveJobs` capacity.
 
-The host creates job metadata and launches a short-lived agent container with
-only that job directory mounted at `/workspace/coding-job`. The container clones
-and edits the repo, then emits diff, changed-file, and test summaries for
-dashboard review. Implementation requires an approved `coding-implement` record
-tied to the job id before the container can mutate the workspace. Commit, push,
-and GitHub PR creation require an approved `coding-open-pr` record tied to the
-same job id before the host performs those repo mutations. Job metadata is
-stored in `store/coding-jobs.json`, registered repos live in
-`store/coding-repos.json`, and workspaces live under
-`data/coding-workspaces/jobs/`.
+The host creates job metadata and an isolated checkout below
+`data/coding-workspaces/jobs/`. Container-backed CLIs receive only that job
+directory at `/workspace/coding-job`. The Devin CLI integration is currently
+disabled: it is a host-native coding runner, not a provider or container
+runner, but the empty-root sandbox has no safe authentication handoff yet.
+Coding readiness therefore returns
+`Sandboxed Devin authentication handoff is unavailable; no credential or host
+auth directory is mounted`, and dispatch refuses before workspace mutation or
+process spawn. No Devin credential or service home is mounted or read. If the
+handoff guard is later approved, Devin remains an attempt-owned process with
+constrained model tools and an OS-sandboxed command broker that exposes only
+the approved workspace. Before launch, NanoCrab fails closed on workspace
+symlinks or Git-metadata hardlink aliases and wraps the whole Devin process so
+`.git` is read-only. Linux uses a new PID namespace from an empty root, mounts
+only verified runtime paths plus the workspace, sandbox temp, prompt,
+configuration, and broker files, then rebinds `.git` read-only. macOS host
+launch remains disabled while the authentication handoff and an explicit
+deny-default `sandbox-exec` profile are pending review. The supported Linux
+path emits diff,
+changed-file, and test summaries for dashboard review.
+Implementation requires an approved `coding-implement` record tied to the job
+id before workspace mutation. Commit, push, and GitHub PR creation require an
+approved `coding-open-pr` record tied to the same job id before the trusted host
+performs those repo mutations. Job metadata is stored in
+`store/coding-jobs.json`, and registered repos live in
+`store/coding-repos.json`.
 
-Coding jobs support `claude`, `codex`, `opencode`, `openrouter`,
-code-capable Ollama models, and code-capable custom OpenAI-compatible models.
+Before evidence or publication, the trusted host recursively rejects unsafe
+`.git` metadata (symlinks, special entries, `commondir`, or object alternates).
+PR publication inventories and stages files without repository filters, creates
+the commit through Git plumbing as `NanoCrab Bot <nanocrab@localhost>`, and
+pushes only to the registered repository's exact GitHub HTTPS URL. Cancellation
+invalidates publication ownership and blocks later PR/state mutation, but it
+cannot terminate a Git push child that already started; that remote branch may
+still update and must be reviewed before retry.
+
+Coding jobs support `claude`, `codex`, `opencode`, `devin`, `pi`, and `mistral`
+runner CLIs with compatible providers/models, plus code-capable Ollama,
+OpenRouter, and custom OpenAI-compatible models through the appropriate CLI.
+Runner CLI, provider, and model are separate selections; for example,
+`devin / claude / claude-opus-4-6` maps to the Devin CLI alias
+`claude-opus-4.6`.
 `/api/agents/providers` is the source of truth for provider/model coding
 capability, so Agents and Autofix selectors rely on per-model `codingCapable`
 metadata instead of provider-name allow/deny lists. OpenRouter, local Ollama,
@@ -156,6 +185,36 @@ before assigning local/custom coding work. The AI Providers dashboard can save
 a custom `/v1` base URL, optional key, and model, or a first-class Airouter
 subscription endpoint, then Settings can make that provider the active default
 for new agent sessions.
+
+#### Devin Host Runner Status
+
+The Devin host-runner code is present behind a fail-closed guard, but it is not
+available for coding jobs yet. Do not authenticate Devin for NanoCrab or assign
+Devin implementation work: readiness and dispatch remain unavailable until a
+sandbox-safe authentication handoff is designed and reviewed. NanoCrab never
+mounts, reads, copies, serializes, or forwards Devin credentials or a host auth
+directory.
+
+Configure the optional runner timeout and model aliases in `.env`:
+
+```dotenv
+CODING_JOB_RUNNER_TIMEOUT_MS=1800000
+DEVIN_CREDENTIAL_PATH=/home/nanocrab/.config/devin/credentials.json
+DEVIN_CLI_MODEL_ALIASES_JSON={"claude/claude-haiku-4-5":"claude-haiku-4.5"}
+```
+
+`CODING_JOB_RUNNER_TIMEOUT_MS` defaults to `CONTAINER_TIMEOUT`. The built-in
+model mappings are `claude/claude-sonnet-4-6 -> claude-sonnet-4` and
+`claude/claude-opus-4-6 -> claude-opus-4.6`; JSON aliases may extend but cannot
+override them. These settings are retained for future enablement; they do not
+make Devin runnable while the authentication handoff guard is closed.
+When a reviewed handoff exists, readiness will still repeat after
+implementation or runtime fallback approval and before creating or mutating a
+checkout. Devin will remain an explicit owner-approved runtime, never a silent
+fallback, and its prompts, selected repository content, and tool results will
+be sent to Devin's external service. Rollback must disable or reassign Devin
+profiles and preserve each checkout and its evidence; do not delete Devin
+authentication or sessions.
 
 ### Agent Profiles
 
@@ -516,6 +575,9 @@ WEATHER_LOCATION=Stavanger
 CONTAINER_MEMORY_LIMIT=2g       # Container resource limits
 CONTAINER_CPU_LIMIT=2
 NANOCRAB_API_TOKEN=<token>      # For container skill API access
+CODING_JOB_RUNNER_TIMEOUT_MS=1800000 # Host-native runner timeout
+DEVIN_CREDENTIAL_PATH=/absolute/path/to/devin/credentials.json
+DEVIN_CLI_MODEL_ALIASES_JSON={"claude/claude-haiku-4-5":"claude-haiku-4.5"}
 ```
 
 ## Architecture
@@ -530,9 +592,17 @@ Polling loop (src/index.ts)
 Container Runner → Docker container (Claude, Codex/GPT, or local model)
     ↓                    ↓
 Response → Router    Admin Dashboard (Express + plugins)
+
+Coding Jobs → isolated checkout → container-backed CLI or opt-in host-native Devin CLI
 ```
 
-Single Node.js process. Channels self-register at startup. Agents execute in isolated Docker containers. Admin dashboard runs in the same process on a separate port. Plugins are self-contained modules that register routes, sidebar items, and startup hooks.
+Single Node.js process. Channels self-register at startup. Normal agent runs and
+container-backed coding CLIs execute in isolated Docker containers. The Devin
+coding CLI integration is a guarded host-native exception: its attempt-owned
+process, constrained model tools, and OS-sandboxed commands remain unavailable
+until a safe authentication handoff is approved. Admin dashboard runs in the same process on a separate
+port. Plugins are self-contained modules that register routes, sidebar items,
+and startup hooks.
 
 ### Key Files
 
@@ -547,7 +617,7 @@ Single Node.js process. Channels self-register at startup. Agents execute in iso
 | `src/channels/`            | Channel adapters (WhatsApp, Telegram, Signal)                          |
 | `src/container-runner.ts`  | Spawns agent containers with mounts                                    |
 | `src/credential-proxy.ts`  | Provider credential injection (secrets never enter containers)         |
-| `src/coding-jobs.ts`       | Isolated coding-container orchestration and GitHub PR jobs             |
+| `src/coding-jobs.ts`       | Isolated coding-workspace orchestration across container/host runners  |
 | `src/memory-store.ts`      | Structured long-term memory proposals, approval, and MEMORY.md render  |
 | `src/journal-store.ts`     | Notable-event journal storage and search                               |
 | `src/skill-factory.ts`     | Provider-neutral skill draft, validation, approval, and installation   |

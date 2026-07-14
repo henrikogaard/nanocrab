@@ -20,7 +20,12 @@ The entire codebase should be something you can read and understand. One Node.js
 
 ### Security Through True Isolation
 
-Instead of application-level permission systems trying to prevent agents from accessing things, agents run in actual Linux containers. The isolation is at the OS level. Agents can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your Mac.
+Instead of relying only on application-level permission systems, normal agents
+run in actual Linux containers. The isolation is at the OS level, and agents can
+see only explicit mounts. The opt-in Devin coding CLI is the narrow host-native
+exception: it runs as a dedicated service user against one isolated checkout,
+with fail-closed host readiness, constrained model tools, and every brokered
+command inside the platform sandbox.
 
 ### Built for the Individual User
 
@@ -62,7 +67,7 @@ A personal AI assistant accessible via messaging, with minimal custom code.
 **Core components:**
 
 - **Agent provider abstraction** for Claude, Codex/GPT, and local-model backends
-- **Containers** for isolated agent execution (Linux VMs)
+- **Containers** for normal isolated agent execution (Linux VMs), plus the opt-in constrained host-native Devin coding runner
 - **Multi-channel messaging** (WhatsApp, Telegram, Discord, Slack, Gmail) — add exactly the channels you need
 - **Persistent memory** per conversation and globally
 - **Scheduled tasks** that run the configured agent provider and can message back
@@ -98,13 +103,12 @@ A personal AI assistant accessible via messaging, with minimal custom code.
 - Each group maintains a conversation session through the configured provider
 - Sessions auto-compact when context gets too long, preserving critical information
 
-### Container Isolation
+### Execution Isolation
 
-- All agents run inside containers (lightweight Linux VMs)
-- Each agent invocation spawns a container with mounted directories
-- Containers provide filesystem isolation - agents can only see mounted paths
-- Bash access is safe because commands run inside the container, not on the host
-- Browser automation via agent-browser with Chromium in the container
+- Normal agent invocations and container-backed coding runners use containers (lightweight Linux VMs).
+- Containers provide filesystem isolation: agents can see only mounted paths.
+- The opt-in Devin coding CLI is a host-native exception, not a provider or container runner. It requires a healthy host readiness probe and uses an attempt-owned process, constrained model tools, whole-process read-only `.git` isolation, and an OS-sandboxed command broker scoped to one isolated coding workspace. Launch preparation fails closed before spawn when the workspace contains symlinks or Git-metadata hardlink aliases.
+- Browser automation uses agent-browser with Chromium in the container.
 
 ### Scheduled Tasks
 

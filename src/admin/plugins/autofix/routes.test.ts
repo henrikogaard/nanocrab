@@ -46,6 +46,9 @@ function job(overrides: Partial<CodingJob>): CodingJob {
     requestedBy: 'test',
     agentProfileId: null,
     sourceSubscriptionId: null,
+    runnerCli: 'codex',
+    activeAttemptId: null,
+    executionAttempts: [],
     createdAt: new Date(0).toISOString(),
     completedAt: null,
     ...overrides,
@@ -68,13 +71,67 @@ describe('autofix project automation settings', () => {
     expect(project.triggerLabel).toBe('autofix');
     expect(project.provider).toBe('claude');
     expect(project.model).toBe('claude-sonnet-4-6');
+    expect(project.runtime).toEqual({
+      cli: 'claude',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+    });
     expect(project.createPr).toBe(true);
     expect(project.maxActiveJobs).toBe(1);
     expect(project.autoPickEnabled).toBe(false);
     expect(project.pollIntervalMinutes).toBe(15);
   });
 
-  it('builds webhook coding-job input from project provider settings', () => {
+  it('normalizes a legacy Codex project to a complete runtime triple', () => {
+    const project = normalizeAutofixProject({
+      owner: 'owner',
+      repo: 'repo',
+      provider: 'codex',
+      model: 'gpt-5.4',
+    });
+
+    expect(project.runtime).toEqual({
+      cli: 'codex',
+      provider: 'codex',
+      model: 'gpt-5.4',
+    });
+  });
+
+  it('preserves a mapped complete Devin project runtime', () => {
+    const project = normalizeAutofixProject({
+      owner: 'owner',
+      repo: 'repo',
+      runtime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+
+    expect(project.runtime).toEqual({
+      cli: 'devin',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+    });
+    expect(project.provider).toBe('claude');
+    expect(project.model).toBe('claude-sonnet-4-6');
+  });
+
+  it('rejects an incompatible complete project runtime', () => {
+    expect(() =>
+      normalizeAutofixProject({
+        owner: 'owner',
+        repo: 'repo',
+        runtime: {
+          cli: 'opencode',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+        },
+      }),
+    ).toThrow('opencode / claude / claude-sonnet-4-6');
+  });
+
+  it('builds webhook coding-job input from the complete project runtime', () => {
     const project = normalizeAutofixProject({
       id: 'project-1',
       owner: 'owner',
@@ -93,12 +150,21 @@ describe('autofix project automation settings', () => {
       {
         repo: 'owner/repo',
         issueNumber: 42,
-        provider: 'codex',
-        model: 'gpt-5.4',
+        actualRuntime: {
+          cli: 'codex',
+          provider: 'codex',
+          model: 'gpt-5.4',
+        },
         createPr: false,
         requestedBy: 'github-webhook',
       },
     );
+    expect(
+      buildAutofixStartInput(project, 42, 'github-webhook'),
+    ).not.toHaveProperty('provider');
+    expect(
+      buildAutofixStartInput(project, 42, 'github-webhook'),
+    ).not.toHaveProperty('model');
   });
 
   it('blocks new webhook jobs when the project active-job limit is reached', () => {

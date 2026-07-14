@@ -5,7 +5,7 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 ## Current Implementation Status
 
 - Playwright is available in the agent image and uses system Chromium.
-- GitHub coding jobs are launched through short-lived dedicated coding containers with only the job workspace mounted. The Agents dashboard can register repos, pick issues, launch jobs, show output, and link PRs.
+- GitHub coding jobs use isolated per-job workspaces. Container-backed CLIs remain the default. The Devin host-runner integration is implemented behind a fail-closed authentication-handoff guard; coding readiness and dispatch remain unavailable until a sandbox-safe handoff is reviewed. The Agents dashboard can register repos, pick issues, launch jobs, show output, and link PRs.
 - Memory v1 foundation exists: structured memory proposals, dashboard approval/rejection, and generated `groups/global/MEMORY.md`.
 - Journal v1 foundation exists: notable-event recording, scoped event search, dashboard summary listing, and deterministic daily/weekly summary generation from stored message history.
 - Skill Factory v1 foundation exists: `SKILL.md` draft validation, draft storage, dashboard review, owner/admin approval, and installation into `container/skills`.
@@ -15,6 +15,8 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 - Personal operations now include reusable runbooks, missions with step-level status tracking, and daily/weekly briefing schedules backed by approval-gated report tasks.
 - Routines and scheduled tasks now include dashboard blueprints, freeform draft creation, exact cron/interval/one-time schedules, dashboard/chat/file/webhook delivery modes, approval-gated webhook delivery, named routine sessions, chained task context, heartbeat checks, quiet hours, stale policies, active-run limits, run history, and run-now controls.
 - Autofix now supports issue-webhook startup, scheduled auto-pickup, max-active-job limits, project cadence controls, connector health checks, and approval-gated implementation/PR publishing.
+- Issue #129's Devin host-runner implementation is present locally on its feature branch with automated unit/integration evidence: verified host readiness context, exact credential metadata checks, fail-closed whole-process `.git` isolation, constrained workspace-only command execution, approval-gated complete runtime fallback, attempt-owned cancellation, stateful redaction, hardened host Git/evidence, and operator/security documentation. The coding path now fails closed because no sandbox-safe authentication handoff exists; no workspace mutation or process spawn is possible. It is not deployed, released, live-tested, merged, closed, or `Done`; a ready-for-review PR remains contingent on the final full repository verification.
+- LIVE OPERATOR ROLLOUT: blocked until a reviewed sandbox-safe Devin authentication handoff exists. Do not authenticate Devin for NanoCrab, assign implementation work, or run a paid/external-processing smoke test.
 - Better terminal controls exist in the dashboard: named shell session id, reconnect, clear, copy transcript, and xterm output.
 - Cowork/provider milestone slice is implemented: project-scoped Cowork run/context/capability APIs expose active skills, plugins, connectors, readiness states, reusable complexity/budget estimates, run stats, canonical provenance/sensitivity labels, action workflow previews, approval-gated external writes, research-job source ledgers, citation coverage, local artifacts, and selected context notebook injection. Channel prompts now receive workspace intent context before generic agent execution, and Code/Autofix provider selectors use provider/model coding capability metadata rather than provider-name exceptions.
 - Admin frontend decomposition is in progress: page-level modules already carry major surfaces, shared UI helpers cover data health, feedback, shell states, recovery, provider parity, routine states, and file-vault states, and shell navigation metadata now lives in `ui/shell-navigation.js` instead of the large app shell.
@@ -179,7 +181,7 @@ Goal: work with GitHub repos and produce PRs while the owner is on the go.
   - DONE: repo registration/allowlist for coding jobs
   - DONE: repo-specific coding rules/preferences are stored separately from secrets and injected into coding prompts.
   - DONE: issue listing, project-board browsing, and issue picking through dashboard/API
-  - DONE: branch creation inside dedicated coding containers
+  - DONE: branch creation inside isolated coding workspaces through the selected container-backed CLI or opt-in host-native Devin CLI.
   - commit signing policy
   - DONE: PR creation when `createPr` is enabled
   - DONE: PR status and CI tracking
@@ -199,6 +201,8 @@ Goal: work with GitHub repos and produce PRs while the owner is on the go.
   - DONE: repository mounts are explicit and validated through the coding repo/workspace allowlist.
   - DONE: non-main groups cannot mount writable repos.
   - DONE: provider fallback cannot happen silently for code-writing tasks.
+  - IMPLEMENTED LOCALLY FOR #129 (DISABLED): the Devin CLI has a verified host-runtime context, fail-closed whole-process `.git` isolation, workspace-only OS-sandboxed command broker, immutable `O_NOFOLLOW` config/launcher files, stateful output redaction, hardened host Git, exact-attempt TERM-to-KILL ownership, and an explicit no-auth-handoff guard before workspace mutation.
+  - PENDING SECURITY DESIGN FOR #129: a sandbox-safe authentication handoff is required before any Devin invocation, external-processing smoke test, deployment, release, or production profile assignment.
 
 ---
 
@@ -317,7 +321,10 @@ Goal: give agents a durable research/reporting workflow without making the core 
 
 These rules are non-negotiable:
 
-- Agent execution stays inside containers.
+- Normal agent execution stays inside containers. The Devin coding CLI is a
+  documented host-native exception behind a fail-closed authentication-handoff
+  guard; its attempt-owned process and workspace command broker are unavailable
+  until that handoff is reviewed.
 - Project root remains read-only unless a task explicitly mounts a writable repo.
 - `.env`, credentials, OAuth tokens, and provider keys never enter containers directly.
 - Credential proxy or scoped token references are used instead of raw secrets.

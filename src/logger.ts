@@ -18,18 +18,33 @@ const threshold =
 
 const SENSITIVE_KEY_PATTERN =
   /(authorization|cookie|password|passwd|pwd|secret|token|api[_-]?key|apikey|auth[_-]?token|credential[_-]?proxy|credentialproxy)/i;
+const STREAMING_SENSITIVE_KEYS = [
+  'credential_proxy',
+  'credential-proxy',
+  'credentialproxy',
+  'authorization',
+  'api_key',
+  'api-key',
+  'apikey',
+  'password',
+  'cookie',
+  'token',
+] as const;
+const STREAMING_TOKEN_DELIMITER = /[\s"',&]/;
 const SECRET_VALUE_PATTERNS = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]+/g,
   /\bsk-[A-Za-z0-9._-]+/g,
   /\/__nanocrab\/providers\/[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+/g,
-  /\b(credential[_-]?proxy|authorization|cookie|password|token|api[_-]?key)(\s*[:=]\s*)[^\s"',&]+/gi,
+  /\b(credential[_-]?proxy|authorization|cookie|password|token|api[_-]?key)(\s*[:=]\s*)(?!Bearer(?:\s|$))[^\s"',&]+/gi,
 ];
 
 export function redactLogString(value: string): string {
   let redacted = value;
   for (const pattern of SECRET_VALUE_PATTERNS) {
     redacted = redacted.replace(pattern, (match, key, sep) => {
-      if (key && sep) return `${key}${sep}[REDACTED]`;
+      if (typeof key === 'string' && typeof sep === 'string') {
+        return `${key}${sep}[REDACTED]`;
+      }
       if (match.startsWith('/__nanocrab/providers/')) {
         return '/__nanocrab/providers/[REDACTED]';
       }
@@ -39,6 +54,147 @@ export function redactLogString(value: string): string {
     });
   }
   return redacted;
+}
+
+export interface StreamingLogRedactor {
+  write(chunk: string): string;
+  flush(): string;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function redactKnownSecrets(value: string, secrets: RegExp | null): string {
+  return secrets ? value.replace(secrets, '[REDACTED]') : value;
+}
+
+function isWordBoundary(value: string, index: number): boolean {
+  return index === 0 || !/[A-Za-z0-9_]/.test(value[index - 1]);
+}
+
+function isSensitiveAssignmentPrefix(value: string): boolean {
+  const lower = value.toLowerCase();
+  return STREAMING_SENSITIVE_KEYS.some((key) => {
+    if (lower.length < key.length) return key.startsWith(lower);
+    if (!lower.startsWith(key)) return false;
+
+    const remainder = value.slice(key.length);
+    return /^\s*$/.test(remainder) || /^\s*[:=]\s*$/.test(remainder);
+  });
+}
+
+function findOpenSuffix(
+  value: string,
+  knownSecrets: readonly string[],
+): number {
+  let earliest = value.length;
+  const openPatterns = [
+    /\bBearer\s+[^\s"',&]*$/,
+    /\bsk-[^\s"',&]*$/,
+    /\/__nanocrab\/providers\/[^\s"',&]*$/,
+    new RegExp(
+      `\\b(?:${STREAMING_SENSITIVE_KEYS.map(escapeRegExp).join('|')})(?:\\s*[:=]\\s*)[^\\s"',&]*$`,
+      'i',
+    ),
+  ];
+
+  for (const pattern of openPatterns) {
+    const match = pattern.exec(value);
+    if (match?.index != null) earliest = Math.min(earliest, match.index);
+  }
+
+  const fixedPrefixes = [
+    'Bearer ',
+    'sk-',
+    '/__nanocrab/providers/',
+    ...knownSecrets,
+  ];
+  for (const prefix of fixedPrefixes) {
+    for (let length = 1; length < prefix.length; length += 1) {
+      if (value.endsWith(prefix.slice(0, length))) {
+        earliest = Math.min(earliest, value.length - length);
+      }
+    }
+  }
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (
+      isWordBoundary(value, index) &&
+      isSensitiveAssignmentPrefix(value.slice(index))
+    ) {
+      earliest = Math.min(earliest, index);
+      break;
+    }
+  }
+
+  return earliest;
+}
+
+export function createStreamingLogRedactor(options?: {
+  knownSecrets?: readonly string[];
+  carryLength?: number;
+}): StreamingLogRedactor {
+  const knownSecrets = [...new Set(options?.knownSecrets ?? [])]
+    .filter((value) => value.length >= 8)
+    .sort((left, right) => right.length - left.length);
+  const knownSecretPattern = knownSecrets.length
+    ? new RegExp(knownSecrets.map(escapeRegExp).join('|'), 'g')
+    : null;
+  const longestKnownSecret = knownSecrets[0]?.length ?? 0;
+  const carryLength = Math.max(
+    1,
+    Math.floor(options?.carryLength ?? 4_096),
+    longestKnownSecret,
+  );
+  let carry = '';
+  let discardingOpenToken = false;
+  let flushed = false;
+
+  const redact = (value: string): string =>
+    redactLogString(redactKnownSecrets(value, knownSecretPattern));
+
+  return {
+    write(chunk: string): string {
+      if (flushed) {
+        throw new Error(
+          'Cannot write after streaming log redactor has been flushed',
+        );
+      }
+
+      if (discardingOpenToken) {
+        const delimiterIndex = chunk.search(STREAMING_TOKEN_DELIMITER);
+        if (delimiterIndex === -1) return '';
+        chunk = chunk.slice(delimiterIndex);
+        discardingOpenToken = false;
+      }
+
+      carry += chunk;
+      carry = redactKnownSecrets(carry, knownSecretPattern);
+      const openSuffix = findOpenSuffix(carry, knownSecrets);
+      const completePrefix = carry.slice(0, openSuffix);
+      carry = carry.slice(openSuffix);
+      let output = redact(completePrefix);
+
+      if (carry.length >= carryLength) {
+        const redactedCarry = redact(carry);
+        output += redactedCarry === carry ? '[REDACTED]' : redactedCarry;
+        carry = '';
+        discardingOpenToken = true;
+      }
+
+      return output;
+    },
+
+    flush(): string {
+      if (flushed) return '';
+      flushed = true;
+      const output = redact(carry);
+      carry = '';
+      discardingOpenToken = false;
+      return output;
+    },
+  };
 }
 
 export function redactLogValue(value: unknown): unknown {

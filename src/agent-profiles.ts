@@ -1,7 +1,10 @@
 import { randomUUID } from 'crypto';
 
 import { isAgentProvider, isValidAgentModel } from './agent-provider.js';
-import { isAgentCliId } from './agent-runtime-registry.js';
+import {
+  isAgentCliId,
+  validateCodingRuntimeSelection,
+} from './agent-runtime-registry.js';
 import {
   getAgentProfileRow,
   getAgentProfileRowByHandle,
@@ -125,7 +128,10 @@ export function normalizeAgentHandle(value: string): string {
 
 const STAGE_ROLES: AgentStageRole[] = ['planning', 'implement', 'review'];
 
-export function validateRuntimeSelection(runtime: AgentRuntimeSelection): void {
+export function validateRuntimeSelection(
+  runtime: AgentRuntimeSelection,
+  options: { coding?: boolean } = {},
+): void {
   if (!isAgentCliId(runtime.cli)) {
     throw new Error(`agent runtime CLI is not supported: ${runtime.cli}`);
   }
@@ -136,6 +142,18 @@ export function validateRuntimeSelection(runtime: AgentRuntimeSelection): void {
   }
   if (!runtime.model?.trim()) {
     throw new Error('agent runtime model is required');
+  }
+  if (options.coding) {
+    if (
+      runtime.cli !== 'devin' &&
+      !isValidAgentModel(runtime.provider, runtime.model)
+    ) {
+      throw new Error(
+        `agent runtime model is not supported for provider ${runtime.provider}: ${runtime.model}`,
+      );
+    }
+    validateCodingRuntimeSelection(runtime);
+    return;
   }
   if (!isValidAgentModel(runtime.provider, runtime.model)) {
     throw new Error(
@@ -590,6 +608,9 @@ function normalizeAgentProfileFields(
   input: AgentProfileInput,
 ): Omit<AgentProfile, 'id' | 'createdAt' | 'updatedAt'> {
   validateAgentProfileInput(input);
+  const codingRuntime =
+    input.taskKinds?.includes('coding_job') ||
+    Boolean(input.stageRoles?.length);
 
   return {
     handle: normalizeAgentHandle(input.handle),
@@ -617,8 +638,14 @@ function normalizeAgentProfileFields(
         input.writePolicy?.autonomousSendRequiresApproval !== false,
     },
     instructions: nullableString(input.instructions),
-    primaryRuntime: normalizeRuntimeSelection(input.primaryRuntime),
-    fallbackRuntimes: normalizeFallbackRuntimes(input.fallbackRuntimes),
+    primaryRuntime: normalizeRuntimeSelection(
+      input.primaryRuntime,
+      codingRuntime,
+    ),
+    fallbackRuntimes: normalizeFallbackRuntimes(
+      input.fallbackRuntimes,
+      codingRuntime,
+    ),
     stageRoles: normalizeStageRoles(input.stageRoles),
     repositoryScopes: sanitizeStringList(input.repositoryScopes),
     maxConcurrency:
@@ -666,9 +693,10 @@ function sanitizeChannelBindings(
 
 function normalizeRuntimeSelection(
   runtime: AgentRuntimeSelection | null | undefined,
+  coding = false,
 ): AgentRuntimeSelection | null {
   if (!runtime) return null;
-  validateRuntimeSelection(runtime);
+  validateRuntimeSelection(runtime, { coding });
   return {
     cli: runtime.cli,
     provider: runtime.provider,
@@ -678,9 +706,10 @@ function normalizeRuntimeSelection(
 
 function normalizeFallbackRuntimes(
   runtimes: AgentRuntimeSelection[] | undefined,
+  coding = false,
 ): AgentRuntimeSelection[] {
   if (!runtimes || !Array.isArray(runtimes)) return [];
-  return runtimes.map((r) => normalizeRuntimeSelection(r)!);
+  return runtimes.map((r) => normalizeRuntimeSelection(r, coding)!);
 }
 
 function normalizeStageRoles(

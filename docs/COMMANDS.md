@@ -137,17 +137,17 @@ The agent sees these as `mcp__nanocrab__*` tools. You usually do not type these 
 
 ### GitHub And Coding Jobs
 
-| Tool                                        | What It Does                                                                                |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `mcp__nanocrab__register_coding_repo`       | Main group only. Registers a GitHub repo for host-managed coding jobs.                      |
-| `mcp__nanocrab__list_coding_repos`          | Main group only. Lists registered coding repos.                                             |
-| `mcp__nanocrab__list_github_issues`         | Main group only. Lists open issues from a registered repo.                                  |
-| `mcp__nanocrab__start_coding_job`           | Main group only. Starts a dedicated coding job container/workspace.                         |
-| `mcp__nanocrab__pick_github_issue`          | Main group only. Picks a matching GitHub issue and starts a coding job.                     |
-| `mcp__nanocrab__schedule_github_issue_loop` | Main group only. Schedules recurring issue pickup.                                          |
-| `mcp__nanocrab__list_coding_jobs`           | Main group only. Lists recent coding jobs.                                                  |
-| `mcp__nanocrab__get_coding_job`             | Main group only. Gets full status/output for a coding job.                                  |
-| `mcp__nanocrab__control_coding_job`         | Main group only. Approves, cancels, retries, opens PR, or requests revert for a coding job. |
+| Tool                                        | What It Does                                                                                                                       |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `mcp__nanocrab__register_coding_repo`       | Main group only. Registers a GitHub repo for host-managed coding jobs.                                                             |
+| `mcp__nanocrab__list_coding_repos`          | Main group only. Lists registered coding repos.                                                                                    |
+| `mcp__nanocrab__list_github_issues`         | Main group only. Lists open issues from a registered repo.                                                                         |
+| `mcp__nanocrab__start_coding_job`           | Main group only. Starts an isolated coding workspace with the selected container-backed runner or opt-in host-native Devin runner. |
+| `mcp__nanocrab__pick_github_issue`          | Main group only. Picks a matching GitHub issue and starts a coding job.                                                            |
+| `mcp__nanocrab__schedule_github_issue_loop` | Main group only. Schedules recurring issue pickup.                                                                                 |
+| `mcp__nanocrab__list_coding_jobs`           | Main group only. Lists recent coding jobs.                                                                                         |
+| `mcp__nanocrab__get_coding_job`             | Main group only. Gets full status/output for a coding job.                                                                         |
+| `mcp__nanocrab__control_coding_job`         | Main group only. Approves, cancels, retries, opens PR, or requests revert for a coding job.                                        |
 
 ### Memory, Journal, And Skills
 

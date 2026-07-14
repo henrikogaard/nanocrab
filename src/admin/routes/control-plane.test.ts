@@ -29,6 +29,11 @@ vi.mock('../../config.js', () => ({
   DATA_DIR,
   GROUPS_DIR,
   ASSISTANT_NAME: 'Assistant',
+  DEVIN_CLI_MODEL_ALIASES: {
+    'claude/claude-sonnet-4-6': 'claude-sonnet-4',
+    'claude/claude-opus-4-6': 'claude-opus-4.6',
+  },
+  DEVIN_CREDENTIAL_PATH: null,
 }));
 
 vi.mock('../../logger.js', () => ({

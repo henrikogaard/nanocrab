@@ -646,6 +646,83 @@ describe('mock admin data', () => {
     });
   });
 
+  it('serves complete coding runtime catalogs and native runtime identity in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const runtimeResponse = await fetch(
+        `${baseUrl}/api/agents/coding/runtimes`,
+      );
+      const runtimes = (await runtimeResponse.json()) as Array<{
+        cli: string;
+        provider: string;
+        model: string;
+        available: boolean;
+        readiness: { status: string; detail: string };
+      }>;
+      expect(runtimes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            cli: 'codex',
+            provider: 'codex',
+            model: 'gpt-5.4',
+            available: true,
+            readiness: expect.objectContaining({ status: 'healthy' }),
+          }),
+          expect.objectContaining({
+            available: false,
+            readiness: expect.objectContaining({ status: 'missing' }),
+          }),
+          expect.objectContaining({
+            cli: 'devin',
+            provider: 'claude',
+            model: 'claude-sonnet-4-6',
+            readiness: expect.objectContaining({ detail: expect.any(String) }),
+          }),
+        ]),
+      );
+
+      const [projects, autofixJobs, agentJobs, agentJob] = await Promise.all([
+        fetch(`${baseUrl}/api/autofix/projects`).then(
+          async (response) =>
+            (await response.json()) as Array<Record<string, unknown>>,
+        ),
+        fetch(`${baseUrl}/api/autofix/jobs`).then(
+          async (response) =>
+            (await response.json()) as Array<Record<string, unknown>>,
+        ),
+        fetch(`${baseUrl}/api/agents/coding/jobs`).then(
+          async (response) =>
+            (await response.json()) as Array<Record<string, unknown>>,
+        ),
+        fetch(`${baseUrl}/api/agents/coding/jobs/code-mock-1`).then(
+          async (response) =>
+            (await response.json()) as Record<string, unknown>,
+        ),
+      ]);
+      expect(projects[0]).toMatchObject({
+        runnerCli: 'codex',
+        runtime: { cli: 'codex', provider: 'codex', model: 'gpt-5.4' },
+      });
+      expect(autofixJobs[0]).toMatchObject({
+        runnerCli: 'codex',
+        actualRuntime: {
+          cli: 'codex',
+          provider: 'codex',
+          model: 'gpt-5.4',
+        },
+      });
+      for (const job of [agentJobs[0], agentJob]) {
+        expect(job).toMatchObject({
+          runnerCli: 'codex',
+          actualRuntime: {
+            cli: 'codex',
+            provider: 'codex',
+            model: 'gpt-5.4',
+          },
+        });
+      }
+    });
+  });
+
   it('serves model operations metrics in mock mode', async () => {
     await withServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/providers/model-metrics`);

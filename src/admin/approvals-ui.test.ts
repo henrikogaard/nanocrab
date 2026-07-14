@@ -203,6 +203,29 @@ describe('Approval inbox UI wiring', () => {
     expect(source).toContain("return 'Code'");
   });
 
+  it('requires a healthy complete runtime for coding-job fallback approval', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+
+    expect(source).toContain("api('/agents/coding/runtimes')");
+    expect(source).toContain('.then(normalizeCodingRuntimeCatalog)');
+    expect(source).toContain('isCodingRuntimeFallbackApproval');
+    expect(source).toContain('Runner CLI');
+    expect(source).toContain('Provider');
+    expect(source).toContain('Model');
+    expect(source).toContain('approvalRuntimeOptionsForCli');
+    expect(source).toContain('approvalRuntimeOptionsForProvider');
+    expect(source).toContain('runtime.readiness.detail');
+    expect(source).toContain("runtime?.readiness.status === 'healthy'");
+    expect(source).toContain('Coding runtime catalog unavailable');
+    expect(source).toContain('No compatible coding runtimes are available');
+    expect(source).toContain(
+      "Devin sends the prompt, selected repository content, and tool results to Devin's external service.",
+    );
+    expect(source).toContain('body.runtime = { cli, provider, model }');
+    expect(source).toContain('body: JSON.stringify(body)');
+    expect(source).not.toContain("provider === 'devin'");
+  });
+
   it('turns filtered approval empties into routing decisions', () => {
     const source = fs.readFileSync(appPath, 'utf8');
     const style = fs.readFileSync(stylePath, 'utf8');

@@ -1,6 +1,7 @@
 import os from 'os';
 import path from 'path';
 
+import { isAgentProvider } from './agent-provider.js';
 import { readEnvFile } from './env.js';
 import { isValidTimezone } from './timezone.js';
 
@@ -12,7 +13,179 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'TZ',
   'SKILLS_SH_API_BASE_URL',
+  'CODING_JOB_RUNNER_TIMEOUT_MS',
+  'DEVIN_CREDENTIAL_PATH',
+  'DEVIN_CLI_MODEL_ALIASES_JSON',
 ]);
+
+export const DEVIN_BUILTIN_MODEL_ALIASES = Object.freeze({
+  'claude/claude-sonnet-4-6': 'claude-sonnet-4',
+  'claude/claude-opus-4-6': 'claude-opus-4.6',
+});
+
+const DEVIN_ALIAS_KEY = /^([a-z0-9-]+)\/(\S+)$/;
+
+function rejectDuplicateJsonObjectKeys(raw: string): void {
+  let index = 0;
+
+  const skipWhitespace = (): void => {
+    while (/\s/.test(raw[index] ?? '')) index += 1;
+  };
+
+  const scanString = (): string => {
+    const start = index;
+    index += 1;
+    let escaped = false;
+    while (index < raw.length) {
+      const character = raw[index++]!;
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '"') {
+        return JSON.parse(raw.slice(start, index)) as string;
+      }
+    }
+    throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be valid JSON');
+  };
+
+  const scanValue = (): void => {
+    skipWhitespace();
+    const character = raw[index];
+    if (character === '"') {
+      scanString();
+      return;
+    }
+    if (character === '{') {
+      index += 1;
+      skipWhitespace();
+      const keys = new Set<string>();
+      if (raw[index] === '}') {
+        index += 1;
+        return;
+      }
+      while (index < raw.length) {
+        skipWhitespace();
+        if (raw[index] !== '"') {
+          throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be valid JSON');
+        }
+        const key = scanString();
+        if (keys.has(key)) {
+          throw new Error(
+            `DEVIN_CLI_MODEL_ALIASES_JSON contains duplicate key ${key}`,
+          );
+        }
+        keys.add(key);
+        skipWhitespace();
+        index += 1; // ':'; JSON.parse already validated the token.
+        scanValue();
+        skipWhitespace();
+        if (raw[index] === '}') {
+          index += 1;
+          return;
+        }
+        index += 1; // ','; JSON.parse already validated the token.
+      }
+      throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be valid JSON');
+    }
+    if (character === '[') {
+      index += 1;
+      skipWhitespace();
+      if (raw[index] === ']') {
+        index += 1;
+        return;
+      }
+      while (index < raw.length) {
+        scanValue();
+        skipWhitespace();
+        if (raw[index] === ']') {
+          index += 1;
+          return;
+        }
+        index += 1; // ','; JSON.parse already validated the token.
+      }
+      throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be valid JSON');
+    }
+    while (index < raw.length && !/[,}\]]/.test(raw[index]!)) index += 1;
+  };
+
+  scanValue();
+}
+
+export function parseDevinCliModelAliases(
+  raw: string | undefined,
+): Readonly<Record<string, string>> {
+  if (!raw?.trim()) {
+    return Object.freeze({ ...DEVIN_BUILTIN_MODEL_ALIASES });
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be valid JSON');
+  }
+
+  rejectDuplicateJsonObjectKeys(raw);
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be a JSON object');
+  }
+
+  const operatorAliases: Record<string, string> = {};
+  for (const [key, alias] of Object.entries(parsed)) {
+    const match = key.match(DEVIN_ALIAS_KEY);
+    if (!match) {
+      throw new Error(
+        `DEVIN_CLI_MODEL_ALIASES_JSON key ${key} must use provider/model format`,
+      );
+    }
+    if (!isAgentProvider(match[1])) {
+      throw new Error(
+        `DEVIN_CLI_MODEL_ALIASES_JSON key ${key} uses unknown provider ${match[1]}`,
+      );
+    }
+    if (Object.hasOwn(DEVIN_BUILTIN_MODEL_ALIASES, key)) {
+      throw new Error(
+        `DEVIN_CLI_MODEL_ALIASES_JSON cannot override built-in alias ${key}`,
+      );
+    }
+    if (typeof alias !== 'string' || !alias.trim()) {
+      throw new Error(
+        `DEVIN_CLI_MODEL_ALIASES_JSON alias for ${key} must be a non-empty string`,
+      );
+    }
+    operatorAliases[key] = alias;
+  }
+
+  return Object.freeze({
+    ...DEVIN_BUILTIN_MODEL_ALIASES,
+    ...operatorAliases,
+  });
+}
+
+export function parsePositiveMilliseconds(
+  raw: string | undefined,
+  fallback: number,
+  key: string,
+): number {
+  const parsed = raw === undefined ? fallback : Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${key} must be a positive integer number of milliseconds`);
+  }
+  return parsed;
+}
+
+function parseAbsolutePath(
+  raw: string | undefined,
+  key: string,
+): string | null {
+  if (!raw?.trim()) return null;
+  if (!path.isAbsolute(raw)) {
+    throw new Error(`${key} must be an absolute path`);
+  }
+  return raw;
+}
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -79,6 +252,20 @@ export const CONTAINER_IMAGE =
 export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || '1800000',
   10,
+);
+export const CODING_JOB_RUNNER_TIMEOUT_MS = parsePositiveMilliseconds(
+  process.env.CODING_JOB_RUNNER_TIMEOUT_MS ||
+    envConfig.CODING_JOB_RUNNER_TIMEOUT_MS,
+  CONTAINER_TIMEOUT,
+  'CODING_JOB_RUNNER_TIMEOUT_MS',
+);
+export const DEVIN_CREDENTIAL_PATH = parseAbsolutePath(
+  process.env.DEVIN_CREDENTIAL_PATH || envConfig.DEVIN_CREDENTIAL_PATH,
+  'DEVIN_CREDENTIAL_PATH',
+);
+export const DEVIN_CLI_MODEL_ALIASES = parseDevinCliModelAliases(
+  process.env.DEVIN_CLI_MODEL_ALIASES_JSON ||
+    envConfig.DEVIN_CLI_MODEL_ALIASES_JSON,
 );
 export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',

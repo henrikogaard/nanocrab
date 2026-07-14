@@ -25,8 +25,15 @@ import { STORE_DIR } from '../../../config.js';
 import { readEnvFile } from '../../../env.js';
 import {
   DEFAULT_AGENT_MODELS,
+  isAgentProvider,
   type AgentProvider,
 } from '../../../agent-provider.js';
+import {
+  inferLegacyRunnerCli,
+  validateCodingRuntimeSelection,
+} from '../../../agent-runtime-registry.js';
+import { probeCodingRunnerReadiness } from '../../../coding-runner-readiness.js';
+import type { AgentRuntimeSelection } from '../../../types.js';
 import { auditLog } from '../../security.js';
 import { getState } from '../../state.js';
 import { logger } from '../../../logger.js';
@@ -66,6 +73,7 @@ export interface Project {
   triggerLabel: string;
   provider: string;
   model: string;
+  runtime: AgentRuntimeSelection;
   notifyJid: string; // bot channel to notify
   autoReview: boolean; // auto-review new PRs
   createPr: boolean;
@@ -122,6 +130,34 @@ export function normalizeAutofixProject(input: Partial<Project>): Project {
   const owner = String(input.owner || '').trim();
   const repo = String(input.repo || '').trim();
   const maxActiveJobs = Number(input.maxActiveJobs);
+  const rawLegacyProvider = String(input.provider || 'claude').trim();
+  if (!isAgentProvider(rawLegacyProvider)) {
+    throw new Error(
+      `Invalid Autofix coding runtime (missing) / ${rawLegacyProvider || '(missing)'} / ${String(input.model || '(missing)')}: unknown provider`,
+    );
+  }
+  const legacyProvider: AgentProvider = rawLegacyProvider;
+  const legacyModel =
+    String(input.model || '').trim() || defaultAutofixModel(legacyProvider);
+  const runtime: AgentRuntimeSelection = input.runtime
+    ? {
+        cli: input.runtime.cli,
+        provider: input.runtime.provider,
+        model: String(input.runtime.model || '').trim(),
+      }
+    : {
+        cli: inferLegacyRunnerCli(legacyProvider),
+        provider: legacyProvider,
+        model: legacyModel,
+      };
+  try {
+    validateCodingRuntimeSelection(runtime);
+  } catch (err) {
+    throw new Error(
+      `Invalid Autofix coding runtime ${runtime.cli || '(missing)'} / ${runtime.provider || '(missing)'} / ${runtime.model || '(missing)'}: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
 
   return {
     id: input.id || crypto.randomUUID(),
@@ -131,10 +167,9 @@ export function normalizeAutofixProject(input: Partial<Project>): Project {
       input.workDir ||
       path.join(process.env.HOME || '/tmp', 'repos', `${owner}-${repo}`),
     triggerLabel: input.triggerLabel?.trim() || 'autofix',
-    provider: input.provider?.trim() || 'claude',
-    model:
-      input.model?.trim() ||
-      defaultAutofixModel(input.provider?.trim() || 'claude'),
+    provider: runtime.provider,
+    model: runtime.model,
+    runtime,
     notifyJid: input.notifyJid || '',
     autoReview: input.autoReview === true,
     createPr: input.createPr !== false,
@@ -162,11 +197,23 @@ export function buildAutofixStartInput(
   return {
     repo: `${project.owner}/${project.repo}`,
     issueNumber,
-    provider: project.provider,
-    model: project.model || undefined,
+    actualRuntime: project.runtime,
     createPr: project.createPr,
     requestedBy,
   };
+}
+
+async function assertAutofixRuntimeReady(
+  runtime: AgentRuntimeSelection,
+): Promise<void> {
+  validateCodingRuntimeSelection(runtime);
+  if (runtime.cli !== 'devin') return;
+  const readiness = await probeCodingRunnerReadiness('devin');
+  if (readiness.status !== 'healthy') {
+    throw new Error(
+      `Autofix coding runtime ${runtime.cli} / ${runtime.provider} / ${runtime.model} is unavailable: ${readiness.detail}`,
+    );
+  }
 }
 
 export function hasAutofixCapacity(
@@ -368,6 +415,7 @@ export async function runAutofixAutoPickOnce(
           break;
         }
 
+        await assertAutofixRuntimeReady(project.runtime);
         const job = await startJob(
           buildAutofixStartInput(project, issue.number, 'github-auto-pick'),
         );
@@ -418,14 +466,38 @@ export function stopAutofixAutoPickLoop(): void {
 }
 
 function loadProjects(): Project[] {
+  let contents: string;
   try {
-    const projects = JSON.parse(fs.readFileSync(PROJECTS_PATH, 'utf-8'));
-    return Array.isArray(projects)
-      ? projects.map((project) => normalizeAutofixProject(project))
-      : [];
-  } catch {
-    return [];
+    contents = fs.readFileSync(PROJECTS_PATH, 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw new Error(
+      `Unable to load Autofix projects: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
   }
+
+  let projects: unknown;
+  try {
+    projects = JSON.parse(contents);
+  } catch (err) {
+    throw new Error('Unable to load Autofix projects: malformed JSON', {
+      cause: err,
+    });
+  }
+  if (!Array.isArray(projects)) {
+    throw new Error('Unable to load Autofix projects: expected a JSON array');
+  }
+  return projects.map((project, index) => {
+    try {
+      return normalizeAutofixProject(project as Partial<Project>);
+    } catch (err) {
+      throw new Error(
+        `Unable to load Autofix projects: Autofix project record ${index + 1} is invalid: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
+  });
 }
 
 function saveProjects(projects: Project[]): void {
@@ -473,7 +545,13 @@ async function githubApi(path: string, opts: RequestInit = {}): Promise<any> {
 // --- Projects CRUD ---
 
 router.get('/projects', (_req: Request, res: Response) => {
-  res.json(loadProjects());
+  try {
+    res.json(loadProjects());
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 router.post('/projects', async (req: Request, res: Response) => {
@@ -482,8 +560,7 @@ router.post('/projects', async (req: Request, res: Response) => {
     repo,
     workDir,
     triggerLabel,
-    provider,
-    model,
+    runtime,
     notifyJid,
     autoReview,
     createPr,
@@ -496,23 +573,33 @@ router.post('/projects', async (req: Request, res: Response) => {
     return;
   }
 
-  const project = normalizeAutofixProject({
-    id: crypto.randomUUID(),
-    owner,
-    repo,
-    workDir,
-    triggerLabel,
-    provider,
-    model,
-    notifyJid,
-    autoReview,
-    createPr,
-    maxActiveJobs,
-    autoPickEnabled,
-    pollIntervalMinutes,
-  });
+  let project: Project;
+  let projects: Project[];
+  try {
+    projects = loadProjects();
+    if (!runtime) throw new Error('a complete runtime is required');
+    project = normalizeAutofixProject({
+      id: crypto.randomUUID(),
+      owner,
+      repo,
+      workDir,
+      triggerLabel,
+      runtime,
+      notifyJid,
+      autoReview,
+      createPr,
+      maxActiveJobs,
+      autoPickEnabled,
+      pollIntervalMinutes,
+    });
+    await assertAutofixRuntimeReady(project.runtime);
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
 
-  const projects = loadProjects();
   projects.push(project);
   saveProjects(projects);
   try {
@@ -530,44 +617,57 @@ router.post('/projects', async (req: Request, res: Response) => {
   res.json({ ok: true, project });
 });
 
-router.put('/projects/:id', (req: Request, res: Response) => {
-  const projects = loadProjects();
-  const project = projects.find((p) => p.id === req.params.id);
-  if (!project) {
-    res.status(404).json({ error: 'Project not found' });
+router.put('/projects/:id', async (req: Request, res: Response) => {
+  try {
+    const projects = loadProjects();
+    const project = projects.find((p) => p.id === req.params.id);
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+
+    const fields = [
+      'workDir',
+      'triggerLabel',
+      'runtime',
+      'notifyJid',
+      'autoReview',
+      'createPr',
+      'maxActiveJobs',
+      'autoPickEnabled',
+      'pollIntervalMinutes',
+    ];
+    for (const f of fields) {
+      if (req.body[f] !== undefined) (project as any)[f] = req.body[f];
+    }
+    Object.assign(project, normalizeAutofixProject(project));
+    await assertAutofixRuntimeReady(project.runtime);
+    saveProjects(projects);
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
     return;
   }
-
-  const fields = [
-    'workDir',
-    'triggerLabel',
-    'provider',
-    'model',
-    'notifyJid',
-    'autoReview',
-    'createPr',
-    'maxActiveJobs',
-    'autoPickEnabled',
-    'pollIntervalMinutes',
-  ];
-  for (const f of fields) {
-    if (req.body[f] !== undefined) (project as any)[f] = req.body[f];
-  }
-  Object.assign(project, normalizeAutofixProject(project));
-  saveProjects(projects);
   res.json({ ok: true });
 });
 
 router.delete('/projects/:id', (req: Request, res: Response) => {
-  const projects = loadProjects();
-  const idx = projects.findIndex((p) => p.id === req.params.id);
-  if (idx === -1) {
-    res.status(404).json({ error: 'Project not found' });
-    return;
+  try {
+    const projects = loadProjects();
+    const idx = projects.findIndex((p) => p.id === req.params.id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+    projects.splice(idx, 1);
+    saveProjects(projects);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
-  projects.splice(idx, 1);
-  saveProjects(projects);
-  res.json({ ok: true });
 });
 
 // --- Jobs ---
@@ -641,28 +741,28 @@ function parseQueryIssueNumber(value: unknown): number | undefined {
 }
 
 router.get('/workbench', async (req: Request, res: Response) => {
-  const repos = loadCodingRepos().filter((repo) => repo.enabled);
-  const projects = loadProjects();
-  const selectedRepo =
-    parseQueryString(req.query.repo) ||
-    repos[0]?.fullName ||
-    (projects[0] ? `${projects[0].owner}/${projects[0].repo}` : null);
-
-  if (!selectedRepo) {
-    res.json(
-      buildAutofixWorkbenchResponse({
-        repos,
-        projects,
-        selectedRepo: null,
-        issues: [],
-        projectBoards: [],
-        jobs: [],
-      }),
-    );
-    return;
-  }
-
   try {
+    const repos = loadCodingRepos().filter((repo) => repo.enabled);
+    const projects = loadProjects();
+    const selectedRepo =
+      parseQueryString(req.query.repo) ||
+      repos[0]?.fullName ||
+      (projects[0] ? `${projects[0].owner}/${projects[0].repo}` : null);
+
+    if (!selectedRepo) {
+      res.json(
+        buildAutofixWorkbenchResponse({
+          repos,
+          projects,
+          selectedRepo: null,
+          issues: [],
+          projectBoards: [],
+          jobs: [],
+        }),
+      );
+      return;
+    }
+
     const labels =
       req.query.allLabels === 'true' ? [] : parseQueryLabels(req.query.labels);
     const assignee = parseQueryString(req.query.assignee);
@@ -726,11 +826,19 @@ router.post('/workbench/assign', async (req: Request, res: Response) => {
         `${candidate.owner}/${candidate.repo}`.toLowerCase() ===
         repo.toLowerCase(),
     );
+    const runtime = req.body.actualRuntime
+      ? normalizeAutofixProject({
+          owner: project?.owner || repo.split('/')[0],
+          repo: project?.repo || repo.split('/')[1],
+          runtime: req.body.actualRuntime,
+        }).runtime
+      : project?.runtime;
+    if (!runtime) throw new Error('a complete coding runtime is required');
+    await assertAutofixRuntimeReady(runtime);
     const job = await startCodingJob({
       repo,
       issueNumber,
-      provider: req.body.provider || project?.provider,
-      model: req.body.model || project?.model,
+      actualRuntime: runtime,
       createPr:
         req.body.createPr === undefined
           ? project?.createPr !== false
@@ -1058,27 +1166,26 @@ Instructions:
 
 // Manual trigger from dashboard
 router.post('/run', async (req: Request, res: Response) => {
-  const { projectId, issueNumber, model } = req.body;
+  const { projectId, issueNumber, actualRuntime } = req.body;
   if (!projectId || !issueNumber) {
     res.status(400).json({ error: 'projectId and issueNumber required' });
     return;
   }
 
-  const projects = loadProjects();
-  const project = projects.find((p) => p.id === projectId);
-  if (!project) {
-    res.status(404).json({ error: 'Project not found' });
-    return;
-  }
-
   // Fetch issue details
   try {
+    const projects = loadProjects();
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+    const selectedProject = actualRuntime
+      ? normalizeAutofixProject({ ...project, runtime: actualRuntime })
+      : project;
+    await assertAutofixRuntimeReady(selectedProject.runtime);
     const jobInput = buildAutofixStartInput(
-      {
-        ...project,
-        model:
-          typeof model === 'string' && model.trim() ? model : project.model,
-      },
+      selectedProject,
       Number(issueNumber),
       req.user?.username || 'autofix-dashboard',
     );
@@ -1090,7 +1197,7 @@ router.post('/run', async (req: Request, res: Response) => {
     );
     res.json({ ok: true, jobId: job.id });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -1371,6 +1478,7 @@ export async function handleAutofixWebhook(payload: any): Promise<void> {
           );
           return;
         }
+        await assertAutofixRuntimeReady(project.runtime);
         await startCodingJob(
           buildAutofixStartInput(project, issue.number, 'github-webhook'),
         );
@@ -1405,6 +1513,7 @@ export async function handleAutofixWebhook(payload: any): Promise<void> {
           );
           return;
         }
+        await assertAutofixRuntimeReady(project.runtime);
         await startCodingJob(
           buildAutofixStartInput(project, issue.number, 'github-webhook'),
         );

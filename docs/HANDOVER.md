@@ -25,7 +25,7 @@ Last updated: 2026-06-17
 - Provider profiles for Claude, Codex, OpenCode, Ollama, OpenRouter, Google, and related OpenAI-compatible flows.
 - Structured memory proposals, journal events/summaries, skill drafts, skill suggestions, and skill timeline surfaces.
 - Skill registry with enabled/scope/visibility controls and relevance-based skill injection.
-- Dedicated coding job containers for GitHub work, including dashboard assignment, mobile `/code` commands, GitHub issue pickup, and approval-gated PR creation.
+- Isolated coding workspaces for GitHub work: container-backed runners remain the default, with an opt-in host-native Devin runner behind host readiness, constrained model tools, sandboxed commands, and the same dashboard/mobile assignment and PR approval gates.
 - Routine blueprints and scheduled tasks with delivery modes, webhook approvals, heartbeat checks, active-run limits, run history, and run-now controls.
 - Autofix auto-pickup with cadence, max-active-job limits, webhook receiver guidance, and connector health checks.
 - Reports, research jobs, deliverables, artifacts, approvals, and Playwright support.
