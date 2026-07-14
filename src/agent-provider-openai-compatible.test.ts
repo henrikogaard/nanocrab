@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const envValues: Record<string, string> = {};
+const { envValues } = vi.hoisted(() => ({
+  envValues: {} as Record<string, string>,
+}));
 
 vi.mock('./env.js', () => ({
   readEnvFile: vi.fn((keys: string[]) =>
