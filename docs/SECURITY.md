@@ -2,12 +2,13 @@
 
 ## Trust Model
 
-| Entity            | Trust Level | Rationale                        |
-| ----------------- | ----------- | -------------------------------- |
-| Main group        | Trusted     | Private self-chat, admin control |
-| Non-main groups   | Untrusted   | Other users may be malicious     |
-| Container agents  | Sandboxed   | Isolated execution environment   |
-| Incoming messages | User input  | Potential prompt injection       |
+| Entity             | Trust Level | Rationale                                  |
+| ------------------ | ----------- | ------------------------------------------ |
+| Main group         | Trusted     | Private self-chat, admin control           |
+| Non-main groups    | Untrusted   | Other users may be malicious               |
+| Container agents   | Sandboxed   | Isolated execution environment             |
+| Host coding runner | Constrained | Trusted process with sandboxed model tools |
+| Incoming messages  | User input  | Potential prompt injection                 |
 
 ## Security Boundaries
 
@@ -111,6 +112,77 @@ runs, heartbeat stale policy, quiet hours, dry-run/tool policy, provider
 fallback policy, and delivery approval policy. Webhook targets and payload
 previews are shown in the approval inbox so operators can deny stale, vague, or
 incorrect deliveries before any external side effect occurs.
+
+### 3e. Devin Host Runner Boundary
+
+Devin is an opt-in host-native Runner CLI, not a provider and not a container
+runner. NanoCrab and the authenticated Devin installation run directly on
+macOS/Linux as the same dedicated service user. The NanoCrab process and the
+narrow Git children it starts for approved clone/fetch/push and evidence
+collection are trusted host processes. The Devin model is not trusted with
+general host access.
+
+Before a Devin job can run, readiness verifies a configured canonical
+`DEVIN_CREDENTIAL_PATH`, exact service-UID ownership and POSIX mode `0600`,
+authentication status, required CLI capabilities, every configured model alias,
+the platform sandbox executable, and canonical Devin/Node/sandbox executables
+inside verified runtime roots. NanoCrab stats the credential but never reads its
+contents. It does not guess, create, copy, mount, or delete the credential file.
+Mounting Devin credentials into a NanoCrab container is unsupported.
+
+The host child environment is an allowlist: `HOME`, temporary-directory and
+locale variables, plus `XDG_CONFIG_HOME`/`XDG_DATA_HOME`; NanoCrab supplies a
+fixed `PATH`, `TERM=dumb`, and `NO_COLOR=1`. Provider keys, GitHub tokens,
+authorization/cookie/proxy variables, arbitrary `DEVIN_*` variables, and the
+credential path setting are not forwarded to the Devin child. Repository
+clone/fetch/push uses a separate temporary Git-only `GIT_ASKPASS` helper that
+answers only the approved GitHub HTTPS username/password prompts. Git runs with
+system/global config disabled, hooks and credential helpers disabled, HTTPS-only
+protocol policy, redirects/proxies disabled, fixed argument shapes, and token
+redaction from returned output and errors.
+
+The Devin agent config exposes constrained model tools: repository read tools,
+write tools only for implement/direct stages, and one immutable command-broker
+launcher. The agent config (`0600`) and launcher (`0555`) are created or opened
+through `O_NOFOLLOW` file handles and verified by owner, mode, identity, size,
+and content; protected job metadata, the credential, service-user SSH/GPG data,
+and NanoCrab config remain denied. The broker validates an exact command
+allowlist and routes every accepted inspection, Git, build, and test command
+through OS isolation. Linux uses Bubblewrap with an empty root, no network, and
+PID/IPC/session/private-proc isolation; macOS uses an explicit `sandbox-exec`
+profile that denies network. Only verified runtime roots, temp, and the selected
+workspace are visible. Inspection and Git receive the workspace read-only;
+implement/direct build and test commands may write only there.
+
+Readiness is repeated after implementation or replacement-runtime approval and
+before checkout creation or mutation. Runtime fallback is never silent for an
+explicit coding runtime: the owner approves a healthy complete Runner CLI /
+Provider / Model triple in the Approvals UI. Process ownership is scoped to the
+exact job, attempt, and unguessable lease token. Cancellation and timeout send
+`SIGTERM` to that owned process group, retain the lease through a five-second
+grace period, then send `SIGKILL` only if the same lease still owns the attempt.
+
+Devin stdout and stderr pass through independent stateful streaming redactors
+before persistence or display. The redactors carry partial tokens across chunk
+boundaries, remove known secrets and credential-shaped assignments, cap output,
+and accept output only from the currently owned attempt. Host Git evidence is
+collected with external diff/textconv/fsmonitor helpers disabled. Existing dirty
+workspaces are inspected and preserved; NanoCrab records staged, unstaged,
+untracked, and unpushed state and does not reset or delete the checkout.
+
+Devin sends prompts, selected repository content, and tool results to Devin's
+external service. This external processing is an operator-approved privacy
+boundary; repository tests do not invoke a live or paid Devin session. The
+Devin Research Preview sandbox is defense in depth, not the sole boundary. A
+residual local TOCTOU risk remains because workspace parent components are
+checked with path-based `lstat`/`realpath` rather than a directory-handle-relative
+`openat` walk. A malicious same-UID host process could race those components;
+use a dedicated service account and do not run untrusted same-UID host software.
+
+Rollback does not destroy operator state: disable or reassign Devin profiles,
+cancel exact active attempts, preserve each checkout and its evidence, and
+revert the adapter/readiness support. Never delete Devin authentication or
+sessions as part of rollback.
 
 ### 4. IPC Authorization
 

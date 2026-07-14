@@ -13,26 +13,26 @@ Containers still start only when an existing run path needs one.
 
 The Agents cockpit stores profile identity, model choice, and capability policy:
 
-| Field | Meaning |
-| ----- | ------- |
-| `handle` | Unique mention handle, such as `RepoFixer`. Users invoke it as `@RepoFixer`. |
-| `displayName` | Human-readable name shown in the roster, activity, and run attribution. |
-| `personality` | Profile-level instructions added to the run context. |
-| `providerProfileId` | Preferred provider profile, such as chat or coding defaults, for execution paths that consume profile preferences. |
-| `provider` / `model` | Optional explicit provider/model override for this profile. |
-| `toolPolicy` | Stored profile-level tool posture for operator policy and future enforcement; host policy remains the active gate unless a run path explicitly consumes it. |
-| `allowedMcpServers` | MCP connector allowlist. `null` inherits the runtime boundary; an empty list means NanoCrab-only. |
-| `skills` | Skill hints or allowed skill references. Runtime skill scope and visibility still apply and are not bypassed by this list. |
-| `memoryScopes` | Intended memory/wiki scopes for the profile. Runtime memory injection remains controlled by existing memory and boundary logic. |
-| `taskKinds` | Allowed work types, such as chat, cowork task, coding job, report, research, or scheduled check. Subscriptions and UI validation use this list. |
-| `channelBindings` | Channel-specific aliases or handles when a channel needs different naming. |
-| `writePolicy` | Stored write-policy intent for the profile layer. Existing host policy and approvals remain the enforced write gate. |
-| `instructions` | Extra operating instructions added to the profile context. |
-| `primaryRuntime` | Preferred CLI, provider, and model for the profile, e.g. `{ cli: 'claude', provider: 'claude', model: 'claude-sonnet-4-6' }`. |
-| `fallbackRuntimes` | Ordered list of alternate CLI/provider/model combinations to try when the primary runtime is missing or unhealthy. |
-| `stageRoles` | Which control-plane pipeline stages this profile can perform: `planning`, `implement`, and/or `review`. |
-| `repositoryScopes` | Repositories (`owner/repo`) this profile is allowed to work on. Required for control-plane pipeline assignment. |
-| `maxConcurrency` | Maximum number of simultaneous runs this profile may have. Defaults to `1`. |
+| Field                | Meaning                                                                                                                                                                |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `handle`             | Unique mention handle, such as `RepoFixer`. Users invoke it as `@RepoFixer`.                                                                                           |
+| `displayName`        | Human-readable name shown in the roster, activity, and run attribution.                                                                                                |
+| `personality`        | Profile-level instructions added to the run context.                                                                                                                   |
+| `providerProfileId`  | Preferred provider profile, such as chat or coding defaults, for execution paths that consume profile preferences.                                                     |
+| `provider` / `model` | Optional explicit provider/model override for this profile.                                                                                                            |
+| `toolPolicy`         | Stored profile-level tool posture for operator policy and future enforcement; host policy remains the active gate unless a run path explicitly consumes it.            |
+| `allowedMcpServers`  | MCP connector allowlist. `null` inherits the runtime boundary; an empty list means NanoCrab-only.                                                                      |
+| `skills`             | Skill hints or allowed skill references. Runtime skill scope and visibility still apply and are not bypassed by this list.                                             |
+| `memoryScopes`       | Intended memory/wiki scopes for the profile. Runtime memory injection remains controlled by existing memory and boundary logic.                                        |
+| `taskKinds`          | Allowed work types, such as chat, cowork task, coding job, report, research, or scheduled check. Subscriptions and UI validation use this list.                        |
+| `channelBindings`    | Channel-specific aliases or handles when a channel needs different naming.                                                                                             |
+| `writePolicy`        | Stored write-policy intent for the profile layer. Existing host policy and approvals remain the enforced write gate.                                                   |
+| `instructions`       | Extra operating instructions added to the profile context.                                                                                                             |
+| `primaryRuntime`     | Preferred Runner CLI, provider, and model for the profile, e.g. `{ cli: 'devin', provider: 'claude', model: 'claude-opus-4-6' }`. These are three distinct selections. |
+| `fallbackRuntimes`   | Ordered list of alternate CLI/provider/model combinations to try when the primary runtime is missing or unhealthy.                                                     |
+| `stageRoles`         | Which control-plane pipeline stages this profile can perform: `planning`, `implement`, and/or `review`.                                                                |
+| `repositoryScopes`   | Repositories (`owner/repo`) this profile is allowed to work on. Required for control-plane pipeline assignment.                                                        |
+| `maxConcurrency`     | Maximum number of simultaneous runs this profile may have. Defaults to `1`.                                                                                            |
 
 Profiles add identity, attribution, preferences, and narrower routing choices.
 They cannot widen runtime access. If a channel group cannot use a private skill,
@@ -120,6 +120,33 @@ automatically; write-capable work such as `implement` and `review` stages
 requires explicit approval before the fallback runtime is used. If no healthy
 fallback is available and approved, dispatch fails with a clear runtime error.
 
+Devin is a host-native Runner CLI, not a provider and not a container runner.
+NanoCrab itself must run directly on macOS or Linux as the same dedicated OS
+user that owns the authenticated Devin installation. Run interactive
+`devin auth login` as that user, set the credential file to exact mode `0600`,
+and configure its exact canonical absolute path as `DEVIN_CREDENTIAL_PATH`.
+NanoCrab does not guess the path, manage the credential, or read its contents.
+
+Runner CLI, provider, and model remain distinct throughout selection,
+attribution, and fallback. The mapped example
+`devin / claude / claude-opus-4-6` resolves to the Devin CLI alias
+`claude-opus-4.6`. Operator extensions are configured through
+`DEVIN_CLI_MODEL_ALIASES_JSON`; built-in mappings cannot be overridden.
+
+Assign Devin profiles deliberately. Start with planning/review, then select one
+low-risk issue for implementation only after owner approval. The readiness
+probe must be `healthy` when the profile or Autofix project is assigned, and it
+is repeated after approval immediately before checkout creation or mutation.
+For coding jobs, NanoCrab does not silently fall back from an explicitly
+selected runtime. The Approvals UI requires the owner to select a healthy,
+complete replacement Runner CLI / Provider / Model triple before dispatch can
+resume.
+
+Devin sends the prompt, selected repository content, and tool results to
+Devin's external service. Live smoke testing is not part of repository
+verification and requires Henrik's separate approval for cost and external
+processing.
+
 ## Stage Roles
 
 Control-plane pipelines move an issue through `planning`, `implement`, and
@@ -156,6 +183,11 @@ To recover, re-enable the profile or subscription, narrow overly broad filters,
 fix the provider/model or connector policy, and retry from the Agents cockpit or
 the original channel. Failed subscription matches should be retried manually
 rather than replaying duplicate external events blindly.
+
+For a Devin-specific rollback, disable or reassign the affected profiles,
+cancel each exact active attempt, preserve the checkout and captured evidence,
+and revert the host adapter/readiness support. Never delete Devin authentication
+or sessions as part of NanoCrab rollback.
 
 ## Out Of Scope And Follow-Ons
 
