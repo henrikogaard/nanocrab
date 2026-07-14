@@ -190,7 +190,9 @@ an agent profile with the matching `stageRoles`.
 4. Use **Control Plane -> Pipelines** or `POST /api/control-plane/pipelines`
    to create the pipeline. Provide the stable GitHub option IDs for each stage.
 5. Open **Control Plane -> Overview** to see the board, pending decisions, and
-   runtime health.
+   coding-runner readiness. This is evaluated separately from host CLI
+   discovery: Pi requires the coding container image and an OpenRouter
+   credential route, but it does not require a host `pi` executable.
 
 ### Workflow
 

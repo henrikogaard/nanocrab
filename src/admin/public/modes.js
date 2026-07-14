@@ -62,6 +62,8 @@
     'sessions',
     'marketplace',
     'control-plane',
+    'learning-proposals',
+    'source-collections',
     'backup',
     'usage',
     'help',

@@ -58,8 +58,8 @@ import { insertPipeline } from './pipelines.js';
 import {
   proposeStageTransition,
   resolveDecision,
-  DecisionResolutionError,
-  DecisionStaleError,
+  DecisionResolutionError as _DecisionResolutionError,
+  DecisionStaleError as _DecisionStaleError,
 } from './decisions.js';
 import { getDecision, getStageAssignmentsForIssue } from './store.js';
 import { runtime } from './dispatcher.js';

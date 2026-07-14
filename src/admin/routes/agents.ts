@@ -20,7 +20,10 @@ import {
   isCodingCapableProvider,
   codingProviderUnavailableReason,
 } from '../../agent-provider.js';
-import { getAllRegisteredGroups, getNonWebRegisteredGroups } from '../../db.js';
+import {
+  getAllRegisteredGroups as _getAllRegisteredGroups,
+  getNonWebRegisteredGroups,
+} from '../../db.js';
 import {
   deriveRuntimeCapabilities,
   resolveAgentBoundary,
@@ -64,7 +67,9 @@ function loadConfiguredConnectorIds(): string[] {
         if (server.name) ids.add(server.name);
       }
     }
-  } catch {}
+  } catch {
+    // intentional
+  }
   return Array.from(ids);
 }
 
@@ -514,11 +519,15 @@ router.get('/tools', (_req: Request, res: Response) => {
   try {
     execFileSync('which', ['codex'], { stdio: 'pipe' });
     tools[1].available = true;
-  } catch {}
+  } catch {
+    // intentional
+  }
   try {
     execFileSync('which', ['opencode'], { stdio: 'pipe' });
     tools[2].available = true;
-  } catch {}
+  } catch {
+    // intentional
+  }
 
   res.json(tools);
 });
@@ -855,7 +864,9 @@ try {
   for (const task of loadScheduled()) {
     if (task.enabled) scheduleTask(task);
   }
-} catch {}
+} catch {
+  // intentional
+}
 
 router.get('/scheduled', (_req: Request, res: Response) => {
   res.json(loadScheduled());

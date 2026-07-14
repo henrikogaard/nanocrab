@@ -27,7 +27,7 @@ import {
 import { auditLog } from '../security.js';
 
 const router = Router();
-const PROJECT_ROOT = process.cwd();
+const _PROJECT_ROOT = process.cwd();
 const GLOBAL_INSTRUCTIONS_DIR = path.join(GROUPS_DIR, 'global');
 
 const SKIP_DIRS = new Set([
@@ -496,7 +496,7 @@ router.post(
           promotedAt: now,
         },
       });
-    } catch (err) {
+    } catch (_err) {
       res.status(fs.existsSync(sourcePath) ? 500 : 404).json({
         error: fs.existsSync(sourcePath)
           ? 'Failed to promote artifact'

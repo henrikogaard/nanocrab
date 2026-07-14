@@ -113,4 +113,24 @@ describe('report admin routes', () => {
       );
     });
   });
+
+  it('creates dashboard reports with explicit non-agent authorization context', async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/reports/jobs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ request: 'Prepare a dashboard report.' }),
+      });
+      const body = (await response.json()) as {
+        job: { authorizationContext: Record<string, unknown> };
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.job.authorizationContext).toEqual({
+        actorUsername: 'owner',
+        groupFolder: 'dashboard',
+        isMainAgent: false,
+      });
+    });
+  });
 });

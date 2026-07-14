@@ -19,7 +19,9 @@ try {
     fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8'),
   );
   _appVersion = pkg.version || 'unknown';
-} catch {}
+} catch {
+  // intentional
+}
 
 export const APP_VERSION = _appVersion;
 export const NANOCRAB_VERSION = APP_VERSION;

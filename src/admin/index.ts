@@ -84,6 +84,8 @@ import assistantProfileRoutes from './routes/assistant-profile.js';
 import threadsRoutes from './routes/threads.js';
 import projectsRoutes from './routes/projects.js';
 import controlPlaneRoutes from './routes/control-plane.js';
+import learningProposalsRoutes from './routes/learning-proposals.js';
+import sourceCollectionsRoutes from './routes/source-collections.js';
 
 // Plugin system
 import {
@@ -261,6 +263,18 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
     requireAuth,
     requireRole('admin'),
     controlPlaneRoutes,
+  );
+  app.use(
+    '/api/learning-proposals',
+    requireAuth,
+    requireRole('admin'),
+    learningProposalsRoutes,
+  );
+  app.use(
+    '/api/source-collections',
+    requireAuth,
+    requireRole('admin'),
+    sourceCollectionsRoutes,
   );
 
   // Admin role required

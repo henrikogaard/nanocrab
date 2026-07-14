@@ -1,11 +1,19 @@
 import { execFileSync } from 'child_process';
 
 import { readEnvFile, writeEnvValue } from './env.js';
+import {
+  getCodingRunnerInfrastructure,
+  isCodingContainerImageAvailable,
+  isCredentialConfigured,
+  type CodingRunnerInfrastructure,
+  type ContainerImageInspector,
+} from './coding-runner-readiness.js';
 
 export const AGENT_PROVIDERS = [
   'claude',
   'codex',
   'opencode',
+  'pi',
   'ollama',
   'openrouter',
   'google',
@@ -22,6 +30,8 @@ export type AgentProviderRuntime =
   | 'claude-agent-sdk'
   | 'codex-cli'
   | 'opencode-cli'
+  | 'pi-cli'
+  | 'vibe-cli'
   | 'openai-compatible'
   | 'openai-responses'
   | 'anthropic-messages'
@@ -70,6 +80,15 @@ export const AGENT_PROVIDER_DEFINITIONS: Record<
       'OpenCode CLI coding-agent runtime. Uses OpenCode provider config/auth.',
     selectable: true,
     requiresCli: 'opencode',
+    requiresAuth: true,
+  },
+  pi: {
+    id: 'pi',
+    name: 'Pi CLI',
+    runtime: 'pi-cli',
+    description: 'Pi coding assistant with read, bash, edit, write tools.',
+    selectable: true,
+    requiresCli: 'pi',
     requiresAuth: true,
   },
   ollama: {
@@ -192,6 +211,7 @@ export const AGENT_PROVIDER_MODELS: Record<AgentProvider, string[]> = {
     'anthropic/claude-sonnet-4-6',
     'openai/gpt-5.4',
   ],
+  pi: ['gemini-2.5-pro', 'claude-sonnet-4-6', 'gpt-5.4'],
   ollama: ['llama3', 'llama3.1', 'mistral', 'codestral', 'gemma4:e2b'],
   openrouter: [
     'openai/gpt-5.4',
@@ -221,6 +241,7 @@ export const DEFAULT_AGENT_MODELS: Record<AgentProvider, string> = {
   claude: 'claude-sonnet-4-6',
   codex: 'gpt-5.4',
   opencode: 'opencode/grok-code-fast-1',
+  pi: 'gemini-2.5-pro',
   ollama: 'llama3',
   openrouter: 'openrouter/auto',
   google: 'gemini-3.5-flash',
@@ -232,10 +253,12 @@ export const DEFAULT_AGENT_MODELS: Record<AgentProvider, string> = {
   'openai-compatible': 'model-id',
 };
 
-const CODING_PROVIDER_IDS = new Set<AgentProvider>([
+export const CODING_PROVIDER_IDS = new Set<AgentProvider>([
   'claude',
   'codex',
   'opencode',
+  'pi',
+  'mistral',
   'openrouter',
   'ollama',
   'openai-compatible',
@@ -321,6 +344,7 @@ export function isValidAgentModel(
       'openrouter',
       'google',
       'opencode',
+      'pi',
       'openai-compatible',
       'gemini',
       'mistral',
@@ -421,14 +445,37 @@ function commandAvailable(command: string): boolean {
   }
 }
 
-export function getProviderAvailability(): Record<AgentProvider, boolean> {
+export function getProviderAvailability(
+  options: {
+    commandAvailable?: (command: string) => boolean;
+    containerImageAvailable?: () => boolean;
+    credentialAvailable?: (key: string) => boolean;
+    codingRunnerInfrastructure?: CodingRunnerInfrastructure;
+    inspectContainerImage?: ContainerImageInspector;
+  } = {},
+): Record<AgentProvider, boolean> {
   const config = getAgentProviderConfig();
   const availability = {} as Record<AgentProvider, boolean>;
+  const hasCommand = options.commandAvailable || commandAvailable;
+  const hasContainerImage =
+    options.containerImageAvailable ||
+    (() =>
+      isCodingContainerImageAvailable({
+        infrastructure:
+          options.codingRunnerInfrastructure || getCodingRunnerInfrastructure(),
+        inspect: options.inspectContainerImage,
+      }));
+  const hasCredential = options.credentialAvailable || isCredentialConfigured;
 
   for (const provider of AGENT_PROVIDERS) {
     const definition = AGENT_PROVIDER_DEFINITIONS[provider];
+    if (provider === 'pi') {
+      availability.pi =
+        hasContainerImage() && hasCredential('OPENROUTER_API_KEY');
+      continue;
+    }
     if (definition.requiresCli) {
-      availability[provider] = commandAvailable(definition.requiresCli);
+      availability[provider] = hasCommand(definition.requiresCli);
       continue;
     }
 

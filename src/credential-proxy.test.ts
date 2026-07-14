@@ -244,6 +244,56 @@ describe('credential-proxy', () => {
     );
   });
 
+  it('injects the OpenRouter API key through the hosted provider route', async () => {
+    proxyPort = await startProxy({
+      OPENROUTER_API_KEY: 'sk-openrouter-real-key',
+      OPENROUTER_BASE_URL: `http://127.0.0.1:${upstreamPort}/v1`,
+    });
+
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: 'GET',
+        path: '/__nanocrab/providers/openrouter/models',
+        headers: {
+          authorization: 'Bearer placeholder',
+        },
+      },
+      '',
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(lastUpstreamPath).toBe('/v1/models');
+    expect(lastUpstreamHeaders.authorization).toBe(
+      'Bearer sk-openrouter-real-key',
+    );
+  });
+
+  it('injects the Mistral API key through the hosted provider route', async () => {
+    proxyPort = await startProxy({
+      MISTRAL_API_KEY: 'sk-mistral-real-key',
+      MISTRAL_BASE_URL: `http://127.0.0.1:${upstreamPort}/v1`,
+    });
+
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: 'GET',
+        path: '/__nanocrab/providers/mistral/models',
+        headers: {
+          authorization: 'Bearer placeholder',
+        },
+      },
+      '',
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(lastUpstreamPath).toBe('/v1/models');
+    expect(lastUpstreamHeaders.authorization).toBe(
+      'Bearer sk-mistral-real-key',
+    );
+  });
+
   it('returns 502 when upstream is unreachable', async () => {
     Object.assign(mockEnv, {
       ANTHROPIC_API_KEY: 'sk-ant-real-key',

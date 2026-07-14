@@ -63,6 +63,11 @@ describe('Control Plane UI', () => {
     expect(source).toContain('control-plane-runtime-row');
   });
 
+  it('renders coding-runner readiness instead of host-only CLI health', () => {
+    const source = fs.readFileSync(pagePath, 'utf8');
+    expect(source).toContain('runtime.codingReadiness || runtime.health');
+  });
+
   it('wires page routing and navigation', () => {
     const app = fs.readFileSync(appPath, 'utf8');
     expect(app).toContain('renderControlPlane');

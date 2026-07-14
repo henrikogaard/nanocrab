@@ -160,7 +160,9 @@ function getDiskUsage(): {
       const free = parseInt(parts[3], 10);
       return { total, used, free, percent: Math.round((used / total) * 100) };
     }
-  } catch {}
+  } catch {
+    // intentional
+  }
   return null;
 }
 
@@ -244,8 +246,11 @@ router.get('/dashboard', async (_req: Request, res: Response) => {
         .all() as any[];
       failedLogins = audit.filter((a) => a.action === 'login_failed').length;
       blockedIps = audit.filter((a) => a.action === 'ip_blocked').length;
-    } catch {}
+    } catch {
+      // intentional
+    }
   } catch {
+    // intentional
   } finally {
     db.close();
   }

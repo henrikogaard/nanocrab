@@ -237,7 +237,6 @@ function connectWs() {
       ws.send(
         JSON.stringify({ type: 'terminal_attach', sessionId: savedSessionId }),
       );
-      ws.send(JSON.stringify({ type: 'terminal_spawn', data: savedSessionId }));
     }
   };
   ws.onmessage = (e) => {
@@ -306,6 +305,29 @@ function activatePageTabAlias(alias) {
 }
 
 let handleWsMessage = function (msg) {
+  if (
+    msg.type === 'terminal_attach_result' &&
+    activeTerminal &&
+    msg.sessionId === activeTerminal.sessionId
+  ) {
+    activeTerminal.readOnly = msg.data.status === 'historical';
+    if (msg.data.status === 'not-found' && ws?.readyState === 1) {
+      ws.send(
+        JSON.stringify({ type: 'terminal_spawn', data: msg.sessionId }),
+      );
+    }
+    return;
+  }
+  if (
+    msg.type === 'terminal_denied' &&
+    activeTerminal &&
+    msg.sessionId === activeTerminal.sessionId
+  ) {
+    activeTerminal.term.write(
+      `\r\n[Permission denied: ${msg.data.reason || 'terminal operation denied'}]\r\n`,
+    );
+    return;
+  }
   // Route terminal output to active terminal
   if (
     msg.type === 'terminal_output' &&
@@ -650,6 +672,10 @@ const navIconPaths = {
     '<path d="M9 4.5h5l3.5 3.5v8a1.5 1.5 0 0 1-1.5 1.5H9A1.5 1.5 0 0 1 7.5 16V6A1.5 1.5 0 0 1 9 4.5Z"/><path d="M14 4.5V8h3.5"/><path d="M4.5 8.5V18.5A1 1 0 0 0 5.5 19.5h7.5"/>',
   'control-plane':
     '<path d="M12 2.5 21.5 8v8L12 21.5 2.5 16V8L12 2.5Z"/><path d="M12 7.5v9"/><path d="M7.5 10.5 12 7.5l4.5 3"/><path d="M7.5 13.5 12 16.5l4.5-3"/>',
+  learning:
+    '<path d="M12 3.5 19.5 8v8L12 20.5 4.5 16V8L12 3.5Z"/><path d="M12 8.5v7"/><path d="M8 11.5 12 8.5l4 3"/><path d="M8 14.5 12 17.5l4-3"/>',
+  source:
+    '<path d="M4.5 6.5h15v3.5h-15z"/><path d="M6 10v8.5a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V10"/><path d="M10 14h4"/>',
 };
 
 function navIcon(name, extraClass = '') {
@@ -1028,6 +1054,8 @@ const _pageMap = {
   help: 'renderHelp',
   marketplace: 'renderMarketplace',
   'control-plane': 'renderControlPlane',
+  'learning-proposals': 'renderLearningProposals',
+  'source-collections': 'renderSourceCollections',
   'session-detail': 'renderSessionDetail',
 };
 // Track which plugin frontends we've already loaded
@@ -12590,6 +12618,20 @@ async function renderTerminal(el) {
         `).join('')}
       </div>
     </section>
+    <section class="terminal-session-browser" id="terminal-session-browser">
+      <div class="terminal-session-browser-head" onclick="toggleSessionBrowser()">
+        <span class="report-kicker">Session history</span>
+        <span class="terminal-session-browser-toggle">&#9660;</span>
+      </div>
+      <div class="terminal-session-browser-body is-hidden" id="terminal-session-browser-body">
+        <div class="terminal-session-browser-toolbar">
+          <button class="btn btn-sm btn-ghost" onclick="loadTerminalSessions()">Refresh</button>
+        </div>
+        <div class="terminal-session-list" id="terminal-session-list">
+          <p class="terminal-session-empty">Click refresh to load session history.</p>
+        </div>
+      </div>
+    </section>
     <div class="terminal-shell-card">
       <div class="split-container" id="terminal-split">
         <div class="split-pane terminal-split-pane" id="pane-left">
@@ -12718,7 +12760,7 @@ async function renderTerminal(el) {
 
   const sessionId = document.getElementById('terminal-session-id').value;
   localStorage.setItem('terminal_session_id', sessionId);
-  activeTerminal = { sessionId, term, transcript: '' };
+  activeTerminal = { sessionId, term, transcript: '', readOnly: false };
   window._terminalOperatorState = {
     ...(window._terminalOperatorState || {}),
     sessionId,
@@ -12730,7 +12772,6 @@ async function renderTerminal(el) {
   const initTerminal = () => {
     if (ws?.readyState === 1) {
       ws.send(JSON.stringify({ type: 'terminal_attach', sessionId }));
-      ws.send(JSON.stringify({ type: 'terminal_spawn', data: sessionId }));
       return;
     }
     term.write('Connecting...\r\n');
@@ -12741,7 +12782,6 @@ async function renderTerminal(el) {
       if (ws?.readyState === 1) {
         clearInterval(check);
         ws.send(JSON.stringify({ type: 'terminal_attach', sessionId }));
-        ws.send(JSON.stringify({ type: 'terminal_spawn', data: sessionId }));
       } else if (attempts > 20) {
         clearInterval(check);
         term.write('\r\nFailed to connect. Check WebSocket.\r\n');
@@ -12752,7 +12792,7 @@ async function renderTerminal(el) {
   initTerminal();
 
   term.onData((data) => {
-    if (ws?.readyState === 1) {
+    if (ws?.readyState === 1 && !activeTerminal.readOnly) {
       ws.send(JSON.stringify({ type: 'terminal_input', sessionId, data }));
     }
   });
@@ -12960,6 +13000,78 @@ window.spawnNewTerminal = function () {
     activeTerminal = null;
   }
   if (currentPage === 'devhub') navigate('devhub');
+};
+
+window.loadTerminalSessions = async function () {
+  const listEl = document.getElementById('terminal-session-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<p>Loading...</p>';
+  try {
+    const res = await fetch('/api/sessions/terminal/history', {
+      headers: { Authorization: 'Bearer ' + sessionToken },
+    });
+    if (!res.ok) {
+      listEl.innerHTML = '<p class="terminal-session-error">Failed to load session history</p>';
+      return;
+    }
+    const sessions = await res.json();
+    if (sessions.length === 0) {
+      listEl.innerHTML = '<p class="terminal-session-empty">No sessions yet.</p>';
+      return;
+    }
+    listEl.innerHTML = sessions
+      .map(
+        (s) =>
+          `<div class="terminal-session-item ${s.active ? 'active' : ''}" data-session-id="${esc(s.id)}">
+            <div class="terminal-session-item-info" onclick="loadTerminalSession('${esc(s.id)}')">
+              <strong>${esc(s.id)}</strong>
+              <span class="terminal-session-meta">${s.active ? 'Active' : s.endedAt ? timeAgo(s.endedAt) : 'Never ended'} &middot; ${s.owner || 'unknown'} &middot; ${s.bytes ? formatBytes(s.bytes) : '0 B'}</span>
+            </div>
+            <button class="btn btn-sm btn-ghost terminal-session-delete" onclick="event.stopPropagation(); deleteTerminalSession('${esc(s.id)}')" title="Delete session">🗑</button>
+          </div>`,
+      )
+      .join('');
+  } catch {
+    listEl.innerHTML = '<p class="terminal-session-error">Failed to load session history</p>';
+  }
+};
+
+window.loadTerminalSession = function (sessionId) {
+  const input = document.getElementById('terminal-session-id');
+  if (input) input.value = sessionId;
+  localStorage.setItem('terminal_session_id', sessionId);
+  if (window._terminalOperatorState) {
+    window._terminalOperatorState.sessionId = sessionId;
+    window._terminalOperatorState.transcript = '';
+  }
+  if (activeTerminal && activeTerminal.term) {
+    activeTerminal.term.dispose();
+    activeTerminal = null;
+  }
+  if (currentPage === 'devhub') navigate('devhub');
+};
+
+window.deleteTerminalSession = async function (sessionId) {
+  if (!confirm('Delete terminal session ' + sessionId + '?')) return;
+  try {
+    const res = await fetch('/api/sessions/terminal/' + encodeURIComponent(sessionId), {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer ' + sessionToken },
+    });
+    if (res.ok) {
+      toast('Session deleted', 'success');
+      loadTerminalSessions();
+    } else {
+      toast('Failed to delete session', 'error');
+    }
+  } catch {
+    toast('Failed to delete session', 'error');
+  }
+};
+
+window.toggleSessionBrowser = function () {
+  const body = document.getElementById('terminal-session-browser-body');
+  if (body) body.classList.toggle('is-hidden');
 };
 
 window.reconnectTerminal = function () {
@@ -13786,7 +13898,7 @@ function colorizeLog(lines) {
   return lines
     .map((l) => {
       if (!l) return '';
-      const escaped = esc(l.replace(/\x1b\[[0-9;]*m/g, ''));
+      const escaped = esc(l.replace(new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g'), ''));
       if (escaped.includes('ERROR'))
         return `<span class="log-error">${escaped}</span>`;
       if (escaped.includes('WARN'))

@@ -34,6 +34,10 @@ const fileVaultStatesUiPath = path.join(
   process.cwd(),
   'src/admin/public/ui/file-vault-states.js',
 );
+const commandPaletteUiPath = path.join(
+  process.cwd(),
+  'src/admin/public/ui/command-palette.js',
+);
 
 function loadShellNavigation(role = 'owner') {
   const context = {
@@ -44,6 +48,53 @@ function loadShellNavigation(role = 'owner') {
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(shellNavigationUiPath, 'utf8'), context);
   return (context.window as any).NanoShellNavigation;
+}
+
+function loadCommandPalette() {
+  const inputMock = {
+    value: '',
+    addEventListener: () => {},
+    focus: () => {},
+  };
+  const elMock = {
+    id: '',
+    className: '',
+    setAttribute: () => {},
+    addEventListener: () => {},
+    appendChild: (child: any) => child,
+    innerHTML: '',
+    querySelector: (sel: string) =>
+      sel === '.cp-input' || sel === '.cp-results'
+        ? sel === '.cp-input'
+          ? inputMock
+          : {
+              innerHTML: '',
+              querySelector: () => null,
+              addEventListener: () => {},
+            }
+        : null,
+    querySelectorAll: () => [],
+    closest: (_s: string) => null,
+    scrollIntoView: () => {},
+    focus: () => {},
+  };
+  const doc = {
+    getElementById: () => null,
+    createElement: (_tag: string) => elMock,
+    addEventListener: () => {},
+    body: { appendChild: () => {} },
+    readyState: 'complete',
+  };
+  const context: any = {
+    window: { document: doc },
+    document: doc,
+    navigator: {},
+    location: { hash: '' },
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(shellNavigationUiPath, 'utf8'), context);
+  vm.runInContext(fs.readFileSync(commandPaletteUiPath, 'utf8'), context);
+  return context.window.NanoCommandPalette;
 }
 
 describe('App shell accessibility UI', () => {
@@ -186,6 +237,7 @@ describe('App shell accessibility UI', () => {
     expect(indexSource).toContain('/ui/feedback.js');
     expect(indexSource).toContain('/ui/shell-states.js');
     expect(indexSource).toContain('/ui/shell-navigation.js');
+    expect(indexSource).toContain('/ui/command-palette.js');
     expect(indexSource).toContain('/ui/recovery.js');
     expect(indexSource).toContain('/ui/provider-parity.js');
     expect(indexSource).toContain('/ui/routine-states.js');
@@ -212,6 +264,9 @@ describe('App shell accessibility UI', () => {
       indexSource.indexOf('/ui/shell-navigation.js'),
     );
     expect(indexSource.indexOf('/ui/shell-navigation.js')).toBeLessThan(
+      indexSource.indexOf('/ui/recovery.js'),
+    );
+    expect(indexSource.indexOf('/ui/command-palette.js')).toBeLessThan(
       indexSource.indexOf('/ui/recovery.js'),
     );
     expect(indexSource.indexOf('/ui/recovery.js')).toBeLessThan(
@@ -536,5 +591,56 @@ describe('App shell accessibility UI', () => {
     expect(source).toContain('.shell-loading-state::after,');
     expect(source).toContain('.progress-spinner');
     expect(source).toContain('animation: none !important;');
+  });
+
+  it('loads the command palette after shell-navigation and before app.js, with Cmd+K binding', () => {
+    const source = fs.readFileSync(commandPaletteUiPath, 'utf8');
+    const styleSource = fs.readFileSync(stylePath, 'utf8');
+    const indexSource = fs.readFileSync(
+      path.join(process.cwd(), 'src/admin/public/index.html'),
+      'utf8',
+    );
+
+    expect(indexSource.indexOf('/ui/shell-navigation.js')).toBeLessThan(
+      indexSource.indexOf('/ui/command-palette.js'),
+    );
+    expect(indexSource.indexOf('/ui/command-palette.js')).toBeLessThan(
+      indexSource.indexOf('/ui/recovery.js'),
+    );
+    expect(source).toContain("'k'");
+    expect(source).toContain('e.metaKey || e.ctrlKey');
+    expect(source).toContain("cp-overlay'");
+    expect(source).toContain('cp-modal');
+    expect(source).toContain('cp-input');
+    expect(source).toContain('cp-results');
+    expect(source).toContain('cp-item');
+    expect(source).toContain('cp-empty');
+    expect(source).toContain('cp-footer');
+    expect(source).toContain('Search pages, tools, and views');
+    expect(source).toContain('ArrowDown');
+    expect(source).toContain('ArrowUp');
+    expect(source).toContain('dialog');
+    expect(source).toContain('option');
+    expect(source).toContain('group');
+    expect(source).toContain('listbox');
+    expect(source).toContain('aria-selected');
+    expect(source).toContain('aria-label');
+    expect(source).toContain('aria-modal');
+    expect(styleSource).toContain('.cp-overlay');
+    expect(styleSource).toContain('.cp-modal');
+    expect(styleSource).toContain('.cp-item');
+    expect(styleSource).toContain('.cp-selected');
+    expect(styleSource).toContain('.cp-empty');
+    expect(styleSource).toContain('.cp-footer');
+    expect(styleSource).toContain('.cp-overlay.cp-visible');
+    expect(styleSource).toContain('z-index: 100');
+    expect(styleSource).toContain('cp-results');
+  });
+
+  it('registers NanoCommandPalette with open and close methods', () => {
+    const palette = loadCommandPalette();
+    expect(palette).toBeDefined();
+    expect(typeof palette.open).toBe('function');
+    expect(typeof palette.close).toBe('function');
   });
 });

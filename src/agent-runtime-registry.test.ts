@@ -4,6 +4,11 @@ import {
   listAgentRuntimeDefinitions,
   probeAgentRuntime,
 } from './agent-runtime-registry.js';
+import {
+  getCodingRunnerInfrastructure,
+  isCodingContainerImageAvailable,
+  probeCodingRunnerReadiness,
+} from './coding-runner-readiness.js';
 
 describe('agent runtime registry', () => {
   it('exposes allowlisted CLI definitions', () => {
@@ -74,6 +79,55 @@ describe('agent runtime registry', () => {
     expect(result.checkedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
   });
 
+  it('reports Pi coding readiness from the image and credential route, not host CLI', async () => {
+    const hostProbe = vi.fn();
+
+    await expect(
+      probeCodingRunnerReadiness('pi', {
+        probeHostRuntime: hostProbe,
+        containerImageAvailable: vi.fn().mockReturnValue(true),
+        credentialAvailable: vi
+          .fn()
+          .mockImplementation((key: string) => key === 'OPENROUTER_API_KEY'),
+      }),
+    ).resolves.toMatchObject({
+      cli: 'pi',
+      status: 'healthy',
+      detail: expect.stringContaining('OpenRouter'),
+    });
+    expect(hostProbe).not.toHaveBeenCalled();
+  });
+
+  it('does not report Pi runnable without the OpenRouter credential route', async () => {
+    await expect(
+      probeCodingRunnerReadiness('pi', {
+        probeHostRuntime: vi.fn(),
+        containerImageAvailable: vi.fn().mockReturnValue(true),
+        credentialAvailable: vi.fn().mockReturnValue(false),
+      }),
+    ).resolves.toMatchObject({
+      cli: 'pi',
+      status: 'missing',
+      detail: expect.stringContaining('OPENROUTER_API_KEY'),
+    });
+  });
+
+  it('uses the configured container runtime and image for coding readiness', () => {
+    const infrastructure = getCodingRunnerInfrastructure({
+      CONTAINER_RUNTIME_BIN: 'podman',
+      CONTAINER_IMAGE: 'registry.example/nanocrab-agent:test',
+    });
+    const inspect = vi.fn().mockReturnValue(true);
+
+    expect(isCodingContainerImageAvailable({ infrastructure, inspect })).toBe(
+      true,
+    );
+    expect(inspect).toHaveBeenCalledWith(
+      'podman',
+      'registry.example/nanocrab-agent:test',
+    );
+  });
+
   it('reports healthy runtime with parsed version', async () => {
     const execFile = vi.fn().mockResolvedValue({
       stdout: 'codex-cli 1.2.3\n',
@@ -90,26 +144,23 @@ describe('agent runtime registry', () => {
     expect(result.version).toBe('1.2.3');
   });
 
-  it('distinguishes installed unsupported runtimes from a supported runtime', async () => {
+  it('reports supported runtimes as healthy when installed', async () => {
     const execFile = vi
       .fn()
       .mockResolvedValueOnce({ stdout: 'pi 0.4.0\n', stderr: '' })
-      .mockResolvedValueOnce({ stdout: 'devin 1.1.0\n', stderr: '' })
       .mockResolvedValueOnce({ stdout: 'vibe 0.9.1\n', stderr: '' })
       .mockResolvedValueOnce({ stdout: 'codex-cli 1.2.3\n', stderr: '' });
 
     for (const [cli, executable, version] of [
       ['pi', 'pi', '0.4.0'],
-      ['devin', 'devin', '1.1.0'],
       ['mistral', 'vibe', '0.9.1'],
     ] as const) {
       await expect(probeAgentRuntime(cli, { execFile })).resolves.toMatchObject(
         {
           cli,
           executable,
-          status: 'unsupported',
+          status: 'healthy',
           version,
-          detail: expect.stringMatching(/not supported.*coding.*runner/i),
         },
       );
     }
@@ -121,6 +172,22 @@ describe('agent runtime registry', () => {
       executable: 'codex',
       status: 'healthy',
       version: '1.2.3',
+    });
+  });
+
+  it('reports devin as unsupported when installed', async () => {
+    const execFile = vi.fn().mockResolvedValue({
+      stdout: 'devin 1.1.0\n',
+      stderr: '',
+    });
+
+    await expect(
+      probeAgentRuntime('devin', { execFile }),
+    ).resolves.toMatchObject({
+      cli: 'devin',
+      executable: 'devin',
+      status: 'unsupported',
+      version: '1.1.0',
     });
   });
 

@@ -15,7 +15,14 @@ import {
 } from '../channel-status.js';
 import { getState, nonWebGroups } from './state.js';
 import { validateSession, getSessionUser, AdminUser } from './auth.js';
-import { SESSIONS_DIR, TERMINAL_IDLE_TIMEOUT_MS } from '../config.js';
+import {
+  SESSIONS_DIR,
+  TERMINAL_IDLE_TIMEOUT_MS,
+  MAX_SESSION_LOG_BYTES,
+  MAX_SESSION_RETENTION_DAYS,
+  MAX_SESSIONS_COUNT,
+  SESSION_PRUNE_INTERVAL_MS,
+} from '../config.js';
 
 interface WsMessage {
   type: string;
@@ -52,10 +59,97 @@ const SAFE_SESSION_ID = /^[A-Za-z0-9_.-]+$/;
 interface SessionMetadata {
   id: string;
   name: string;
-  owner: string;
+  owner?: string;
   createdAt: string;
   endedAt: string | null;
   bytes: number;
+}
+
+type TerminalOperation = 'spawn' | 'attach' | 'input' | 'close';
+
+function terminalSessionOwner(sessionId: string): string | undefined {
+  return (
+    terminals.get(sessionId)?.owner ||
+    loadSessionIndex().find((entry) => entry.id === sessionId)?.owner
+  );
+}
+
+export type TerminalSessionAccess = 'allowed' | 'forbidden' | 'not-found';
+
+export function authorizeTerminalSessionAccess(
+  sessionId: string,
+  username: string,
+  operation: 'read' | 'delete' = 'read',
+): TerminalSessionAccess {
+  const indexed = loadSessionIndex().find((entry) => entry.id === sessionId);
+  const active = terminals.get(sessionId);
+  if (!indexed && !active) {
+    const logPath = sessionLogPath(sessionId);
+    const diskOnlyOrphan = Boolean(
+      historicalSessions.has(sessionId) || (logPath && fs.existsSync(logPath)),
+    );
+    return diskOnlyOrphan ? 'forbidden' : 'not-found';
+  }
+  const owner = active?.owner || indexed?.owner;
+  if (owner) return owner === username ? 'allowed' : 'forbidden';
+  return operation === 'read' ? 'allowed' : 'forbidden';
+}
+
+function denyTerminalOperation(
+  ws: WebSocket,
+  operation: TerminalOperation,
+  sessionId: string,
+  reason: string,
+): void {
+  send(ws, {
+    type: 'terminal_denied',
+    sessionId,
+    data: { operation, reason },
+  });
+}
+
+function authorizeTerminalOperation(
+  ws: WebSocket,
+  user: AdminUser | null,
+  operation: TerminalOperation,
+  sessionId: string,
+): boolean {
+  if (user?.role !== 'owner') {
+    denyTerminalOperation(
+      ws,
+      operation,
+      sessionId,
+      'Terminal operations require owner role.',
+    );
+    return false;
+  }
+
+  const sessionOwner = terminalSessionOwner(sessionId);
+  if (sessionOwner && sessionOwner !== user.username) {
+    denyTerminalOperation(
+      ws,
+      operation,
+      sessionId,
+      'Terminal session belongs to a different owner.',
+    );
+    return false;
+  }
+
+  if (
+    (operation === 'input' || operation === 'close') &&
+    !terminals.has(sessionId) &&
+    historicalSessions.has(sessionId)
+  ) {
+    denyTerminalOperation(
+      ws,
+      operation,
+      sessionId,
+      'Historical terminal sessions are read-only.',
+    );
+    return false;
+  }
+
+  return true;
 }
 
 export interface CockpitStreamEvent {
@@ -115,8 +209,8 @@ function sessionLogPath(sessionId: string): string | null {
 
 export function createSessionFile(sessionId: string, owner = 'owner'): boolean {
   if (!isSafeTerminalSessionId(sessionId)) return false;
-  let index = loadSessionIndex();
-  index = index.filter((e) => e.id !== sessionId);
+  const index = loadSessionIndex();
+  if (index.some((entry) => entry.id === sessionId)) return false;
   index.push({
     id: sessionId,
     name: sessionId,
@@ -129,7 +223,21 @@ export function createSessionFile(sessionId: string, owner = 'owner'): boolean {
   return true;
 }
 
+// Sessions whose log has hit the byte cap — used to warn only once per session.
+const maxSizeWarned = new Set<string>();
+
+// Truncate a UTF-8 buffer to at most maxBytes without splitting a multi-byte
+// codepoint (which would write an invalid byte sequence to the log file).
+function safeUtf8Slice(buf: Buffer, maxBytes: number): Buffer {
+  let end = Math.min(maxBytes, buf.length);
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) {
+    end--;
+  }
+  return buf.subarray(0, end);
+}
+
 export function finalizeSessionFile(sessionId: string): void {
+  maxSizeWarned.delete(sessionId);
   const index = loadSessionIndex();
   const entry = index.find((e) => e.id === sessionId);
   if (entry) {
@@ -137,9 +245,26 @@ export function finalizeSessionFile(sessionId: string): void {
     const logPath = sessionLogPath(sessionId);
     try {
       entry.bytes = logPath ? fs.statSync(logPath).size : 0;
-    } catch {}
+    } catch {
+      // intentional
+    }
     saveSessionIndex(index);
   }
+  if (entry) historicalSessions.set(sessionId, readSessionLog(sessionId));
+}
+
+export type TerminalSessionAttachment =
+  | { status: 'historical'; transcript: string }
+  | { status: 'not-found' };
+
+export function getTerminalSessionAttachment(
+  sessionId: string,
+): TerminalSessionAttachment {
+  if (!historicalSessions.has(sessionId)) return { status: 'not-found' };
+  return {
+    status: 'historical',
+    transcript: historicalSessions.get(sessionId) || '',
+  };
 }
 
 export function appendToSessionLog(sessionId: string, data: string): void {
@@ -148,6 +273,34 @@ export function appendToSessionLog(sessionId: string, data: string): void {
   if (!logPath) return;
   try {
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    // Enforce a byte-accurate size cap. Terminal output may contain multi-byte
+    // UTF-8, so we measure and slice on bytes rather than string length.
+    if (fs.existsSync(logPath)) {
+      const stat = fs.statSync(logPath);
+      if (stat.size >= MAX_SESSION_LOG_BYTES) {
+        if (!maxSizeWarned.has(sessionId)) {
+          maxSizeWarned.add(sessionId);
+          logger.warn(
+            { sessionId, size: stat.size },
+            'Session log reached max size, dropping further output',
+          );
+        }
+        return;
+      }
+      const remaining = MAX_SESSION_LOG_BYTES - stat.size;
+      const buf = Buffer.from(data, 'utf-8');
+      if (buf.length > remaining) {
+        fs.appendFileSync(logPath, safeUtf8Slice(buf, remaining));
+        if (!maxSizeWarned.has(sessionId)) {
+          maxSizeWarned.add(sessionId);
+          logger.warn(
+            { sessionId },
+            'Session log reached max size, dropping further output',
+          );
+        }
+        return;
+      }
+    }
     fs.appendFileSync(logPath, data, 'utf-8');
   } catch (err) {
     logger.warn({ err, sessionId }, 'Failed to append to session log');
@@ -166,6 +319,7 @@ export function readSessionLog(sessionId: string): string {
 
 export function loadHistoricalSessions(): number {
   try {
+    historicalSessions.clear();
     if (!fs.existsSync(SESSIONS_DIR)) return 0;
     const files = fs
       .readdirSync(SESSIONS_DIR)
@@ -173,14 +327,98 @@ export function loadHistoricalSessions(): number {
     let count = 0;
     for (const file of files) {
       const sessionId = file.replace('.log', '');
-      const content = fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf-8');
-      historicalSessions.set(sessionId, content);
-      count++;
+      try {
+        const content = fs.readFileSync(path.join(SESSIONS_DIR, file), 'utf-8');
+        historicalSessions.set(sessionId, content);
+        count++;
+      } catch {
+        // skip files that can't be read
+      }
     }
     return count;
   } catch {
     return 0;
   }
+}
+
+export function pruneOldSessions(): number {
+  try {
+    if (!fs.existsSync(SESSIONS_DIR)) return 0;
+    const indexPath = path.join(SESSIONS_DIR, 'index.json');
+    if (!fs.existsSync(indexPath)) return 0;
+    let index: SessionMetadata[] = JSON.parse(
+      fs.readFileSync(indexPath, 'utf-8'),
+    );
+    const originalIndex = [...index];
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - MAX_SESSION_RETENTION_DAYS);
+    index = index.filter((entry) => {
+      if (!entry.endedAt) return true; // keep active sessions
+      return new Date(entry.endedAt) >= cutoff;
+    });
+    // Also cap total count
+    if (index.length > MAX_SESSIONS_COUNT) {
+      index.sort((a, b) =>
+        (b.createdAt || '').localeCompare(a.createdAt || ''),
+      );
+      index = index.slice(0, MAX_SESSIONS_COUNT);
+    }
+    const retainedIds = new Set(index.map((entry) => entry.id));
+    const prunedIds = originalIndex
+      .filter((entry) => !retainedIds.has(entry.id))
+      .map((entry) => entry.id);
+    saveSessionIndex(index);
+    for (const sessionId of prunedIds) {
+      removeTerminalSessionArtifacts(sessionId);
+    }
+    const pruned = prunedIds.length;
+    if (pruned > 0) {
+      logger.info({ pruned }, 'Pruned old terminal sessions');
+    }
+    // Remove orphan .log files not in index
+    const indexIds = new Set(index.map((e) => e.id));
+    const logFiles = fs
+      .readdirSync(SESSIONS_DIR)
+      .filter((f) => f.endsWith('.log'));
+    for (const file of logFiles) {
+      const sessionId = file.replace('.log', '');
+      if (!indexIds.has(sessionId)) {
+        removeTerminalSessionArtifacts(sessionId);
+      }
+    }
+    return pruned;
+  } catch {
+    return 0;
+  }
+}
+
+function removeTerminalSessionArtifacts(sessionId: string): void {
+  closeTerminalSession(sessionId);
+  historicalSessions.delete(sessionId);
+  maxSizeWarned.delete(sessionId);
+  const logPath = sessionLogPath(sessionId);
+  try {
+    if (logPath && fs.existsSync(logPath)) fs.unlinkSync(logPath);
+  } catch {
+    // best-effort cleanup; the index/cache state is still made coherent
+  }
+}
+
+export function deleteTerminalSession(sessionId: string): boolean {
+  if (!isSafeTerminalSessionId(sessionId)) return false;
+  const index = loadSessionIndex();
+  const indexed = index.some((entry) => entry.id === sessionId);
+  const logPath = sessionLogPath(sessionId);
+  const exists =
+    indexed ||
+    terminals.has(sessionId) ||
+    historicalSessions.has(sessionId) ||
+    Boolean(logPath && fs.existsSync(logPath));
+  if (!exists) return false;
+
+  saveSessionIndex(index.filter((entry) => entry.id !== sessionId));
+  removeTerminalSessionArtifacts(sessionId);
+  return true;
 }
 
 export function initWebSocket(server: HttpServer): void {
@@ -212,18 +450,15 @@ export function initWebSocket(server: HttpServer): void {
           stopLogStream(ws);
         }
         if (msg.type === 'terminal_spawn') {
-          // Only owner can open terminal sessions
-          if (wsUser?.role !== 'owner') {
-            send(ws, {
-              type: 'terminal_output',
-              data: 'Permission denied: terminal requires owner role.\r\n',
-              sessionId: msg.data as string,
-            });
-            return;
+          const sessionId = msg.data as string;
+          if (authorizeTerminalOperation(ws, wsUser, 'spawn', sessionId)) {
+            spawnTerminal(ws, sessionId, wsUser!.username);
           }
-          spawnTerminal(ws, msg.data as string, wsUser?.username || 'owner');
         }
         if (msg.type === 'terminal_input' && msg.sessionId) {
+          if (!authorizeTerminalOperation(ws, wsUser, 'input', msg.sessionId)) {
+            return;
+          }
           const term = terminals.get(msg.sessionId);
           if (term && term.clients.has(ws)) {
             term.process.stdin?.write(msg.data as string);
@@ -242,20 +477,33 @@ export function initWebSocket(server: HttpServer): void {
         }
         if (msg.type === 'terminal_attach' && msg.sessionId) {
           const sid = msg.sessionId as string;
+          if (!authorizeTerminalOperation(ws, wsUser, 'attach', sid)) {
+            return;
+          }
           const term = terminals.get(sid);
           if (term) {
             term.clients.add(ws);
+            send(ws, {
+              type: 'terminal_attach_result',
+              data: { status: 'active', readOnly: false },
+              sessionId: sid,
+            });
             send(ws, {
               type: 'terminal_output',
               data: term.transcript.slice(-50000),
               sessionId: sid,
             });
           } else {
-            const historical = historicalSessions.get(sid);
-            if (historical) {
+            const attachment = getTerminalSessionAttachment(sid);
+            if (attachment.status === 'historical') {
+              send(ws, {
+                type: 'terminal_attach_result',
+                data: { status: 'historical', readOnly: true },
+                sessionId: sid,
+              });
               send(ws, {
                 type: 'terminal_output',
-                data: historical.slice(-50000),
+                data: attachment.transcript.slice(-50000),
                 sessionId: sid,
               });
               send(ws, {
@@ -263,12 +511,19 @@ export function initWebSocket(server: HttpServer): void {
                 data: '\r\n[Session ended — read-only view. Close this and spawn a new session to continue.]\r\n',
                 sessionId: sid,
               });
+            } else {
+              send(ws, {
+                type: 'terminal_attach_result',
+                data: { status: 'not-found', readOnly: false },
+                sessionId: sid,
+              });
             }
           }
         }
         if (msg.type === 'terminal_close' && msg.sessionId) {
-          const term = terminals.get(msg.sessionId);
-          if (term) term.process.kill();
+          if (authorizeTerminalOperation(ws, wsUser, 'close', msg.sessionId)) {
+            closeTerminalSession(msg.sessionId);
+          }
         }
       } catch {
         // ignore malformed messages
@@ -286,7 +541,11 @@ export function initWebSocket(server: HttpServer): void {
     broadcast({ type: 'status', data: getStatusData() });
   }, 3000);
 
+  pruneOldSessions();
   loadHistoricalSessions();
+  // Enforce retention periodically, not only at startup, so long-running
+  // servers do not accumulate sessions unbounded between restarts.
+  setInterval(() => pruneOldSessions(), SESSION_PRUNE_INTERVAL_MS).unref();
   logger.debug('WebSocket server initialized');
 }
 
@@ -387,6 +646,19 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
     return;
   }
 
+  if (
+    historicalSessions.has(sessionId) ||
+    loadSessionIndex().some((entry) => entry.id === sessionId)
+  ) {
+    denyTerminalOperation(
+      ws,
+      'spawn',
+      sessionId,
+      'Historical terminal session ids cannot be reused.',
+    );
+    return;
+  }
+
   if (terminals.size >= MAX_TERMINALS) {
     send(ws, {
       type: 'terminal_output',
@@ -440,6 +712,19 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
   });
 
   logger.info({ sessionId }, 'Terminal session spawned');
+}
+
+// Terminate an active terminal session: finalize its log, clear the idle timer,
+// and kill the process. Returns true if a live session was closed. The process
+// 'close' handler removes it from the terminals map.
+export function closeTerminalSession(sessionId: string): boolean {
+  const term = terminals.get(sessionId);
+  if (!term) return false;
+  clearTimeout(term.idleTimer);
+  finalizeSessionFile(sessionId);
+  term.process.kill();
+  terminals.delete(sessionId);
+  return true;
 }
 
 function broadcastTerminal(sessionId: string, data: string): void {

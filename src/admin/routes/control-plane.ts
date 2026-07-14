@@ -4,7 +4,11 @@ import { randomUUID } from 'crypto';
 import type { AgentCliId } from '../../types.js';
 import { listAgentProfiles } from '../../agent-profiles.js';
 import { probeAllAgentRuntimes } from '../../agent-runtime-registry.js';
-import { loadCodingJobs, getCodingJob } from '../../coding-jobs.js';
+import { probeAllCodingRunnerReadiness } from '../../coding-runner-readiness.js';
+import {
+  loadCodingJobs,
+  getCodingJob as _getCodingJob,
+} from '../../coding-jobs.js';
 import {
   DefaultGitHubProjectClient,
   StageConflictError,
@@ -96,6 +100,9 @@ function userActor(req: Request): string {
 interface RuntimeResponse {
   cli: AgentCliId;
   health: Awaited<ReturnType<typeof probeAllAgentRuntimes>>[number] | null;
+  codingReadiness:
+    | Awaited<ReturnType<typeof probeAllCodingRunnerReadiness>>[number]
+    | null;
 }
 
 const AGENT_CLIS: AgentCliId[] = [
@@ -206,11 +213,18 @@ function buildBoardCards() {
 
 router.get('/runtimes', async (_req: Request, res: Response) => {
   try {
-    const health = await probeAllAgentRuntimes();
+    const [health, codingReadiness] = await Promise.all([
+      probeAllAgentRuntimes(),
+      probeAllCodingRunnerReadiness(),
+    ]);
     const byCli = new Map(health.map((h) => [h.cli, h]));
+    const codingReadinessByCli = new Map(
+      codingReadiness.map((readiness) => [readiness.cli, readiness]),
+    );
     const runtimes: RuntimeResponse[] = AGENT_CLIS.map((cli) => ({
       cli,
       health: byCli.get(cli) || null,
+      codingReadiness: codingReadinessByCli.get(cli) || null,
     }));
     res.json({ runtimes });
   } catch (err) {
@@ -466,12 +480,12 @@ router.post('/decisions/:id/reassign', (req: Request, res: Response) =>
 
 router.get('/overview', async (_req: Request, res: Response) => {
   try {
-    const [pipelines, decisions, snapshots, runtimes, agents] =
+    const [pipelines, decisions, snapshots, codingReadiness, agents] =
       await Promise.all([
         Promise.resolve(listPipelines()),
         Promise.resolve(listDecisions()),
         Promise.resolve(listProjectItemSnapshots()),
-        probeAllAgentRuntimes(),
+        probeAllCodingRunnerReadiness(),
         Promise.resolve(listAgentProfiles()),
       ]);
     const jobs = loadCodingJobs();
@@ -482,7 +496,8 @@ router.get('/overview', async (_req: Request, res: Response) => {
       agents: agents.length,
       pendingDecisions: pendingDecisions.length,
       runs: jobs.filter((j) => j.pipelineId || j.decisionId).length,
-      runtimesHealthy: runtimes.filter((r) => r.status === 'healthy').length,
+      runtimesHealthy: codingReadiness.filter((r) => r.status === 'healthy')
+        .length,
     };
     res.json({
       ok: true,

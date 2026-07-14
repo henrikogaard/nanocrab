@@ -68,9 +68,11 @@ function controlPlaneDecisionCard(decision) {
 }
 
 function controlPlaneRuntimeRow(runtime) {
+  const readiness = runtime.codingReadiness || runtime.health;
+  const status = readiness ? readiness.status : 'unknown';
   return `<div class="control-plane-runtime-row">
     <span class="runtime-cli">${esc(runtime.cli)}</span>
-    <span class="runtime-status ${esc(controlPlaneBadge(runtime.health ? runtime.health.status : 'unknown'))}">${esc(runtime.health ? runtime.health.status : 'unknown')}</span>
+    <span class="runtime-status ${esc(controlPlaneBadge(status))}">${esc(status)}</span>
   </div>`;
 }
 

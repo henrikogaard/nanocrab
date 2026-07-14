@@ -81,7 +81,7 @@ wss.on('connection', (ws) => {
         JSON.stringify({
           type: 'terminal_output',
           sessionId: payload.data,
-          data: 'NanoCrab mock terminal\\n$ echo \"No live commands are run in mock mode.\"\\nNo live commands are run in mock mode.\\n$ ',
+          data: 'NanoCrab mock terminal\\n$ echo "No live commands are run in mock mode."\\nNo live commands are run in mock mode.\\n$ ',
         }),
       );
     }

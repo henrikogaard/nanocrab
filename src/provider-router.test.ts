@@ -342,11 +342,8 @@ describe('provider-router persistence', () => {
   });
 
   it('considers invalid preferred model unavailable and creates fallback approval', async () => {
-    const {
-      loadProviderProfiles,
-      resolveProviderFallbackForAction,
-      saveProviderProfile,
-    } = await import('./provider-router.js');
+    const { loadProviderProfiles, resolveProviderFallbackForAction } =
+      await import('./provider-router.js');
     const { listApprovals } = await import('./approvals.js');
     fs.mkdirSync('/tmp/nanocrab-provider-router-test/store', {
       recursive: true,

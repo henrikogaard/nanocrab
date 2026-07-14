@@ -44,7 +44,6 @@ const {
   getWebThreads,
   getAllChats,
   getChatProject,
-  listChatProjects,
   createChatProject,
   createCoworkProject,
 } = await import('../../db.js');

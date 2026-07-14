@@ -87,7 +87,7 @@ let mockThreads: Array<Record<string, string>> = [
   },
 ];
 
-let mockProjects: Array<Record<string, JsonValue>> = [
+const mockProjects: Array<Record<string, JsonValue>> = [
   {
     id: 'project-auroradocs',
     name: 'AuroraDocs',

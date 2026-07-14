@@ -28,6 +28,7 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { logger } from './logger.js';
+import { buildMistralVibeShellBlock } from './mistral-vibe-adapter.js';
 import {
   createApproval,
   findPendingApprovalForTarget,
@@ -55,6 +56,8 @@ const CODING_JOB_PROVIDERS = new Set<AgentProvider>([
   'claude',
   'codex',
   'opencode',
+  'pi',
+  'mistral',
   'openrouter',
   'ollama',
   'openai-compatible',
@@ -64,6 +67,8 @@ type CodingProvider = Extract<
   | 'claude'
   | 'codex'
   | 'opencode'
+  | 'pi'
+  | 'mistral'
   | 'openrouter'
   | 'ollama'
   | 'openai-compatible'
@@ -774,6 +779,20 @@ function applyCodingJobTransition(
       dryRun: job.dryRun,
     },
   });
+
+  if (to === 'completed') {
+    void import('./learning-loop.js')
+      .then(({ deriveLearningFromRun }) => {
+        deriveLearningFromRun(job.id, job.requestedBy || 'system');
+      })
+      .catch((err) => {
+        logger.error(
+          { err, jobId: job.id },
+          'Failed to derive learning proposal from coding job',
+        );
+      });
+  }
+
   return job;
 }
 
@@ -853,6 +872,7 @@ function buildCodingContainerEnv(
     'GIT_AUTHOR_NAME',
     'GIT_AUTHOR_EMAIL',
     'CODING_JOB_MAX_BUDGET_USD',
+    'CODING_JOB_MAX_TURNS',
     'OPENCODE_API_KEY',
     'OPENROUTER_API_KEY',
     'OPENROUTER_BASE_URL',
@@ -860,6 +880,8 @@ function buildCodingContainerEnv(
     'OPENAI_COMPATIBLE_API_KEY',
     'OPENAI_COMPATIBLE_BASE_URL',
     'DEFAULT_OPENAI_COMPATIBLE_BASE_URL',
+    'PI_PROVIDER',
+    'MISTRAL_API_KEY',
   ]);
   const env: Record<string, string> = {
     TZ: TIMEZONE,
@@ -874,6 +896,8 @@ function buildCodingContainerEnv(
     CREATE_PR: 'false',
     CODING_JOB_MAX_BUDGET_USD:
       envValue(envFileValues, 'CODING_JOB_MAX_BUDGET_USD') || '5',
+    CODING_JOB_MAX_TURNS:
+      envValue(envFileValues, 'CODING_JOB_MAX_TURNS') || '30',
     GIT_AUTHOR_NAME:
       envValue(envFileValues, 'GIT_AUTHOR_NAME') || 'NanoCrab Bot',
     GIT_AUTHOR_EMAIL:
@@ -954,13 +978,81 @@ function buildCodingContainerEnv(
     }
   }
 
+  if (job.provider === 'pi') {
+    const openrouterKey = envValue(envFileValues, 'OPENROUTER_API_KEY');
+    if (openrouterKey) {
+      env.OPENROUTER_API_KEY = 'placeholder';
+    }
+    env.PI_PROVIDER = 'openrouter';
+    env.PI_CODING_AGENT_DIR = '/workspace/coding-job/.nanocrab/pi-agent';
+  }
+
+  if (job.provider === 'mistral') {
+    env.MISTRAL_API_KEY = 'placeholder';
+    env.VIBE_HOME = '/workspace/coding-job/.nanocrab/vibe-home';
+  }
+
   return env;
+}
+
+function buildProxyProviderUrl(provider: string): string {
+  return `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/${provider}`;
+}
+
+function writeVibeConfig(metadataDir: string, job: CodingJob): void {
+  const vibeDir = path.join(metadataDir, 'vibe-home');
+  fs.mkdirSync(vibeDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(vibeDir, 'config.toml'),
+    [
+      'active_model = "nanocrab"',
+      '',
+      '[[providers]]',
+      'name = "mistral"',
+      `api_base = "${buildProxyProviderUrl('mistral')}"`,
+      'api_key_env_var = "MISTRAL_API_KEY"',
+      '',
+      '[[models]]',
+      `name = "${job.model.replace(/"/g, '\\"')}"`,
+      'provider = "mistral"',
+      'alias = "nanocrab"',
+      '',
+    ].join('\n'),
+  );
+}
+
+function writePiConfig(metadataDir: string): void {
+  const piDir = path.join(metadataDir, 'pi-agent');
+  fs.mkdirSync(piDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(piDir, 'models.json'),
+    JSON.stringify(
+      {
+        providers: {
+          openrouter: {
+            baseUrl: buildProxyProviderUrl('openrouter'),
+            apiKey: 'OPENROUTER_API_KEY',
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  fs.writeFileSync(path.join(piDir, 'auth.json'), '{}');
 }
 
 function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
   const jobRoot = path.dirname(job.workspace);
   const metadataDir = path.join(jobRoot, '.nanocrab');
   fs.mkdirSync(metadataDir, { recursive: true });
+  if (job.provider === 'mistral') writeVibeConfig(metadataDir, job);
+  if (job.provider === 'pi') writePiConfig(metadataDir);
+  const mistralVibeShellBlock = buildMistralVibeShellBlock({
+    prompt: '"$PROMPT"',
+    maxTurns: '"$CODING_JOB_MAX_TURNS"',
+    maxPrice: '"$CODING_JOB_MAX_BUDGET_USD"',
+  });
   fs.writeFileSync(
     path.join(metadataDir, 'prompt.txt'),
     `${buildCodingPrompt(job)}\n`,
@@ -1038,6 +1130,23 @@ function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
       '    ;;',
       '  claude)',
       '    claude -p --model "$JOB_MODEL" --output-format text --dangerously-skip-permissions --max-budget-usd "$CODING_JOB_MAX_BUDGET_USD" "$PROMPT"',
+      '    ;;',
+      '  pi)',
+      '    PI_PROVIDER=openrouter',
+      '    PI_CODING_AGENT_DIR=/workspace/coding-job/.nanocrab/pi-agent',
+      '    OPENROUTER_API_KEY=placeholder',
+      '    case "$JOB_MODEL" in',
+      '      gemini-2.5-pro) PI_JOB_MODEL="google/gemini-2.5-pro" ;;',
+      '      claude-sonnet-4-6) PI_JOB_MODEL="anthropic/claude-sonnet-4-6" ;;',
+      '      gpt-5.4) PI_JOB_MODEL="openai/gpt-5.4" ;;',
+      '      *) PI_JOB_MODEL="$JOB_MODEL" ;;',
+      '    esac',
+      '    pi -p "$PROMPT" --mode json --model "$PI_JOB_MODEL" --provider openrouter --no-session',
+      '    ;;',
+      '  mistral)',
+      '    VIBE_HOME=/workspace/coding-job/.nanocrab/vibe-home',
+      '    MISTRAL_API_KEY=placeholder',
+      ...mistralVibeShellBlock.map((line) => `    ${line}`),
       '    ;;',
       '  *)',
       '    echo "Unsupported coding provider: $JOB_PROVIDER" >&2',

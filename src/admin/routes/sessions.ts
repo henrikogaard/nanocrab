@@ -6,10 +6,12 @@ import readline from 'readline';
 import { DATA_DIR, SESSIONS_DIR } from '../../config.js';
 import { requireRole } from '../middleware.js';
 import {
+  authorizeTerminalSessionAccess,
   isSafeTerminalSessionId,
   listCockpitStreamEvents,
   listTerminalSessions,
   readSessionLog,
+  deleteTerminalSession,
 } from '../websocket.js';
 import { getAgentProviderConfig } from '../../agent-provider.js';
 import { listApprovals } from '../../approvals.js';
@@ -668,7 +670,7 @@ export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
 router.get('/', async (_req: Request, res: Response) => {
   try {
     res.json(listCockpitSessions());
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: 'Failed to list sessions' });
   }
 });
@@ -747,7 +749,7 @@ router.get(
 router.get(
   '/terminal/history',
   requireRole('owner'),
-  async (_req: Request, res: Response) => {
+  async (req: Request, res: Response) => {
     try {
       const indexPath = path.join(SESSIONS_DIR, 'index.json');
       if (!fs.existsSync(indexPath)) {
@@ -759,15 +761,21 @@ router.get(
       const activeIds = new Set(
         activeSessions.filter((s) => s.active).map((s) => s.id),
       );
-      const history = index.map((entry: any) => ({
-        ...entry,
-        active: activeIds.has(entry.id),
-      }));
+      const username = req.user?.username || '';
+      const history = index
+        .filter(
+          (entry: any) =>
+            authorizeTerminalSessionAccess(entry.id, username) === 'allowed',
+        )
+        .map((entry: any) => ({
+          ...entry,
+          active: activeIds.has(entry.id),
+        }));
       history.sort((a: any, b: any) =>
         (b.createdAt || '').localeCompare(a.createdAt || ''),
       );
       res.json(history);
-    } catch (err) {
+    } catch (_err) {
       res.status(500).json({ error: 'Failed to read session history' });
     }
   },
@@ -784,13 +792,21 @@ router.get(
         res.status(400).json({ error: 'Invalid session id' });
         return;
       }
+      const access = authorizeTerminalSessionAccess(
+        sessionId,
+        req.user?.username || '',
+      );
+      if (access === 'forbidden') {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
       const content = readSessionLog(sessionId);
       if (!content) {
         res.status(404).json({ error: 'Session not found' });
         return;
       }
       res.json({ id: sessionId, content });
-    } catch (err) {
+    } catch (_err) {
       res.status(500).json({ error: 'Failed to read session transcript' });
     }
   },
@@ -823,6 +839,14 @@ router.post(
         return;
       }
       const index: any[] = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+      const username = req.user?.username || '';
+      if (
+        sessionId &&
+        authorizeTerminalSessionAccess(sessionId, username) === 'forbidden'
+      ) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
       const lowerQuery = query.toLowerCase();
       const results: Array<{
         sessionId: string;
@@ -833,7 +857,10 @@ router.post(
 
       const sessionsToSearch = sessionId
         ? index.filter((e) => e.id === sessionId)
-        : index;
+        : index.filter(
+            (entry) =>
+              authorizeTerminalSessionAccess(entry.id, username) === 'allowed',
+          );
 
       for (const entry of sessionsToSearch) {
         if (dateFrom && entry.createdAt && entry.createdAt < dateFrom) continue;
@@ -863,8 +890,40 @@ router.post(
       }
 
       res.json({ results });
-    } catch (err) {
+    } catch (_err) {
       res.status(500).json({ error: 'Search failed' });
+    }
+  },
+);
+
+// DELETE /api/sessions/terminal/:id — delete a terminal session
+router.delete(
+  '/terminal/:id',
+  requireRole('owner'),
+  async (req: Request, res: Response) => {
+    try {
+      const sessionId = req.params.id as string;
+      if (!isSafeTerminalSessionId(sessionId)) {
+        res.status(400).json({ error: 'Invalid session id' });
+        return;
+      }
+      if (
+        authorizeTerminalSessionAccess(
+          sessionId,
+          req.user?.username || '',
+          'delete',
+        ) === 'forbidden'
+      ) {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+      if (!deleteTerminalSession(sessionId)) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      res.json({ deleted: sessionId });
+    } catch (_err) {
+      res.status(500).json({ error: 'Failed to delete session' });
     }
   },
 );
@@ -1065,7 +1124,7 @@ router.get('/:group/:sessionId/detail', async (req: Request, res: Response) => {
       },
       messages,
     });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: 'Failed to read session detail' });
   }
 });
@@ -1178,7 +1237,7 @@ router.get('/:group/:sessionId', async (req: Request, res: Response) => {
     }
 
     res.json(messages);
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: 'Failed to read session' });
   }
 });

@@ -176,6 +176,17 @@ const STATIC_CAPABILITIES: Record<AgentProvider, ProviderCapabilities> = {
     privacy_tier: 'third-party',
     supports_mcp_strategy: 'container-loop',
   },
+  pi: {
+    tool_calls: true,
+    structured_output: false,
+    streaming: false,
+    vision: false,
+    code_strength: 'agentic',
+    context_window: 128000,
+    cost_tier: 'medium',
+    privacy_tier: 'third-party',
+    supports_mcp_strategy: 'container-loop',
+  },
   ollama: {
     tool_calls: false,
     structured_output: false,
@@ -808,7 +819,7 @@ export async function runLiveCapabilityProbe(
 ): Promise<ProviderProbeResult> {
   const probe = await liveProbeService.probeModel(providerId, model);
   const capabilities = probeCapabilitiesToRouter(probe.capabilities);
-  const definition = AGENT_PROVIDER_DEFINITIONS[providerId as AgentProvider];
+  const _definition = AGENT_PROVIDER_DEFINITIONS[providerId as AgentProvider];
 
   const checks: ProviderProbeCheck[] = [
     {

@@ -553,7 +553,7 @@ function mapDecision(row: DecisionRow): ControlPlaneDecision {
 
 function validateDecisionRuntime(
   runtime: AgentRuntimeSelection | null | undefined,
-  field: string,
+  _field: string,
 ): void {
   if (runtime === null || runtime === undefined) return;
   validateRuntimeSelection(runtime);

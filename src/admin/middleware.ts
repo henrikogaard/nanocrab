@@ -7,6 +7,7 @@ import { validateApiToken } from './routes/tokens.js';
 
 // Extend Express Request to carry user info
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       user?: AdminUser;

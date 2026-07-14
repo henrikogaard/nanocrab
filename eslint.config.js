@@ -29,4 +29,13 @@ export default [
       '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
+  {
+    files: ['src/admin/public/**/*.{js,ts}'],
+    languageOptions: { globals: globals.browser },
+    rules: {
+      'no-undef': 'off',
+      'no-empty': ['error', { allowEmptyCatch: true }],
+      '@typescript-eslint/no-unused-vars': 'off',
+    },
+  },
 ]

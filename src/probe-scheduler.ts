@@ -1,4 +1,4 @@
-import { liveProbeService } from './providers/live-probe.js';
+import { liveProbeService as _liveProbeService } from './providers/live-probe.js';
 import {
   loadProviderProfiles,
   runLiveProviderProbe,

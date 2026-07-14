@@ -51,6 +51,23 @@ vi.mock('../../admin/security.js', () => ({
   auditLog: vi.fn(),
 }));
 
+vi.mock('../../coding-runner-readiness.js', () => ({
+  probeCodingRunnerReadiness: vi.fn().mockResolvedValue({
+    cli: 'codex',
+    status: 'healthy',
+    detail: 'mock coding runner',
+    checkedAt: '2026-07-13T00:00:00.000Z',
+  }),
+  probeAllCodingRunnerReadiness: vi.fn().mockResolvedValue([
+    {
+      cli: 'pi',
+      status: 'healthy',
+      detail: 'Pi coding runner is available in the agent container',
+      checkedAt: '2026-07-13T00:00:00.000Z',
+    },
+  ]),
+}));
+
 vi.mock('../../coding-jobs.js', () => {
   const jobs: Array<Record<string, unknown>> = [];
   return {
@@ -135,7 +152,7 @@ vi.mock('../../control-plane/github-projects.js', () => {
 
 const { _closeDatabase, _initTestDatabase } = await import('../../db.js');
 const { createAgentProfile } = await import('../../agent-profiles.js');
-const { saveProjectItemSnapshot } =
+const { saveProjectItemSnapshot: _saveProjectItemSnapshot } =
   await import('../../control-plane/store.js');
 const { default: controlPlaneRouter } = await import('./control-plane.js');
 
@@ -296,7 +313,7 @@ describe('/api/control-plane', () => {
         ]),
       );
       expect(create.res.status).toBe(201);
-      const pipelineId = create.body.pipeline.pipeline.id;
+      const _pipelineId = create.body.pipeline.pipeline.id;
 
       const res = await fetch(`${base}/api/control-plane/overview`);
       expect(res.status).toBe(200);
@@ -317,10 +334,17 @@ describe('/api/control-plane', () => {
       const res = await fetch(`${base}/api/control-plane/runtimes`);
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
-        runtimes: Array<{ cli: string; health: { status: string } | null }>;
+        runtimes: Array<{
+          cli: string;
+          health: { status: string } | null;
+          codingReadiness: { status: string } | null;
+        }>;
       };
       expect(body.runtimes.length).toBeGreaterThan(0);
       expect(body.runtimes.map((r) => r.cli)).toContain('claude');
+      expect(
+        body.runtimes.find((r) => r.cli === 'pi')?.codingReadiness,
+      ).toEqual(expect.objectContaining({ status: 'healthy' }));
     });
   });
 
@@ -447,7 +471,7 @@ describe('/api/control-plane', () => {
   });
 
   it('POST /api/control-plane/pipelines/:id/sync returns 200 with candidates', async () => {
-    const { DefaultGitHubProjectClient } =
+    const { DefaultGitHubProjectClient: _DefaultGitHubProjectClient } =
       await import('../../control-plane/github-projects.js');
     await withServer(async (base) => {
       const atlas = createAgentProfile(

@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { exec as _exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -499,7 +499,7 @@ export class WhatsAppChannel implements Channel {
   private findDmFallback(groupJid: string): string | undefined {
     const groups = this.opts.registeredGroups();
     // Find any registered non-group JID (DM) that belongs to WhatsApp
-    for (const [jid, group] of Object.entries(groups)) {
+    for (const [jid, _group] of Object.entries(groups)) {
       if (jid !== groupJid && !jid.endsWith('@g.us')) return jid;
     }
     return undefined;

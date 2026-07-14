@@ -18,7 +18,7 @@ import {
   executeControlPlaneCommand,
   parseControlPlaneCommand,
   resetControlPlaneCommandCache,
-  type ControlPlaneCommandResult,
+  type ControlPlaneCommandResult as _ControlPlaneCommandResult,
 } from './commands.js';
 import type { GitHubProjectClient } from './github-projects.js';
 

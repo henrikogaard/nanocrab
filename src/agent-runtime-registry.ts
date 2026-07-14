@@ -10,6 +10,7 @@ export interface AgentRuntimeDefinition {
   readonly executable: string;
   readonly versionArgs: readonly string[];
   readonly codingRunnerSupported: boolean;
+  readonly detail?: string;
 }
 
 const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
@@ -29,7 +30,7 @@ const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
     cli: 'pi',
     executable: 'pi',
     versionArgs: Object.freeze(['--version']),
-    codingRunnerSupported: false,
+    codingRunnerSupported: true,
   }),
   opencode: {
     cli: 'opencode',
@@ -42,12 +43,14 @@ const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
     executable: 'devin',
     versionArgs: Object.freeze(['--version']),
     codingRunnerSupported: false,
+    detail:
+      'Devin CLI is discoverable for runtime health but is not a selectable agent provider or coding runner. It requires interactive `devin auth login` and does not accept DEVIN_API_KEY/WINDSURF_API_KEY for non-interactive runs, so it cannot be used in unattended coding jobs.',
   }),
   mistral: Object.freeze({
     cli: 'mistral',
     executable: 'vibe',
     versionArgs: Object.freeze(['--version']),
-    codingRunnerSupported: false,
+    codingRunnerSupported: true,
   }),
 };
 Object.freeze(RUNTIMES.opencode);
@@ -113,7 +116,9 @@ export async function probeAgentRuntime(
         status: 'unsupported',
         version,
         checkedAt,
-        detail: `${definition.cli} is installed but not supported by the current coding-job runner`,
+        detail:
+          definition.detail ||
+          `${definition.cli} is installed but not supported by the current coding-job runner`,
       };
     }
 

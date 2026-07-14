@@ -11,9 +11,8 @@ import {
   listApprovals,
   type ApprovalKind,
 } from './approvals.js';
-import { listJournalEntryRecords, findJournalEvents } from './journal-store.js';
-import { listMemoryRecords } from './memory-store.js';
 import { ProviderPurpose } from './provider-router.js';
+import { collectSources } from './source-collection.js';
 import {
   designSystemSelectionSummary,
   type DesignSystem,
@@ -27,11 +26,19 @@ export type ReportJobStatus =
   | 'delivered'
   | 'failed';
 
+export interface ReportAuthorizationContext {
+  actorUsername: string;
+  groupFolder: string;
+  agentId?: string;
+  isMainAgent: boolean;
+}
+
 export interface ReportJob {
   id: string;
   title: string;
   request: string;
   requester: string;
+  authorizationContext: ReportAuthorizationContext;
   providerProfileId: ProviderPurpose;
   sourceScopes: string[];
   outputFormats: string[];
@@ -43,6 +50,7 @@ export interface ReportJob {
   outline: string;
   markdown: string;
   citations: Array<{ label: string; source: string }>;
+  sourceCollectionId: string | null;
   artifacts: Array<{ format: string; path: string }>;
   createdAt: string;
   updatedAt: string;
@@ -53,6 +61,7 @@ export interface CreateReportJobInput {
   title?: string;
   request: string;
   requester?: string;
+  authorizationContext?: ReportAuthorizationContext;
   providerProfileId?: ProviderPurpose;
   sourceScopes?: string[];
   outputFormats?: string[];
@@ -67,13 +76,31 @@ const REPORT_JOBS_PATH = path.join(STORE_DIR, 'report-jobs.json');
 
 function readJobs(): ReportJob[] {
   try {
-    return JSON.parse(
+    const jobs = JSON.parse(
       fs.readFileSync(REPORT_JOBS_PATH, 'utf-8'),
     ) as ReportJob[];
+    return jobs.map((job) => ({
+      ...job,
+      authorizationContext: {
+        actorUsername:
+          job.authorizationContext?.actorUsername ||
+          job.requester ||
+          'dashboard',
+        groupFolder: job.authorizationContext?.groupFolder || 'dashboard',
+        ...(job.authorizationContext?.agentId
+          ? { agentId: job.authorizationContext.agentId }
+          : {}),
+        isMainAgent: job.authorizationContext?.isMainAgent === true,
+      },
+    }));
   } catch {
     return [];
   }
 }
+
+export const reportSourceRuntime = {
+  collectSources,
+};
 
 function writeJobs(jobs: ReportJob[]): void {
   fs.mkdirSync(path.dirname(REPORT_JOBS_PATH), { recursive: true });
@@ -98,42 +125,26 @@ function safeFilename(value: string): string {
   );
 }
 
-function collectSources(job: ReportJob): {
+async function collectReportSources(job: ReportJob): Promise<{
   sections: string[];
   citations: Array<{ label: string; source: string }>;
-} {
-  const sections: string[] = [];
-  const citations: Array<{ label: string; source: string }> = [];
-  if (job.sourceScopes.includes('journal')) {
-    const entries = listJournalEntryRecords({ limit: 10 });
-    const events = findJournalEvents({ query: job.request, limit: 10 });
-    sections.push(
-      `## Journal\n\n${
-        entries
-          .map((entry) => `### ${entry.date}\n${entry.summary}`)
-          .join('\n\n') || 'No journal entries found.'
-      }`,
-    );
-    for (const event of events) {
-      citations.push({ label: event.title, source: `journal:${event.id}` });
-    }
-  }
-  if (job.sourceScopes.includes('memory')) {
-    const memories = listMemoryRecords({ status: 'approved', limit: 25 });
-    sections.push(
-      `## Approved Memory\n\n${
-        memories.map((memory) => `- ${memory.content}`).join('\n') ||
-        'No approved memories found.'
-      }`,
-    );
-    for (const memory of memories.slice(0, 10)) {
-      citations.push({
-        label: memory.content.slice(0, 80),
-        source: `memory:${memory.id}`,
-      });
-    }
-  }
-  return { sections, citations };
+}> {
+  const collected = await reportSourceRuntime.collectSources(
+    job.id,
+    job.sourceScopes,
+    job.request,
+    {
+      actor: job.authorizationContext.actorUsername,
+      groupFolder: job.authorizationContext.groupFolder,
+      agentId: job.authorizationContext.agentId,
+      isMain: job.authorizationContext.isMainAgent,
+    },
+  );
+  job.sourceCollectionId = collected.sourceCollectionId;
+  return {
+    sections: collected.sections,
+    citations: collected.citations,
+  };
 }
 
 function composeOutline(job: ReportJob): string {
@@ -177,8 +188,8 @@ function ensureReportApproval(job: ReportJob, kind: ApprovalKind): void {
   });
 }
 
-function composeMarkdown(job: ReportJob): void {
-  const collected = collectSources(job);
+async function composeMarkdown(job: ReportJob): Promise<void> {
+  const collected = await collectReportSources(job);
   job.citations = collected.citations;
   const designSystem = job.designSystemId
     ? designSystemSelectionSummary({
@@ -309,6 +320,11 @@ export function createReportJob(input: CreateReportJobInput): ReportJob {
       'NanoCrab Report',
     request: input.request.trim(),
     requester: input.requester || 'dashboard',
+    authorizationContext: input.authorizationContext || {
+      actorUsername: input.requester || 'dashboard',
+      groupFolder: 'dashboard',
+      isMainAgent: false,
+    },
     providerProfileId: input.providerProfileId || 'default_reports',
     sourceScopes: input.sourceScopes?.length
       ? input.sourceScopes
@@ -328,6 +344,7 @@ export function createReportJob(input: CreateReportJobInput): ReportJob {
     outline: '',
     markdown: '',
     citations: [],
+    sourceCollectionId: null,
     artifacts: [],
     createdAt: now,
     updatedAt: now,
@@ -352,7 +369,7 @@ export async function approveReportOutline(id: string): Promise<ReportJob> {
     ensureReportApproval(job, 'report-outline');
     throw new Error('Report outline approval is still pending');
   }
-  composeMarkdown(job);
+  await composeMarkdown(job);
   await exportArtifacts(job);
   job.status = job.requireDeliveryApproval
     ? 'awaiting_delivery_approval'

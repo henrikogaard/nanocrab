@@ -2,7 +2,8 @@ import crypto from 'crypto';
 
 import { getAgentProfile } from '../agent-profiles.js';
 import { isCodingCapableProvider } from '../agent-provider.js';
-import { isAgentCliId, probeAgentRuntime } from '../agent-runtime-registry.js';
+import { isAgentCliId } from '../agent-runtime-registry.js';
+import { probeCodingRunnerReadiness } from '../coding-runner-readiness.js';
 import type { AgentRuntimeHealth } from '../types.js';
 import { startCodingJob, type CodingJob } from '../coding-jobs.js';
 import { createApproval } from '../approvals.js';
@@ -13,13 +14,13 @@ import {
   insertDecision,
   getDecision as getDecisionRecord,
   updateDecisionApprovalId,
-  updateDecisionDispatchResult,
+  updateDecisionDispatchResult as _updateDecisionDispatchResult,
 } from './store.js';
 import type { StageDispatchCandidate } from './sync.js';
 import type { ControlPlaneDecision, PipelineStageKind } from './types.js';
 
 export const runtime = {
-  probe: probeAgentRuntime,
+  probe: probeCodingRunnerReadiness,
 };
 
 export interface DispatchCandidateOptions {
@@ -115,7 +116,7 @@ export function requestRuntimeFallback(
   fallbackRuntime: AgentRuntimeSelection,
   options: RequestRuntimeFallbackOptions = {},
 ): ControlPlaneDecision {
-  const { pipeline, stage } = validateCandidate(candidate);
+  const { pipeline: _pipeline, stage } = validateCandidate(candidate);
   const profile = getAgentProfile(candidate.agentProfileId);
   if (!profile)
     throw new Error(`agent profile ${candidate.agentProfileId} was not found`);
@@ -208,7 +209,7 @@ export async function dispatchCandidate(
   candidate: StageDispatchCandidate,
   options: DispatchCandidateOptions = {},
 ): Promise<DispatchCandidateResult> {
-  const { pipeline, stage } = validateCandidate(candidate);
+  const { pipeline: _pipeline, stage } = validateCandidate(candidate);
 
   if (options.decisionId) {
     const existing = getDecisionRecord(options.decisionId);

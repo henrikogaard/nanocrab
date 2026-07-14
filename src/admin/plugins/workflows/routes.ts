@@ -30,7 +30,9 @@ function loadWorkflows(): Workflow[] {
     if (fs.existsSync(WORKFLOWS_FILE)) {
       return JSON.parse(fs.readFileSync(WORKFLOWS_FILE, 'utf-8'));
     }
-  } catch {}
+  } catch {
+    // intentional
+  }
   return [];
 }
 
@@ -87,7 +89,7 @@ router.put('/:id', (req: Request, res: Response) => {
 // Delete a workflow
 router.delete('/:id', (req: Request, res: Response) => {
   const delId = req.params.id as string;
-  let workflows = loadWorkflows();
+  const workflows = loadWorkflows();
   const idx = workflows.findIndex((w) => w.id === delId);
   if (idx === -1) {
     res.status(404).json({ error: 'Workflow not found' });

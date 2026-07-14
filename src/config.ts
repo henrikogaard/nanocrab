@@ -47,6 +47,22 @@ export const TERMINAL_IDLE_TIMEOUT_MS = parseInt(
   process.env.TERMINAL_IDLE_TIMEOUT_MS || '7200000',
   10,
 ); // 2 hours default
+export const MAX_SESSION_LOG_BYTES = parseInt(
+  process.env.MAX_SESSION_LOG_BYTES || '10485760',
+  10,
+); // 10 MB default
+export const MAX_SESSION_RETENTION_DAYS = parseInt(
+  process.env.MAX_SESSION_RETENTION_DAYS || '90',
+  10,
+); // 90 days default
+export const MAX_SESSIONS_COUNT = parseInt(
+  process.env.MAX_SESSIONS_COUNT || '100',
+  10,
+); // max session index entries
+export const SESSION_PRUNE_INTERVAL_MS = parseInt(
+  process.env.SESSION_PRUNE_INTERVAL_MS || '21600000',
+  10,
+); // 6 hours default — enforce retention on long-running servers
 export const CODING_WORKSPACE_DIR = path.resolve(DATA_DIR, 'coding-workspaces');
 export const CONTAINER_SKILLS_DIR = path.resolve(
   PROJECT_ROOT,

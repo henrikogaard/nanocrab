@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import Database from 'better-sqlite3';
 
-import { STORE_DIR, ASSISTANT_NAME } from '../../../config.js';
+import { STORE_DIR } from '../../../config.js';
 import { getState } from '../../state.js';
 import { auditLog } from '../../security.js';
 import { logger } from '../../../logger.js';
@@ -89,7 +89,7 @@ router.post('/voice', async (req: Request, res: Response) => {
         }
 
         res.json({ ok: true, text });
-      } catch (err) {
+      } catch (_err) {
         try {
           fs.unlinkSync(tmpFile);
         } catch {

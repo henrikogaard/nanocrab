@@ -180,7 +180,9 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
   let states: Record<string, number> = {};
   try {
     states = JSON.parse(fs.readFileSync(statesPath, 'utf-8'));
-  } catch {}
+  } catch {
+    // intentional
+  }
   if (!states[state as string]) {
     res.status(400).send('Invalid state — possible CSRF. Try again.');
     return;
@@ -351,15 +353,16 @@ router.post('/accounts/:id/refresh', async (req: Request, res: Response) => {
         },
       });
       account.copilotEnabled = copilotRes.status !== 404;
-    } catch {}
-
+    } catch {
+      // intentional
+    }
     saveAccounts(accounts);
     res.json({
       ok: true,
       login: account.login,
       copilotEnabled: account.copilotEnabled,
     });
-  } catch (err) {
+  } catch (_err) {
     res.status(500).json({ error: 'Refresh failed' });
   }
 });

@@ -384,7 +384,9 @@ export function refreshMemoryReviewStatuses(
     if (isStaleByDate || isStaleByAge) {
       try {
         changed.push(reviewMemoryWithTimeline(memory.id, 'stale', now));
-      } catch {}
+      } catch {
+        // intentional
+      }
     }
   }
 
@@ -399,7 +401,9 @@ export function refreshMemoryReviewStatuses(
             now,
           ),
         );
-      } catch {}
+      } catch {
+        // intentional
+      }
     }
   }
 
@@ -411,7 +415,9 @@ export function refreshMemoryReviewStatuses(
       if (!memoriesConflict(newer, older)) continue;
       try {
         changed.push(reviewMemoryWithTimeline(older.id, 'contradicted', now));
-      } catch {}
+      } catch {
+        // intentional
+      }
     }
   }
   return changed;

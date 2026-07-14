@@ -1,20 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
+import _os from 'os';
 import { WebSocket } from 'ws';
 
 type WatchFileListener = (curr: fs.Stats, prev: fs.Stats) => void;
 
-const TEST_DIR = vi.hoisted(() => {
-  const os = require('os');
-  const p = require('path');
-  return p.join(os.tmpdir(), `nanocrab-term-test-${Date.now()}`);
-});
+const TEST_DIR = vi.hoisted(
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  () => require('os').tmpdir() + `/nanocrab-term-test-${Date.now()}`,
+);
 
 vi.mock('../config.js', () => ({
   SESSIONS_DIR: TEST_DIR,
   TERMINAL_IDLE_TIMEOUT_MS: 7200000,
+  MAX_SESSION_LOG_BYTES: 1024,
+  MAX_SESSION_RETENTION_DAYS: 90,
+  MAX_SESSIONS_COUNT: 100,
 }));
 
 vi.mock('../logger.js', () => ({
@@ -32,8 +34,10 @@ import {
   appendToSessionLog,
   readSessionLog,
   finalizeSessionFile,
+  getTerminalSessionAttachment,
   loadHistoricalSessions,
   listTerminalSessions,
+  pruneOldSessions,
   startLogStream,
   stopLogStream,
   listCockpitStreamEvents,
@@ -63,6 +67,19 @@ describe('file-backed terminal sessions', () => {
     expect(index[0].endedAt).toBeNull();
   });
 
+  it('does not reuse an ended historical session id', () => {
+    createSessionFile('term-ended', 'alice');
+    appendToSessionLog('term-ended', 'historical output');
+    finalizeSessionFile('term-ended');
+    const before = fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8');
+
+    expect(createSessionFile('term-ended', 'alice')).toBe(false);
+    expect(fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8')).toBe(
+      before,
+    );
+    expect(readSessionLog('term-ended')).toBe('historical output');
+  });
+
   it('rejects unsafe terminal session ids before writing files', () => {
     expect(createSessionFile('../outside', 'alice')).toBe(false);
     appendToSessionLog('../outside', 'nope');
@@ -86,6 +103,33 @@ describe('file-backed terminal sessions', () => {
     const entry = index.find((e) => e.id === 'term-finalize')!;
     expect(entry.endedAt).toBeTruthy();
     expect(entry.bytes).toBeGreaterThan(0);
+    expect(listTerminalSessions()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'term-finalize',
+          active: false,
+        }),
+      ]),
+    );
+  });
+
+  it('caches an empty finalized session for historical read-only attachment', () => {
+    createSessionFile('term-empty', 'alice');
+    finalizeSessionFile('term-empty');
+
+    expect(listTerminalSessions()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'term-empty',
+          transcriptBytes: 0,
+          active: false,
+        }),
+      ]),
+    );
+    expect(getTerminalSessionAttachment('term-empty')).toEqual({
+      status: 'historical',
+      transcript: '',
+    });
   });
 
   it('loadHistoricalSessions loads from .log files', () => {
@@ -166,6 +210,105 @@ describe('file-backed terminal sessions', () => {
         currentStep: 'Running focused tests',
       }),
     ).not.toThrow();
+  });
+
+  it('pruneOldSessions removes entries older than retention period', () => {
+    const oldDate = new Date();
+    oldDate.setFullYear(oldDate.getFullYear() - 5);
+    createSessionFile('fresh-session', 'alice');
+    createSessionFile('stale-session', 'bob');
+    // Manually backdate the stale entry
+    const indexPath = path.join(TEST_DIR, 'index.json');
+    const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+    const staleEntry = index.find(
+      (e: { id: string }) => e.id === 'stale-session',
+    );
+    staleEntry.endedAt = oldDate.toISOString();
+    fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
+    // Prime a .log file for the stale session so pruneOldSessions deletes it
+    fs.writeFileSync(path.join(TEST_DIR, 'stale-session.log'), 'old data');
+    loadHistoricalSessions();
+
+    const pruned = pruneOldSessions();
+    expect(pruned).toBe(1);
+    const remaining = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+    expect(remaining.map((e: { id: string }) => e.id)).toEqual([
+      'fresh-session',
+    ]);
+    // Orphan .log file should be removed
+    expect(fs.existsSync(path.join(TEST_DIR, 'stale-session.log'))).toBe(false);
+    expect(listTerminalSessions().map((session) => session.id)).not.toContain(
+      'stale-session',
+    );
+  });
+
+  it('pruneOldSessions evicts stale history even when its log is already absent', () => {
+    const oldDate = new Date();
+    oldDate.setFullYear(oldDate.getFullYear() - 5);
+    createSessionFile('stale-cache-only', 'alice');
+    fs.writeFileSync(
+      path.join(TEST_DIR, 'stale-cache-only.log'),
+      'cached old data',
+    );
+    loadHistoricalSessions();
+    fs.unlinkSync(path.join(TEST_DIR, 'stale-cache-only.log'));
+    const indexPath = path.join(TEST_DIR, 'index.json');
+    const index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+    index[0].endedAt = oldDate.toISOString();
+    fs.writeFileSync(indexPath, JSON.stringify(index, null, 2));
+
+    expect(pruneOldSessions()).toBe(1);
+    expect(listTerminalSessions().map((session) => session.id)).not.toContain(
+      'stale-cache-only',
+    );
+  });
+
+  it('appendToSessionLog respects MAX_SESSION_LOG_BYTES', () => {
+    // Fill the log past the limit
+    const bigData = 'x'.repeat(1024);
+    appendToSessionLog('term-bounded', bigData);
+    appendToSessionLog('term-bounded', 'SHOULD_NOT_APPEAR');
+    const content = readSessionLog('term-bounded');
+    expect(content).not.toContain('SHOULD_NOT_APPEAR');
+    expect(content).toContain('x');
+    expect(content.length).toBeLessThanOrEqual(1024);
+  });
+
+  it('appendToSessionLog truncates data that exceeds max size', () => {
+    const data = 'y'.repeat(800);
+    const extra = 'z'.repeat(800);
+    appendToSessionLog('term-truncated', data);
+    appendToSessionLog('term-truncated', extra);
+    const bytes = fs.statSync(path.join(TEST_DIR, 'term-truncated.log')).size;
+    const content = readSessionLog('term-truncated');
+    // Cap is 1024: 800 y's + exactly 224 z's, never more.
+    expect(bytes).toBe(1024);
+    expect(content).toBe('y'.repeat(800) + 'z'.repeat(224));
+  });
+
+  it('appendToSessionLog truncates on a UTF-8 codepoint boundary', () => {
+    // 1021 ASCII bytes leaves only 3 bytes before the 1024-byte cap; a 4-byte
+    // emoji cannot fit and must be dropped whole rather than split.
+    appendToSessionLog('term-utf8', 'a'.repeat(1021));
+    appendToSessionLog('term-utf8', '\u{1F600}');
+    const buf = fs.readFileSync(path.join(TEST_DIR, 'term-utf8.log'));
+    expect(buf.length).toBe(1021);
+    expect(buf.toString('utf-8')).toBe('a'.repeat(1021));
+    // The written bytes must be valid UTF-8 (no dangling continuation bytes).
+    expect(Buffer.byteLength(buf.toString('utf-8'), 'utf-8')).toBe(1021);
+  });
+
+  it('pruneOldSessions caps total count at MAX_SESSIONS_COUNT', () => {
+    // Create more than max entries
+    for (let i = 0; i < 103; i++) {
+      createSessionFile(`overflow-${i}`, `user-${i}`);
+    }
+    const prune = pruneOldSessions();
+    expect(prune).toBeGreaterThanOrEqual(3);
+    const indexed = JSON.parse(
+      fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8'),
+    );
+    expect(indexed.length).toBeLessThanOrEqual(100);
   });
 
   it('records recent tool and progress events for cockpit streams', () => {
