@@ -110,7 +110,7 @@ router.post(
         existing.targetId
       ) {
         const runtime = completeRuntime(req.body.runtime);
-        const job = approveCodingJobRuntimeFallback(
+        const job = await approveCodingJobRuntimeFallback(
           existing.targetId,
           runtime,
           req.user?.username || 'dashboard',

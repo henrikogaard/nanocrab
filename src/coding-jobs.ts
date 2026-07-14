@@ -2329,11 +2329,11 @@ export async function retryCodingJob(
   return job;
 }
 
-export function approveCodingJobRuntimeFallback(
+export async function approveCodingJobRuntimeFallback(
   jobId: string,
   runtime: AgentRuntimeSelection,
   by = 'dashboard',
-): CodingJob {
+): Promise<CodingJob> {
   const job = getCodingJob(jobId);
   if (!job) throw new Error(`Coding job not found: ${jobId}`);
   if (job.status !== 'await_approval' || !job.actualRuntime) {
@@ -2371,6 +2371,24 @@ export function approveCodingJobRuntimeFallback(
     );
   }
   validateCodingRuntimeSelection(runtime);
+  if (runtime.cli === 'devin') {
+    let readiness: AgentRuntimeHealth;
+    try {
+      readiness = await codingJobExecutionDependencies().probeReadiness(
+        runtime.cli,
+      );
+    } catch (err) {
+      throw new Error(
+        `Coding runtime ${runtime.cli} / ${runtime.provider} / ${runtime.model} readiness check failed: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
+    if (readiness.status !== 'healthy') {
+      throw new Error(
+        `Coding runtime ${runtime.cli} / ${runtime.provider} / ${runtime.model} is unavailable: ${readiness.detail}`,
+      );
+    }
+  }
   reviewApproval(pending.id, 'approved', by);
   const previous = job.actualRuntime;
   job.actualRuntime = { ...runtime };

@@ -87,7 +87,10 @@ describe('approval admin routes', () => {
     };
   });
 
-  function writeCodingRuntimeFallbackApproval(): void {
+  function writeCodingRuntimeFallbackApproval(
+    proposedProvider = 'codex',
+    proposedModel = 'gpt-5.4',
+  ): void {
     writeApprovals([
       {
         id: 'coding-runtime-fallback',
@@ -100,8 +103,8 @@ describe('approval admin routes', () => {
         targetId: 'job-129',
         payload: {
           sourceRuntime: codingJobRuntime,
-          proposedProvider: 'codex',
-          proposedModel: 'gpt-5.4',
+          proposedProvider,
+          proposedModel,
         },
         status: 'pending',
         correlationId: 'job-129',
@@ -201,6 +204,55 @@ describe('approval admin routes', () => {
         error: expect.stringContaining('not compatible'),
       });
     });
+    expect(getApproval('coding-runtime-fallback')?.status).toBe('pending');
+    expect(codingJobRuntime).toEqual(originalRuntime);
+  });
+
+  it('returns 400 when Devin readiness changes before approval and preserves pending state', async () => {
+    codingJobRuntime = {
+      cli: 'codex',
+      provider: 'codex',
+      model: 'gpt-5.4',
+    };
+    writeCodingRuntimeFallbackApproval('claude', 'claude-sonnet-4-6');
+    const originalRuntime = { ...codingJobRuntime };
+    approveCodingJobRuntimeFallback.mockRejectedValue(
+      new Error(
+        'Coding runtime devin / claude / claude-sonnet-4-6 is unavailable: Devin credential unavailable',
+      ),
+    );
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        new URL('/approvals/coding-runtime-fallback/approve', baseUrl),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            runtime: {
+              cli: 'devin',
+              provider: 'claude',
+              model: 'claude-sonnet-4-6',
+            },
+          }),
+        },
+      );
+      expect(response.status).toBe(400);
+      expect((await response.json()) as { error: string }).toMatchObject({
+        error: expect.stringContaining(
+          'devin / claude / claude-sonnet-4-6 is unavailable',
+        ),
+      });
+    });
+    expect(approveCodingJobRuntimeFallback).toHaveBeenCalledWith(
+      'job-129',
+      {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+      'owner',
+    );
     expect(getApproval('coding-runtime-fallback')?.status).toBe('pending');
     expect(codingJobRuntime).toEqual(originalRuntime);
   });

@@ -466,14 +466,38 @@ export function stopAutofixAutoPickLoop(): void {
 }
 
 function loadProjects(): Project[] {
+  let contents: string;
   try {
-    const projects = JSON.parse(fs.readFileSync(PROJECTS_PATH, 'utf-8'));
-    return Array.isArray(projects)
-      ? projects.map((project) => normalizeAutofixProject(project))
-      : [];
-  } catch {
-    return [];
+    contents = fs.readFileSync(PROJECTS_PATH, 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw new Error(
+      `Unable to load Autofix projects: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
   }
+
+  let projects: unknown;
+  try {
+    projects = JSON.parse(contents);
+  } catch (err) {
+    throw new Error('Unable to load Autofix projects: malformed JSON', {
+      cause: err,
+    });
+  }
+  if (!Array.isArray(projects)) {
+    throw new Error('Unable to load Autofix projects: expected a JSON array');
+  }
+  return projects.map((project, index) => {
+    try {
+      return normalizeAutofixProject(project as Partial<Project>);
+    } catch (err) {
+      throw new Error(
+        `Unable to load Autofix projects: Autofix project record ${index + 1} is invalid: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
+  });
 }
 
 function saveProjects(projects: Project[]): void {
@@ -521,7 +545,13 @@ async function githubApi(path: string, opts: RequestInit = {}): Promise<any> {
 // --- Projects CRUD ---
 
 router.get('/projects', (_req: Request, res: Response) => {
-  res.json(loadProjects());
+  try {
+    res.json(loadProjects());
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 });
 
 router.post('/projects', async (req: Request, res: Response) => {
@@ -544,7 +574,9 @@ router.post('/projects', async (req: Request, res: Response) => {
   }
 
   let project: Project;
+  let projects: Project[];
   try {
+    projects = loadProjects();
     if (!runtime) throw new Error('a complete runtime is required');
     project = normalizeAutofixProject({
       id: crypto.randomUUID(),
@@ -568,7 +600,6 @@ router.post('/projects', async (req: Request, res: Response) => {
     return;
   }
 
-  const projects = loadProjects();
   projects.push(project);
   saveProjects(projects);
   try {
@@ -587,50 +618,56 @@ router.post('/projects', async (req: Request, res: Response) => {
 });
 
 router.put('/projects/:id', async (req: Request, res: Response) => {
-  const projects = loadProjects();
-  const project = projects.find((p) => p.id === req.params.id);
-  if (!project) {
-    res.status(404).json({ error: 'Project not found' });
-    return;
-  }
-
-  const fields = [
-    'workDir',
-    'triggerLabel',
-    'runtime',
-    'notifyJid',
-    'autoReview',
-    'createPr',
-    'maxActiveJobs',
-    'autoPickEnabled',
-    'pollIntervalMinutes',
-  ];
-  for (const f of fields) {
-    if (req.body[f] !== undefined) (project as any)[f] = req.body[f];
-  }
   try {
+    const projects = loadProjects();
+    const project = projects.find((p) => p.id === req.params.id);
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+
+    const fields = [
+      'workDir',
+      'triggerLabel',
+      'runtime',
+      'notifyJid',
+      'autoReview',
+      'createPr',
+      'maxActiveJobs',
+      'autoPickEnabled',
+      'pollIntervalMinutes',
+    ];
+    for (const f of fields) {
+      if (req.body[f] !== undefined) (project as any)[f] = req.body[f];
+    }
     Object.assign(project, normalizeAutofixProject(project));
     await assertAutofixRuntimeReady(project.runtime);
+    saveProjects(projects);
   } catch (err) {
     res.status(400).json({
       error: err instanceof Error ? err.message : String(err),
     });
     return;
   }
-  saveProjects(projects);
   res.json({ ok: true });
 });
 
 router.delete('/projects/:id', (req: Request, res: Response) => {
-  const projects = loadProjects();
-  const idx = projects.findIndex((p) => p.id === req.params.id);
-  if (idx === -1) {
-    res.status(404).json({ error: 'Project not found' });
-    return;
+  try {
+    const projects = loadProjects();
+    const idx = projects.findIndex((p) => p.id === req.params.id);
+    if (idx === -1) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
+    projects.splice(idx, 1);
+    saveProjects(projects);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
-  projects.splice(idx, 1);
-  saveProjects(projects);
-  res.json({ ok: true });
 });
 
 // --- Jobs ---
@@ -704,28 +741,28 @@ function parseQueryIssueNumber(value: unknown): number | undefined {
 }
 
 router.get('/workbench', async (req: Request, res: Response) => {
-  const repos = loadCodingRepos().filter((repo) => repo.enabled);
-  const projects = loadProjects();
-  const selectedRepo =
-    parseQueryString(req.query.repo) ||
-    repos[0]?.fullName ||
-    (projects[0] ? `${projects[0].owner}/${projects[0].repo}` : null);
-
-  if (!selectedRepo) {
-    res.json(
-      buildAutofixWorkbenchResponse({
-        repos,
-        projects,
-        selectedRepo: null,
-        issues: [],
-        projectBoards: [],
-        jobs: [],
-      }),
-    );
-    return;
-  }
-
   try {
+    const repos = loadCodingRepos().filter((repo) => repo.enabled);
+    const projects = loadProjects();
+    const selectedRepo =
+      parseQueryString(req.query.repo) ||
+      repos[0]?.fullName ||
+      (projects[0] ? `${projects[0].owner}/${projects[0].repo}` : null);
+
+    if (!selectedRepo) {
+      res.json(
+        buildAutofixWorkbenchResponse({
+          repos,
+          projects,
+          selectedRepo: null,
+          issues: [],
+          projectBoards: [],
+          jobs: [],
+        }),
+      );
+      return;
+    }
+
     const labels =
       req.query.allLabels === 'true' ? [] : parseQueryLabels(req.query.labels);
     const assignee = parseQueryString(req.query.assignee);
@@ -1135,15 +1172,14 @@ router.post('/run', async (req: Request, res: Response) => {
     return;
   }
 
-  const projects = loadProjects();
-  const project = projects.find((p) => p.id === projectId);
-  if (!project) {
-    res.status(404).json({ error: 'Project not found' });
-    return;
-  }
-
   // Fetch issue details
   try {
+    const projects = loadProjects();
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
     const selectedProject = actualRuntime
       ? normalizeAutofixProject({ ...project, runtime: actualRuntime })
       : project;

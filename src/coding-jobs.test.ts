@@ -1814,7 +1814,7 @@ describe('coding jobs', () => {
       ).toHaveLength(1),
     );
 
-    approveCodingJobRuntimeFallback(
+    await approveCodingJobRuntimeFallback(
       job.id,
       { cli: 'codex', provider: 'codex', model: 'gpt-5.4' },
       'owner',
@@ -1838,6 +1838,109 @@ describe('coding jobs', () => {
         targetId: job.id,
       })[0],
     ).toMatchObject({ status: 'approved', reviewedBy: 'owner' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('re-probes Devin readiness before approving a runtime fallback', async () => {
+    vi.useRealTimers();
+    vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
+      approved: true,
+      profile: {
+        id: 'default_coding',
+        label: 'Coding',
+        purpose: 'default_coding',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+        toolPolicy: 'approval-required',
+        updatedAt: new Date(0).toISOString(),
+      },
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Reject an unhealthy Devin fallback.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'codex',
+        provider: 'codex',
+        model: 'gpt-5.4',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(
+        listApprovals({
+          kind: 'provider-fallback',
+          targetType: 'coding-job',
+          targetId: job.id,
+        }),
+      ).toHaveLength(1),
+    );
+    const original = getCodingJob(job.id);
+    expect(original).toBeDefined();
+    configureCodingJobExecutionForTests({
+      probeReadiness: async (cli) => ({
+        cli,
+        executable: cli,
+        status: cli === 'devin' ? 'missing' : 'healthy',
+        version: null,
+        checkedAt: new Date(0).toISOString(),
+        detail: cli === 'devin' ? 'Devin credential unavailable' : 'ready',
+      }),
+    });
+
+    await expect(
+      approveCodingJobRuntimeFallback(
+        job.id,
+        {
+          cli: 'devin',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+        },
+        'owner',
+      ),
+    ).rejects.toThrow('devin / claude / claude-sonnet-4-6 is unavailable');
+
+    configureCodingJobExecutionForTests({
+      probeReadiness: async () => {
+        throw new Error('Devin credential store unreadable');
+      },
+    });
+    await expect(
+      approveCodingJobRuntimeFallback(
+        job.id,
+        {
+          cli: 'devin',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+        },
+        'owner',
+      ),
+    ).rejects.toThrow(
+      'devin / claude / claude-sonnet-4-6 readiness check failed: Devin credential store unreadable',
+    );
+
+    expect(getCodingJob(job.id)).toMatchObject({
+      status: original!.status,
+      actualRuntime: original!.actualRuntime,
+      runnerCli: original!.runnerCli,
+      provider: original!.provider,
+      model: original!.model,
+      output: original!.output,
+    });
+    expect(
+      listApprovals({
+        kind: 'provider-fallback',
+        targetType: 'coding-job',
+        targetId: job.id,
+      })[0],
+    ).toMatchObject({
+      status: 'pending',
+      reviewedAt: null,
+      reviewedBy: null,
+    });
     expect(spawn).not.toHaveBeenCalled();
   });
 
