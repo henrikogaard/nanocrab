@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  inferLegacyRunnerCli,
   listAgentRuntimeDefinitions,
   probeAgentRuntime,
+  resolveDevinCliModelAlias,
+  validateCodingRuntimeSelection,
 } from './agent-runtime-registry.js';
+import type { AgentProvider } from './agent-provider.js';
+import type { AgentCliId, AgentRuntimeSelection } from './types.js';
 import {
   getCodingRunnerInfrastructure,
   isCodingContainerImageAvailable,
@@ -11,6 +16,107 @@ import {
 } from './coding-runner-readiness.js';
 
 describe('agent runtime registry', () => {
+  it.each([
+    ['claude', 'claude'],
+    ['codex', 'codex'],
+    ['pi', 'pi'],
+    ['mistral', 'mistral'],
+    ['opencode', 'opencode'],
+    ['openrouter', 'opencode'],
+    ['ollama', 'opencode'],
+    ['openai-compatible', 'opencode'],
+  ] satisfies Array<[AgentProvider, AgentCliId]>)(
+    'infers legacy %s jobs as %s CLI jobs',
+    (provider, expected) => {
+      expect(inferLegacyRunnerCli(provider)).toBe(expected);
+    },
+  );
+
+  it.each([
+    ['claude', 'claude'],
+    ['codex', 'codex'],
+    ['opencode', 'opencode'],
+    ['opencode', 'openrouter'],
+    ['opencode', 'ollama'],
+    ['opencode', 'openai-compatible'],
+    ['pi', 'pi'],
+    ['mistral', 'mistral'],
+  ] satisfies Array<[AgentCliId, AgentProvider]>)(
+    'accepts the %s CLI with the %s provider',
+    (cli, provider) => {
+      expect(() =>
+        validateCodingRuntimeSelection({ cli, provider, model: 'model' }),
+      ).not.toThrow();
+    },
+  );
+
+  it.each([
+    ['claude', 'openrouter'],
+    ['codex', 'claude'],
+    ['opencode', 'codex'],
+    ['pi', 'openrouter'],
+    ['mistral', 'claude'],
+  ] satisfies Array<[AgentCliId, AgentProvider]>)(
+    'rejects the incompatible %s CLI and %s provider',
+    (cli, provider) => {
+      expect(() =>
+        validateCodingRuntimeSelection({
+          cli,
+          provider,
+          model: 'model',
+        }),
+      ).toThrow('not compatible');
+    },
+  );
+
+  it('resolves a configured and advertised Devin model alias', () => {
+    const runtime: AgentRuntimeSelection = {
+      cli: 'devin',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+    };
+
+    expect(
+      resolveDevinCliModelAlias(
+        runtime,
+        { 'claude/claude-sonnet-4-6': 'claude-sonnet-4' },
+        new Set(['claude-sonnet-4']),
+      ),
+    ).toBe('claude-sonnet-4');
+    expect(() =>
+      validateCodingRuntimeSelection(runtime, {
+        aliases: { 'claude/claude-sonnet-4-6': 'claude-sonnet-4' },
+        advertisedDevinAliases: new Set(['claude-sonnet-4']),
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects an unconfigured Devin model before advertised aliases are consulted', () => {
+    const advertisedAliases = new Proxy(new Set<string>(), {
+      get() {
+        throw new Error('advertised aliases must not be consulted');
+      },
+    }) as ReadonlySet<string>;
+
+    expect(() =>
+      resolveDevinCliModelAlias(
+        { cli: 'devin', provider: 'claude', model: 'unconfigured' },
+        {},
+        advertisedAliases,
+      ),
+    ).toThrow('no configured Devin CLI model alias');
+  });
+
+  it('rejects a configured Devin alias that is not advertised', () => {
+    expect(() =>
+      resolveDevinCliModelAlias(
+        { cli: 'devin', provider: 'claude', model: 'claude-sonnet-4-6' },
+        { 'claude/claude-sonnet-4-6': 'claude-sonnet-4' },
+        new Set(['claude-opus-4.6']),
+      ),
+    ).toThrow('not advertised');
+  });
+
   it('exposes allowlisted CLI definitions', () => {
     const definitions = listAgentRuntimeDefinitions();
     const cliIds = definitions.map((d) => d.cli);

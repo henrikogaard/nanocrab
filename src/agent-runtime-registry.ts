@@ -1,9 +1,77 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
-import type { AgentCliId, AgentRuntimeHealth } from './types.js';
+import type { AgentProvider } from './agent-provider.js';
+import { DEVIN_CLI_MODEL_ALIASES } from './config.js';
+import type {
+  AgentCliId,
+  AgentRuntimeHealth,
+  AgentRuntimeSelection,
+} from './types.js';
 
 const execFileAsync = promisify(execFile);
+
+export function inferLegacyRunnerCli(provider: AgentProvider): AgentCliId {
+  if (provider === 'claude' || provider === 'codex' || provider === 'pi') {
+    return provider;
+  }
+  if (provider === 'mistral') return 'mistral';
+  return 'opencode';
+}
+
+export function resolveDevinCliModelAlias(
+  runtime: AgentRuntimeSelection,
+  aliases: Readonly<Record<string, string>> = DEVIN_CLI_MODEL_ALIASES,
+  advertisedAliases?: ReadonlySet<string>,
+): string {
+  const key = `${runtime.provider}/${runtime.model}`;
+  const alias = aliases[key];
+  if (!alias) {
+    throw new Error(`no configured Devin CLI model alias for ${key}`);
+  }
+  if (advertisedAliases && !advertisedAliases.has(alias)) {
+    throw new Error(`Devin CLI model alias ${alias} is not advertised`);
+  }
+  return alias;
+}
+
+const COMPATIBLE_CODING_PROVIDERS: Readonly<
+  Partial<Record<AgentCliId, ReadonlySet<AgentProvider>>>
+> = Object.freeze({
+  claude: new Set<AgentProvider>(['claude']),
+  codex: new Set<AgentProvider>(['codex']),
+  opencode: new Set<AgentProvider>([
+    'opencode',
+    'openrouter',
+    'ollama',
+    'openai-compatible',
+  ]),
+  pi: new Set<AgentProvider>(['pi']),
+  mistral: new Set<AgentProvider>(['mistral']),
+});
+
+export function validateCodingRuntimeSelection(
+  runtime: AgentRuntimeSelection,
+  options?: {
+    aliases?: Readonly<Record<string, string>>;
+    advertisedDevinAliases?: ReadonlySet<string>;
+  },
+): void {
+  if (runtime.cli === 'devin') {
+    resolveDevinCliModelAlias(
+      runtime,
+      options?.aliases,
+      options?.advertisedDevinAliases,
+    );
+    return;
+  }
+
+  if (!COMPATIBLE_CODING_PROVIDERS[runtime.cli]?.has(runtime.provider)) {
+    throw new Error(
+      `coding runtime CLI ${runtime.cli} is not compatible with provider ${runtime.provider}`,
+    );
+  }
+}
 
 export interface AgentRuntimeDefinition {
   readonly cli: AgentCliId;
