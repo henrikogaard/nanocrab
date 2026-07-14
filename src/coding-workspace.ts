@@ -55,7 +55,7 @@ const TRUSTED_GIT_ENV: NodeJS.ProcessEnv = {
   LC_ALL: 'C.UTF-8',
 };
 
-const CREDENTIALED_GIT_CONFIG = [
+const HARDENED_GIT_CONFIG = [
   ['credential.helper', ''],
   ['credential.interactive', 'never'],
   ['core.hooksPath', '/dev/null'],
@@ -73,6 +73,7 @@ const CREDENTIALED_GIT_CONFIG = [
   ['http.curloptResolve', ''],
   ['http.followRedirects', 'false'],
   ['http.sslVerify', 'true'],
+  ['submodule.recurse', 'false'],
 ] as const;
 
 const EMPTY_GIT_STATE: PreparedCodingWorkspace['gitState'] = {
@@ -256,10 +257,7 @@ function validateApprovedHostGitArgs(args: readonly string[]): void {
   throw new Error('Git arguments are not an approved remote operation');
 }
 
-function credentialedGitEnvironment(
-  helperPath: string,
-  token: string,
-): NodeJS.ProcessEnv {
+function hardenedGitEnvironment(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...TRUSTED_GIT_ENV,
     GIT_CONFIG_SYSTEM: '/dev/null',
@@ -268,16 +266,25 @@ function credentialedGitEnvironment(
     GIT_ALLOW_PROTOCOL: 'https',
     GIT_PROTOCOL_FROM_USER: '0',
     GIT_SSH_COMMAND: 'false',
-    GIT_ASKPASS: helperPath,
-    GIT_TERMINAL_PROMPT: '0',
-    NANOCRAB_GIT_TOKEN: token,
-    GIT_CONFIG_COUNT: String(CREDENTIALED_GIT_CONFIG.length),
+    GIT_CONFIG_COUNT: String(HARDENED_GIT_CONFIG.length),
   };
-  CREDENTIALED_GIT_CONFIG.forEach(([key, value], index) => {
+  HARDENED_GIT_CONFIG.forEach(([key, value], index) => {
     env[`GIT_CONFIG_KEY_${index}`] = key;
     env[`GIT_CONFIG_VALUE_${index}`] = value;
   });
   return env;
+}
+
+function credentialedGitEnvironment(
+  helperPath: string,
+  token: string,
+): NodeJS.ProcessEnv {
+  return {
+    ...hardenedGitEnvironment(),
+    GIT_ASKPASS: helperPath,
+    GIT_TERMINAL_PROMPT: '0',
+    NANOCRAB_GIT_TOKEN: token,
+  };
 }
 
 export async function runApprovedHostGit(
@@ -342,7 +349,7 @@ async function runLocalGit(
   try {
     result = await git(args, {
       cwd,
-      env: { ...TRUSTED_GIT_ENV },
+      env: hardenedGitEnvironment(),
       timeoutMs: GIT_TIMEOUT_MS,
     });
   } catch (error) {
@@ -407,10 +414,27 @@ function parseStatus(
   };
 }
 
+function assertOutsideMetadata(
+  candidate: string,
+  canonicalMetadataDir: string,
+  label: string,
+): void {
+  const relative = path.relative(canonicalMetadataDir, candidate);
+  if (
+    !relative ||
+    (relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  ) {
+    throw new Error(`${label} overlaps protected coding metadata`);
+  }
+}
+
 async function validateWorkspaceParentChain(
   requestedWorkspace: string,
   requestedJobRoot: string,
   canonicalJobRoot: string,
+  canonicalMetadataDir: string,
   deps: CodingWorkspaceDeps,
 ): Promise<void> {
   const requestedParent = path.dirname(requestedWorkspace);
@@ -437,6 +461,11 @@ async function validateWorkspaceParentChain(
     }
     const canonicalParent = await deps.realpath(current);
     assertBelow(canonicalParent, canonicalJobRoot, 'Coding workspace parent');
+    assertOutsideMetadata(
+      canonicalParent,
+      canonicalMetadataDir,
+      'Coding workspace parent',
+    );
   }
 }
 
@@ -531,6 +560,10 @@ export async function prepareCodingWorkspace(
   const canonicalJobRoot = await deps.realpath(jobRoot);
   assertBelow(canonicalJobRoot, canonicalJobsRoot, 'Coding job root');
   await deps.mkdir(metadataDir, { recursive: true });
+  const metadataStats = await deps.lstat(metadataDir);
+  if (metadataStats.isSymbolicLink() || !metadataStats.isDirectory()) {
+    throw new Error('Coding metadata directory must be a real directory');
+  }
   const canonicalMetadataDir = await deps.realpath(metadataDir);
   assertBelow(
     canonicalMetadataDir,
@@ -542,6 +575,7 @@ export async function prepareCodingWorkspace(
     requestedWorkspace,
     jobRoot,
     canonicalJobRoot,
+    canonicalMetadataDir,
     deps,
   );
 
@@ -549,6 +583,11 @@ export async function prepareCodingWorkspace(
   if (exists) {
     const canonicalWorkspace = await deps.realpath(requestedWorkspace);
     assertBelow(canonicalWorkspace, canonicalJobRoot, 'Coding workspace');
+    assertOutsideMetadata(
+      canonicalWorkspace,
+      canonicalMetadataDir,
+      'Coding workspace',
+    );
     const gitState = await inspectExistingCheckout(
       input,
       deps,
@@ -583,6 +622,11 @@ export async function prepareCodingWorkspace(
 
   const canonicalWorkspace = await deps.realpath(requestedWorkspace);
   assertBelow(canonicalWorkspace, canonicalJobRoot, 'Coding workspace');
+  assertOutsideMetadata(
+    canonicalWorkspace,
+    canonicalMetadataDir,
+    'Coding workspace',
+  );
   const fetchResult = await runApprovedHostGit(
     ['fetch', 'origin', input.defaultBranch, '--depth', '50'],
     {

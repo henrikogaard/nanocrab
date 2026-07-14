@@ -179,13 +179,33 @@ describe('coding workspace', () => {
     await prepareCodingWorkspace({ ...firstRunInput, isFirstRun: false }, deps);
 
     for (const [, options] of git.mock.calls) {
-      expect(options.env).toEqual({
+      expect(options.env).toMatchObject({
         PATH: '/usr/local/bin:/usr/bin:/bin',
         LANG: 'C.UTF-8',
         LC_ALL: 'C.UTF-8',
+        GIT_CONFIG_SYSTEM: '/dev/null',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_NOSYSTEM: '1',
       });
       expect(options.env).not.toHaveProperty('GIT_ASKPASS');
       expect(options.env).not.toHaveProperty('NANOCRAB_GIT_TOKEN');
+      const config = Array.from(
+        { length: Number(options.env.GIT_CONFIG_COUNT) },
+        (_, index) => [
+          options.env[`GIT_CONFIG_KEY_${index}`],
+          options.env[`GIT_CONFIG_VALUE_${index}`],
+        ],
+      );
+      expect(config).toEqual(
+        expect.arrayContaining([
+          ['credential.helper', ''],
+          ['core.hooksPath', '/dev/null'],
+          ['core.fsmonitor', 'false'],
+          ['core.untrackedCache', 'false'],
+          ['core.sshCommand', 'false'],
+          ['submodule.recurse', 'false'],
+        ]),
+      );
     }
     expect(deps.createAskpass).not.toHaveBeenCalled();
   });
@@ -298,6 +318,57 @@ describe('coding workspace', () => {
     await expect(prepareCodingWorkspace(firstRunInput, deps)).rejects.toThrow(
       /job root|symlink/i,
     );
+    expect(deps.git).not.toHaveBeenCalled();
+    expect(deps.createAskpass).not.toHaveBeenCalled();
+  });
+
+  it('rejects a symlinked metadata directory before filesystem or Git workspaces', async () => {
+    const deps = baseDeps();
+    deps.lstat.mockImplementation(async (value: string) => {
+      if (value === metadataDir) return stats('symlink');
+      if (value === workspace) throw missingError();
+      return stats();
+    });
+
+    await expect(prepareCodingWorkspace(firstRunInput, deps)).rejects.toThrow(
+      /metadata|real directory/i,
+    );
+    expect(deps.git).not.toHaveBeenCalled();
+    expect(deps.createAskpass).not.toHaveBeenCalled();
+  });
+
+  it('rejects an existing workspace canonically aliased to protected metadata before Git', async () => {
+    const deps = baseDeps({
+      workspaceExists: true,
+      canonicalWorkspace: metadataDir,
+      git: localCheckoutGit(),
+    });
+
+    await expect(
+      prepareCodingWorkspace({ ...firstRunInput, isFirstRun: false }, deps),
+    ).rejects.toThrow(/metadata|workspace/i);
+    expect(deps.git).not.toHaveBeenCalled();
+  });
+
+  it('rejects a workspace parent canonically aliased to protected metadata before remote Git', async () => {
+    const aliasedParent = `${jobRoot}/alias`;
+    const aliasedWorkspace = `${aliasedParent}/owner__repo`;
+    const deps = baseDeps();
+    deps.lstat.mockImplementation(async (value: string) => {
+      if (value === aliasedWorkspace) throw missingError();
+      return stats();
+    });
+    deps.realpath.mockImplementation(async (value: string) => {
+      if (value === aliasedParent) return metadataDir;
+      return path.resolve(value);
+    });
+
+    await expect(
+      prepareCodingWorkspace(
+        { ...firstRunInput, workspace: aliasedWorkspace },
+        deps,
+      ),
+    ).rejects.toThrow(/metadata|workspace parent/i);
     expect(deps.git).not.toHaveBeenCalled();
     expect(deps.createAskpass).not.toHaveBeenCalled();
   });
