@@ -26,6 +26,7 @@ const jobRoot = `${jobsRoot}/job-129`;
 const workspace = `${jobRoot}/owner__repo`;
 const metadataDir = `${jobRoot}/.nanocrab`;
 const token = 'test-secret-token';
+const trustTestGitMetadata = async () => undefined;
 
 const firstRunInput: CodingWorkspaceInput = {
   jobId: 'job-129',
@@ -51,7 +52,9 @@ function gitResult(stdout = '', stderr = '', exitCode = 0) {
   return { stdout, stderr, exitCode };
 }
 
-function createHostGitExploitFixture(): {
+function createHostGitExploitFixture(
+  options: { localIdentity?: boolean } = {},
+): {
   root: string;
   workspace: string;
   marker: string;
@@ -59,13 +62,15 @@ function createHostGitExploitFixture(): {
   pushes: readonly string[][];
 } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocrab-publish-test-'));
-  const exploitWorkspace = path.join(root, 'repo');
+  const requestedWorkspace = path.join(root, 'repo');
   const marker = path.join(root, 'filter-executed');
-  fs.mkdirSync(exploitWorkspace);
-  const run = (args: readonly string[]) => {
+  fs.mkdirSync(requestedWorkspace);
+  const exploitWorkspace = fs.realpathSync(requestedWorkspace);
+  const run = (args: readonly string[], env?: NodeJS.ProcessEnv) => {
     const result = spawnSync('git', [...args], {
       cwd: exploitWorkspace,
       encoding: 'utf8',
+      env,
     });
     if (result.status !== 0) {
       throw new Error(result.stderr || `git ${args.join(' ')} failed`);
@@ -73,11 +78,24 @@ function createHostGitExploitFixture(): {
     return result.stdout;
   };
   run(['init', '-q']);
-  run(['config', 'user.email', 'test@example.com']);
-  run(['config', 'user.name', 'NanoCrab Test']);
+  if (options.localIdentity !== false) {
+    run(['config', 'user.email', 'test@example.com']);
+    run(['config', 'user.name', 'NanoCrab Test']);
+  }
   fs.writeFileSync(path.join(exploitWorkspace, 'payload.txt'), 'baseline\n');
   run(['add', 'payload.txt']);
-  run(['commit', '-qm', 'baseline']);
+  run(
+    ['commit', '-qm', 'baseline'],
+    options.localIdentity === false
+      ? {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'Bootstrap',
+          GIT_AUTHOR_EMAIL: 'bootstrap@example.invalid',
+          GIT_COMMITTER_NAME: 'Bootstrap',
+          GIT_COMMITTER_EMAIL: 'bootstrap@example.invalid',
+        }
+      : undefined,
+  );
   run(['checkout', '-qb', 'nanocrab/issue-129']);
   fs.writeFileSync(
     path.join(exploitWorkspace, '.gitattributes'),
@@ -201,7 +219,7 @@ describe('coding workspace', () => {
         token,
         assertOwnership,
       },
-      { git, createAskpass },
+      { git, createAskpass, validateGitMetadata: trustTestGitMetadata },
     );
 
     expect(result).toEqual({ commitSha });
@@ -236,6 +254,7 @@ describe('coding workspace', () => {
         GIT_CONFIG_SYSTEM: '/dev/null',
         GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_CONFIG_NOSYSTEM: '1',
+        GIT_WORK_TREE: workspace,
       });
       expect(options.env).not.toHaveProperty('HOME');
       expect(options.env).not.toHaveProperty('GIT_ASKPASS');
@@ -279,7 +298,7 @@ describe('coding workspace', () => {
           token,
           assertOwnership: vi.fn(),
         },
-        { git },
+        { git, validateGitMetadata: trustTestGitMetadata },
       ),
     ).rejects.toThrow('Git tracked-file inventory failed');
     await expect(
@@ -292,7 +311,7 @@ describe('coding workspace', () => {
           token,
           assertOwnership: vi.fn(),
         },
-        { git },
+        { git, validateGitMetadata: trustTestGitMetadata },
       ),
     ).rejects.not.toThrow(token);
   });
@@ -377,6 +396,90 @@ describe('coding workspace', () => {
     }
   });
 
+  it('rejects replaced Git object metadata before publication can write outside the workspace', async () => {
+    const fixture = createHostGitExploitFixture();
+    const gitDir = path.join(fixture.workspace, '.git');
+    const outsideObjects = path.join(fixture.root, 'outside-objects');
+    fs.renameSync(path.join(gitDir, 'objects'), outsideObjects);
+    fs.symlinkSync(outsideObjects, path.join(gitDir, 'objects'));
+    const before = fs.readdirSync(outsideObjects, { recursive: true }).sort();
+    try {
+      await expect(
+        collectCodingWorkspaceEvidence(fixture.workspace, {
+          git: fixture.git,
+        }),
+      ).rejects.toThrow(/Git metadata/i);
+      await expect(
+        publishCodingWorkspace(
+          {
+            workspace: fixture.workspace,
+            repo: 'owner/repo',
+            branch: 'nanocrab/issue-129',
+            commitMessage: 'fix: reject replaced metadata',
+            token,
+            assertOwnership: vi.fn(),
+          },
+          {
+            git: fixture.git,
+            createAskpass: async () => ({
+              path: '/private/tmp/askpass/helper.sh',
+              dispose: async () => undefined,
+            }),
+          },
+        ),
+      ).rejects.toThrow(/Git metadata/i);
+
+      expect(
+        fs.readdirSync(outsideObjects, { recursive: true }).sort(),
+      ).toEqual(before);
+      expect(fixture.pushes).toEqual([]);
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it('creates commits with deterministic NanoCrab identity without host or repo identity', async () => {
+    const fixture = createHostGitExploitFixture({ localIdentity: false });
+    try {
+      await publishCodingWorkspace(
+        {
+          workspace: fixture.workspace,
+          repo: 'owner/repo',
+          branch: 'nanocrab/issue-129',
+          commitMessage: 'fix: deterministic identity',
+          token,
+          assertOwnership: vi.fn(),
+        },
+        {
+          git: fixture.git,
+          createAskpass: async () => ({
+            path: '/private/tmp/askpass/helper.sh',
+            dispose: async () => undefined,
+          }),
+        },
+      );
+
+      const identity = spawnSync(
+        'git',
+        ['show', '-s', '--format=%an|%ae|%cn|%ce', 'HEAD'],
+        { cwd: fixture.workspace, encoding: 'utf8' },
+      ).stdout.trim();
+      expect(identity).toBe(
+        'NanoCrab Bot|nanocrab@localhost|NanoCrab Bot|nanocrab@localhost',
+      );
+      const dates = spawnSync(
+        'git',
+        ['show', '-s', '--format=%aI|%cI', 'HEAD'],
+        { cwd: fixture.workspace, encoding: 'utf8' },
+      ).stdout.trim();
+      expect(dates).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
+      );
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it('collects fresh credential-free host Git evidence after a Devin run', async () => {
     const originalObject = 'a'.repeat(40);
     const changedObject = 'b'.repeat(40);
@@ -401,6 +504,7 @@ describe('coding workspace', () => {
 
     const evidence = await collectCodingWorkspaceEvidence(workspace, {
       git,
+      validateGitMetadata: trustTestGitMetadata,
       lstat: async () =>
         ({
           isDirectory: () => false,
@@ -441,6 +545,10 @@ describe('coding workspace', () => {
         GIT_CONFIG_SYSTEM: '/dev/null',
         GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_CONFIG_NOSYSTEM: '1',
+        GIT_AUTHOR_NAME: 'NanoCrab Bot',
+        GIT_AUTHOR_EMAIL: 'nanocrab@localhost',
+        GIT_COMMITTER_NAME: 'NanoCrab Bot',
+        GIT_COMMITTER_EMAIL: 'nanocrab@localhost',
       });
       expect(options.env).not.toHaveProperty('GIT_ASKPASS');
       expect(options.env).not.toHaveProperty('NANOCRAB_GIT_TOKEN');

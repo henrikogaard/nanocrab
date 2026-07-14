@@ -529,6 +529,9 @@ function sandboxProfile(
   ];
   if (workspaceWritable) {
     rules.push(`(allow file-write* (subpath ${JSON.stringify(workspace)}))`);
+    rules.push(
+      `(deny file-write* ${sandboxPathFilters(path.join(workspace, '.git'))})`,
+    );
   }
   return rules.join(' ');
 }
@@ -601,6 +604,13 @@ export function buildSandboxedCommand(
         workspaceWritable ? '--bind' : '--ro-bind',
         request.workspace,
         request.workspace,
+        ...(workspaceWritable
+          ? [
+              '--ro-bind',
+              path.join(request.workspace, '.git'),
+              path.join(request.workspace, '.git'),
+            ]
+          : []),
         '--bind',
         temporaryDirectory,
         temporaryDirectory,

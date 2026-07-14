@@ -395,6 +395,9 @@ describe('command execution', () => {
         '--bind',
         workspace,
         workspace,
+        '--ro-bind',
+        `${workspace}/.git`,
+        `${workspace}/.git`,
         '--bind',
         '/tmp',
         '/tmp',
@@ -446,6 +449,9 @@ describe('command execution', () => {
     expect(result.args.slice(-1)).toEqual(['pytest']);
     expect(result.args[1]).toContain('(deny network*)');
     expect(result.args[1]).toContain(`(subpath "${workspace}")`);
+    expect(result.args[1]).toContain(
+      `(deny file-write* (literal "${workspace}/.git") (subpath "${workspace}/.git"))`,
+    );
     expect(result.args[1]).toContain('(subpath "/tmp")');
     for (const runtimeRoot of trustedRuntimeReadRoots) {
       expect(result.args[1]).toContain(`(subpath "${runtimeRoot}")`);

@@ -73,6 +73,11 @@ const TRUSTED_GIT_ENV: NodeJS.ProcessEnv = {
   PATH: '/usr/local/bin:/usr/bin:/bin',
   LANG: 'C.UTF-8',
   LC_ALL: 'C.UTF-8',
+  TZ: 'UTC',
+  GIT_AUTHOR_NAME: 'NanoCrab Bot',
+  GIT_AUTHOR_EMAIL: 'nanocrab@localhost',
+  GIT_COMMITTER_NAME: 'NanoCrab Bot',
+  GIT_COMMITTER_EMAIL: 'nanocrab@localhost',
 };
 
 const HARDENED_GIT_CONFIG = [
@@ -293,7 +298,7 @@ function validateApprovedHostGitArgs(args: readonly string[]): void {
   throw new Error('Git arguments are not an approved remote operation');
 }
 
-function hardenedGitEnvironment(): NodeJS.ProcessEnv {
+function hardenedGitEnvironment(worktree?: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...TRUSTED_GIT_ENV,
     GIT_CONFIG_SYSTEM: '/dev/null',
@@ -304,6 +309,7 @@ function hardenedGitEnvironment(): NodeJS.ProcessEnv {
     GIT_SSH_COMMAND: 'false',
     GIT_CONFIG_COUNT: String(HARDENED_GIT_CONFIG.length),
   };
+  if (worktree) env.GIT_WORK_TREE = worktree;
   HARDENED_GIT_CONFIG.forEach(([key, value], index) => {
     env[`GIT_CONFIG_KEY_${index}`] = key;
     env[`GIT_CONFIG_VALUE_${index}`] = value;
@@ -314,9 +320,10 @@ function hardenedGitEnvironment(): NodeJS.ProcessEnv {
 function credentialedGitEnvironment(
   helperPath: string,
   token: string,
+  worktree?: string,
 ): NodeJS.ProcessEnv {
   return {
-    ...hardenedGitEnvironment(),
+    ...hardenedGitEnvironment(worktree),
     GIT_ASKPASS: helperPath,
     GIT_TERMINAL_PROMPT: '0',
     NANOCRAB_GIT_TOKEN: token,
@@ -344,7 +351,7 @@ export async function runApprovedHostGit(
     const result = await options.git(args, {
       cwd: options.cwd,
       timeoutMs: GIT_TIMEOUT_MS,
-      env: credentialedGitEnvironment(helper.path, options.token),
+      env: credentialedGitEnvironment(helper.path, options.token, options.cwd),
     });
     return {
       stdout: redact(result.stdout, options.token),
@@ -386,7 +393,7 @@ async function runLocalGit(
   try {
     result = await git(args, {
       cwd,
-      env: hardenedGitEnvironment(),
+      env: hardenedGitEnvironment(cwd),
       timeoutMs: GIT_TIMEOUT_MS,
       stdin,
     });
@@ -400,6 +407,79 @@ async function runLocalGit(
   }
   requireGitSuccess(result, operation);
   return result;
+}
+
+interface GitMetadataValidationDeps {
+  lstat(value: string): Promise<fs.Stats>;
+  realpath(value: string): Promise<string>;
+  readdir(
+    value: string,
+    options: { withFileTypes: true },
+  ): Promise<fs.Dirent[]>;
+}
+
+const gitMetadataValidationDeps: GitMetadataValidationDeps = {
+  lstat: (value) => fs.promises.lstat(value),
+  realpath: (value) => fs.promises.realpath(value),
+  readdir: (value, options) => fs.promises.readdir(value, options),
+};
+
+async function assertTrustedGitMetadata(
+  workspace: string,
+  deps: GitMetadataValidationDeps = gitMetadataValidationDeps,
+): Promise<void> {
+  const gitDir = path.join(workspace, '.git');
+  try {
+    if ((await deps.realpath(workspace)) !== workspace) {
+      throw new Error('Git workspace is not canonical');
+    }
+    const gitStats = await deps.lstat(gitDir);
+    if (gitStats.isSymbolicLink() || !gitStats.isDirectory()) {
+      throw new Error('Git metadata root is not a trusted directory');
+    }
+    if ((await deps.realpath(gitDir)) !== gitDir) {
+      throw new Error('Git metadata root escapes the workspace');
+    }
+
+    for (const forbidden of [
+      path.join(gitDir, 'commondir'),
+      path.join(gitDir, 'objects', 'info', 'alternates'),
+    ]) {
+      try {
+        await deps.lstat(forbidden);
+        throw new Error('Git metadata contains an external indirection');
+      } catch (error) {
+        if (!isMissing(error)) throw error;
+      }
+    }
+
+    const walk = async (directory: string): Promise<void> => {
+      for (const entry of await deps.readdir(directory, {
+        withFileTypes: true,
+      })) {
+        const candidate = path.join(directory, entry.name);
+        const stats = await deps.lstat(candidate);
+        if (stats.isSymbolicLink()) {
+          throw new Error('Git metadata must not contain symlinks');
+        }
+        if (stats.isDirectory()) {
+          await walk(candidate);
+        } else if (!stats.isFile()) {
+          throw new Error('Git metadata contains an unsupported entry');
+        }
+      }
+    };
+    await walk(gitDir);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Git metadata')) {
+      throw error;
+    }
+    throw new Error('Git metadata validation failed', {
+      // Filesystem failures may expose paths outside the approved workspace.
+      // eslint-disable-next-line preserve-caught-error
+      cause: new Error('Git metadata is not trusted'),
+    });
+  }
 }
 
 function trustedGithubRepoUrl(repo: string): string {
@@ -596,7 +676,9 @@ async function stageCodingWorkspaceWithoutFilters(
 
 export async function publishCodingWorkspace(
   input: CodingWorkspacePublicationInput,
-  deps: Pick<CodingWorkspaceDeps, 'git' | 'createAskpass'>,
+  deps: Pick<CodingWorkspaceDeps, 'git' | 'createAskpass'> & {
+    validateGitMetadata?(workspace: string): Promise<void>;
+  },
 ): Promise<{ commitSha: string }> {
   if (
     !path.isAbsolute(input.workspace) ||
@@ -610,6 +692,7 @@ export async function publishCodingWorkspace(
     throw new Error('Coding workspace commit message is required');
   }
 
+  await (deps.validateGitMetadata ?? assertTrustedGitMetadata)(input.workspace);
   input.assertOwnership();
   await stageCodingWorkspaceWithoutFilters(input, deps);
   input.assertOwnership();
@@ -693,7 +776,9 @@ export async function publishCodingWorkspace(
 
 export async function deleteCodingWorkspaceBranch(
   input: { workspace: string; repo: string; branch: string; token: string },
-  deps: Pick<CodingWorkspaceDeps, 'git' | 'createAskpass'>,
+  deps: Pick<CodingWorkspaceDeps, 'git' | 'createAskpass'> & {
+    validateGitMetadata?(workspace: string): Promise<void>;
+  },
 ): Promise<void> {
   if (
     !path.isAbsolute(input.workspace) ||
@@ -703,6 +788,7 @@ export async function deleteCodingWorkspaceBranch(
   }
   validateCodingBranch(input.branch);
   const trustedRemote = trustedGithubRepoUrl(input.repo);
+  await (deps.validateGitMetadata ?? assertTrustedGitMetadata)(input.workspace);
   const result = await runApprovedHostGit(
     ['push', trustedRemote, `:${input.branch}`],
     {
@@ -720,11 +806,13 @@ export async function collectCodingWorkspaceEvidence(
   deps: Pick<CodingWorkspaceDeps, 'git'> & {
     lstat?(value: string): Promise<fs.Stats>;
     readlink?(value: string): Promise<string>;
+    validateGitMetadata?(workspace: string): Promise<void>;
   },
 ): Promise<CodingWorkspaceEvidence> {
   if (!path.isAbsolute(workspace) || path.normalize(workspace) !== workspace) {
     throw new Error('Coding workspace evidence path must be canonical');
   }
+  await (deps.validateGitMetadata ?? assertTrustedGitMetadata)(workspace);
   const state = await collectFilterFreeWorkspaceState(
     { workspace, assertOwnership: () => undefined },
     deps,

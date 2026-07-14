@@ -43,6 +43,8 @@ const readOnlyConfig = {
       'Read(/home/service/.gnupg/**)',
       'Read(/home/service/.config/nanocrab/**)',
       'Write(/jobs/job/.nanocrab/**)',
+      'Write(/jobs/job/repo/.git)',
+      'Write(/jobs/job/repo/.git/**)',
       'Write(/home/service/.config/devin/credentials.json)',
       'Write(/home/service/.ssh/**)',
       'Write(/home/service/.gnupg/**)',

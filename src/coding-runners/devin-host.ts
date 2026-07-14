@@ -59,6 +59,8 @@ export function buildDevinAgentConfig(input: {
         `Read(${path.join(input.home, '.gnupg')}/**)`,
         `Read(${input.nanocrabConfigRoot}/**)`,
         `Write(${metadataRoot}/**)`,
+        `Write(${path.join(input.workspace, '.git')})`,
+        `Write(${path.join(input.workspace, '.git')}/**)`,
         `Write(${input.devinCredentialPath})`,
         `Write(${path.join(input.home, '.ssh')}/**)`,
         `Write(${path.join(input.home, '.gnupg')}/**)`,
