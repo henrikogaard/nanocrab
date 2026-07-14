@@ -8,6 +8,7 @@ import {
   buildDevinAgentConfig,
   buildDevinChildEnvironment,
   createDevinHostRunner,
+  ensureDevinAgentConfig,
   ensureDevinCommandBrokerLauncher,
   writeDevinCommandBrokerLauncher,
 } from './devin-host.js';
@@ -296,7 +297,7 @@ describe('Devin command broker launcher', () => {
   });
 
   it('creates the exact immutable launcher when it does not exist', async () => {
-    const dependencies = immutableLauncherDependencies();
+    const dependencies = immutableLauncherDependencies({ parentMode: 0o700 });
     dependencies.lstat.mockRejectedValueOnce(
       Object.assign(new Error('missing'), { code: 'ENOENT' }),
     );
@@ -328,6 +329,39 @@ describe('Devin command broker launcher', () => {
       0o500,
     );
   });
+
+  it.each([
+    ['symlink', { parentSymlink: true }],
+    ['non-directory', { parentDirectory: false }],
+    ['wrong owner', { parentUid: 999 }],
+    ['wrong staging mode', { parentMode: 0o755 }],
+    ['noncanonical path', { parentRealpath: '/attacker/bin' }],
+  ])(
+    'rejects a hostile existing creation parent: %s',
+    async (_name, change) => {
+      const dependencies = immutableLauncherDependencies(change);
+      dependencies.lstat.mockRejectedValueOnce(
+        Object.assign(new Error('missing'), { code: 'ENOENT' }),
+      );
+      await expect(
+        ensureDevinCommandBrokerLauncher(
+          {
+            stageKind: 'direct',
+            workspace: '/jobs/job/repo',
+            jobRoot: '/jobs/job',
+            commandBrokerModulePath: '/opt/nanocrab/command-broker.js',
+            sandboxExecutable: '/usr/bin/bwrap',
+            nodeExecutable: '/usr/bin/node',
+            home: '/home/service',
+            protectedPaths: ['/jobs/job/.nanocrab'],
+            trustedRuntimeReadRoots: ['/usr'],
+          },
+          dependencies,
+        ),
+      ).rejects.toThrow(/parent|directory|immutable|unsafe|canonical/i);
+      expect(dependencies.writeFile).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ['tampered bytes', { source: 'tampered' }],
@@ -364,7 +398,10 @@ function immutableLauncherDependencies(
     launcherMode?: number;
     launcherUid?: number;
     parentSymlink?: boolean;
+    parentDirectory?: boolean;
+    parentUid?: number;
     parentMode?: number;
+    parentRealpath?: string;
     writeFile?: (
       path: string,
       data: string,
@@ -385,17 +422,21 @@ function immutableLauncherDependencies(
   const parent = {
     dev: 1,
     ino: 1,
-    uid: 501,
+    uid: changes.parentUid ?? 501,
     mode: changes.parentMode ?? 0o500,
     isSymbolicLink: () => changes.parentSymlink ?? false,
     isFile: () => false,
-    isDirectory: () => true,
+    isDirectory: () => changes.parentDirectory ?? true,
   } as unknown as import('node:fs').Stats;
   return {
     mkdir: vi.fn(async () => undefined),
     writeFile: changes.writeFile ?? vi.fn(async () => undefined),
     chmod: changes.chmod ?? vi.fn(async () => undefined),
-    realpath: vi.fn(async (value: string) => value),
+    realpath: vi.fn(async (value: string) =>
+      value.endsWith('/bin') && changes.parentRealpath
+        ? changes.parentRealpath
+        : value,
+    ),
     lstat: vi.fn(async (value: string) =>
       value.endsWith('/bin') ? parent : launcher,
     ),
@@ -403,6 +444,72 @@ function immutableLauncherDependencies(
       value.endsWith('/bin') ? parent : launcher,
     ),
     readFile: vi.fn(async () => changes.source ?? 'expected'),
+    getuid: () => 501,
+  };
+}
+
+describe('immutable Devin agent config', () => {
+  it('creates mode 0600 with exclusive create and reuses exact bytes', async () => {
+    const dependencies = immutableConfigDependencies();
+    dependencies.lstat.mockRejectedValueOnce(
+      Object.assign(new Error('missing'), { code: 'ENOENT' }),
+    );
+    await ensureDevinAgentConfig(
+      '/jobs/job/.nanocrab/devin-agent.json',
+      '{}',
+      dependencies,
+    );
+    expect(dependencies.writeFile).toHaveBeenCalledWith(
+      '/jobs/job/.nanocrab/devin-agent.json',
+      '{}',
+      { encoding: 'utf8', mode: 0o600, flag: 'wx' },
+    );
+
+    const existing = immutableConfigDependencies({ source: '{}' });
+    await expect(
+      ensureDevinAgentConfig(
+        '/jobs/job/.nanocrab/devin-agent.json',
+        '{}',
+        existing,
+      ),
+    ).resolves.toBeUndefined();
+    expect(existing.writeFile).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['tampered bytes', { source: 'tampered' }],
+    ['symlink', { symlink: true }],
+    ['mode 0644', { mode: 0o644 }],
+  ])('rejects an existing unsafe config with %s', async (_name, change) => {
+    const dependencies = immutableConfigDependencies(change);
+    await expect(
+      ensureDevinAgentConfig(
+        '/jobs/job/.nanocrab/devin-agent.json',
+        '{}',
+        dependencies,
+      ),
+    ).rejects.toThrow(/config|immutable|unsafe/i);
+    expect(dependencies.writeFile).not.toHaveBeenCalled();
+  });
+});
+
+function immutableConfigDependencies(
+  changes: { source?: string; symlink?: boolean; mode?: number } = {},
+) {
+  const stats = {
+    dev: 2,
+    ino: 3,
+    uid: 501,
+    mode: changes.mode ?? 0o600,
+    isSymbolicLink: () => changes.symlink ?? false,
+    isFile: () => true,
+  } as unknown as import('node:fs').Stats;
+  return {
+    writeFile: vi.fn(async () => undefined),
+    realpath: vi.fn(async (value: string) => value),
+    lstat: vi.fn(async () => stats),
+    stat: vi.fn(async () => stats),
+    readFile: vi.fn(async () => changes.source ?? '{}'),
     getuid: () => 501,
   };
 }
@@ -476,7 +583,7 @@ function runnerHarness(processes = [new FakeCodingProcess(101)]) {
     graceMs: 50,
   });
   const spawn = vi.fn(() => processes[spawnIndex++]!);
-  const writeFile = vi.fn(async () => undefined);
+  const ensureConfig = vi.fn(async () => undefined);
   const ensureLauncher = vi.fn(
     async () => '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
   );
@@ -487,7 +594,6 @@ function runnerHarness(processes = [new FakeCodingProcess(101)]) {
     spawn,
     registry,
     timers,
-    executable: canonicalRuntime.executable,
     environmentSource: {
       HOME: '/home/service',
       XDG_CONFIG_HOME: '/home/service/.config',
@@ -495,7 +601,7 @@ function runnerHarness(processes = [new FakeCodingProcess(101)]) {
       GITHUB_TOKEN: 'github-secret-value',
     },
     knownSecrets: ['known-secret-value'],
-    writeFile,
+    ensureAgentConfig: ensureConfig,
     realpath: async (value) => value,
     getVerifiedRuntimeContext,
     ensureCommandBrokerLauncher: ensureLauncher,
@@ -504,12 +610,13 @@ function runnerHarness(processes = [new FakeCodingProcess(101)]) {
     devinCredentialPath: '/home/service/.config/devin/credentials.json',
     home: '/home/service',
     nanocrabConfigRoot: '/home/service/.config/nanocrab',
+    signalProcessGroup: (pid, signal) => groupSignals.push([pid, signal]),
   });
   return {
     runner,
     spawn,
     registry,
-    writeFile,
+    ensureConfig,
     ensureLauncher,
     getVerifiedRuntimeContext,
     groupSignals,
@@ -541,10 +648,9 @@ describe('Devin host process runner', () => {
       ],
       trustedRuntimeReadRoots: ['/opt/devin', '/usr/local', '/usr/bin'],
     });
-    expect(harness.writeFile).toHaveBeenCalledWith(
+    expect(harness.ensureConfig).toHaveBeenCalledWith(
       '/jobs/job/.nanocrab/devin-agent.json',
       expect.stringContaining('Write(/jobs/job/owner__repo/**)'),
-      { mode: 0o600 },
     );
     expect(harness.spawn).toHaveBeenCalledWith(
       '/opt/devin/bin/devin',
@@ -581,6 +687,70 @@ describe('Devin host process runner', () => {
     await expect(run).resolves.toMatchObject({ state: 'succeeded' });
   });
 
+  it('consumes the fresh verified canonical executable on every run', async () => {
+    const first = new FakeCodingProcess(201);
+    const second = new FakeCodingProcess(202);
+    const harness = runnerHarness([first, second]);
+    harness.getVerifiedRuntimeContext
+      .mockReturnValueOnce(canonicalRuntime)
+      .mockReturnValueOnce({
+        ...canonicalRuntime,
+        executable: '/opt/devin-v2/bin/devin',
+      });
+    const firstRun = harness.runner.run(runnerInput());
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledTimes(1));
+    first.close(0);
+    await firstRun;
+    const secondRun = harness.runner.run(
+      runnerInput({ attemptId: 'attempt-2' }),
+    );
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledTimes(2));
+    second.close(0);
+    await secondRun;
+    const spawnCalls = harness.spawn.mock.calls as unknown as Array<[string]>;
+    expect(spawnCalls.map((call) => call[0])).toEqual([
+      '/opt/devin/bin/devin',
+      '/opt/devin-v2/bin/devin',
+    ]);
+  });
+
+  it('terminates an unleased detached process group when registration fails', async () => {
+    const process = new FakeCodingProcess(203);
+    const harness = runnerHarness([process]);
+    vi.spyOn(harness.registry, 'register').mockImplementationOnce(() => {
+      throw new Error('duplicate');
+    });
+    await expect(harness.runner.run(runnerInput())).resolves.toMatchObject({
+      state: 'failed',
+      detail: 'Devin process registration failed',
+    });
+    expect(harness.groupSignals).toContainEqual([-203, 'SIGTERM']);
+    expect(process.signals).toEqual([]);
+  });
+
+  it('emits one bounded safe truncation marker per truncated stream', async () => {
+    const process = new FakeCodingProcess(204);
+    const harness = runnerHarness([process]);
+    const chunks: Array<{ stream: 'stdout' | 'stderr'; text: string }> = [];
+    const run = harness.runner.run(
+      runnerInput({ onOutput: (chunk) => chunks.push(chunk) }),
+    );
+    await vi.waitFor(() => expect(harness.spawn).toHaveBeenCalledOnce());
+    process.stdout.write(`known-secret-value ${'x'.repeat(1_100_000)}`);
+    process.stderr.write(`known-secret-value ${'y'.repeat(1_100_000)}`);
+    process.close(0);
+    await run;
+    for (const stream of ['stdout', 'stderr'] as const) {
+      const text = chunks
+        .filter((chunk) => chunk.stream === stream)
+        .map((chunk) => chunk.text)
+        .join('');
+      expect(text).not.toContain('known-secret-value');
+      expect(text.match(/NanoCrab: Devin output truncated/g)).toHaveLength(1);
+      expect(text.length).toBeLessThanOrEqual(1_048_576);
+    }
+  });
+
   it('registers before output, preserves stream order, and bounds only redacted output', async () => {
     const process = new FakeCodingProcess(102);
     const harness = runnerHarness([process]);
@@ -598,10 +768,12 @@ describe('Devin host process runner', () => {
     await run;
 
     expect(owns).toHaveBeenCalled();
-    expect(chunks[0]?.stream).toBe('stdout');
-    expect(chunks.slice(1).every((chunk) => chunk.stream === 'stderr')).toBe(
-      true,
-    );
+    expect(chunks.map((chunk) => chunk.stream)).toEqual([
+      'stdout',
+      'stderr',
+      'stderr',
+      'stdout',
+    ]);
     const output = chunks.map((chunk) => chunk.text).join('');
     expect(output).not.toContain('known-secret-value');
     expect(output).toContain('[REDACTED]');

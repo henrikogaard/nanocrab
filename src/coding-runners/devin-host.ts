@@ -127,6 +127,19 @@ export interface EnsureDevinBrokerLauncherDependencies extends DevinBrokerLaunch
   getuid(): number;
 }
 
+export interface EnsureDevinAgentConfigDependencies {
+  writeFile(
+    path: string,
+    data: string,
+    options: { encoding: 'utf8'; mode: number; flag: 'wx' },
+  ): Promise<void>;
+  realpath(path: string): Promise<string>;
+  lstat(path: string): Promise<fs.Stats>;
+  stat(path: string): Promise<fs.Stats>;
+  readFile(path: string, encoding: 'utf8'): Promise<string>;
+  getuid(): number;
+}
+
 const launcherDependencies: DevinBrokerLauncherDependencies = {
   mkdir: fs.promises.mkdir,
   writeFile: fs.promises.writeFile,
@@ -227,6 +240,32 @@ function exactMode(stats: fs.Stats): number {
   return stats.mode & 0o777;
 }
 
+async function validateImmutableDirectory(
+  directory: string,
+  mode: number,
+  dependencies: EnsureDevinBrokerLauncherDependencies,
+): Promise<void> {
+  const first = await dependencies.lstat(directory);
+  const canonical = await dependencies.realpath(directory);
+  const followed = await dependencies.stat(directory);
+  const final = await dependencies.lstat(directory);
+  if (
+    first.isSymbolicLink() ||
+    !first.isDirectory() ||
+    first.uid !== dependencies.getuid() ||
+    exactMode(first) !== mode ||
+    canonical !== directory ||
+    !sameFileIdentity(first, followed) ||
+    !sameFileIdentity(first, final) ||
+    final.isSymbolicLink() ||
+    !final.isDirectory() ||
+    final.uid !== dependencies.getuid() ||
+    exactMode(final) !== mode
+  ) {
+    throw new Error('Immutable Devin launcher parent directory is unsafe');
+  }
+}
+
 export async function ensureDevinCommandBrokerLauncher(
   input: DevinBrokerLauncherInput,
   dependencies: EnsureDevinBrokerLauncherDependencies,
@@ -238,7 +277,27 @@ export async function ensureDevinCommandBrokerLauncher(
     firstLauncher = await dependencies.lstat(launcherPath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    return writeDevinCommandBrokerLauncher(input, dependencies);
+    try {
+      await dependencies.lstat(directory);
+    } catch (parentError) {
+      if ((parentError as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw parentError;
+      }
+      await dependencies.mkdir(directory, { recursive: true, mode: 0o700 });
+    }
+    await validateImmutableDirectory(directory, 0o700, dependencies);
+    const source = await buildDevinCommandBrokerLauncherSource(
+      input,
+      dependencies.realpath,
+    );
+    await dependencies.writeFile(launcherPath, source, {
+      encoding: 'utf8',
+      mode: 0o555,
+      flag: 'wx',
+    });
+    await dependencies.chmod(launcherPath, 0o555);
+    await dependencies.chmod(directory, 0o500);
+    return launcherPath;
   }
 
   const firstDirectory = await dependencies.lstat(directory);
@@ -302,18 +361,52 @@ export async function ensureDevinCommandBrokerLauncher(
   return launcherPath;
 }
 
+export async function ensureDevinAgentConfig(
+  configPath: string,
+  expectedSource: string,
+  dependencies: EnsureDevinAgentConfigDependencies,
+): Promise<void> {
+  let first: fs.Stats;
+  try {
+    first = await dependencies.lstat(configPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    await dependencies.writeFile(configPath, expectedSource, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx',
+    });
+    return;
+  }
+  const canonical = await dependencies.realpath(configPath);
+  const followed = await dependencies.stat(configPath);
+  const actualSource = await dependencies.readFile(configPath, 'utf8');
+  const final = await dependencies.lstat(configPath);
+  if (
+    first.isSymbolicLink() ||
+    !first.isFile() ||
+    first.uid !== dependencies.getuid() ||
+    exactMode(first) !== 0o600 ||
+    canonical !== configPath ||
+    !sameFileIdentity(first, followed) ||
+    !sameFileIdentity(first, final) ||
+    final.isSymbolicLink() ||
+    !final.isFile() ||
+    final.uid !== dependencies.getuid() ||
+    exactMode(final) !== 0o600 ||
+    actualSource !== expectedSource
+  ) {
+    throw new Error('Immutable Devin agent config is unsafe');
+  }
+}
+
 export interface DevinHostRunnerDependencies {
   spawn: CodingProcessSpawner;
   registry: ProcessRegistry;
   timers: CodingTimerTransport;
-  executable: string;
   environmentSource: NodeJS.ProcessEnv;
   knownSecrets: readonly string[];
-  writeFile(
-    path: string,
-    data: string,
-    options: { mode: number },
-  ): Promise<void>;
+  ensureAgentConfig(path: string, data: string): Promise<void>;
   realpath(path: string): Promise<string>;
   getVerifiedRuntimeContext(): VerifiedDevinRuntimeContext | null;
   ensureCommandBrokerLauncher: (
@@ -323,14 +416,41 @@ export interface DevinHostRunnerDependencies {
   devinCredentialPath: string;
   home: string;
   nanocrabConfigRoot: string;
+  signalProcessGroup(pid: number, signal: NodeJS.Signals): void;
+}
+
+export interface DevinHostRunnerProductionDependencies extends Omit<
+  DevinHostRunnerDependencies,
+  'ensureAgentConfig' | 'ensureCommandBrokerLauncher'
+> {
+  filesystem: EnsureDevinBrokerLauncherDependencies &
+    EnsureDevinAgentConfigDependencies;
+}
+
+export function createProductionDevinHostRunner(
+  dependencies: DevinHostRunnerProductionDependencies,
+): CodingRunnerAdapter {
+  const { filesystem, ...runnerDependencies } = dependencies;
+  return createDevinHostRunner({
+    ...runnerDependencies,
+    ensureAgentConfig: (configPath, source) =>
+      ensureDevinAgentConfig(configPath, source, filesystem),
+    ensureCommandBrokerLauncher: (input) =>
+      ensureDevinCommandBrokerLauncher(input, filesystem),
+  });
 }
 
 const MAX_SAFE_OUTPUT = 1_048_576;
 const STDERR_TAIL = 8_192;
 
 interface ActiveRun {
-  lease: ProcessLease;
+  leaseToken: string;
   cancel(): boolean;
+}
+
+interface LatestRunIdentity {
+  attemptId: string;
+  leaseToken: string;
 }
 
 function runKey(jobId: string, attemptId: string): string {
@@ -364,12 +484,12 @@ export function createDevinHostRunner(
   deps: DevinHostRunnerDependencies,
 ): CodingRunnerAdapter {
   const activeRuns = new Map<string, ActiveRun>();
-  const latestLeaseByJob = new Map<string, ProcessLease>();
+  const latestRunByJob = new Map<string, LatestRunIdentity>();
 
   return {
     async run(input: CodingRunnerInput): Promise<CodingRunnerResult> {
       const runtime = deps.getVerifiedRuntimeContext();
-      if (!runtime || runtime.executable !== deps.executable) {
+      if (!runtime) {
         return failedBeforeSpawn(
           input.attemptId,
           'Devin runtime verification is unavailable',
@@ -454,9 +574,7 @@ export function createDevinHostRunner(
           home,
           nanocrabConfigRoot,
         });
-        await deps.writeFile(agentConfigPath, JSON.stringify(config), {
-          mode: 0o600,
-        });
+        await deps.ensureAgentConfig(agentConfigPath, JSON.stringify(config));
       } catch {
         return failedBeforeSpawn(
           input.attemptId,
@@ -505,10 +623,18 @@ export function createDevinHostRunner(
           process: child,
         });
       } catch {
-        try {
-          child.kill('SIGTERM');
-        } catch {
-          // The unleased child is best-effort terminated without exposing errors.
+        if (child.pid && child.pid > 0) {
+          try {
+            deps.signalProcessGroup(-child.pid, 'SIGTERM');
+          } catch {
+            // A detached process with a PID is never signalled as an individual.
+          }
+        } else {
+          try {
+            child.kill('SIGTERM');
+          } catch {
+            // A PID-less unleased child is best-effort terminated.
+          }
         }
         return failedBeforeSpawn(
           input.attemptId,
@@ -516,7 +642,10 @@ export function createDevinHostRunner(
         );
       }
 
-      latestLeaseByJob.set(input.jobId, lease);
+      latestRunByJob.set(input.jobId, {
+        attemptId: input.attemptId,
+        leaseToken: lease.leaseToken,
+      });
       const key = runKey(input.jobId, input.attemptId);
       const stdoutRedactor = createStreamingLogRedactor({
         knownSecrets: deps.knownSecrets,
@@ -525,6 +654,7 @@ export function createDevinHostRunner(
         knownSecrets: deps.knownSecrets,
       });
       let safeOutputLength = 0;
+      const truncationEmitted = { stdout: false, stderr: false };
       let stderrTail = '';
       let settled = false;
       let timeoutHandle: unknown;
@@ -532,7 +662,8 @@ export function createDevinHostRunner(
       const ownsOutput = (): boolean =>
         !settled &&
         deps.registry.owns(lease) &&
-        latestLeaseByJob.get(input.jobId)?.leaseToken === lease.leaseToken;
+        latestRunByJob.get(input.jobId)?.attemptId === input.attemptId &&
+        latestRunByJob.get(input.jobId)?.leaseToken === lease.leaseToken;
 
       const emitSafe = (
         stream: CodingRunnerOutputChunk['stream'],
@@ -542,16 +673,29 @@ export function createDevinHostRunner(
         if (!safeText) return;
         const allowed = duringSettlement
           ? deps.registry.owns(lease) &&
-            latestLeaseByJob.get(input.jobId)?.leaseToken === lease.leaseToken
+            latestRunByJob.get(input.jobId)?.attemptId === input.attemptId &&
+            latestRunByJob.get(input.jobId)?.leaseToken === lease.leaseToken
           : ownsOutput();
         if (!allowed) return;
         if (stream === 'stderr') {
           stderrTail = (stderrTail + safeText).slice(-STDERR_TAIL);
         }
-        const remaining = MAX_SAFE_OUTPUT - safeOutputLength;
-        if (remaining <= 0) return;
-        const bounded = safeText.slice(0, remaining);
+        const marker = '[NanoCrab: Devin output truncated]\n';
+        const reservedMarkerBytes =
+          Object.values(truncationEmitted).filter((value) => !value).length *
+          marker.length;
+        const remaining = Math.max(
+          0,
+          MAX_SAFE_OUTPUT - safeOutputLength - reservedMarkerBytes,
+        );
+        const truncated = safeText.length > remaining;
+        const bounded = truncated
+          ? safeText.slice(0, remaining) +
+            (truncationEmitted[stream] ? '' : marker)
+          : safeText;
+        if (!bounded) return;
         safeOutputLength += bounded.length;
+        if (truncated) truncationEmitted[stream] = true;
         input.onOutput({ stream, text: bounded });
       };
 
@@ -567,15 +711,14 @@ export function createDevinHostRunner(
           emitSafe('stdout', stdoutRedactor.flush(), true);
           emitSafe('stderr', stderrRedactor.flush(), true);
           if (releaseLease) deps.registry.compareAndDelete(lease);
-          if (activeRuns.get(key)?.lease.leaseToken === lease.leaseToken) {
+          if (activeRuns.get(key)?.leaseToken === lease.leaseToken) {
             activeRuns.delete(key);
           }
           if (
-            latestLeaseByJob.get(input.jobId)?.leaseToken ===
-              lease.leaseToken &&
-            releaseLease
+            latestRunByJob.get(input.jobId)?.attemptId === input.attemptId &&
+            latestRunByJob.get(input.jobId)?.leaseToken === lease.leaseToken
           ) {
-            latestLeaseByJob.delete(input.jobId);
+            latestRunByJob.delete(input.jobId);
           }
           if (result.state === 'failed' && result.exitCode !== null) {
             result.detail = `Devin exited with code ${result.exitCode}: ${stderrTail}`;
@@ -622,7 +765,7 @@ export function createDevinHostRunner(
         });
 
         const activeRun: ActiveRun = {
-          lease,
+          leaseToken: lease.leaseToken,
           cancel: () => {
             if (settled || !deps.registry.terminate(lease, 'cancelled')) {
               return false;
