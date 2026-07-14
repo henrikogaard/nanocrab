@@ -16,6 +16,8 @@
     ]);
     const isTrimmedText = (input) =>
       typeof input === 'string' && input.length > 0 && input === input.trim();
+    const isNonBlankText = (input) =>
+      typeof input === 'string' && input.trim().length > 0;
     const isNullableTrimmedText = (input) =>
       input === null || isTrimmedText(input);
     const isIsoTimestamp = (input) => {
@@ -46,7 +48,7 @@
           isTrimmedText(runtime.readiness.executable) &&
           isNullableTrimmedText(runtime.readiness.version) &&
           isIsoTimestamp(runtime.readiness.checkedAt) &&
-          isTrimmedText(runtime.readiness.detail) &&
+          isNonBlankText(runtime.readiness.detail) &&
           runtime.available === (runtime.readiness.status === 'healthy'),
       );
     if (!valid) {

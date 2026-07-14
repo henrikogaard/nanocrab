@@ -151,6 +151,27 @@ describe('App shell accessibility UI', () => {
     expect(
       shared.normalizeCodingRuntimeCatalog([validUnavailableRuntime]),
     ).toEqual({ runtimes: [validUnavailableRuntime], error: '' });
+    const validErrorRuntime = {
+      ...validRuntime,
+      cli: 'opencode',
+      provider: 'openrouter',
+      model: 'openai/gpt-oss-120b',
+      available: false,
+      readiness: {
+        ...validRuntime.readiness,
+        cli: 'opencode',
+        executable: 'opencode',
+        status: 'error',
+        version: null,
+        detail: 'Failed to start opencode\nstderr: connection refused\n',
+      },
+    };
+    expect(
+      shared.normalizeCodingRuntimeCatalog([validRuntime, validErrorRuntime]),
+    ).toEqual({
+      runtimes: [validRuntime, validErrorRuntime],
+      error: '',
+    });
     const malformedRuntimeEntries = [
       { ...validRuntime, cli: ' ' },
       { ...validRuntime, provider: '' },
