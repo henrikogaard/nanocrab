@@ -1,5 +1,13 @@
 # Control Plane Roadmap Batch - Design Spec
 
+> **Implementation status (2026-07-14):** This is the approved historical
+> design for the roadmap batch implemented by [PR #136](https://github.com/henrikogaard/nanocrab/pull/136),
+> which is now merged. Issues #128 and #130-#135 were delivered and closed.
+> Signal verification issue #94 was closed as deferred/not planned after the
+> live inbound-delivery boundary could not be validated. Devin runner issue
+> #129 was not delivered by PR #136 and remains open. The sections below
+> preserve the pre-implementation plan rather than serving as current status.
+
 ## Overview
 
 Complete the recommended post-control-plane roadmap as one reviewable delivery
