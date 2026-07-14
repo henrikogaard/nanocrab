@@ -45,7 +45,9 @@ import { createProductionDevinHostRunner } from './coding-runners/devin-host.js'
 import { codingProcessRegistry } from './coding-runners/process-registry.js';
 import { probeCodingRunnerReadiness } from './coding-runner-readiness.js';
 import {
+  collectCodingWorkspaceEvidence,
   prepareCodingWorkspace,
+  type CodingWorkspaceEvidence,
   type CodingWorkspaceInput,
   type PreparedCodingWorkspace,
 } from './coding-workspace.js';
@@ -81,6 +83,7 @@ export interface CodingJobExecutionDependencies {
   prepareWorkspace(
     input: CodingWorkspaceInput,
   ): Promise<PreparedCodingWorkspace>;
+  collectWorkspaceEvidence(workspace: string): Promise<CodingWorkspaceEvidence>;
   devinRunner: CodingRunnerAdapter;
   runContainer(
     job: CodingJob,
@@ -1391,6 +1394,9 @@ function configuredKnownSecrets(): string[] {
 
 function getProductionDevinRunner(): CodingRunnerAdapter {
   if (productionDevinRunner) return productionDevinRunner;
+  if (!DEVIN_CREDENTIAL_PATH) {
+    throw new Error('DEVIN_CREDENTIAL_PATH is not configured');
+  }
   const home = process.env.HOME || os.homedir();
   productionDevinRunner = createProductionDevinHostRunner({
     spawn,
@@ -1408,15 +1414,21 @@ function getProductionDevinRunner(): CodingRunnerAdapter {
       'coding-runners',
       'command-broker.js',
     ),
-    devinCredentialPath:
-      DEVIN_CREDENTIAL_PATH ||
-      path.join(home, '.config', 'devin', 'credentials.json'),
+    devinCredentialPath: DEVIN_CREDENTIAL_PATH,
     home,
     nanocrabConfigRoot: path.join(home, '.config', 'nanocrab'),
     signalProcessGroup: (pid, signal) => process.kill(pid, signal),
   });
   return productionDevinRunner;
 }
+
+const productionDevinRunnerProxy: CodingRunnerAdapter = {
+  run: (input) => getProductionDevinRunner().run(input),
+  cancel: (jobId, attemptId) =>
+    DEVIN_CREDENTIAL_PATH
+      ? getProductionDevinRunner().cancel(jobId, attemptId)
+      : false,
+};
 
 function runGit(
   args: readonly string[],
@@ -1464,7 +1476,9 @@ function productionCodingJobExecutionDependencies(): CodingJobExecutionDependenc
         mkdir: fs.promises.mkdir,
         githubToken: getGitHubToken(),
       }),
-    devinRunner: getProductionDevinRunner(),
+    collectWorkspaceEvidence: (workspace) =>
+      collectCodingWorkspaceEvidence(workspace, { git: runGit }),
+    devinRunner: productionDevinRunnerProxy,
     runContainer: runCodingContainer,
     now: nowIso,
   };
@@ -1558,6 +1572,8 @@ function requirePrProviderFallbackApproval(
     action: 'pr-creation',
     requester,
     correlationId: job.id,
+    sourceProvider: job.provider,
+    sourceModel: job.model,
   });
   logAuditEvent({
     actor: job.requestedBy,
@@ -1584,7 +1600,22 @@ function requirePrProviderFallbackApproval(
   return false;
 }
 
-async function runCodingJob(job: CodingJob): Promise<void> {
+interface StaleCodingAttemptResult {
+  kind: 'stale_attempt';
+  jobId: string;
+  attemptId: string;
+}
+
+function staleAttemptResult(
+  jobId: string,
+  attemptId: string,
+): StaleCodingAttemptResult {
+  return { kind: 'stale_attempt', jobId, attemptId };
+}
+
+async function runCodingJob(
+  job: CodingJob,
+): Promise<void | StaleCodingAttemptResult> {
   const current = getCodingJob(job.id) || job;
   if (current.status === 'cancelled') {
     updateJobOutput(current, '\n\nCoding job cancelled.\n');
@@ -1693,6 +1724,8 @@ async function runCodingJob(job: CodingJob): Promise<void> {
     action: 'coding-implementation',
     requester: job.requestedBy,
     correlationId: job.id,
+    sourceProvider: job.provider,
+    sourceModel: job.model,
   });
   logAuditEvent({
     actor: job.requestedBy,
@@ -1725,39 +1758,48 @@ async function runCodingJob(job: CodingJob): Promise<void> {
     }
   }
 
-  const fallbackWithCli = fallback as typeof fallback & {
-    cli?: AgentCliId;
-    runtime?: AgentRuntimeSelection;
-  };
-  const proposedRuntime =
-    fallbackWithCli.runtime ||
-    (fallbackWithCli.cli
-      ? {
-          cli: fallbackWithCli.cli,
-          provider: fallback.provider,
-          model: fallback.model,
-        }
-      : null);
   const runtimeChanged =
     fallback.provider !== job.provider || fallback.model !== job.model;
-  if (job.actualRuntime && runtimeChanged && !proposedRuntime) {
+  if (job.actualRuntime && runtimeChanged) {
+    let decision = findPendingApprovalForTarget(
+      'provider-fallback',
+      'coding-job',
+      job.id,
+    );
+    if (!decision) {
+      decision = createApproval({
+        kind: 'provider-fallback',
+        title: `Select fallback coding runtime for ${job.repo}`,
+        summary: `Choose and approve a complete CLI, provider, and model runtime to replace ${job.actualRuntime.cli}/${job.actualRuntime.provider}/${job.actualRuntime.model} with provider ${fallback.provider} and model ${fallback.model}.`,
+        risk: 'high',
+        requester: job.requestedBy,
+        targetType: 'coding-job',
+        targetId: job.id,
+        correlationId: job.id,
+        payload: {
+          jobId: job.id,
+          sourceRuntime: job.actualRuntime,
+          proposedProvider: fallback.provider,
+          proposedModel: fallback.model,
+        },
+      });
+    }
     updateJobOutput(
       job,
-      '\n\nProvider fallback must include an approved CLI, provider, and model; a control-plane decision is required.\n',
+      `\n\nProvider fallback must include an owner-approved CLI, provider, and model; a control-plane decision is required (${decision.id}).\n`,
     );
     upsertCodingJob(job);
     return;
   }
-  const selectedRuntime = proposedRuntime ||
-    job.actualRuntime || {
-      cli: runtimeChanged
-        ? inferLegacyRunnerCli(fallback.provider)
-        : job.runnerCli,
-      provider: fallback.provider,
-      model: fallback.model,
-    };
+  const selectedRuntime = job.actualRuntime || {
+    cli: runtimeChanged
+      ? inferLegacyRunnerCli(fallback.provider)
+      : job.runnerCli,
+    provider: fallback.provider,
+    model: fallback.model,
+  };
   validateCodingRuntimeSelection(selectedRuntime);
-  if (runtimeChanged || proposedRuntime) {
+  if (runtimeChanged) {
     updateJobOutput(
       job,
       `\n\nUsing approved runtime ${job.runnerCli}/${job.provider}/${job.model} -> ${selectedRuntime.cli}/${selectedRuntime.provider}/${selectedRuntime.model}\n`,
@@ -1816,6 +1858,7 @@ async function runCodingJob(job: CodingJob): Promise<void> {
   upsertCodingJob(job);
 
   let runnerResult: CodingRunnerResult;
+  let hostEvidence: CodingWorkspaceEvidence | null = null;
   try {
     const prepared = await deps.prepareWorkspace({
       jobId: job.id,
@@ -1826,7 +1869,9 @@ async function runCodingJob(job: CodingJob): Promise<void> {
       isFirstRun,
     });
     writeCodingJobFiles(job, repo);
-    if (!runningAttempt(job.id, attemptId)) return;
+    if (!runningAttempt(job.id, attemptId)) {
+      return staleAttemptResult(job.id, attemptId);
+    }
     if (job.runnerCli === 'devin') {
       const advertisedAliases = getVerifiedDevinAliases();
       const modelAlias = resolveDevinCliModelAlias(
@@ -1850,6 +1895,9 @@ async function runCodingJob(job: CodingJob): Promise<void> {
           }
         },
       });
+      if (runnerResult.state === 'succeeded') {
+        hostEvidence = await deps.collectWorkspaceEvidence(prepared.workspace);
+      }
     } else {
       const exitCode = await deps.runContainer(job, repo, attemptId);
       runnerResult = {
@@ -1866,17 +1914,23 @@ async function runCodingJob(job: CodingJob): Promise<void> {
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    terminalizeAttempt(job.id, attemptId, 'failed', detail);
+    if (!terminalizeAttempt(job.id, attemptId, 'failed', detail)) {
+      return staleAttemptResult(job.id, attemptId);
+    }
     throw error;
   }
 
   if (runnerResult.attemptId !== attemptId) {
     const detail = 'Coding runner returned a mismatched attempt identifier';
-    terminalizeAttempt(job.id, attemptId, 'failed', detail);
+    if (!terminalizeAttempt(job.id, attemptId, 'failed', detail)) {
+      return staleAttemptResult(job.id, attemptId);
+    }
     throw new Error(detail);
   }
   const refreshedBeforeTerminal = getCodingJob(job.id);
-  if (refreshedBeforeTerminal?.activeAttemptId !== attemptId) return;
+  if (refreshedBeforeTerminal?.activeAttemptId !== attemptId) {
+    return staleAttemptResult(job.id, attemptId);
+  }
   if (runnerResult.state !== 'succeeded') {
     const failureReason = runnerFailureMessage(job, runnerResult);
     const refreshed = terminalizeAttempt(
@@ -1885,7 +1939,7 @@ async function runCodingJob(job: CodingJob): Promise<void> {
       runnerResult.state,
       failureReason,
     );
-    if (!refreshed) return;
+    if (!refreshed) return staleAttemptResult(job.id, attemptId);
     if (runnerResult.state === 'cancelled') {
       if (refreshed.status !== 'cancelled') {
         applyCodingJobTransition(refreshed, 'cancelled', failureReason);
@@ -1895,18 +1949,30 @@ async function runCodingJob(job: CodingJob): Promise<void> {
     throw new Error(failureReason);
   }
   const refreshed = terminalizeAttempt(job.id, attemptId, 'succeeded');
-  if (!refreshed || refreshed.status === 'cancelled') return;
+  if (!refreshed) return staleAttemptResult(job.id, attemptId);
+  if (refreshed.status === 'cancelled') return;
   Object.assign(job, refreshed);
   applyCodingJobTransition(job, 'test');
 
   const metadataDir = path.join(path.dirname(job.workspace), '.nanocrab');
-  const diffStat = readTextFile(path.join(metadataDir, 'diff-stat.txt'));
-  const changedFiles = readTextFile(
-    path.join(metadataDir, 'changed-files.txt'),
-  );
-  const untracked = readTextFile(path.join(metadataDir, 'untracked.txt'));
-  const testSummary = readTextFile(path.join(metadataDir, 'test-summary.txt'));
-  if (!diffStat && !untracked) {
+  const diffStat =
+    hostEvidence?.diffStat ||
+    (hostEvidence ? '' : readTextFile(path.join(metadataDir, 'diff-stat.txt')));
+  const changedFiles = hostEvidence
+    ? hostEvidence.changedFiles
+    : readTextFile(path.join(metadataDir, 'changed-files.txt'))
+        .split('\n')
+        .filter(Boolean);
+  const untracked = hostEvidence
+    ? hostEvidence.untrackedFiles
+    : readTextFile(path.join(metadataDir, 'untracked.txt'))
+        .split('\n')
+        .filter(Boolean);
+  const testSummary = hostEvidence
+    ? hostEvidence.testEvidence.summary
+    : readTextFile(path.join(metadataDir, 'test-summary.txt'));
+  if (hostEvidence) job.testSummary = testSummary;
+  if (!diffStat && untracked.length === 0) {
     updateJobOutput(job, '\n\nNo repository changes were produced.\n');
     applyCodingJobTransition(job, 'completed');
     upsertCodingJob(job);
@@ -1921,8 +1987,8 @@ async function runCodingJob(job: CodingJob): Promise<void> {
   job.changedFiles = Array.from(
     new Set(
       [
-        ...changedFiles.split('\n'),
-        ...untracked.split('\n'),
+        ...changedFiles,
+        ...untracked,
         ...diffStat.split('\n').map((line) => line.split('|')[0]?.trim()),
       ].filter(Boolean),
     ),
@@ -2256,6 +2322,74 @@ export async function retryCodingJob(
       }
       applyCodingJobTransition(latest, 'failed', failureReason);
       updateJobOutput(latest, `\n\nCoding job failed: ${failureReason}\n`);
+    });
+  });
+  return job;
+}
+
+export function approveCodingJobRuntimeFallback(
+  jobId: string,
+  runtime: AgentRuntimeSelection,
+  by = 'dashboard',
+): CodingJob {
+  const job = getCodingJob(jobId);
+  if (!job) throw new Error(`Coding job not found: ${jobId}`);
+  if (job.status !== 'await_approval' || !job.actualRuntime) {
+    throw new Error(`Cannot approve runtime fallback from ${job.status}`);
+  }
+  const pending = findPendingApprovalForTarget(
+    'provider-fallback',
+    'coding-job',
+    job.id,
+  );
+  if (!pending) throw new Error('Runtime fallback decision is not pending');
+  const proposedProvider = pending.payload.proposedProvider;
+  const proposedModel = pending.payload.proposedModel;
+  if (
+    runtime.provider !== proposedProvider ||
+    runtime.model !== proposedModel
+  ) {
+    throw new Error('Runtime fallback does not match the pending proposal');
+  }
+  const sourceRuntime = pending.payload.sourceRuntime;
+  if (
+    !sourceRuntime ||
+    typeof sourceRuntime !== 'object' ||
+    (sourceRuntime as AgentRuntimeSelection).cli !== job.actualRuntime.cli ||
+    (sourceRuntime as AgentRuntimeSelection).provider !==
+      job.actualRuntime.provider ||
+    (sourceRuntime as AgentRuntimeSelection).model !== job.actualRuntime.model
+  ) {
+    throw new Error('Runtime fallback source no longer matches the coding job');
+  }
+  if (!isCodingProvider(runtime.provider, runtime.model)) {
+    throw new Error(
+      codingProviderUnavailableReason(runtime.provider, runtime.model) ||
+        `${runtime.provider} is not a coding-job runtime`,
+    );
+  }
+  validateCodingRuntimeSelection(runtime);
+  reviewApproval(pending.id, 'approved', by);
+  const previous = job.actualRuntime;
+  job.actualRuntime = { ...runtime };
+  job.runnerCli = runtime.cli;
+  job.provider = runtime.provider as CodingProvider;
+  job.model = runtime.model;
+  recordJobApproval(job, 'approve-runtime-fallback', by);
+  updateJobOutput(
+    job,
+    `\n\nOwner approved runtime fallback ${previous.cli}/${previous.provider}/${previous.model} -> ${runtime.cli}/${runtime.provider}/${runtime.model}.\n`,
+  );
+  setImmediate(() => {
+    const latest = getCodingJob(job.id);
+    if (!latest) return;
+    void runCodingJob(latest).catch((error) => {
+      const failureReason =
+        error instanceof Error ? error.message : String(error);
+      const failed = getCodingJob(job.id) || latest;
+      if (failed.status === 'cancelled') return;
+      applyCodingJobTransition(failed, 'failed', failureReason);
+      updateJobOutput(failed, `\n\nCoding job failed: ${failureReason}\n`);
     });
   });
   return job;

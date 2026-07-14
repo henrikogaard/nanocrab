@@ -66,6 +66,7 @@ vi.mock('child_process', () => ({
 
 import {
   approveCodingJob,
+  approveCodingJobRuntimeFallback,
   buildCodingPrompt,
   cancelCodingJob,
   cleanupCodingJob,
@@ -88,7 +89,7 @@ import {
 import { listLearningProposals } from './learning-loop.js';
 import { upsertRepoRule } from './repo-preferences.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
-import { createApproval, reviewApproval } from './approvals.js';
+import { createApproval, listApprovals, reviewApproval } from './approvals.js';
 import { listAuditEvents } from './audit-log.js';
 import { _closeDatabase, _initTestDatabase } from './db.js';
 import { resetPolicyRules, savePolicyRules } from './policy-engine.js';
@@ -265,6 +266,16 @@ describe('coding jobs', () => {
           gitState: { staged: '', unstaged: '', untracked: '', unpushed: '' },
         };
       },
+      collectWorkspaceEvidence: async () => ({
+        diffStat: '',
+        changedFiles: [],
+        untrackedFiles: [],
+        testEvidence: {
+          status: 'not_reported',
+          summary:
+            'No trusted test evidence was reported by the Devin host runner.',
+        },
+      }),
     });
   });
 
@@ -1219,6 +1230,261 @@ describe('coding jobs', () => {
     ]);
   });
 
+  it('uses fresh host evidence for Devin changes and preserves the PR approval gate', async () => {
+    vi.useRealTimers();
+    configureCodingJobExecutionForTests({
+      collectWorkspaceEvidence: async () => ({
+        diffStat: 'src/host.ts | 3 +++',
+        changedFiles: ['src/host.ts'],
+        untrackedFiles: ['src/new-host.ts'],
+        testEvidence: {
+          status: 'not_reported',
+          summary:
+            'No trusted test evidence was reported by the Devin host runner.',
+        },
+      }),
+      prepareWorkspace: async (input) => {
+        const jobRoot = path.dirname(input.workspace);
+        const metadataDir = path.join(jobRoot, '.nanocrab');
+        fs.mkdirSync(input.workspace, { recursive: true });
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(metadataDir, 'diff-stat.txt'),
+          'src/stale.ts | 99 +++++++++++++++++++++++++++++++++++++\n',
+        );
+        fs.writeFileSync(
+          path.join(metadataDir, 'changed-files.txt'),
+          'src/stale.ts\n',
+        );
+        fs.writeFileSync(
+          path.join(metadataDir, 'untracked.txt'),
+          'stale.txt\n',
+        );
+        fs.writeFileSync(
+          path.join(metadataDir, 'test-summary.txt'),
+          'untrusted stale tests passed\n',
+        );
+        return {
+          jobRoot,
+          metadataDir,
+          workspace: input.workspace,
+          resumed: false,
+          gitState: { staged: '', unstaged: '', untracked: '', unpushed: '' },
+        };
+      },
+      devinRunner: {
+        run: async (input) => ({
+          attemptId: input.attemptId,
+          state: 'succeeded',
+          exitCode: 0,
+          signal: null,
+        }),
+        cancel: vi.fn(() => true),
+      },
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Collect trusted evidence.',
+      requestedBy: 'owner',
+      createPr: true,
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_pr_approval'),
+    );
+
+    expect(getCodingJob(job.id)).toMatchObject({
+      diffSummary: 'src/host.ts | 3 +++',
+      changedFiles: ['src/host.ts', 'src/new-host.ts'],
+      testSummary:
+        'No trusted test evidence was reported by the Devin host runner.',
+    });
+    expect(getCodingJob(job.id)?.changedFiles).not.toContain('src/stale.ts');
+    await expect(openCodingJobPr(job.id, 'owner')).rejects.toThrow(
+      'PR approval is required',
+    );
+    expect(getCodingJob(job.id)?.transitionHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ to: 'test' }),
+        expect.objectContaining({ to: 'await_pr_approval' }),
+      ]),
+    );
+  });
+
+  it('completes a no-change Devin success using fresh host evidence and ignores stale metadata', async () => {
+    vi.useRealTimers();
+    configureCodingJobExecutionForTests({
+      collectWorkspaceEvidence: async () => ({
+        diffStat: '',
+        changedFiles: [],
+        untrackedFiles: [],
+        testEvidence: {
+          status: 'not_reported',
+          summary:
+            'No trusted test evidence was reported by the Devin host runner.',
+        },
+      }),
+      prepareWorkspace: async (input) => {
+        const jobRoot = path.dirname(input.workspace);
+        const metadataDir = path.join(jobRoot, '.nanocrab');
+        fs.mkdirSync(input.workspace, { recursive: true });
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(metadataDir, 'diff-stat.txt'),
+          'stale | 1 +\n',
+        );
+        fs.writeFileSync(
+          path.join(metadataDir, 'untracked.txt'),
+          'stale.txt\n',
+        );
+        return {
+          jobRoot,
+          metadataDir,
+          workspace: input.workspace,
+          resumed: false,
+          gitState: { staged: '', unstaged: '', untracked: '', unpushed: '' },
+        };
+      },
+      devinRunner: {
+        run: async (input) => ({
+          attemptId: input.attemptId,
+          state: 'succeeded',
+          exitCode: 0,
+          signal: null,
+        }),
+        cancel: vi.fn(() => true),
+      },
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Produce no changes.',
+      requestedBy: 'owner',
+      createPr: true,
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('completed'),
+    );
+    expect(getCodingJob(job.id)).toMatchObject({
+      diffSummary: null,
+      changedFiles: [],
+      prUrl: null,
+    });
+  });
+
+  it('ignores attempt A preparation rejection after cancellation and retry B ownership', async () => {
+    vi.useRealTimers();
+    let attemptNumber = 0;
+    let rejectAttemptA!: (error: Error) => void;
+    let finishAttemptB!: (
+      result: import('./coding-runners/types.js').CodingRunnerResult,
+    ) => void;
+    configureCodingJobExecutionForTests({
+      createAttemptId: () => `attempt-${++attemptNumber}`,
+      collectWorkspaceEvidence: async () => ({
+        diffStat: '',
+        changedFiles: [],
+        untrackedFiles: [],
+        testEvidence: {
+          status: 'not_reported',
+          summary:
+            'No trusted test evidence was reported by the Devin host runner.',
+        },
+      }),
+      prepareWorkspace: (input) => {
+        if (attemptNumber === 1) {
+          return new Promise((_, reject) => {
+            rejectAttemptA = reject;
+          });
+        }
+        const jobRoot = path.dirname(input.workspace);
+        const metadataDir = path.join(jobRoot, '.nanocrab');
+        fs.mkdirSync(input.workspace, { recursive: true });
+        fs.mkdirSync(metadataDir, { recursive: true });
+        return Promise.resolve({
+          jobRoot,
+          metadataDir,
+          workspace: input.workspace,
+          resumed: true,
+          gitState: { staged: '', unstaged: '', untracked: '', unpushed: '' },
+        });
+      },
+      devinRunner: {
+        run: (input) =>
+          new Promise((resolve) => {
+            expect(input.attemptId).toBe('attempt-2');
+            finishAttemptB = resolve;
+          }),
+        cancel: vi.fn(() => true),
+      },
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Keep retry ownership.',
+      requestedBy: 'owner',
+      actualRuntime: {
+        cli: 'devin',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      },
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+    );
+    approveCodingJob(job.id, 'owner');
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.activeAttemptId).toBe('attempt-1'),
+    );
+    cancelCodingJob(job.id, 'owner');
+    await retryCodingJob(job.id, 'owner');
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.activeAttemptId).toBe('attempt-2'),
+    );
+
+    rejectAttemptA(new Error('late preparation failure from attempt A'));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(getCodingJob(job.id)).toMatchObject({
+      status: 'implement',
+      activeAttemptId: 'attempt-2',
+      executionAttempts: [
+        expect.objectContaining({ id: 'attempt-1', state: 'cancelled' }),
+        expect.objectContaining({ id: 'attempt-2', state: 'running' }),
+      ],
+    });
+
+    finishAttemptB({
+      attemptId: 'attempt-2',
+      state: 'succeeded',
+      exitCode: 0,
+      signal: null,
+    });
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.status).toBe('completed'),
+    );
+  });
+
   it('blocks workspace and spawn when the post-approval probe becomes unhealthy', async () => {
     vi.useRealTimers();
     const prepareWorkspace = vi.fn();
@@ -1302,7 +1568,7 @@ describe('coding jobs', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('cancels using persisted activeAttemptId and ignores stale callbacks from a retry', async () => {
+  it('cancels using the persisted activeAttemptId', async () => {
     vi.useRealTimers();
     const cancel = vi.fn(() => true);
     let finish!: (
@@ -1430,7 +1696,7 @@ describe('coding jobs', () => {
     });
   });
 
-  it('rejects provider-model-only fallback and requests a control-plane decision', async () => {
+  it('creates a real owner decision for provider-model-only fallback on an explicit runtime', async () => {
     vi.useRealTimers();
     vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
       approved: true,
@@ -1463,6 +1729,33 @@ describe('coding jobs', () => {
         'control-plane decision is required',
       ),
     );
+    expect(resolveProviderFallbackForAction).toHaveBeenCalledWith({
+      purpose: 'default_coding',
+      action: 'coding-implementation',
+      requester: 'owner',
+      correlationId: job.id,
+      sourceProvider: 'claude',
+      sourceModel: 'claude-sonnet-4-6',
+    });
+    const [decision] = listApprovals({
+      kind: 'provider-fallback',
+      targetType: 'coding-job',
+      targetId: job.id,
+    });
+    expect(decision).toMatchObject({
+      status: 'pending',
+      correlationId: job.id,
+      payload: {
+        jobId: job.id,
+        sourceRuntime: {
+          cli: 'devin',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+        },
+        proposedProvider: 'codex',
+        proposedModel: 'gpt-5.4',
+      },
+    });
     expect(getCodingJob(job.id)).toMatchObject({
       status: 'await_approval',
       runnerCli: 'devin',
@@ -1473,11 +1766,10 @@ describe('coding jobs', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('atomically applies an approved complete fallback runtime triple', async () => {
+  it('resumes with an owner-approved complete fallback runtime triple', async () => {
     vi.useRealTimers();
     vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
       approved: true,
-      cli: 'codex',
       profile: {
         id: 'default_coding',
         label: 'Coding',
@@ -1489,7 +1781,7 @@ describe('coding jobs', () => {
       },
       provider: 'codex',
       model: 'gpt-5.4',
-    } as never);
+    });
     mockGitHubFetch(() => ({ default_branch: 'main' }));
     await registerCodingRepo({ repo: 'owner/repo' });
     const job = await startCodingJob({
@@ -1503,14 +1795,40 @@ describe('coding jobs', () => {
       },
     });
     await vi.waitFor(() =>
-      expect(getCodingJob(job.id)?.status).toBe('await_approval'),
+      expect(
+        listApprovals({
+          kind: 'provider-fallback',
+          targetType: 'coding-job',
+          targetId: job.id,
+        }),
+      ).toHaveLength(1),
+    );
+
+    approveCodingJobRuntimeFallback(
+      job.id,
+      { cli: 'codex', provider: 'codex', model: 'gpt-5.4' },
+      'owner',
+    );
+    await vi.waitFor(() =>
+      expect(getCodingJob(job.id)?.output).toContain(
+        'Implementation is awaiting approval',
+      ),
     );
     expect(getCodingJob(job.id)).toMatchObject({
       runnerCli: 'codex',
       provider: 'codex',
       model: 'gpt-5.4',
       actualRuntime: { cli: 'codex', provider: 'codex', model: 'gpt-5.4' },
+      executionAttempts: [],
     });
+    expect(
+      listApprovals({
+        kind: 'provider-fallback',
+        targetType: 'coding-job',
+        targetId: job.id,
+      })[0],
+    ).toMatchObject({ status: 'approved', reviewedBy: 'owner' });
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it('rejects a catalog-only Devin model before a per-job Devin process', async () => {
@@ -1892,6 +2210,8 @@ describe('coding jobs', () => {
       action: 'pr-creation',
       requester: 'owner',
       correlationId: job.id,
+      sourceProvider: job.provider,
+      sourceModel: job.model,
     });
     expect(getCodingJob(job.id)?.output).toContain(
       'Provider fallback for PR creation is awaiting approval',

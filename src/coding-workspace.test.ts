@@ -10,6 +10,7 @@ vi.mock('./config.js', () => ({
 }));
 
 import {
+  collectCodingWorkspaceEvidence,
   prepareCodingWorkspace,
   runApprovedHostGit,
   validateCodingBranch,
@@ -106,6 +107,45 @@ function localCheckoutGit() {
 }
 
 describe('coding workspace', () => {
+  it('collects fresh credential-free host Git evidence after a Devin run', async () => {
+    const git = vi.fn<GitTransport>(async (args) => {
+      if (args.join(' ') === 'diff --stat HEAD') {
+        return gitResult('src/a.ts | 2 ++\n');
+      }
+      if (args.join(' ') === 'diff --name-only HEAD') {
+        return gitResult('src/a.ts\n');
+      }
+      if (args.join(' ') === 'ls-files --others --exclude-standard') {
+        return gitResult('src/new.ts\n');
+      }
+      throw new Error(`unexpected fake Git call: ${args.join(' ')}`);
+    });
+
+    const evidence = await collectCodingWorkspaceEvidence(workspace, { git });
+
+    expect(evidence).toEqual({
+      diffStat: 'src/a.ts | 2 ++',
+      changedFiles: ['src/a.ts'],
+      untrackedFiles: ['src/new.ts'],
+      testEvidence: {
+        status: 'not_reported',
+        summary:
+          'No trusted test evidence was reported by the Devin host runner.',
+      },
+    });
+    for (const [, options] of git.mock.calls) {
+      expect(options.cwd).toBe(workspace);
+      expect(options.env).toMatchObject({
+        PATH: '/usr/local/bin:/usr/bin:/bin',
+        GIT_CONFIG_SYSTEM: '/dev/null',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_CONFIG_NOSYSTEM: '1',
+      });
+      expect(options.env).not.toHaveProperty('GIT_ASKPASS');
+      expect(options.env).not.toHaveProperty('NANOCRAB_GIT_TOKEN');
+    }
+  });
+
   it('prepares a missing first-run checkout with argument-array Git calls', async () => {
     const deps = baseDeps();
 

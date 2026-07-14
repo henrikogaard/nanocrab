@@ -35,6 +35,16 @@ export interface PreparedCodingWorkspace {
   };
 }
 
+export interface CodingWorkspaceEvidence {
+  diffStat: string;
+  changedFiles: string[];
+  untrackedFiles: string[];
+  testEvidence: {
+    status: 'not_reported';
+    summary: string;
+  };
+}
+
 type AskpassFactory = (
   token: string,
 ) => Promise<{ path: string; dispose(): Promise<void> }>;
@@ -362,6 +372,50 @@ async function runLocalGit(
   }
   requireGitSuccess(result, operation);
   return result;
+}
+
+export async function collectCodingWorkspaceEvidence(
+  workspace: string,
+  deps: Pick<CodingWorkspaceDeps, 'git'>,
+): Promise<CodingWorkspaceEvidence> {
+  if (!path.isAbsolute(workspace) || path.normalize(workspace) !== workspace) {
+    throw new Error('Coding workspace evidence path must be canonical');
+  }
+  const [diffStat, changedFiles, untrackedFiles] = await Promise.all([
+    runLocalGit(
+      deps.git,
+      ['diff', '--stat', 'HEAD'],
+      workspace,
+      'Git diff evidence collection',
+    ),
+    runLocalGit(
+      deps.git,
+      ['diff', '--name-only', 'HEAD'],
+      workspace,
+      'Git changed-file evidence collection',
+    ),
+    runLocalGit(
+      deps.git,
+      ['ls-files', '--others', '--exclude-standard'],
+      workspace,
+      'Git untracked-file evidence collection',
+    ),
+  ]);
+  const lines = (value: string): string[] =>
+    value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  return {
+    diffStat: diffStat.stdout.trim(),
+    changedFiles: lines(changedFiles.stdout),
+    untrackedFiles: lines(untrackedFiles.stdout),
+    testEvidence: {
+      status: 'not_reported',
+      summary:
+        'No trusted test evidence was reported by the Devin host runner.',
+    },
+  };
 }
 
 function canonicalOriginMatches(rawOrigin: string, repo: string): boolean {
