@@ -183,6 +183,9 @@ describe('Devin process sandbox', () => {
       args: [
         '--die-with-parent',
         '--new-session',
+        '--unshare-pid',
+        '--proc',
+        '/proc',
         '--bind',
         '/',
         '/',
@@ -991,6 +994,9 @@ describe('Devin host process runner', () => {
       [
         '--die-with-parent',
         '--new-session',
+        '--unshare-pid',
+        '--proc',
+        '/proc',
         '--bind',
         '/',
         '/',

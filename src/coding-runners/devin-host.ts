@@ -186,6 +186,9 @@ export async function buildSandboxedDevinLaunch(
       args: [
         '--die-with-parent',
         '--new-session',
+        '--unshare-pid',
+        '--proc',
+        '/proc',
         '--bind',
         '/',
         '/',
