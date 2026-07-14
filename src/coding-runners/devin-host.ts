@@ -123,28 +123,47 @@ export interface DevinBrokerLauncherInput {
 export interface EnsureDevinBrokerLauncherDependencies extends DevinBrokerLauncherDependencies {
   lstat(path: string): Promise<fs.Stats>;
   stat(path: string): Promise<fs.Stats>;
-  readFile(path: string, encoding: 'utf8'): Promise<string>;
   getuid(): number;
+  open(
+    path: string,
+    flags: number,
+    mode?: number,
+  ): Promise<ImmutableFileHandle>;
 }
 
 export interface EnsureDevinAgentConfigDependencies {
-  writeFile(
-    path: string,
-    data: string,
-    options: { encoding: 'utf8'; mode: number; flag: 'wx' },
-  ): Promise<void>;
-  realpath(path: string): Promise<string>;
   lstat(path: string): Promise<fs.Stats>;
-  stat(path: string): Promise<fs.Stats>;
-  readFile(path: string, encoding: 'utf8'): Promise<string>;
   getuid(): number;
+  open(
+    path: string,
+    flags: number,
+    mode?: number,
+  ): Promise<ImmutableFileHandle>;
 }
 
-const launcherDependencies: DevinBrokerLauncherDependencies = {
+export interface ImmutableFileHandle {
+  stat(): Promise<fs.Stats>;
+  writeFile(data: string, encoding: 'utf8'): Promise<void>;
+  sync(): Promise<void>;
+  chmod(mode: number): Promise<void>;
+  read(
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number,
+  ): Promise<{ bytesRead: number }>;
+  close(): Promise<void>;
+}
+
+const launcherDependencies: EnsureDevinBrokerLauncherDependencies = {
   mkdir: fs.promises.mkdir,
   writeFile: fs.promises.writeFile,
   chmod: fs.promises.chmod,
   realpath: (value) => fs.promises.realpath(value),
+  lstat: (value) => fs.promises.lstat(value),
+  stat: (value) => fs.promises.stat(value),
+  getuid: () => process.getuid?.() ?? -1,
+  open: (value, flags, mode) => fs.promises.open(value, flags, mode),
 };
 
 function isAtOrBelow(candidate: string, parent: string): boolean {
@@ -212,24 +231,9 @@ process.exitCode = exitCode;
 
 export async function writeDevinCommandBrokerLauncher(
   input: DevinBrokerLauncherInput,
-  dependencies: DevinBrokerLauncherDependencies = launcherDependencies,
+  dependencies: EnsureDevinBrokerLauncherDependencies = launcherDependencies,
 ): Promise<string> {
-  const directory = path.join(input.jobRoot, '.nanocrab', 'bin');
-  const launcherPath = path.join(directory, 'nanocrab-job-exec');
-  const source = await buildDevinCommandBrokerLauncherSource(
-    input,
-    dependencies.realpath,
-  );
-
-  await dependencies.mkdir(directory, { recursive: true, mode: 0o700 });
-  await dependencies.writeFile(launcherPath, source, {
-    encoding: 'utf8',
-    mode: 0o555,
-    flag: 'wx',
-  });
-  await dependencies.chmod(launcherPath, 0o555);
-  await dependencies.chmod(directory, 0o500);
-  return launcherPath;
+  return ensureDevinCommandBrokerLauncher(input, dependencies);
 }
 
 function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
@@ -245,6 +249,9 @@ async function validateImmutableDirectory(
   mode: number,
   dependencies: EnsureDevinBrokerLauncherDependencies,
 ): Promise<void> {
+  // Node does not expose descriptor-relative openat(2). A same-UID attacker
+  // could still swap a parent component after this identity check; final files
+  // are therefore opened separately with O_NOFOLLOW and verified by handle.
   const first = await dependencies.lstat(directory);
   const canonical = await dependencies.realpath(directory);
   const followed = await dependencies.stat(directory);
@@ -272,11 +279,15 @@ export async function ensureDevinCommandBrokerLauncher(
 ): Promise<string> {
   const directory = path.join(input.jobRoot, '.nanocrab', 'bin');
   const launcherPath = path.join(directory, 'nanocrab-job-exec');
-  let firstLauncher: fs.Stats;
+  let exists = true;
   try {
-    firstLauncher = await dependencies.lstat(launcherPath);
+    await dependencies.lstat(launcherPath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    exists = false;
+  }
+
+  if (!exists) {
     try {
       await dependencies.lstat(directory);
     } catch (parentError) {
@@ -290,23 +301,21 @@ export async function ensureDevinCommandBrokerLauncher(
       input,
       dependencies.realpath,
     );
-    await dependencies.writeFile(launcherPath, source, {
-      encoding: 'utf8',
-      mode: 0o555,
-      flag: 'wx',
-    });
-    await dependencies.chmod(launcherPath, 0o555);
+    await createAndVerifyImmutableFile(
+      launcherPath,
+      source,
+      0o555,
+      dependencies,
+      'Devin command broker launcher',
+    );
     await dependencies.chmod(directory, 0o500);
+    await validateImmutableDirectory(directory, 0o500, dependencies);
     return launcherPath;
   }
 
   const firstDirectory = await dependencies.lstat(directory);
   const uid = dependencies.getuid();
   if (
-    firstLauncher.isSymbolicLink() ||
-    !firstLauncher.isFile() ||
-    firstLauncher.uid !== uid ||
-    exactMode(firstLauncher) !== 0o555 ||
     firstDirectory.isSymbolicLink() ||
     !firstDirectory.isDirectory() ||
     firstDirectory.uid !== uid ||
@@ -317,42 +326,32 @@ export async function ensureDevinCommandBrokerLauncher(
     );
   }
 
-  const [canonicalLauncher, canonicalDirectory] = await Promise.all([
-    dependencies.realpath(launcherPath),
-    dependencies.realpath(directory),
-  ]);
-  if (canonicalLauncher !== launcherPath || canonicalDirectory !== directory) {
+  const canonicalDirectory = await dependencies.realpath(directory);
+  if (canonicalDirectory !== directory) {
     throw new Error('Immutable Devin command broker launcher is noncanonical');
   }
-  const [followedLauncher, followedDirectory] = await Promise.all([
-    dependencies.stat(launcherPath),
-    dependencies.stat(directory),
-  ]);
-  if (
-    !sameFileIdentity(firstLauncher, followedLauncher) ||
-    !sameFileIdentity(firstDirectory, followedDirectory)
-  ) {
+  const followedDirectory = await dependencies.stat(directory);
+  if (!sameFileIdentity(firstDirectory, followedDirectory)) {
     throw new Error('Immutable Devin command broker launcher identity changed');
   }
   const expectedSource = await buildDevinCommandBrokerLauncherSource(
     input,
     dependencies.realpath,
   );
-  const actualSource = await dependencies.readFile(launcherPath, 'utf8');
-  const finalLauncher = await dependencies.lstat(launcherPath);
+  await openAndVerifyImmutableFile(
+    launcherPath,
+    expectedSource,
+    0o555,
+    dependencies,
+    'Devin command broker launcher',
+  );
   const finalDirectory = await dependencies.lstat(directory);
   if (
-    !sameFileIdentity(firstLauncher, finalLauncher) ||
     !sameFileIdentity(firstDirectory, finalDirectory) ||
-    finalLauncher.isSymbolicLink() ||
-    !finalLauncher.isFile() ||
-    finalLauncher.uid !== uid ||
-    exactMode(finalLauncher) !== 0o555 ||
     finalDirectory.isSymbolicLink() ||
     !finalDirectory.isDirectory() ||
     finalDirectory.uid !== uid ||
-    exactMode(finalDirectory) !== 0o500 ||
-    actualSource !== expectedSource
+    exactMode(finalDirectory) !== 0o500
   ) {
     throw new Error(
       'Immutable Devin command broker launcher validation failed',
@@ -361,42 +360,146 @@ export async function ensureDevinCommandBrokerLauncher(
   return launcherPath;
 }
 
+async function readExactHandle(
+  handle: ImmutableFileHandle,
+  length: number,
+): Promise<Buffer> {
+  const output = Buffer.alloc(length);
+  let offset = 0;
+  while (offset < length) {
+    const { bytesRead } = await handle.read(
+      output,
+      offset,
+      length - offset,
+      offset,
+    );
+    if (bytesRead <= 0) throw new Error('Immutable file ended unexpectedly');
+    offset += bytesRead;
+  }
+  return output;
+}
+
+async function verifyImmutableHandle(
+  handle: ImmutableFileHandle,
+  expectedSource: string,
+  mode: number,
+  uid: number,
+  label: string,
+): Promise<void> {
+  const expected = Buffer.from(expectedSource, 'utf8');
+  const first = await handle.stat();
+  if (
+    !first.isFile() ||
+    first.uid !== uid ||
+    exactMode(first) !== mode ||
+    first.size !== expected.length
+  ) {
+    throw new Error(`Immutable ${label} metadata is unsafe`);
+  }
+  const actual = await readExactHandle(handle, expected.length);
+  const final = await handle.stat();
+  if (
+    !sameFileIdentity(first, final) ||
+    !final.isFile() ||
+    final.uid !== uid ||
+    exactMode(final) !== mode ||
+    final.size !== expected.length ||
+    !actual.equals(expected)
+  ) {
+    throw new Error(`Immutable ${label} validation failed`);
+  }
+}
+
+async function openAndVerifyImmutableFile(
+  filePath: string,
+  expectedSource: string,
+  mode: number,
+  dependencies: Pick<EnsureDevinAgentConfigDependencies, 'getuid' | 'open'>,
+  label: string,
+): Promise<void> {
+  const flags =
+    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK;
+  let handle: ImmutableFileHandle | undefined;
+  try {
+    handle = await dependencies.open(filePath, flags);
+    await verifyImmutableHandle(
+      handle,
+      expectedSource,
+      mode,
+      dependencies.getuid(),
+      label,
+    );
+  } catch (error) {
+    throw new Error(`Immutable ${label} open or validation failed`, {
+      cause: error,
+    });
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function createAndVerifyImmutableFile(
+  filePath: string,
+  expectedSource: string,
+  mode: number,
+  dependencies: Pick<EnsureDevinAgentConfigDependencies, 'getuid' | 'open'>,
+  label: string,
+): Promise<void> {
+  const flags =
+    fs.constants.O_CREAT |
+    fs.constants.O_EXCL |
+    fs.constants.O_RDWR |
+    fs.constants.O_NOFOLLOW;
+  let handle: ImmutableFileHandle | undefined;
+  try {
+    handle = await dependencies.open(filePath, flags, mode);
+    await handle.writeFile(expectedSource, 'utf8');
+    await handle.sync();
+    await handle.chmod(mode);
+    await verifyImmutableHandle(
+      handle,
+      expectedSource,
+      mode,
+      dependencies.getuid(),
+      label,
+    );
+  } catch (error) {
+    throw new Error(`Immutable ${label} creation or validation failed`, {
+      cause: error,
+    });
+  } finally {
+    await handle?.close();
+  }
+}
+
 export async function ensureDevinAgentConfig(
   configPath: string,
   expectedSource: string,
   dependencies: EnsureDevinAgentConfigDependencies,
 ): Promise<void> {
-  let first: fs.Stats;
+  let exists = true;
   try {
-    first = await dependencies.lstat(configPath);
+    await dependencies.lstat(configPath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    await dependencies.writeFile(configPath, expectedSource, {
-      encoding: 'utf8',
-      mode: 0o600,
-      flag: 'wx',
-    });
-    return;
+    exists = false;
   }
-  const canonical = await dependencies.realpath(configPath);
-  const followed = await dependencies.stat(configPath);
-  const actualSource = await dependencies.readFile(configPath, 'utf8');
-  const final = await dependencies.lstat(configPath);
-  if (
-    first.isSymbolicLink() ||
-    !first.isFile() ||
-    first.uid !== dependencies.getuid() ||
-    exactMode(first) !== 0o600 ||
-    canonical !== configPath ||
-    !sameFileIdentity(first, followed) ||
-    !sameFileIdentity(first, final) ||
-    final.isSymbolicLink() ||
-    !final.isFile() ||
-    final.uid !== dependencies.getuid() ||
-    exactMode(final) !== 0o600 ||
-    actualSource !== expectedSource
-  ) {
-    throw new Error('Immutable Devin agent config is unsafe');
+  if (exists) {
+    await openAndVerifyImmutableFile(
+      configPath,
+      expectedSource,
+      0o600,
+      dependencies,
+      'Devin agent config',
+    );
+  } else {
+    await createAndVerifyImmutableFile(
+      configPath,
+      expectedSource,
+      0o600,
+      dependencies,
+      'Devin agent config',
+    );
   }
 }
 
@@ -423,14 +526,26 @@ export interface DevinHostRunnerProductionDependencies extends Omit<
   DevinHostRunnerDependencies,
   'ensureAgentConfig' | 'ensureCommandBrokerLauncher'
 > {
-  filesystem: EnsureDevinBrokerLauncherDependencies &
+  filesystem?: EnsureDevinBrokerLauncherDependencies &
     EnsureDevinAgentConfigDependencies;
 }
+
+const productionImmutableFileDependencies: EnsureDevinBrokerLauncherDependencies &
+  EnsureDevinAgentConfigDependencies = {
+  ...launcherDependencies,
+  lstat: (value) => fs.promises.lstat(value),
+  stat: (value) => fs.promises.stat(value),
+  getuid: () => process.getuid?.() ?? -1,
+  open: (value, flags, mode) => fs.promises.open(value, flags, mode),
+};
 
 export function createProductionDevinHostRunner(
   dependencies: DevinHostRunnerProductionDependencies,
 ): CodingRunnerAdapter {
-  const { filesystem, ...runnerDependencies } = dependencies;
+  const {
+    filesystem = productionImmutableFileDependencies,
+    ...runnerDependencies
+  } = dependencies;
   return createDevinHostRunner({
     ...runnerDependencies,
     ensureAgentConfig: (configPath, source) =>

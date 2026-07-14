@@ -1,4 +1,4 @@
-import type { PathLike } from 'node:fs';
+import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 
@@ -147,10 +147,10 @@ describe('Devin child environment', () => {
 
 describe('Devin command broker launcher', () => {
   it('writes a secret-free immutable Node launcher outside the workspace', async () => {
-    const mkdir = vi.fn(async () => undefined);
-    const writeFile = vi.fn(async () => undefined);
-    const chmod = vi.fn(async () => undefined);
-    const realpath = vi.fn(async (value: PathLike) => value.toString());
+    const dependencies = immutableLauncherDependencies({ parentMode: 0o700 });
+    dependencies.lstat.mockRejectedValueOnce(
+      Object.assign(new Error('missing'), { code: 'ENOENT' }),
+    );
 
     await expect(
       writeDevinCommandBrokerLauncher(
@@ -170,22 +170,11 @@ describe('Devin command broker launcher', () => {
           ],
           trustedRuntimeReadRoots: ['/usr'],
         },
-        { mkdir, writeFile, chmod, realpath },
+        dependencies,
       ),
     ).resolves.toBe('/jobs/job/.nanocrab/bin/nanocrab-job-exec');
 
-    expect(mkdir).toHaveBeenCalledWith('/jobs/job/.nanocrab/bin', {
-      recursive: true,
-      mode: 0o700,
-    });
-    expect(writeFile).toHaveBeenCalledWith(
-      '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
-      expect.stringMatching(/^#!\/usr\/bin\/node\n/),
-      { encoding: 'utf8', mode: 0o555, flag: 'wx' },
-    );
-    const source = (
-      writeFile.mock.calls as unknown as Array<[string, string]>
-    )[0]![1];
+    const source = dependencies.handle.content();
     expect(source).toContain('runCommandBrokerCli');
     expect(source).toMatch(/^#!\/usr\/bin\/node\n/);
     expect(source).not.toContain('/usr/bin/env');
@@ -199,18 +188,16 @@ describe('Devin command broker launcher', () => {
     );
     expect(source).toContain(JSON.stringify(['/usr']));
     expect(source).not.toMatch(/token|secret|shell:\s*true/i);
-    expect(chmod).toHaveBeenCalledWith(
-      '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
-      0o555,
-    );
-    expect(chmod).toHaveBeenCalledWith('/jobs/job/.nanocrab/bin', 0o500);
+    expect(dependencies.handle.sync).toHaveBeenCalledOnce();
+    expect(dependencies.handle.chmod).toHaveBeenCalledWith(0o555);
+    expect(dependencies.handle.read).toHaveBeenCalled();
   });
 
   it('rejects a Node executable outside trusted runtime roots before writing', async () => {
-    const mkdir = vi.fn(async () => undefined);
-    const writeFile = vi.fn(async () => undefined);
-    const chmod = vi.fn(async () => undefined);
-    const realpath = vi.fn(async (value: PathLike) => value.toString());
+    const dependencies = immutableLauncherDependencies({ parentMode: 0o700 });
+    dependencies.lstat.mockRejectedValueOnce(
+      Object.assign(new Error('missing'), { code: 'ENOENT' }),
+    );
 
     await expect(
       writeDevinCommandBrokerLauncher(
@@ -226,14 +213,20 @@ describe('Devin command broker launcher', () => {
           protectedPaths: ['/jobs/job/.nanocrab'],
           trustedRuntimeReadRoots: ['/usr'],
         },
-        { mkdir, writeFile, chmod, realpath },
+        dependencies,
       ),
     ).rejects.toThrow(/node|runtime|trusted/i);
-    expect(writeFile).not.toHaveBeenCalled();
+    expect(dependencies.handle.writeFile).not.toHaveBeenCalled();
   });
 
   it('rejects a noncanonical Node executable before writing', async () => {
-    const writeFile = vi.fn(async () => undefined);
+    const dependencies = immutableLauncherDependencies({ parentMode: 0o700 });
+    dependencies.lstat.mockRejectedValueOnce(
+      Object.assign(new Error('missing'), { code: 'ENOENT' }),
+    );
+    dependencies.realpath.mockImplementation(async (value: string) =>
+      value === '/usr/local/bin/node' ? '/usr/bin/node' : value,
+    );
     await expect(
       writeDevinCommandBrokerLauncher(
         {
@@ -248,23 +241,15 @@ describe('Devin command broker launcher', () => {
           protectedPaths: ['/jobs/job/.nanocrab'],
           trustedRuntimeReadRoots: ['/usr'],
         },
-        {
-          mkdir: vi.fn(async () => undefined),
-          writeFile,
-          chmod: vi.fn(async () => undefined),
-          realpath: vi.fn(async () => '/usr/bin/node'),
-        },
+        dependencies,
       ),
     ).rejects.toThrow(/node|canonical/i);
-    expect(writeFile).not.toHaveBeenCalled();
+    expect(dependencies.handle.writeFile).not.toHaveBeenCalled();
   });
 
   it('reuses an unchanged immutable launcher without rewriting it', async () => {
     const writeFile = vi.fn(async () => undefined);
     const chmod = vi.fn(async () => undefined);
-    const sourceCapture = vi.fn(
-      async (_path: string, _data: string, _options: unknown) => undefined,
-    );
     const launcherInput = {
       stageKind: 'direct' as const,
       workspace: '/jobs/job/repo',
@@ -277,21 +262,30 @@ describe('Devin command broker launcher', () => {
       protectedPaths: ['/jobs/job/.nanocrab'],
       trustedRuntimeReadRoots: ['/usr'],
     };
-    await writeDevinCommandBrokerLauncher(launcherInput, {
-      mkdir: vi.fn(async () => undefined),
-      writeFile: sourceCapture,
-      chmod: vi.fn(async () => undefined),
-      realpath: async (value) => value,
+    const sourceDependencies = immutableLauncherDependencies({
+      parentMode: 0o700,
     });
-    const source = (
-      sourceCapture.mock.calls as unknown as Array<[string, string]>
-    )[0]![1];
+    sourceDependencies.lstat.mockRejectedValueOnce(
+      Object.assign(new Error('missing'), { code: 'ENOENT' }),
+    );
+    await writeDevinCommandBrokerLauncher(launcherInput, sourceDependencies);
+    const source = sourceDependencies.handle.content();
+    const dependencies = immutableLauncherDependencies({
+      source,
+      writeFile,
+      chmod,
+    });
     await expect(
-      ensureDevinCommandBrokerLauncher(
-        launcherInput,
-        immutableLauncherDependencies({ source, writeFile, chmod }),
-      ),
+      ensureDevinCommandBrokerLauncher(launcherInput, dependencies),
     ).resolves.toBe('/jobs/job/.nanocrab/bin/nanocrab-job-exec');
+    expect(dependencies.open).toHaveBeenCalledWith(
+      '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
+    );
+    expect(dependencies.realpath).not.toHaveBeenCalledWith(
+      '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
+    );
+    expect(dependencies.readFile).not.toHaveBeenCalled();
     expect(writeFile).not.toHaveBeenCalled();
     expect(chmod).not.toHaveBeenCalled();
   });
@@ -319,15 +313,52 @@ describe('Devin command broker launcher', () => {
         dependencies,
       ),
     ).resolves.toBe('/jobs/job/.nanocrab/bin/nanocrab-job-exec');
-    expect(dependencies.writeFile).toHaveBeenCalledWith(
+    expect(dependencies.open).toHaveBeenLastCalledWith(
       '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
-      expect.stringMatching(/^#!\/usr\/bin\/node\n/),
-      { encoding: 'utf8', mode: 0o555, flag: 'wx' },
+      fs.constants.O_CREAT |
+        fs.constants.O_EXCL |
+        fs.constants.O_RDWR |
+        fs.constants.O_NOFOLLOW,
+      0o555,
     );
-    expect(dependencies.chmod).toHaveBeenCalledWith(
-      '/jobs/job/.nanocrab/bin',
-      0o500,
+    expect(dependencies.handle.writeFile).toHaveBeenCalledOnce();
+    expect(dependencies.handle.sync).toHaveBeenCalledOnce();
+    expect(dependencies.handle.chmod).toHaveBeenCalledWith(0o555);
+    expect(dependencies.handle.stat).toHaveBeenCalled();
+    expect(dependencies.handle.read).toHaveBeenCalled();
+    expect(dependencies.handle.close).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a newly created launcher until handle metadata is verified', async () => {
+    const dependencies = immutableLauncherDependencies({
+      parentMode: 0o700,
+      launcherMode: 0o644,
+    });
+    dependencies.lstat.mockRejectedValueOnce(
+      Object.assign(new Error('missing'), { code: 'ENOENT' }),
     );
+    await expect(
+      ensureDevinCommandBrokerLauncher(
+        {
+          stageKind: 'direct',
+          workspace: '/jobs/job/repo',
+          jobRoot: '/jobs/job',
+          commandBrokerModulePath: '/opt/nanocrab/command-broker.js',
+          sandboxExecutable: '/usr/bin/bwrap',
+          nodeExecutable: '/usr/bin/node',
+          home: '/home/service',
+          protectedPaths: ['/jobs/job/.nanocrab'],
+          trustedRuntimeReadRoots: ['/usr'],
+        },
+        dependencies,
+      ),
+    ).rejects.toThrow(/launcher|metadata|immutable/i);
+    expect(dependencies.handle.writeFile).toHaveBeenCalled();
+    expect(dependencies.handle.sync).toHaveBeenCalled();
+    expect(dependencies.handle.chmod).toHaveBeenCalledWith(0o555);
+    expect(dependencies.handle.stat).toHaveBeenCalled();
+    expect(dependencies.handle.read).not.toHaveBeenCalled();
+    expect(dependencies.handle.close).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -366,11 +397,13 @@ describe('Devin command broker launcher', () => {
   it.each([
     ['tampered bytes', { source: 'tampered' }],
     ['launcher symlink', { launcherSymlink: true }],
+    ['launcher FIFO', { launcherFile: false }],
     ['wrong launcher mode', { launcherMode: 0o755 }],
     ['wrong launcher owner', { launcherUid: 999 }],
     ['parent symlink', { parentSymlink: true }],
     ['wrong parent mode', { parentMode: 0o700 }],
   ])('rejects immutable launcher reuse with %s', async (_name, change) => {
+    const dependencies = immutableLauncherDependencies(change);
     await expect(
       ensureDevinCommandBrokerLauncher(
         {
@@ -385,9 +418,13 @@ describe('Devin command broker launcher', () => {
           protectedPaths: ['/jobs/job/.nanocrab'],
           trustedRuntimeReadRoots: ['/usr'],
         },
-        immutableLauncherDependencies(change),
+        dependencies,
       ),
     ).rejects.toThrow(/launcher|immutable|owner|mode|symlink/i);
+    if (!('parentSymlink' in change) && !('parentMode' in change)) {
+      expect(dependencies.open).toHaveBeenCalled();
+    }
+    expect(dependencies.handle.read).not.toHaveBeenCalled();
   });
 });
 
@@ -395,6 +432,7 @@ function immutableLauncherDependencies(
   changes: {
     source?: string;
     launcherSymlink?: boolean;
+    launcherFile?: boolean;
     launcherMode?: number;
     launcherUid?: number;
     parentSymlink?: boolean;
@@ -416,22 +454,30 @@ function immutableLauncherDependencies(
     uid: changes.launcherUid ?? 501,
     mode: changes.launcherMode ?? 0o555,
     isSymbolicLink: () => changes.launcherSymlink ?? false,
-    isFile: () => true,
+    isFile: () => changes.launcherFile ?? true,
     isDirectory: () => false,
   } as unknown as import('node:fs').Stats;
+  let parentMode = changes.parentMode ?? 0o500;
   const parent = {
     dev: 1,
     ino: 1,
     uid: changes.parentUid ?? 501,
-    mode: changes.parentMode ?? 0o500,
+    get mode() {
+      return parentMode;
+    },
     isSymbolicLink: () => changes.parentSymlink ?? false,
     isFile: () => false,
     isDirectory: () => changes.parentDirectory ?? true,
   } as unknown as import('node:fs').Stats;
-  return {
+  const handle = fakeImmutableHandle(launcher, changes.source ?? 'expected');
+  const dependencies = {
     mkdir: vi.fn(async () => undefined),
     writeFile: changes.writeFile ?? vi.fn(async () => undefined),
-    chmod: changes.chmod ?? vi.fn(async () => undefined),
+    chmod:
+      changes.chmod ??
+      vi.fn(async (value: string, mode: number) => {
+        if (value.endsWith('/bin')) parentMode = mode;
+      }),
     realpath: vi.fn(async (value: string) =>
       value.endsWith('/bin') && changes.parentRealpath
         ? changes.parentRealpath
@@ -445,7 +491,14 @@ function immutableLauncherDependencies(
     ),
     readFile: vi.fn(async () => changes.source ?? 'expected'),
     getuid: () => 501,
+    open: changes.launcherSymlink
+      ? vi.fn(async () => {
+          throw Object.assign(new Error('symlink'), { code: 'ELOOP' });
+        })
+      : vi.fn(async () => handle),
+    handle,
   };
+  return dependencies;
 }
 
 describe('immutable Devin agent config', () => {
@@ -459,11 +512,37 @@ describe('immutable Devin agent config', () => {
       '{}',
       dependencies,
     );
-    expect(dependencies.writeFile).toHaveBeenCalledWith(
+    expect(dependencies.open).toHaveBeenLastCalledWith(
       '/jobs/job/.nanocrab/devin-agent.json',
-      '{}',
-      { encoding: 'utf8', mode: 0o600, flag: 'wx' },
+      fs.constants.O_CREAT |
+        fs.constants.O_EXCL |
+        fs.constants.O_RDWR |
+        fs.constants.O_NOFOLLOW,
+      0o600,
     );
+    expect(dependencies.handle.writeFile).toHaveBeenCalledWith('{}', 'utf8');
+    expect(dependencies.handle.sync).toHaveBeenCalledOnce();
+    expect(dependencies.handle.chmod).toHaveBeenCalledWith(0o600);
+    expect(dependencies.handle.read).toHaveBeenCalled();
+    expect(dependencies.handle.close).toHaveBeenCalledOnce();
+
+    const unsafeCreate = immutableConfigDependencies({ mode: 0o644 });
+    unsafeCreate.lstat.mockRejectedValueOnce(
+      Object.assign(new Error('missing'), { code: 'ENOENT' }),
+    );
+    await expect(
+      ensureDevinAgentConfig(
+        '/jobs/job/.nanocrab/unsafe-agent.json',
+        '{}',
+        unsafeCreate,
+      ),
+    ).rejects.toThrow(/config|metadata|immutable/i);
+    expect(unsafeCreate.handle.writeFile).toHaveBeenCalled();
+    expect(unsafeCreate.handle.sync).toHaveBeenCalled();
+    expect(unsafeCreate.handle.chmod).toHaveBeenCalledWith(0o600);
+    expect(unsafeCreate.handle.stat).toHaveBeenCalled();
+    expect(unsafeCreate.handle.read).not.toHaveBeenCalled();
+    expect(unsafeCreate.handle.close).toHaveBeenCalledOnce();
 
     const existing = immutableConfigDependencies({ source: '{}' });
     await expect(
@@ -473,12 +552,20 @@ describe('immutable Devin agent config', () => {
         existing,
       ),
     ).resolves.toBeUndefined();
+    expect(existing.open).toHaveBeenCalledWith(
+      '/jobs/job/.nanocrab/devin-agent.json',
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
+    );
+    expect(existing.realpath).not.toHaveBeenCalled();
+    expect(existing.stat).not.toHaveBeenCalled();
+    expect(existing.readFile).not.toHaveBeenCalled();
     expect(existing.writeFile).not.toHaveBeenCalled();
   });
 
   it.each([
     ['tampered bytes', { source: 'tampered' }],
     ['symlink', { symlink: true }],
+    ['FIFO', { fifo: true }],
     ['mode 0644', { mode: 0o644 }],
   ])('rejects an existing unsafe config with %s', async (_name, change) => {
     const dependencies = immutableConfigDependencies(change);
@@ -490,11 +577,18 @@ describe('immutable Devin agent config', () => {
       ),
     ).rejects.toThrow(/config|immutable|unsafe/i);
     expect(dependencies.writeFile).not.toHaveBeenCalled();
+    expect(dependencies.open).toHaveBeenCalled();
+    expect(dependencies.handle.read).not.toHaveBeenCalled();
   });
 });
 
 function immutableConfigDependencies(
-  changes: { source?: string; symlink?: boolean; mode?: number } = {},
+  changes: {
+    source?: string;
+    symlink?: boolean;
+    fifo?: boolean;
+    mode?: number;
+  } = {},
 ) {
   const stats = {
     dev: 2,
@@ -502,8 +596,10 @@ function immutableConfigDependencies(
     uid: 501,
     mode: changes.mode ?? 0o600,
     isSymbolicLink: () => changes.symlink ?? false,
-    isFile: () => true,
+    isFile: () => !changes.fifo,
+    size: Buffer.byteLength(changes.source ?? '{}'),
   } as unknown as import('node:fs').Stats;
+  const handle = fakeImmutableHandle(stats, changes.source ?? '{}');
   return {
     writeFile: vi.fn(async () => undefined),
     realpath: vi.fn(async (value: string) => value),
@@ -511,6 +607,47 @@ function immutableConfigDependencies(
     stat: vi.fn(async () => stats),
     readFile: vi.fn(async () => changes.source ?? '{}'),
     getuid: () => 501,
+    open: changes.symlink
+      ? vi.fn(async () => {
+          throw Object.assign(new Error('symlink'), { code: 'ELOOP' });
+        })
+      : vi.fn(async () => handle),
+    handle,
+  };
+}
+
+function fakeImmutableHandle(stats: import('node:fs').Stats, source: string) {
+  let content = source;
+  return {
+    stat: vi.fn(
+      async () =>
+        ({
+          ...stats,
+          size: Buffer.byteLength(content),
+        }) as import('node:fs').Stats,
+    ),
+    writeFile: vi.fn(async (data: string) => {
+      content = data;
+    }),
+    sync: vi.fn(async () => undefined),
+    chmod: vi.fn(async () => undefined),
+    read: vi.fn(
+      async (
+        buffer: Buffer,
+        offset: number,
+        length: number,
+        position: number,
+      ) => {
+        const bytes = Buffer.from(content).subarray(
+          position,
+          position + length,
+        );
+        bytes.copy(buffer, offset);
+        return { bytesRead: bytes.length };
+      },
+    ),
+    close: vi.fn(async () => undefined),
+    content: () => content,
   };
 }
 
