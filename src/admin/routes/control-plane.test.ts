@@ -910,6 +910,96 @@ describe('/api/control-plane', () => {
     });
   });
 
+  it('POST /api/control-plane/decisions/:id/{pause,cancel,follow} resolves decisions', async () => {
+    const { insertDecision } = await import('../../control-plane/store.js');
+
+    await withServer(async (base) => {
+      const atlas = createAgentProfile(
+        makeAgentInput('atlas', 'planning', 'claude'),
+      );
+      const forge = createAgentProfile(
+        makeAgentInput('forge', 'implement', 'codex'),
+      );
+      const lens = createAgentProfile(
+        makeAgentInput('lens', 'review', 'devin'),
+      );
+      const create = await postJson<PipelineResponse>(
+        base,
+        '/api/control-plane/pipelines',
+        makePipelineInput([
+          { agentProfileId: atlas.id, stageKind: 'planning' },
+          { agentProfileId: forge.id, stageKind: 'implement' },
+          { agentProfileId: lens.id, stageKind: 'review' },
+        ]),
+      );
+      const pipelineId = create.body.pipeline.pipeline.id;
+      const planningStage = create.body.pipeline.stages.find(
+        (s) => s.stageKind === 'planning',
+      )!;
+
+      const decision = (id: string) =>
+        insertDecision({
+          id,
+          kind: 'stage_transition',
+          status: 'pending',
+          pipelineId,
+          projectItemId: `${id}_item`,
+          issueNodeId: `${id}_issue`,
+          repository: 'owner/repo',
+          issueNumber: 1,
+          stageId: planningStage.id,
+          runId: null,
+          proposedStageId: null,
+          proposedAgentProfileId: atlas.id,
+          proposedRuntime: null,
+          expectedGithubOptionId: 'opt_planning',
+          expectedGithubFieldUpdatedAt: '2026-07-12T12:00:00Z',
+          actualGithubOptionId: null,
+          actualGithubFieldUpdatedAt: null,
+          summary: id,
+          evidence: {},
+          decidedBy: null,
+          decidedFrom: null,
+          decisionNote: null,
+          createdAt: new Date().toISOString(),
+          decidedAt: null,
+          actualRuntime: null,
+          dispatchStatus: null,
+          dispatchError: null,
+          dispatchJobId: null,
+          dispatchDecisionId: null,
+          approvalId: null,
+          correlationId: null,
+        });
+
+      const pauseDecision = decision('decision_pause');
+      const pause = await postJson<{ decision: { status: string } }>(
+        base,
+        `/api/control-plane/decisions/${pauseDecision.id}/pause`,
+        { note: 'wait for review' },
+      );
+      expect(pause.res.status).toBe(200);
+      expect(pause.body.decision.status).toBe('paused');
+
+      const follow = await postJson<{ decision: { status: string } }>(
+        base,
+        `/api/control-plane/decisions/${pauseDecision.id}/follow`,
+        {},
+      );
+      expect(follow.res.status).toBe(200);
+      expect(follow.body.decision.status).toBe('paused');
+
+      const cancelDecision = decision('decision_cancel');
+      const cancel = await postJson<{ decision: { status: string } }>(
+        base,
+        `/api/control-plane/decisions/${cancelDecision.id}/cancel`,
+        { note: 'no longer needed' },
+      );
+      expect(cancel.res.status).toBe(200);
+      expect(cancel.body.decision.status).toBe('cancelled');
+    });
+  });
+
   it('POST /api/control-plane/decisions/:id/reassign returns 400 without agentHandle', async () => {
     const { insertDecision } = await import('../../control-plane/store.js');
 
@@ -986,13 +1076,16 @@ describe('/api/control-plane', () => {
     });
   });
 
-  it('POST /api/control-plane/decisions/:id/{approve,reject,revise,reassign} returns 404 for unknown id', async () => {
+  it('POST /api/control-plane/decisions/:id/{approve,reject,revise,reassign,pause,cancel,follow} returns 404 for unknown id', async () => {
     await withServer(async (base) => {
       for (const action of [
         'approve',
         'reject',
         'revise',
         'reassign',
+        'pause',
+        'cancel',
+        'follow',
       ] as const) {
         const res = await fetch(
           `${base}/api/control-plane/decisions/decision_unknown/${action}`,

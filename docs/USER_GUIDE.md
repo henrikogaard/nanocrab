@@ -217,8 +217,10 @@ an agent profile with the matching `stageRoles`.
 
 ### Decision Actions
 
-From the dashboard, the pending decision card shows **Approve**, **Reject**,
-**Revise**, and **Reassign** actions. From the main control group you can type:
+The Control Plane Decisions page shows the current gate state. Admin API clients
+can resolve a decision with `POST /api/control-plane/decisions/:id/{approve,
+reject,revise,reassign,pause,cancel,follow}`. From the main control group you
+can type:
 
 ```text
 @NanoCrab status #120
@@ -229,7 +231,12 @@ From the dashboard, the pending decision card shows **Approve**, **Reject**,
 @NanoCrab reassign #120 planning to @otheragent
 @NanoCrab pause #120
 @NanoCrab cancel #120
+@NanoCrab follow #120
 ```
+
+`follow` is read-only and returns the latest decision status, proposed next
+stage, dispatch state, run, and any dispatch error. The other actions require an
+authorized operator and apply the decision state machine with an audit record.
 
 ### Authorization
 
