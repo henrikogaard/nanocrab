@@ -111,7 +111,10 @@ export type ControlPlaneDecisionAction =
   | 'approve'
   | 'reject'
   | 'revise'
-  | 'reassign';
+  | 'reassign'
+  | 'pause'
+  | 'cancel'
+  | 'follow';
 
 export type ControlPlaneDecisionStatus =
   | 'pending'
@@ -119,6 +122,8 @@ export type ControlPlaneDecisionStatus =
   | 'rejected'
   | 'revised'
   | 'reassigned'
+  | 'paused'
+  | 'cancelled'
   | 'stale';
 
 export interface ControlPlaneDecision {

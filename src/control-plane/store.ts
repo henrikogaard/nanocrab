@@ -587,6 +587,8 @@ function validateDecisionRecord(record: ControlPlaneDecision): void {
       'rejected',
       'revised',
       'reassigned',
+      'paused',
+      'cancelled',
       'stale',
     ].includes(record.status)
   ) {

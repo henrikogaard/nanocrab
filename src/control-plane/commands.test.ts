@@ -800,7 +800,7 @@ describe('control-plane commands', () => {
       expect(runtime.probe).toHaveBeenCalledOnce();
     });
 
-    it('reports no active run for cancel', async () => {
+    it('reports no active run or pending decision for cancel', async () => {
       saveSnapshot('option_planning');
       const command = parseControlPlaneCommand('cancel #128')!;
       const result = await executeControlPlaneCommand(command, {
@@ -811,10 +811,12 @@ describe('control-plane commands', () => {
         isAuthorized: true,
         actor: 'owner',
       });
-      expect(result.text).toContain('No active run to cancel');
+      expect(result.text).toContain(
+        'No active run or pending decision to cancel',
+      );
     });
 
-    it('reports no active run for pause', async () => {
+    it('reports no pending decision for pause', async () => {
       saveSnapshot('option_planning');
       const command = parseControlPlaneCommand('pause #128')!;
       const result = await executeControlPlaneCommand(command, {
@@ -825,7 +827,132 @@ describe('control-plane commands', () => {
         isAuthorized: true,
         actor: 'owner',
       });
-      expect(result.text).toContain('No active run to pause');
+      expect(result.text).toContain('No pending decision to pause');
+    });
+
+    it('parses follow commands', () => {
+      const command = parseControlPlaneCommand('follow #128');
+      expect(command).toEqual({ action: 'follow', issueNumber: 128 });
+    });
+
+    it('parses pause with note', () => {
+      const command = parseControlPlaneCommand('pause #128: need to review');
+      expect(command).toEqual({
+        action: 'pause',
+        issueNumber: 128,
+        note: 'need to review',
+      });
+    });
+
+    it('parses cancel with note', () => {
+      const command = parseControlPlaneCommand('cancel #128: wrong direction');
+      expect(command).toEqual({
+        action: 'cancel',
+        issueNumber: 128,
+        note: 'wrong direction',
+      });
+    });
+
+    it('pauses a pending decision via control plane', async () => {
+      saveSnapshot('option_planning');
+      const decision = proposeStageTransition({
+        candidate: candidate('planning', 'option_planning'),
+        runId: 'run_1',
+      });
+      const command = parseControlPlaneCommand('pause #128')!;
+      const result = await executeControlPlaneCommand(command, {
+        channel: 'test',
+        chatJid: 'test:123',
+        senderId: 'u1',
+        senderName: 'Alice',
+        isAuthorized: true,
+        actor: 'owner',
+      });
+      expect(result.text).toContain('Paused decision');
+      expect(result.text).toContain('paused');
+      expect(result.decisionId).toBe(decision.id);
+      // Verify the decision status was updated
+      const updatedDecision = getDecision(decision.id);
+      expect(updatedDecision?.status).toBe('paused');
+    });
+
+    it('cancels a pending decision via control plane', async () => {
+      saveSnapshot('option_planning');
+      const decision = proposeStageTransition({
+        candidate: candidate('planning', 'option_planning'),
+        runId: 'run_1',
+      });
+      const command = parseControlPlaneCommand('cancel #128')!;
+      const result = await executeControlPlaneCommand(command, {
+        channel: 'test',
+        chatJid: 'test:123',
+        senderId: 'u1',
+        senderName: 'Alice',
+        isAuthorized: true,
+        actor: 'owner',
+      });
+      expect(result.text).toContain('Cancelled decision');
+      expect(result.text).toContain('cancelled');
+      expect(result.decisionId).toBe(decision.id);
+      // Verify the decision status was updated
+      const updatedDecision = getDecision(decision.id);
+      expect(updatedDecision?.status).toBe('cancelled');
+    });
+
+    it('follows a pending decision via control plane', async () => {
+      saveSnapshot('option_planning');
+      const decision = proposeStageTransition({
+        candidate: candidate('planning', 'option_planning'),
+        runId: 'run_1',
+      });
+      const command = parseControlPlaneCommand('follow #128')!;
+      const result = await executeControlPlaneCommand(command, {
+        channel: 'test',
+        chatJid: 'test:123',
+        senderId: 'u1',
+        senderName: 'Alice',
+        isAuthorized: true,
+        actor: 'owner',
+      });
+      expect(result.text).toContain('Decision');
+      expect(result.text).toContain('pending');
+      expect(result.decisionId).toBe(decision.id);
+    });
+
+    it('refuses to pause a decision without authorization', async () => {
+      saveSnapshot('option_planning');
+      proposeStageTransition({
+        candidate: candidate('planning', 'option_planning'),
+        runId: 'run_1',
+      });
+      const command = parseControlPlaneCommand('pause #128')!;
+      const result = await executeControlPlaneCommand(command, {
+        channel: 'test',
+        chatJid: 'test:123',
+        senderId: 'u1',
+        senderName: 'Alice',
+        isAuthorized: false,
+        actor: 'u1',
+      });
+      expect(result.text).toContain('Unauthorized');
+    });
+
+    it('refuses to cancel a decision without authorization', async () => {
+      saveSnapshot('option_planning');
+      proposeStageTransition({
+        candidate: candidate('planning', 'option_planning'),
+        runId: 'run_1',
+      });
+      const command = parseControlPlaneCommand('cancel #128')!;
+      const result = await executeControlPlaneCommand(command, {
+        channel: 'test',
+        chatJid: 'test:123',
+        senderId: 'u1',
+        senderName: 'Alice',
+        isAuthorized: false,
+        actor: 'u1',
+      });
+      expect(result.text).toContain('Unauthorized');
     });
   });
 });
