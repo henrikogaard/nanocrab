@@ -4,7 +4,8 @@ function controlPlaneBadge(status) {
   if (status === 'healthy') return 'badge-success';
   if (status === 'pending' || status === 'queued') return 'badge-warning';
   if (status === 'approved') return 'badge-info';
-  if (status === 'rejected' || status === 'failed') return 'badge-error';
+  if (status === 'rejected' || status === 'failed' || status === 'cancelled') return 'badge-error';
+  if (status === 'paused') return 'badge-warning';
   return 'badge-muted';
 }
 

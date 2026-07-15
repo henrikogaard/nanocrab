@@ -403,7 +403,14 @@ interface DecisionActionBody {
 async function handleDecisionAction(
   req: Request,
   res: Response,
-  action: 'approve' | 'reject' | 'revise' | 'reassign',
+  action:
+    | 'approve'
+    | 'reject'
+    | 'revise'
+    | 'reassign'
+    | 'pause'
+    | 'cancel'
+    | 'follow',
 ) {
   const id = routeParam(req, 'id');
   const body = (req.body || {}) as DecisionActionBody;
@@ -474,6 +481,15 @@ router.post('/decisions/:id/revise', (req: Request, res: Response) =>
 );
 router.post('/decisions/:id/reassign', (req: Request, res: Response) =>
   handleDecisionAction(req, res, 'reassign'),
+);
+router.post('/decisions/:id/pause', (req: Request, res: Response) =>
+  handleDecisionAction(req, res, 'pause'),
+);
+router.post('/decisions/:id/cancel', (req: Request, res: Response) =>
+  handleDecisionAction(req, res, 'cancel'),
+);
+router.post('/decisions/:id/follow', (req: Request, res: Response) =>
+  handleDecisionAction(req, res, 'follow'),
 );
 
 // --- Overview ---
