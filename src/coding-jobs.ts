@@ -2293,22 +2293,23 @@ export function cancelCodingJob(jobId: string, by = 'dashboard'): CodingJob {
   }
   recordJobApproval(job, 'cancel', by);
 
-  // Deny any pending approvals for this job to prevent contradictory state
-  const pendingImplementation = findPendingApprovalForTarget(
+  // Deny ALL pending approvals for this job to prevent contradictory state
+  // This includes: coding-implement, coding-open-pr, provider-fallback, coding-revert
+  const approvalKinds = [
     'coding-implement',
-    'coding-job',
-    job.id,
-  );
-  if (pendingImplementation) {
-    reviewApproval(pendingImplementation.id, 'denied', by, 'Job was cancelled');
-  }
-  const pendingPr = findPendingApprovalForTarget(
     'coding-open-pr',
-    'coding-job',
-    job.id,
-  );
-  if (pendingPr) {
-    reviewApproval(pendingPr.id, 'denied', by, 'Job was cancelled');
+    'provider-fallback',
+    'coding-revert',
+  ] as const;
+  for (const kind of approvalKinds) {
+    const pendingApproval = findPendingApprovalForTarget(
+      kind,
+      'coding-job',
+      job.id,
+    );
+    if (pendingApproval) {
+      reviewApproval(pendingApproval.id, 'denied', by, 'Job was cancelled');
+    }
   }
 
   applyCodingJobTransition(job, 'cancelled');
