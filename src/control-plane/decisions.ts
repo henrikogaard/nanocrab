@@ -471,6 +471,19 @@ export async function resolveDecision(
       decision = getDecision(decisionId)!;
     }
 
+    // Reconcile linked approval for runtime_fallback decisions
+    if (decision.kind === 'runtime_fallback' && decision.approvalId) {
+      const approval = getApproval(decision.approvalId);
+      if (approval && approval.status === 'pending') {
+        reviewApproval(
+          decision.approvalId,
+          'denied',
+          actor,
+          note || 'paused by operator',
+        );
+      }
+    }
+
     logAuditEvent({
       actor,
       actionType: 'control_plane.decision.resolved',
@@ -494,6 +507,19 @@ export async function resolveDecision(
       }
     } else {
       decision = getDecision(decisionId)!;
+    }
+
+    // Reconcile linked approval for runtime_fallback decisions
+    if (decision.kind === 'runtime_fallback' && decision.approvalId) {
+      const approval = getApproval(decision.approvalId);
+      if (approval && approval.status === 'pending') {
+        reviewApproval(
+          decision.approvalId,
+          'denied',
+          actor,
+          note || 'cancelled by operator',
+        );
+      }
     }
 
     logAuditEvent({

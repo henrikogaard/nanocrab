@@ -55,8 +55,7 @@ export type ControlPlaneCommand =
       repository?: string;
       issueNumber: number;
       note?: string;
-    }
-
+    };
 
 export interface ControlPlaneCommandResult {
   text: string;
