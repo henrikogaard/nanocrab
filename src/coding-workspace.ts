@@ -3,6 +3,15 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { CODING_WORKSPACE_DIR } from './config.js';
+import {
+  openStableDirectory,
+  openStableDirectoryAt,
+  type StableDirectoryHandle,
+} from './coding-runners/stable-directory.js';
+import {
+  HostGitCancelledError,
+  HostGitTimeoutError,
+} from './coding-runners/host-git.js';
 
 export type GitTransport = (
   args: readonly string[],
@@ -11,11 +20,14 @@ export type GitTransport = (
     env: NodeJS.ProcessEnv;
     timeoutMs: number;
     stdin?: string;
+    jobId?: string;
+    attemptId?: string;
   },
 ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
 
 export interface CodingWorkspaceInput {
   jobId: string;
+  attemptId?: string;
   repo: string;
   defaultBranch: string;
   branch: string;
@@ -53,6 +65,8 @@ export interface CodingWorkspacePublicationInput {
   commitMessage: string;
   token: string;
   assertOwnership(): void;
+  jobId?: string;
+  attemptId?: string;
 }
 
 type AskpassFactory = (
@@ -337,6 +351,8 @@ export async function runApprovedHostGit(
     token: string;
     git: GitTransport;
     createAskpass: AskpassFactory;
+    jobId?: string;
+    attemptId?: string;
   },
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   if (!options.token) throw new Error('Git credential is required');
@@ -352,6 +368,8 @@ export async function runApprovedHostGit(
       cwd: options.cwd,
       timeoutMs: GIT_TIMEOUT_MS,
       env: credentialedGitEnvironment(helper.path, options.token, options.cwd),
+      jobId: options.jobId,
+      attemptId: options.attemptId,
     });
     return {
       stdout: redact(result.stdout, options.token),
@@ -359,6 +377,8 @@ export async function runApprovedHostGit(
       exitCode: result.exitCode,
     };
   } catch (error) {
+    if (error instanceof HostGitTimeoutError) throw error;
+    if (error instanceof HostGitCancelledError) throw error;
     const message = error instanceof Error ? error.message : 'unknown failure';
     const sanitized = redact(message, options.token);
     throw new Error(`Approved Git operation failed: ${sanitized}`, {
@@ -409,76 +429,79 @@ async function runLocalGit(
   return result;
 }
 
-interface GitMetadataValidationDeps {
-  lstat(value: string): Promise<fs.Stats>;
-  realpath(value: string): Promise<string>;
-  readdir(
-    value: string,
-    options: { withFileTypes: true },
-  ): Promise<fs.Dirent[]>;
-}
-
-const gitMetadataValidationDeps: GitMetadataValidationDeps = {
-  lstat: (value) => fs.promises.lstat(value),
-  realpath: (value) => fs.promises.realpath(value),
-  readdir: (value, options) => fs.promises.readdir(value, options),
-};
-
-async function assertTrustedGitMetadata(
-  workspace: string,
-  deps: GitMetadataValidationDeps = gitMetadataValidationDeps,
-): Promise<void> {
-  const gitDir = path.join(workspace, '.git');
+async function openStableFileIfExists(filePath: string): Promise<boolean> {
+  let handle: fs.promises.FileHandle | undefined;
   try {
-    if ((await deps.realpath(workspace)) !== workspace) {
-      throw new Error('Git workspace is not canonical');
-    }
-    const gitStats = await deps.lstat(gitDir);
-    if (gitStats.isSymbolicLink() || !gitStats.isDirectory()) {
-      throw new Error('Git metadata root is not a trusted directory');
-    }
-    if ((await deps.realpath(gitDir)) !== gitDir) {
-      throw new Error('Git metadata root escapes the workspace');
-    }
-
-    for (const forbidden of [
-      path.join(gitDir, 'commondir'),
-      path.join(gitDir, 'objects', 'info', 'alternates'),
-    ]) {
-      try {
-        await deps.lstat(forbidden);
-        throw new Error('Git metadata contains an external indirection');
-      } catch (error) {
-        if (!isMissing(error)) throw error;
-      }
-    }
-
-    const walk = async (directory: string): Promise<void> => {
-      for (const entry of await deps.readdir(directory, {
-        withFileTypes: true,
-      })) {
-        const candidate = path.join(directory, entry.name);
-        const stats = await deps.lstat(candidate);
-        if (stats.isSymbolicLink()) {
-          throw new Error('Git metadata must not contain symlinks');
-        }
-        if (stats.isDirectory()) {
-          await walk(candidate);
-        } else if (!stats.isFile()) {
-          throw new Error('Git metadata contains an unsupported entry');
-        }
-      }
-    };
-    await walk(gitDir);
+    handle = await fs.promises.open(
+      filePath,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+    );
+    return true;
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Git metadata')) {
-      throw error;
-    }
+    if (isMissing(error)) return false;
     throw new Error('Git metadata validation failed', {
       // Filesystem failures may expose paths outside the approved workspace.
       // eslint-disable-next-line preserve-caught-error
       cause: new Error('Git metadata is not trusted'),
     });
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function walkGitMetadata(dir: StableDirectoryHandle): Promise<void> {
+  for (const entry of await fs.promises.readdir(dir.path, {
+    withFileTypes: true,
+  })) {
+    if (entry.isSymbolicLink()) {
+      throw new Error('Git metadata must not contain symlinks');
+    }
+    if (entry.isDirectory()) {
+      const child = await openStableDirectoryAt(
+        dir,
+        entry.name,
+        'Git metadata entry',
+      );
+      try {
+        await walkGitMetadata(child);
+      } finally {
+        await child.close();
+      }
+    } else if (!entry.isFile()) {
+      throw new Error('Git metadata contains an unsupported entry');
+    }
+  }
+}
+
+async function assertTrustedGitMetadata(workspace: string): Promise<void> {
+  if (!path.isAbsolute(workspace) || path.normalize(workspace) !== workspace) {
+    throw new Error('Git workspace is not canonical');
+  }
+
+  const workspaceDir = await openStableDirectory(workspace, 'Git workspace');
+  try {
+    const gitDir = await openStableDirectoryAt(
+      workspaceDir,
+      '.git',
+      'Git metadata root',
+    );
+    try {
+      for (const relativeForbidden of [
+        'commondir',
+        path.join('objects', 'info', 'alternates'),
+      ]) {
+        const forbidden = path.join(gitDir.path, relativeForbidden);
+        if (await openStableFileIfExists(forbidden)) {
+          throw new Error('Git metadata contains an external indirection');
+        }
+      }
+
+      await walkGitMetadata(gitDir);
+    } finally {
+      await gitDir.close();
+    }
+  } finally {
+    await workspaceDir.close();
   }
 }
 
@@ -768,6 +791,8 @@ export async function publishCodingWorkspace(
       token: input.token,
       git: deps.git,
       createAskpass: deps.createAskpass ?? createTemporaryAskpass,
+      jobId: input.jobId,
+      attemptId: input.attemptId,
     },
   );
   requireGitSuccess(push, 'Approved Git push');
@@ -775,7 +800,14 @@ export async function publishCodingWorkspace(
 }
 
 export async function deleteCodingWorkspaceBranch(
-  input: { workspace: string; repo: string; branch: string; token: string },
+  input: {
+    workspace: string;
+    repo: string;
+    branch: string;
+    token: string;
+    jobId?: string;
+    attemptId?: string;
+  },
   deps: Pick<CodingWorkspaceDeps, 'git' | 'createAskpass'> & {
     validateGitMetadata?(workspace: string): Promise<void>;
   },
@@ -796,6 +828,8 @@ export async function deleteCodingWorkspaceBranch(
       token: input.token,
       git: deps.git,
       createAskpass: deps.createAskpass ?? createTemporaryAskpass,
+      jobId: input.jobId,
+      attemptId: input.attemptId,
     },
   );
   requireGitSuccess(result, 'Approved Git branch deletion');
@@ -1105,6 +1139,8 @@ export async function prepareCodingWorkspace(
       token: deps.githubToken,
       git: deps.git,
       createAskpass,
+      jobId: input.jobId,
+      attemptId: input.attemptId,
     },
   );
   requireGitSuccess(clone, 'Git clone');
@@ -1123,6 +1159,8 @@ export async function prepareCodingWorkspace(
       token: deps.githubToken,
       git: deps.git,
       createAskpass,
+      jobId: input.jobId,
+      attemptId: input.attemptId,
     },
   );
   requireGitSuccess(fetchResult, 'Git fetch');

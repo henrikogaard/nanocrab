@@ -122,9 +122,9 @@ export function parseDevinCliModelAliases(
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch (error) {
+  } catch (_error) {
     throw new Error('DEVIN_CLI_MODEL_ALIASES_JSON must be valid JSON', {
-      cause: error,
+      cause: _error,
     });
   }
 

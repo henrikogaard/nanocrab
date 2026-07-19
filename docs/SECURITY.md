@@ -209,11 +209,18 @@ triple in the Approvals UI. Process ownership is scoped to the
 exact job, attempt, and unguessable lease token. Cancellation and timeout send
 `SIGTERM` to that owned process group, retain the lease through a five-second
 grace period, then send `SIGKILL` only if the same lease still owns the attempt.
-This process lease covers the Devin/container runner, not a later host Git push
-child. If cancellation arrives after an approved push has started, NanoCrab
-cannot terminate that in-flight Git child; the remote branch may still update.
-The lost publication lease is rechecked after the push and prevents subsequent
-PR creation or job-state mutation by that stale publication.
+This process lease covers the Devin/container runner. Host Git commands are
+started through `runHostGit` in `src/coding-runners/host-git.ts` and registered
+in the attempt-aware `codingProcessRegistry` under the exact job/attempt lease.
+`runHostGit` begins by opening the working directory (or clone parent) with
+`O_NOFOLLOW | O_DIRECTORY` and resolving a stable `/proc/self/fd/<n>` path via
+`src/coding-runners/stable-directory.ts`, so the same-UID TOCTOU window between
+path validation and `execFile` is closed for host Git. The spawned `git` process
+runs in a new process group; cancellation/timeout escalate from `SIGTERM` to
+`SIGKILL` against the negative PID, tearing down `git` and any credential or
+SSH children it spawned. `terminateAll` cancels every active host Git attempt
+for a job when the whole job is cancelled. A timed-out or cancelled attempt
+throws `HostGitTimeoutError`/`HostGitCancelledError` and the result is not used.
 
 Devin stdout and stderr pass through independent stateful streaming redactors
 before persistence or display. The redactors carry partial tokens across chunk
@@ -226,16 +233,16 @@ untracked, and unpushed state and does not reset or delete the checkout.
 Devin sends prompts, selected repository content, and tool results to Devin's
 external service. This external processing is an operator-approved privacy
 boundary; repository tests do not invoke a live or paid Devin session. The
-Devin Research Preview sandbox is defense in depth, not the sole boundary. A
-residual local validation-to-sandbox-spawn TOCTOU risk remains because workspace
-components are checked with path-based `lstat`/`realpath` rather than a
-directory-handle-relative `openat` walk. Symlink-containing workspaces fail
-closed during normal launch preparation, but a malicious same-UID host process
-could race workspace paths or metadata after validation and before sandbox
-spawn. Git metadata is also recursively checked before trusted host operations,
-but those path-based checks do not pin every component for the duration of the
-later Git child. Use a dedicated service account and do not run untrusted
-same-UID host software.
+Devin Research Preview sandbox is defense in depth, not the sole boundary. Host
+Git operations now pin the working directory and clone parent with stable file
+descriptor paths, removing the same-UID TOCTOU window for approved Git
+execution. A residual local validation-to-sandbox-spawn TOCTOU risk remains
+for the Devin host launch itself because workspace components are still checked
+with path-based `lstat`/`realpath` rather than a directory-handle-relative
+`openat` walk. Symlink-containing workspaces fail closed during normal launch
+preparation, but a malicious same-UID host process could still race workspace
+paths or metadata after validation and before the Devin sandbox spawn. Use a
+dedicated service account and do not run untrusted same-UID host software.
 
 Rollback does not destroy operator state: disable or reassign Devin profiles,
 cancel exact active attempts, preserve each checkout and its evidence, and
