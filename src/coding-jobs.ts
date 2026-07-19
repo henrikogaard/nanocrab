@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'node:os';
@@ -45,6 +45,11 @@ import type {
 } from './coding-runners/types.js';
 import { createProductionDevinHostRunner } from './coding-runners/devin-host.js';
 import { codingProcessRegistry } from './coding-runners/process-registry.js';
+import {
+  HostGitCancelledError,
+  HostGitTimeoutError,
+  runHostGit,
+} from './coding-runners/host-git.js';
 import { probeCodingRunnerReadiness } from './coding-runner-readiness.js';
 import {
   collectCodingWorkspaceEvidence,
@@ -97,6 +102,8 @@ export interface CodingJobExecutionDependencies {
     repo: string;
     branch: string;
     token: string;
+    jobId?: string;
+    attemptId?: string;
   }): Promise<void>;
   devinRunner: CodingRunnerAdapter;
   /** True only when the host sandbox has a credential handoff it can safely expose. */
@@ -1447,45 +1454,7 @@ const productionDevinRunnerProxy: CodingRunnerAdapter = {
       : false,
 };
 
-function runGit(
-  args: readonly string[],
-  options: {
-    cwd?: string;
-    env: NodeJS.ProcessEnv;
-    timeoutMs: number;
-    stdin?: string;
-  },
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      'git',
-      [...args],
-      {
-        cwd: options.cwd,
-        env: options.env,
-        timeout: options.timeoutMs,
-        encoding: 'utf8',
-      },
-      (error, stdout, stderr) => {
-        if (error && !('code' in error)) {
-          reject(error);
-          return;
-        }
-        resolve({
-          stdout: String(stdout ?? ''),
-          stderr: String(stderr ?? ''),
-          exitCode:
-            error && typeof error.code === 'number'
-              ? error.code
-              : error
-                ? 1
-                : 0,
-        });
-      },
-    );
-    if (options.stdin !== undefined) child.stdin?.end(options.stdin);
-  });
-}
+const runGit = runHostGit;
 
 function productionCodingJobExecutionDependencies(): CodingJobExecutionDependencies {
   return {
@@ -1892,6 +1861,7 @@ async function runCodingJob(
   try {
     const prepared = await deps.prepareWorkspace({
       jobId: job.id,
+      attemptId,
       repo: job.repo,
       defaultBranch: repo.defaultBranch,
       branch: job.branch,
@@ -1943,6 +1913,35 @@ async function runCodingJob(
       };
     }
   } catch (error) {
+    if (error instanceof HostGitTimeoutError) {
+      if (
+        !terminalizeAttempt(
+          job.id,
+          attemptId,
+          'timed_out',
+          'Host Git operation timed out',
+        )
+      ) {
+        return staleAttemptResult(job.id, attemptId);
+      }
+      throw error;
+    }
+    if (error instanceof HostGitCancelledError) {
+      const current = getCodingJob(job.id);
+      if (current?.activeAttemptId === attemptId) {
+        if (
+          !terminalizeAttempt(
+            job.id,
+            attemptId,
+            'cancelled',
+            'Cancelled by owner',
+          )
+        ) {
+          return staleAttemptResult(job.id, attemptId);
+        }
+      }
+      return staleAttemptResult(job.id, attemptId);
+    }
     const detail = error instanceof Error ? error.message : String(error);
     if (!terminalizeAttempt(job.id, attemptId, 'failed', detail)) {
       return staleAttemptResult(job.id, attemptId);
@@ -2278,6 +2277,10 @@ export function cancelCodingJob(jobId: string, by = 'dashboard'): CodingJob {
 
   const attemptId = job.activeAttemptId;
   if (attemptId) {
+    const hostGitLease = codingProcessRegistry.get(job.id, attemptId);
+    if (hostGitLease) {
+      codingProcessRegistry.terminate(hostGitLease, 'cancelled');
+    }
     if (job.runnerCli === 'devin') {
       codingJobExecutionDependencies().devinRunner.cancel(job.id, attemptId);
     } else {
@@ -2291,6 +2294,7 @@ export function cancelCodingJob(jobId: string, by = 'dashboard'): CodingJob {
         'Cancelled by owner',
       ) || job;
   }
+  codingProcessRegistry.terminateAll(job.id, 'cancelled');
   recordJobApproval(job, 'cancel', by);
 
   // Deny ALL pending approvals for this job to prevent contradictory state
@@ -2684,6 +2688,7 @@ export async function openCodingJobPr(
         commitMessage,
         token,
         assertOwnership: assertPublicationOwnership,
+        jobId: job.id,
       });
     assertPublicationOwnership();
     const pr = (await githubApi(`/repos/${job.repo}/pulls`, {
@@ -2732,6 +2737,10 @@ export async function openCodingJobPr(
     upsertCodingJob(job);
     return job;
   } catch (err) {
+    if (err instanceof HostGitCancelledError) {
+      const current = getCodingJob(job.id);
+      if (current && current.status === 'cancelled') return current;
+    }
     const failureReason = err instanceof Error ? err.message : String(err);
     const current = getCodingJob(job.id);
     if (!ownsPublication() || !current) throw err;
@@ -2897,6 +2906,7 @@ export async function revertCodingJob(
         repo: job.repo,
         branch: job.branch,
         token,
+        jobId: job.id,
       });
     }
   } catch {
