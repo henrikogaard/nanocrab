@@ -38,6 +38,7 @@ import {
   PROVIDER_PURPOSES,
 } from './provider-router.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+import { sendScheduledTaskWebhook } from './webhook-delivery.js';
 import {
   BriefingHistoryEntry,
   BriefingOutcome,
@@ -478,11 +479,30 @@ async function deliverTaskResult(
       };
     }
 
-    return {
-      mode: 'webhook',
-      status: 'completed',
-      approvalState: 'approved',
-    };
+    try {
+      await sendScheduledTaskWebhook({ url, taskId: task.id, result });
+      logger.info(
+        { taskId: task.id, target: url },
+        'Scheduled task webhook delivered via pre-approved target',
+      );
+      return {
+        mode: 'webhook',
+        status: 'completed',
+        approvalState: 'approved',
+      };
+    } catch (err) {
+      const failureContext = err instanceof Error ? err.message : String(err);
+      logger.error(
+        { taskId: task.id, target: url, error: failureContext },
+        'Scheduled task webhook delivery failed',
+      );
+      return {
+        mode: 'webhook',
+        status: 'failed',
+        failureContext,
+        approvalState: 'approved',
+      };
+    }
   }
 
   // chat delivery

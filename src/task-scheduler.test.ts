@@ -17,6 +17,10 @@ vi.mock('./approvals.js', () => ({
   hasApprovedTarget: vi.fn(() => false),
 }));
 
+vi.mock('./webhook-delivery.js', () => ({
+  sendScheduledTaskWebhook: vi.fn(async () => ({ ok: true, status: 200 })),
+}));
+
 import {
   _initTestDatabase,
   createTask,
@@ -30,7 +34,12 @@ import {
 } from './task-scheduler.js';
 import { runContainerAgent } from './container-runner.js';
 import { STORE_DIR } from './config.js';
-import { createApproval, findPendingApprovalForTarget } from './approvals.js';
+import {
+  createApproval,
+  findPendingApprovalForTarget,
+  hasApprovedTarget,
+} from './approvals.js';
+import { sendScheduledTaskWebhook } from './webhook-delivery.js';
 import {
   loadBriefingHistoryStore,
   setDeliveryPreference,
@@ -605,6 +614,75 @@ describe('task scheduler', () => {
         }),
       }),
     );
+  });
+
+  it('sends the webhook directly when the target is pre-approved', async () => {
+    vi.mocked(hasApprovedTarget).mockReturnValueOnce(true);
+    vi.mocked(runContainerAgent).mockImplementationOnce(
+      async (_group, _input, _onProcess, onOutput) => {
+        await onOutput?.({
+          status: 'success',
+          result: 'Fresh webhook payload.',
+        });
+        return { status: 'success', result: 'Fresh webhook payload.' };
+      },
+    );
+    createTask({
+      id: 'task-webhook-approved',
+      group_folder: 'group-one',
+      chat_jid: 'group-one@g.us',
+      title: 'Webhook routine',
+      prompt: 'Prepare webhook payload',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      delivery_mode: 'webhook',
+      delivery_target: 'https://example.com/hooks/nanocrab',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    } as any);
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'group-one@g.us': {
+          name: 'Group One',
+          folder: 'group-one',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: vi.fn(async () => {}),
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(createApproval).not.toHaveBeenCalled();
+    expect(sendScheduledTaskWebhook).toHaveBeenCalledWith({
+      url: 'https://example.com/hooks/nanocrab',
+      taskId: 'task-webhook-approved',
+      result: 'Fresh webhook payload.',
+    });
+    const history = loadBriefingHistoryStore();
+    const entry = history.entries.find(
+      (e) => e.taskId === 'task-webhook-approved',
+    );
+    expect(entry).toMatchObject({
+      status: 'completed',
+      approvalState: 'approved',
+    });
+    expect(entry?.delivery.mode).toBe('webhook');
   });
 
   it('skips heartbeat tasks during quiet hours without waking the container', async () => {

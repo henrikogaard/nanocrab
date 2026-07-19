@@ -540,7 +540,11 @@ export function getNextRetryCountForTask(
   options?: BriefingHistoryOptions,
 ): number {
   const store = loadBriefingHistoryStore(historyPath(options));
-  return store.entries.filter((entry) => entry.taskId === taskId).length;
+  return store.entries.filter(
+    (entry) =>
+      entry.taskId === taskId &&
+      (entry.status === 'failed' || entry.status === 'approval-blocked'),
+  ).length;
 }
 
 export function recordMobileFollowUp(
