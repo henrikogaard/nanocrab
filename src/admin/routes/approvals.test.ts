@@ -5,9 +5,11 @@ import http from 'http';
 import os from 'os';
 import path from 'path';
 
-const { approveCodingJobRuntimeFallback } = vi.hoisted(() => ({
-  approveCodingJobRuntimeFallback: vi.fn(),
-}));
+const { approveCodingJobRuntimeFallback, executeBriefingDeliveryApproval } =
+  vi.hoisted(() => ({
+    approveCodingJobRuntimeFallback: vi.fn(),
+    executeBriefingDeliveryApproval: vi.fn(),
+  }));
 
 const STORE_DIR = path.join(
   os.tmpdir(),
@@ -38,6 +40,14 @@ vi.mock('../security.js', () => ({
 
 vi.mock('../../coding-jobs.js', () => ({
   approveCodingJobRuntimeFallback,
+}));
+
+vi.mock('../../briefing-delivery.js', () => ({
+  executeBriefingDeliveryApproval,
+}));
+
+vi.mock('../state.js', () => ({
+  getState: () => ({ sendMessage: vi.fn() }),
 }));
 
 const { default: approvalsRouter } = await import('./approvals.js');
@@ -80,11 +90,56 @@ describe('approval admin routes', () => {
   beforeEach(() => {
     fs.rmSync(STORE_DIR, { recursive: true, force: true });
     approveCodingJobRuntimeFallback.mockReset();
+    executeBriefingDeliveryApproval.mockReset();
     codingJobRuntime = {
       cli: 'devin',
       provider: 'claude',
       model: 'claude-sonnet-4-6',
     };
+  });
+
+  it('executes an approved briefing result immediately', async () => {
+    writeApprovals([
+      {
+        id: 'briefing-result',
+        kind: 'briefing-delivery',
+        title: 'Deliver briefing',
+        summary: 'Deliver exact result',
+        risk: 'medium',
+        requester: 'task-scheduler',
+        targetType: 'scheduled-task-result',
+        targetId: 'task-1:digest',
+        payload: {
+          taskId: 'task-1',
+          mode: 'chat',
+          channelId: 'wa:main',
+          result: 'Approved result',
+        },
+        status: 'pending',
+        correlationId: 'task-1:digest',
+        createdAt: '2026-07-19T10:00:00.000Z',
+        reviewedAt: null,
+        reviewedBy: null,
+        decisionNote: null,
+      },
+    ]);
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(
+        new URL('/approvals/briefing-result/approve', baseUrl),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        },
+      );
+      expect(response.status).toBe(200);
+    });
+
+    expect(executeBriefingDeliveryApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'briefing-result', status: 'approved' }),
+      expect.objectContaining({ sendMessage: expect.any(Function) }),
+    );
   });
 
   function writeCodingRuntimeFallbackApproval(

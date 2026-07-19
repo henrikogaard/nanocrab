@@ -12,6 +12,7 @@ import { isAgentProvider } from '../../agent-provider.js';
 import { ProviderPurpose, PROVIDER_PURPOSES } from '../../provider-router.js';
 import { createOperationSchedule } from '../../operation-schedules.js';
 import { listRoutineBlueprints } from '../../routine-blueprints.js';
+import { markTaskManualRun } from '../../task-scheduler.js';
 
 const router = Router();
 const DELIVERY_MODES = new Set(['chat', 'dashboard', 'file', 'webhook']);
@@ -284,6 +285,7 @@ router.post('/:id/run-now', (req: Request, res: Response) => {
   }
 
   const nextRun = new Date().toISOString();
+  markTaskManualRun(id);
   updateTask(id, { status: 'active', next_run: nextRun });
   res.json({
     ok: true,

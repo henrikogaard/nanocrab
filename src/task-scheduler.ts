@@ -4,6 +4,11 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  briefingApprovalTargetId,
+  webhookApprovalTargetId,
+} from './briefing-delivery.js';
+
+import {
   ASSISTANT_NAME,
   SCHEDULER_POLL_INTERVAL,
   STORE_DIR,
@@ -14,7 +19,11 @@ import {
   runContainerAgent,
   writeTasksSnapshot,
 } from './container-runner.js';
-import { createApproval, findPendingApprovalForTarget } from './approvals.js';
+import {
+  createApproval,
+  findPendingApprovalForTarget,
+  hasApprovedTarget,
+} from './approvals.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -34,6 +43,15 @@ import {
   PROVIDER_PURPOSES,
 } from './provider-router.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+import { sendScheduledTaskWebhook } from './webhook-delivery.js';
+import {
+  BriefingHistoryEntry,
+  BriefingOutcome,
+  BriefingSource,
+  getNextRetryCountForTask,
+  recordBriefingRun,
+  resolveDeliveryMode,
+} from './briefing-history.js';
 
 interface HeartbeatPolicy {
   quietHours?: {
@@ -257,13 +275,36 @@ function resolveDeliveryFilePath(task: ScheduledTask): string {
   return resolved;
 }
 
+interface DeliveryOutcome {
+  mode: BriefingHistoryEntry['delivery']['mode'];
+  status: BriefingOutcome;
+  failureContext?: string | null;
+  approvalState: BriefingHistoryEntry['approvalState'];
+}
+
+const manualRunIds = new Set<string>();
+
+/** Mark a task as manually triggered so the next run records source=manual. */
+export function markTaskManualRun(taskId: string): void {
+  manualRunIds.add(taskId);
+}
+
 async function deliverTaskResult(
   task: ScheduledTask,
   result: string | null,
   dryRun: boolean,
   deps: SchedulerDependencies,
-): Promise<void> {
-  if (!result || dryRun) return;
+  source: BriefingSource = 'scheduled',
+): Promise<DeliveryOutcome | undefined> {
+  if (!result) return undefined;
+
+  if (dryRun) {
+    return {
+      mode: 'dashboard',
+      status: 'completed',
+      approvalState: 'none',
+    };
+  }
 
   const silentMarker = task.silent_marker?.trim();
   if (silentMarker && result.includes(silentMarker)) {
@@ -271,72 +312,251 @@ async function deliverTaskResult(
       { taskId: task.id, marker: silentMarker },
       'Scheduled task result suppressed by silent marker',
     );
-    return;
+    return {
+      mode: 'dashboard',
+      status: 'skipped',
+      failureContext: 'Suppressed by silent marker',
+      approvalState: 'none',
+    };
   }
 
-  const deliveryMode = task.delivery_mode || 'chat';
-  if (deliveryMode === 'dashboard') return;
+  const channelId = task.delivery_target || task.chat_jid;
+  const taskDeliveryMode = task.delivery_mode || 'chat';
+  const resolved = resolveDeliveryMode(
+    task.group_folder,
+    channelId,
+    taskDeliveryMode,
+  );
 
-  if (deliveryMode === 'file') {
-    const outputPath = resolveDeliveryFilePath(task);
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.writeFileSync(outputPath, result, 'utf-8');
-    logger.info(
-      { taskId: task.id, outputPath },
-      'Scheduled task result written to file',
-    );
-    return;
+  if (!resolved.allowed) {
+    if (resolved.requiresApproval) {
+      const approvalMode =
+        resolved.mode === 'dashboard' ||
+        resolved.mode === 'file' ||
+        resolved.mode === 'webhook'
+          ? resolved.mode
+          : 'chat';
+      const approvalTargetId = briefingApprovalTargetId({
+        taskId: task.id,
+        mode: approvalMode,
+        target: channelId,
+        result,
+      });
+      const approved = hasApprovedTarget(
+        'briefing-delivery',
+        'scheduled-task-result',
+        approvalTargetId,
+      );
+      if (!approved) {
+        const existingApproval = findPendingApprovalForTarget(
+          'briefing-delivery',
+          'scheduled-task-result',
+          approvalTargetId,
+        );
+        if (!existingApproval) {
+          createApproval({
+            kind: 'briefing-delivery',
+            title: `Deliver briefing for ${task.title || task.id}`,
+            summary: `Approve delivery of scheduled task output to ${channelId}.`,
+            risk: 'medium',
+            requester: 'task-scheduler',
+            targetType: 'scheduled-task-result',
+            targetId: approvalTargetId,
+            source: source === 'manual' ? 'manual-run' : 'scheduled-task',
+            correlationId: `scheduled-task:${task.id}`,
+            actionPreview: result.slice(0, 1000),
+            resourceSummary: channelId,
+            payload: {
+              taskId: task.id,
+              channelId,
+              mode: approvalMode,
+              result,
+            },
+          });
+        }
+        logger.info(
+          { taskId: task.id, channelId },
+          'Scheduled task delivery blocked pending approval',
+        );
+        return {
+          mode: approvalMode,
+          status: 'approval-blocked',
+          failureContext: resolved.reason,
+          approvalState: 'pending',
+        };
+      }
+      // The approval route delivers this exact stored result. Do not deliver it
+      // again if the same result is observed during a retry.
+      return {
+        mode: approvalMode,
+        status: 'completed',
+        approvalState: 'approved',
+      };
+    } else {
+      logger.info(
+        { taskId: task.id, channelId, reason: resolved.reason },
+        'Scheduled task delivery skipped by channel preference',
+      );
+      return {
+        mode: resolved.mode,
+        status: 'skipped',
+        failureContext: resolved.reason,
+        approvalState: 'none',
+      };
+    }
   }
 
-  if (deliveryMode === 'webhook') {
+  const effectiveMode = resolved.mode;
+
+  if (effectiveMode === 'dashboard') {
+    return {
+      mode: 'dashboard',
+      status: 'completed',
+      approvalState: resolved.requiresApproval ? 'approved' : 'none',
+    };
+  }
+
+  if (effectiveMode === 'file') {
+    try {
+      const outputPath = resolveDeliveryFilePath(task);
+      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+      fs.writeFileSync(outputPath, result, 'utf-8');
+      logger.info(
+        { taskId: task.id, outputPath },
+        'Scheduled task result written to file',
+      );
+      return {
+        mode: 'file',
+        status: 'completed',
+        approvalState: resolved.requiresApproval ? 'approved' : 'none',
+      };
+    } catch (err) {
+      const failureContext = err instanceof Error ? err.message : String(err);
+      logger.error(
+        { taskId: task.id, error: failureContext },
+        'Scheduled task file delivery failed',
+      );
+      return {
+        mode: 'file',
+        status: 'failed',
+        failureContext,
+        approvalState: 'none',
+      };
+    }
+  }
+
+  if (effectiveMode === 'webhook') {
     const url = task.delivery_target?.trim();
     if (!url) {
-      logger.warn(
-        { taskId: task.id },
-        'Scheduled task webhook delivery skipped because no URL is configured',
-      );
-      return;
+      const failureContext =
+        'Scheduled task webhook delivery skipped because no URL is configured';
+      logger.warn({ taskId: task.id }, failureContext);
+      return {
+        mode: 'webhook',
+        status: 'skipped',
+        failureContext,
+        approvalState: 'none',
+      };
     }
 
-    const existingApproval = findPendingApprovalForTarget(
+    const approvalTargetId = webhookApprovalTargetId(task.id, url);
+    const approved = hasApprovedTarget(
       'webhook-delivery',
       'scheduled-task',
-      task.id,
+      approvalTargetId,
     );
-    if (!existingApproval) {
-      createApproval({
-        kind: 'webhook-delivery',
-        title: `Send webhook for ${task.title || task.id}`,
-        summary: `Approve delivery of scheduled task output to ${url}.`,
-        risk: 'medium',
-        requester: 'task-scheduler',
-        targetType: 'scheduled-task',
-        targetId: task.id,
-        source: 'scheduled-task',
-        correlationId: `scheduled-task:${task.id}`,
-        actionPreview: result.slice(0, 1000),
-        resourceSummary: url,
-        payload: {
-          taskId: task.id,
-          url,
-          result,
-        },
-      });
+    if (!approved) {
+      const existingApproval = findPendingApprovalForTarget(
+        'webhook-delivery',
+        'scheduled-task',
+        approvalTargetId,
+      );
+      if (!existingApproval) {
+        createApproval({
+          kind: 'webhook-delivery',
+          title: `Send webhook for ${task.title || task.id}`,
+          summary: `Approve delivery of scheduled task output to ${url}.`,
+          risk: 'medium',
+          requester: 'task-scheduler',
+          targetType: 'scheduled-task',
+          targetId: approvalTargetId,
+          source: source === 'manual' ? 'manual-run' : 'scheduled-task',
+          correlationId: `scheduled-task:${task.id}`,
+          actionPreview: result.slice(0, 1000),
+          resourceSummary: url,
+          payload: {
+            taskId: task.id,
+            url,
+            result,
+          },
+        });
+      }
+      logger.info(
+        { taskId: task.id, target: url, approvalId: existingApproval?.id },
+        'Scheduled task webhook delivery is awaiting approval',
+      );
+      return {
+        mode: 'webhook',
+        status: 'approval-blocked',
+        failureContext: 'Awaiting webhook delivery approval',
+        approvalState: 'pending',
+      };
     }
-    logger.info(
-      { taskId: task.id, target: url, approvalId: existingApproval?.id },
-      'Scheduled task webhook delivery is awaiting approval',
-    );
-    return;
+
+    try {
+      await sendScheduledTaskWebhook({ url, taskId: task.id, result });
+      logger.info(
+        { taskId: task.id, target: url },
+        'Scheduled task webhook delivered via pre-approved target',
+      );
+      return {
+        mode: 'webhook',
+        status: 'completed',
+        approvalState: 'approved',
+      };
+    } catch (err) {
+      const failureContext = err instanceof Error ? err.message : String(err);
+      logger.error(
+        { taskId: task.id, target: url, error: failureContext },
+        'Scheduled task webhook delivery failed',
+      );
+      return {
+        mode: 'webhook',
+        status: 'failed',
+        failureContext,
+        approvalState: 'approved',
+      };
+    }
   }
 
-  await deps.sendMessage(task.delivery_target || task.chat_jid, result);
+  // chat delivery
+  try {
+    await deps.sendMessage(channelId, result);
+    return {
+      mode: 'chat',
+      status: 'completed',
+      approvalState: resolved.requiresApproval ? 'approved' : 'none',
+    };
+  } catch (err) {
+    const failureContext = err instanceof Error ? err.message : String(err);
+    logger.error(
+      { taskId: task.id, channelId, error: failureContext },
+      'Scheduled task chat delivery failed',
+    );
+    return {
+      mode: 'chat',
+      status: 'failed',
+      failureContext,
+      approvalState: 'none',
+    };
+  }
 }
 
 function skipTaskRun(
   task: ScheduledTask,
   startTime: number,
   resultSummary: string,
+  source: BriefingSource = 'scheduled',
 ): void {
   logTaskRun({
     task_id: task.id,
@@ -347,6 +567,30 @@ function skipTaskRun(
     error: null,
   });
   updateTaskAfterRun(task.id, computeNextRun(task), resultSummary);
+
+  try {
+    recordBriefingRun({
+      taskId: task.id,
+      source,
+      routine: task.title || task.routine_type || task.id,
+      mission: task.group_folder,
+      groupFolder: task.group_folder,
+      channel: task.delivery_target || task.chat_jid,
+      status: 'skipped',
+      deliveryMode: task.delivery_mode || 'dashboard',
+      deliveryTarget: task.delivery_target || task.chat_jid,
+      failureContext: resultSummary,
+      latencyMs: Date.now() - startTime,
+      retryCount: 0,
+      approvalState: 'none',
+      resultPreview: null,
+    });
+  } catch (historyErr) {
+    logger.warn(
+      { taskId: task.id, err: historyErr },
+      'Failed to record skip in briefing history',
+    );
+  }
 }
 
 async function runTask(
@@ -354,6 +598,44 @@ async function runTask(
   deps: SchedulerDependencies,
 ): Promise<void> {
   const startTime = Date.now();
+  const source: BriefingSource = manualRunIds.has(task.id)
+    ? 'manual'
+    : 'scheduled';
+  manualRunIds.delete(task.id);
+
+  function recordTaskHistory(
+    status: BriefingOutcome,
+    failureContext: string | null,
+    deliveryMode: BriefingHistoryEntry['delivery']['mode'] = task.delivery_mode ||
+      'dashboard',
+    approvalState: BriefingHistoryEntry['approvalState'] = 'none',
+    resultPreview: string | null = null,
+  ): void {
+    try {
+      recordBriefingRun({
+        taskId: task.id,
+        source,
+        routine: task.title || task.routine_type || task.id,
+        mission: task.group_folder,
+        groupFolder: task.group_folder,
+        channel: task.delivery_target || task.chat_jid,
+        status,
+        deliveryMode,
+        deliveryTarget: task.delivery_target || task.chat_jid,
+        failureContext,
+        latencyMs: Date.now() - startTime,
+        retryCount: source === 'manual' ? getNextRetryCountForTask(task.id) : 0,
+        approvalState,
+        resultPreview,
+      });
+    } catch (historyErr) {
+      logger.warn(
+        { taskId: task.id, err: historyErr },
+        'Failed to record briefing history',
+      );
+    }
+  }
+
   let groupDir: string;
   try {
     groupDir = resolveGroupFolderPath(task.group_folder);
@@ -373,6 +655,7 @@ async function runTask(
       result: null,
       error,
     });
+    recordTaskHistory('failed', error);
     return;
   }
   fs.mkdirSync(groupDir, { recursive: true });
@@ -400,13 +683,14 @@ async function runTask(
       result: null,
       error: `Group not found: ${task.group_folder}`,
     });
+    recordTaskHistory('failed', `Group not found: ${task.group_folder}`);
     return;
   }
 
   const activeRunCount = task.active_run_count || 0;
   const maxActiveRuns = task.max_active_runs || 0;
   if (maxActiveRuns > 0 && activeRunCount >= maxActiveRuns) {
-    skipTaskRun(task, startTime, 'Skipped: active run limit');
+    skipTaskRun(task, startTime, 'Skipped: active run limit', source);
     logger.info(
       { taskId: task.id, activeRunCount, maxActiveRuns },
       'Scheduled task skipped because active-run limit is reached',
@@ -416,7 +700,7 @@ async function runTask(
 
   const heartbeatReason = heartbeatSkipReason(task);
   if (heartbeatReason) {
-    skipTaskRun(task, startTime, heartbeatReason);
+    skipTaskRun(task, startTime, heartbeatReason, source);
     logger.info(
       { taskId: task.id, reason: heartbeatReason },
       'Scheduled heartbeat skipped by local policy',
@@ -496,7 +780,28 @@ async function runTask(
   // query loop to time out. A short delay handles any final MCP calls.
   const TASK_CLOSE_DELAY_MS = 10000;
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
+  let deliveryOutcome: DeliveryOutcome | undefined;
   let deliveredResult = false;
+
+  const doDeliver = async (resultText: string): Promise<void> => {
+    if (deliveredResult || !resultText) return;
+    const outcome = await deliverTaskResult(
+      task,
+      resultText,
+      dryRun,
+      deps,
+      source,
+    );
+    if (outcome) {
+      deliveredResult = true;
+      deliveryOutcome = outcome;
+      if (outcome.status === 'failed') {
+        throw new Error(
+          outcome.failureContext || 'Scheduled task delivery failed',
+        );
+      }
+    }
+  };
 
   const scheduleClose = () => {
     if (closeTimer) return; // already scheduled
@@ -534,8 +839,7 @@ async function runTask(
         }
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          await deliverTaskResult(task, streamedOutput.result, dryRun, deps);
-          deliveredResult = true;
+          await doDeliver(streamedOutput.result);
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
@@ -559,7 +863,7 @@ async function runTask(
     } else if (output.result) {
       result = output.result;
       if (!deliveredResult) {
-        await deliverTaskResult(task, output.result, dryRun, deps);
+        await doDeliver(output.result);
       }
     }
 
@@ -592,6 +896,23 @@ async function runTask(
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
   updateTask(task.id, { active_run_count: activeRunCount });
+
+  const historyStatus: BriefingOutcome = error
+    ? 'failed'
+    : (deliveryOutcome?.status ?? 'completed');
+  const historyApproval: BriefingHistoryEntry['approvalState'] =
+    deliveryOutcome?.approvalState ?? 'none';
+  const historyFailure = error ?? deliveryOutcome?.failureContext ?? null;
+  const historyMode =
+    deliveryOutcome?.mode ?? (task.delivery_mode || 'dashboard');
+
+  recordTaskHistory(
+    historyStatus,
+    historyFailure,
+    historyMode,
+    historyApproval,
+    result?.slice(0, 500) ?? null,
+  );
 }
 
 let schedulerRunning = false;
