@@ -17,7 +17,8 @@ vi.mock('./config.js', () => ({
   DEVIN_CLI_MODEL_ALIASES: {
     'claude/claude-sonnet-4-6': 'claude-sonnet-4',
   },
-  DEVIN_CREDENTIAL_PATH: '/tmp/nanocrab-coding-jobs-test/devin.json',
+  DEVIN_CREDENTIAL_PATH:
+    '/tmp/nanocrab-coding-jobs-test/devin/credentials.toml',
 }));
 
 vi.mock('./env.js', () => ({

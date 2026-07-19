@@ -6,6 +6,11 @@ export interface DevinCredentialHandoffSuccess {
   dataHome: string;
 }
 
+export interface DevinSandboxAuthProbeLaunch {
+  executable: '/usr/bin/bwrap' | '/usr/bin/sandbox-exec';
+  args: string[];
+}
+
 export interface DevinCredentialHandoffFailure {
   ok: false;
   reason: string;
@@ -40,23 +45,122 @@ function isCanonicalPath(value: string): boolean {
 /**
  * Return the XDG_DATA_HOME directory that should be set when launching the
  * Devin CLI so it can locate its own credential at
- * `<dataHome>/devin/credentials.toml`.
- *
- * If the configured credential path is directly inside a `devin/` directory,
- * the data home is the parent of that directory. Otherwise the data home is
- * the parent directory of the configured file, allowing operators to point at
- * a non-standard credential location.
+ * `<dataHome>/devin/credentials.toml`. Requiring that exact layout prevents
+ * validating one file while the CLI reads a different credential file from
+ * the mounted `devin/` directory.
  */
 export function getDevinCredentialDataHome(credentialPath: string): string {
   if (!isCanonicalPath(credentialPath)) {
     throw new Error('Credential path must be canonical');
   }
   const normalized = path.normalize(credentialPath);
-  const parts = normalized.split(path.sep);
-  if (parts.length >= 2 && parts[parts.length - 2] === 'devin') {
-    return path.dirname(path.dirname(normalized));
+  if (
+    path.basename(normalized) !== 'credentials.toml' ||
+    path.basename(path.dirname(normalized)) !== 'devin'
+  ) {
+    throw new Error('Credential path must end with devin/credentials.toml');
   }
-  return path.dirname(normalized);
+  return path.dirname(path.dirname(normalized));
+}
+
+function sandboxDirectoryArgs(values: readonly string[]): string[] {
+  const directories = new Set<string>();
+  for (const value of values) {
+    let current = path.dirname(value);
+    while (current !== path.parse(current).root) {
+      directories.add(current);
+      current = path.dirname(current);
+    }
+  }
+  return [...directories]
+    .sort((left, right) => left.length - right.length)
+    .flatMap((directory) => ['--dir', directory]);
+}
+
+/** Build the actual sandboxed `devin auth status` readiness probe. */
+export function buildDevinSandboxAuthProbe(input: {
+  platform: NodeJS.Platform;
+  sandboxExecutable: '/usr/bin/bwrap' | '/usr/bin/sandbox-exec';
+  devinExecutable: string;
+  credentialPath: string;
+  trustedRuntimeReadRoots: readonly string[];
+}): DevinSandboxAuthProbeLaunch {
+  const dataHome = getDevinCredentialDataHome(input.credentialPath);
+  const credentialDirectory = path.dirname(input.credentialPath);
+
+  if (
+    input.platform === 'linux' &&
+    input.sandboxExecutable === '/usr/bin/bwrap'
+  ) {
+    const mountRoots = [...input.trustedRuntimeReadRoots, credentialDirectory];
+    return {
+      executable: input.sandboxExecutable,
+      args: [
+        '--die-with-parent',
+        '--new-session',
+        '--unshare-pid',
+        '--unshare-net',
+        '--tmpfs',
+        '/',
+        '--dev',
+        '/dev',
+        '--proc',
+        '/proc',
+        ...sandboxDirectoryArgs(mountRoots),
+        ...input.trustedRuntimeReadRoots.flatMap((root) => [
+          '--ro-bind',
+          root,
+          root,
+        ]),
+        '--ro-bind',
+        credentialDirectory,
+        credentialDirectory,
+        '--chdir',
+        dataHome,
+        '--',
+        input.devinExecutable,
+        'auth',
+        'status',
+      ],
+    };
+  }
+
+  if (
+    input.platform === 'darwin' &&
+    input.sandboxExecutable === '/usr/bin/sandbox-exec'
+  ) {
+    const readableRoots = [
+      '/System',
+      '/Library',
+      '/usr/lib',
+      '/usr/share',
+      '/private/etc',
+      '/dev',
+      ...input.trustedRuntimeReadRoots,
+      credentialDirectory,
+    ];
+    const profile = [
+      '(version 1)',
+      '(deny default)',
+      '(allow process-exec)',
+      '(allow process-fork)',
+      '(deny network*)',
+      `(allow file-read* ${readableRoots
+        .map(
+          (root) =>
+            `(literal ${JSON.stringify(root)}) (subpath ${JSON.stringify(root)})`,
+        )
+        .join(' ')})`,
+      `(deny file-write* (literal ${JSON.stringify(credentialDirectory)}) (subpath ${JSON.stringify(credentialDirectory)}))`,
+      '(allow file-write-data (literal "/dev/null"))',
+    ].join(' ');
+    return {
+      executable: input.sandboxExecutable,
+      args: ['-p', profile, '--', input.devinExecutable, 'auth', 'status'],
+    };
+  }
+
+  throw new Error('Devin sandbox authentication probe is unsupported');
 }
 
 /**
@@ -120,6 +224,9 @@ export function validateDevinCredentialHandoff(
       error && typeof error === 'object' && 'message' in error
         ? (error as Error).message
         : String(error);
-    return { ok: false, reason: `Credential handoff validation failed: ${reason}` };
+    return {
+      ok: false,
+      reason: `Credential handoff validation failed: ${reason}`,
+    };
   }
 }

@@ -188,29 +188,28 @@ for new agent sessions.
 
 #### Devin Host Runner Status
 
-The Devin host-runner code is present behind a fail-closed guard, but it is not
-available for coding jobs yet. Do not authenticate Devin for NanoCrab or assign
-Devin implementation work: readiness and dispatch remain unavailable until a
-sandbox-safe authentication handoff is designed and reviewed. NanoCrab never
-mounts, reads, copies, serializes, or forwards Devin credentials or a host auth
-directory.
+The optional Devin host runner is available only when its canonical
+`devin/credentials.toml` file, service-user ownership and mode, runtime
+executables, and platform sandbox all validate. Readiness proves
+`devin auth status` inside a network-disabled credential sandbox and remains
+fail-closed otherwise. The credential directory is exposed read-only to the
+trusted Devin CLI process; repository tools remain denied by the strict agent
+configuration and command broker.
 
 Configure the optional runner timeout and model aliases in `.env`:
 
 ```dotenv
 CODING_JOB_RUNNER_TIMEOUT_MS=1800000
-DEVIN_CREDENTIAL_PATH=/home/nanocrab/.config/devin/credentials.json
+DEVIN_CREDENTIAL_PATH=/home/nanocrab/.local/share/devin/credentials.toml
 DEVIN_CLI_MODEL_ALIASES_JSON={"claude/claude-haiku-4-5":"claude-haiku-4.5"}
 ```
 
 `CODING_JOB_RUNNER_TIMEOUT_MS` defaults to `CONTAINER_TIMEOUT`. The built-in
 model mappings are `claude/claude-sonnet-4-6 -> claude-sonnet-4` and
 `claude/claude-opus-4-6 -> claude-opus-4.6`; JSON aliases may extend but cannot
-override them. These settings are retained for future enablement; they do not
-make Devin runnable while the authentication handoff guard is closed.
-When a reviewed handoff exists, readiness will still repeat after
-implementation or runtime fallback approval and before creating or mutating a
-checkout. Devin will remain an explicit owner-approved runtime, never a silent
+override them. Readiness repeats after implementation or runtime fallback
+approval and before creating or mutating a checkout. Devin remains an explicit
+owner-approved runtime, never a silent
 fallback, and its prompts, selected repository content, and tool results will
 be sent to Devin's external service. Rollback must disable or reassign Devin
 profiles and preserve each checkout and its evidence; do not delete Devin
@@ -576,7 +575,7 @@ CONTAINER_MEMORY_LIMIT=2g       # Container resource limits
 CONTAINER_CPU_LIMIT=2
 NANOCRAB_API_TOKEN=<token>      # For container skill API access
 CODING_JOB_RUNNER_TIMEOUT_MS=1800000 # Host-native runner timeout
-DEVIN_CREDENTIAL_PATH=/absolute/path/to/devin/credentials.json
+DEVIN_CREDENTIAL_PATH=/absolute/path/to/devin/credentials.toml
 DEVIN_CLI_MODEL_ALIASES_JSON={"claude/claude-haiku-4-5":"claude-haiku-4.5"}
 ```
 

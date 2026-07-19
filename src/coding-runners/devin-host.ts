@@ -391,29 +391,19 @@ function devinSandboxProfile(
     '(allow file-write-data (literal "/dev/null"))',
   ];
   if (workspaceWritable) {
-    rules.push(
-      `(allow file-write* (subpath ${JSON.stringify(workspace)}))`,
-    );
+    rules.push(`(allow file-write* (subpath ${JSON.stringify(workspace)}))`);
     rules.push(
       `(deny file-write* ${sandboxPathFilters(path.join(workspace, '.git'))})`,
     );
   }
   for (const protectedPath of protectedPaths) {
-    rules.push(
-      `(deny file-read* ${sandboxPathFilters(protectedPath)})`,
-    );
-    rules.push(
-      `(deny file-write* ${sandboxPathFilters(protectedPath)})`,
-    );
+    rules.push(`(deny file-read* ${sandboxPathFilters(protectedPath)})`);
+    rules.push(`(deny file-write* ${sandboxPathFilters(protectedPath)})`);
   }
   // Emitted last so it overrides the protected-path denies above; the
   // credential directory itself stays read-only and write-denied.
-  rules.push(
-    `(allow file-read* ${sandboxPathFilters(devinCredentialDir)})`,
-  );
-  rules.push(
-    `(deny file-write* ${sandboxPathFilters(devinCredentialDir)})`,
-  );
+  rules.push(`(allow file-read* ${sandboxPathFilters(devinCredentialDir)})`);
+  rules.push(`(deny file-write* ${sandboxPathFilters(devinCredentialDir)})`);
   return rules.join(' ');
 }
 
@@ -474,7 +464,10 @@ async function assertMinimalMacSandboxLayout(
   }
 
   const devinCredentialDir = path.join(devinCredentialDataHome, 'devin');
-  assertCanonicalSandboxPath(devinCredentialDataHome, 'Devin credential data home');
+  assertCanonicalSandboxPath(
+    devinCredentialDataHome,
+    'Devin credential data home',
+  );
   assertCanonicalSandboxPath(devinCredentialDir, 'Devin credential directory');
   if ((await deps.realpath(devinCredentialDir)) !== devinCredentialDir) {
     throw new Error('Devin credential directory is not canonical');
@@ -1212,7 +1205,8 @@ export function createDevinHostRunner(
       }
 
       const stageKind = input.stageKind ?? 'direct';
-      const devinCredentialDataHome = getDevinCredentialDataHome(devinCredentialPath);
+      const devinCredentialDataHome =
+        getDevinCredentialDataHome(devinCredentialPath);
       const protectedPaths = [
         home,
         path.join(home, '.ssh'),

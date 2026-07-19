@@ -23,7 +23,7 @@ const input = {
   workspace: '/jobs/job/repo',
   jobRoot: '/jobs/job',
   brokerPath: '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
-  devinCredentialPath: '/home/service/.config/devin/credentials.json',
+  devinCredentialPath: '/home/service/.config/devin/credentials.toml',
   home: '/home/service',
   nanocrabConfigRoot: '/home/service/.config/nanocrab',
 };
@@ -69,14 +69,14 @@ const readOnlyConfig = {
     ask: [],
     deny: [
       'Read(/jobs/job/.nanocrab/**)',
-      'Read(/home/service/.config/devin/credentials.json)',
+      'Read(/home/service/.config/devin/credentials.toml)',
       'Read(/home/service/.ssh/**)',
       'Read(/home/service/.gnupg/**)',
       'Read(/home/service/.config/nanocrab/**)',
       'Write(/jobs/job/.nanocrab/**)',
       'Write(/jobs/job/repo/.git)',
       'Write(/jobs/job/repo/.git/**)',
-      'Write(/home/service/.config/devin/credentials.json)',
+      'Write(/home/service/.config/devin/credentials.toml)',
       'Write(/home/service/.ssh/**)',
       'Write(/home/service/.gnupg/**)',
       'Write(/home/service/.config/nanocrab/**)',
@@ -290,7 +290,7 @@ describe('Devin process sandbox', () => {
     ).toBe(false);
     expect(launch.args).not.toContain('/home/service');
     expect(launch.args).not.toContain(
-      '/home/service/.config/devin/credentials.json',
+      '/home/service/.config/devin/credentials.toml',
     );
   });
 
@@ -456,9 +456,7 @@ describe('Devin process sandbox', () => {
       trustedSandboxFilesystem,
     );
     const profile = launch.args[1]!;
-    expect(profile).toContain(
-      'allow file-write* (subpath "/jobs/job/repo")',
-    );
+    expect(profile).toContain('allow file-write* (subpath "/jobs/job/repo")');
     expect(profile).toContain(
       'deny file-write* (literal "/jobs/job/repo/.git") (subpath "/jobs/job/repo/.git")',
     );
@@ -485,7 +483,7 @@ describe('Devin command broker launcher', () => {
           home: '/home/service',
           protectedPaths: [
             '/jobs/job/.nanocrab',
-            '/home/service/.config/devin/credentials.json',
+            '/home/service/.config/devin/credentials.toml',
             '/home/service/.config/nanocrab',
           ],
           trustedRuntimeReadRoots: ['/usr'],
@@ -504,7 +502,7 @@ describe('Devin command broker launcher', () => {
     expect(source).toContain(JSON.stringify('/usr/bin/bwrap'));
     expect(source).toContain(JSON.stringify('/jobs/job/.nanocrab'));
     expect(source).toContain(
-      JSON.stringify('/home/service/.config/devin/credentials.json'),
+      JSON.stringify('/home/service/.config/devin/credentials.toml'),
     );
     expect(source).toContain(JSON.stringify(['/usr']));
     expect(source).not.toMatch(/token|secret|shell:\s*true/i);
@@ -1071,7 +1069,7 @@ function runnerHarness(processes = [new FakeCodingProcess(101)]) {
     ensureCommandBrokerLauncher: ensureLauncher,
     commandBrokerModulePath:
       '/opt/nanocrab/dist/coding-runners/command-broker.js',
-    devinCredentialPath: '/home/service/.config/devin/credentials.json',
+    devinCredentialPath: '/home/service/.config/devin/credentials.toml',
     home: '/home/service',
     nanocrabConfigRoot: '/home/service/.config/nanocrab',
     signalProcessGroup: (pid, signal) => groupSignals.push([pid, signal]),
@@ -1127,7 +1125,7 @@ describe('Devin host process runner', () => {
       home: '/home/service',
       protectedPaths: [
         '/jobs/job/.nanocrab',
-        '/home/service/.config/devin/credentials.json',
+        '/home/service/.config/devin/credentials.toml',
         '/home/service/.config/nanocrab',
       ],
       trustedRuntimeReadRoots: ['/opt/devin', '/usr/local', '/usr/bin'],

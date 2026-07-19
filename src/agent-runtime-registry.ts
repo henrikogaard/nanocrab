@@ -10,6 +10,8 @@ import {
   DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
 } from './coding-runners/devin-host.js';
 import {
+  buildDevinSandboxAuthProbe,
+  getDevinCredentialDataHome,
   validateDevinCredentialHandoff,
   type DevinCredentialHandoffResult,
 } from './coding-runners/devin-auth.js';
@@ -566,6 +568,12 @@ export async function probeDevinRuntime(
       'Configure an absolute DEVIN_CREDENTIAL_PATH for the NanoCrab service user',
     );
   }
+  let credentialDataHome: string;
+  try {
+    credentialDataHome = getDevinCredentialDataHome(credentialPath);
+  } catch {
+    return fail('DEVIN_CREDENTIAL_PATH must end with devin/credentials.toml');
+  }
   if (deps.platform !== 'linux' && deps.platform !== 'darwin') {
     return fail('Devin host runner requires Linux or macOS sandbox support');
   }
@@ -664,6 +672,20 @@ export async function probeDevinRuntime(
         version,
       );
     }
+
+    const authProbe = buildDevinSandboxAuthProbe({
+      platform: deps.platform,
+      sandboxExecutable,
+      devinExecutable: runtimeContext.executable,
+      credentialPath,
+      trustedRuntimeReadRoots: runtimeContext.trustedRuntimeReadRoots,
+    });
+    const authEnvironment = buildDevinChildEnvironment(deps.env);
+    authEnvironment.XDG_DATA_HOME = credentialDataHome;
+    await deps.execFile(authProbe.executable, authProbe.args, {
+      env: authEnvironment,
+      timeout: DEVIN_PROBE_TIMEOUT_MS,
+    });
 
     verifiedDevinState = Object.freeze({
       aliases: new Set(configuredAliases),

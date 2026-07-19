@@ -65,7 +65,7 @@ function healthyDevinProbe(overrides: Record<string, unknown> = {}) {
       { stdout: 'Authenticated as Person <person@example.test>', stderr: '' },
     ],
   ]);
-  const credentialPath = '/home/nanocrab/.config/devin/credentials.json';
+  const credentialPath = '/home/nanocrab/.config/devin/credentials.toml';
   const devinExecutable = '/opt/devin/bin/devin';
   const nodeExecutable = '/usr/local/bin/node';
   return {
@@ -278,7 +278,7 @@ describe('agent runtime registry', () => {
 
   it('fails the public Devin runtime probe closed without touching probe dependencies', async () => {
     const deps = healthyDevinProbe({
-      credentialPath: '/home/nanocrab/.config/devin/credentials.json',
+      credentialPath: '/home/nanocrab/.config/devin/credentials.toml',
     });
 
     await expect(
@@ -392,7 +392,7 @@ describe('agent runtime registry', () => {
     });
   });
 
-  it('reports host capabilities without probing Devin authentication', async () => {
+  it('proves Devin authentication inside the configured process sandbox', async () => {
     const deps = healthyDevinProbe();
 
     await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
@@ -402,11 +402,19 @@ describe('agent runtime registry', () => {
       version: '1.1.0',
       detail: 'Devin host runner is ready',
     });
-    expect(deps.execFile.mock.calls.map((call) => call[1])).toEqual([
-      ['--version'],
-      ['--help'],
-    ]);
-    for (const call of deps.execFile.mock.calls) {
+    expect(deps.execFile).toHaveBeenCalledTimes(3);
+    expect(deps.execFile.mock.calls[0]?.[1]).toEqual(['--version']);
+    expect(deps.execFile.mock.calls[1]?.[1]).toEqual(['--help']);
+    expect(deps.execFile.mock.calls[2]?.[0]).toBe('/usr/bin/bwrap');
+    expect(deps.execFile.mock.calls[2]?.[1]).toEqual(
+      expect.arrayContaining([
+        '--unshare-net',
+        '/opt/devin/bin/devin',
+        'auth',
+        'status',
+      ]),
+    );
+    for (const call of deps.execFile.mock.calls.slice(0, 2)) {
       expect(call[2]).toEqual({
         env: buildDevinChildEnvironment(deps.env),
         timeout: 10_000,
@@ -415,6 +423,13 @@ describe('agent runtime registry', () => {
         expect.arrayContaining(['-p', '--prompt-file', '--model']),
       );
     }
+    expect(deps.execFile.mock.calls[2]?.[2]).toEqual({
+      env: {
+        ...buildDevinChildEnvironment(deps.env),
+        XDG_DATA_HOME: '/home/nanocrab/.config',
+      },
+      timeout: 10_000,
+    });
     expect(deps.commandAvailable).toHaveBeenCalledWith('/usr/bin/bwrap');
     expect(deps.resolveExecutable).toHaveBeenCalledWith('devin', [
       '/opt/devin/bin',
@@ -426,6 +441,39 @@ describe('agent runtime registry', () => {
       trustedRuntimeReadRoots: ['/opt/devin', '/usr/local', '/usr/bin'],
       trustedRuntimeReadFiles: [],
     });
+  });
+
+  it('does not report healthy when sandboxed authentication fails', async () => {
+    const deps = healthyDevinProbe();
+    deps.execFile.mockImplementation(
+      async (executable: string, args: readonly string[]) => {
+        if (executable === '/usr/bin/bwrap') {
+          throw new Error('not authenticated');
+        }
+        if (args[0] === '--version') {
+          return { stdout: 'devin 1.1.0', stderr: '' };
+        }
+        return { stdout: DEVIN_HELP, stderr: '' };
+      },
+    );
+
+    await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
+      status: 'error',
+      detail: 'Unable to verify Devin host runner readiness',
+    });
+    expect(getVerifiedDevinRuntimeContext()).toBeNull();
+  });
+
+  it('rejects a checked credential path that differs from the CLI credential', async () => {
+    const deps = healthyDevinProbe({
+      credentialPath: '/home/nanocrab/.config/devin/approved-placeholder.toml',
+    });
+
+    await expect(probeDevinRuntime(deps)).resolves.toMatchObject({
+      status: 'error',
+      detail: 'DEVIN_CREDENTIAL_PATH must end with devin/credentials.toml',
+    });
+    expect(deps.execFile).not.toHaveBeenCalled();
   });
 
   it('records only canonical optional system files for the host sandbox', async () => {
@@ -480,13 +528,10 @@ describe('agent runtime registry', () => {
         if (args[0] === '--version')
           return { stdout: 'devin 1.1.0', stderr: '' };
         if (args[0] === '--help') return { stdout: DEVIN_HELP, stderr: '' };
-        throw Object.assign(
-          new Error('Jane Person person@example.test user-123 team-456'),
-          {
-            stdout: 'Jane Person person@example.test user-123',
-            stderr: 'team-456',
-          },
-        );
+        return {
+          stdout: 'Logged in as Jane Person person@example.test user-123',
+          stderr: 'team-456',
+        };
       }),
     });
 
