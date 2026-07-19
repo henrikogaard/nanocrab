@@ -188,6 +188,7 @@ function buildBoardCards() {
       run: run
         ? {
             id: run.id,
+            repo: snapshot.repository,
             status: run.status,
             branch: run.branch,
             prUrl: run.prUrl,

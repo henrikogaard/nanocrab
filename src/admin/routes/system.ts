@@ -33,6 +33,10 @@ import {
 import { ensureCodexOAuth, getCodexAuthStatus } from '../../codex-auth.js';
 import { runSetupPreflight } from '../../setup-preflight.js';
 import { runReleaseDiagnostics } from '../../release-diagnostics.js';
+import {
+  buildProductionDiagnostics,
+  formatDiagnosticsSummary,
+} from '../../production-diagnostics.js';
 import { CONTAINER_RUNTIME_BIN } from '../../container-runtime.js';
 import {
   AGENT_PROVIDER_DEFINITIONS,
@@ -451,6 +455,24 @@ router.get('/release-diagnostics', requireRole('owner'), async (_req, res) => {
     res.status(500).json({ error: 'Release diagnostics failed' });
   }
 });
+
+router.get(
+  '/diagnostics',
+  requireRole('owner'),
+  async (req: Request, res: Response) => {
+    try {
+      const result = await buildProductionDiagnostics();
+      if (req.query.format === 'text') {
+        res.type('text/plain').send(formatDiagnosticsSummary(result));
+        return;
+      }
+      res.json(result);
+    } catch (err) {
+      logger.error({ err }, 'Production diagnostics failed');
+      res.status(500).json({ error: 'Production diagnostics failed' });
+    }
+  },
+);
 
 // Usage stats
 router.get('/stats', (_req: Request, res: Response) => {

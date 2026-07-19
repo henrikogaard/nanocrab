@@ -89,4 +89,26 @@ describe('Control Plane UI', () => {
     expect(mock).toContain("'/control-plane/decisions'");
     expect(mock).toContain("'/control-plane/runtimes'");
   });
+
+  it('loads GitHub check status and production diagnostics endpoints', () => {
+    const source = fs.readFileSync(pagePath, 'utf8');
+    expect(source).toContain("api('/github/checks");
+    expect(source).toContain("api('/system/diagnostics')");
+  });
+
+  it('shows check status placeholders, loading, and error states', () => {
+    const source = fs.readFileSync(pagePath, 'utf8');
+    expect(source).toContain('control-plane-check-status');
+    expect(source).toContain('Loading checks');
+    expect(source).toContain('Checks unavailable');
+  });
+
+  it('uses a shared status vocabulary with stale and diagnostic states', () => {
+    const source = fs.readFileSync(pagePath, 'utf8');
+    expect(source).toContain("'ready'");
+    expect(source).toContain("'attention'");
+    expect(source).toContain("'blocked'");
+    expect(source).toContain("'stale'");
+    expect(source).toContain('control-plane-diagnostics-panel');
+  });
 });

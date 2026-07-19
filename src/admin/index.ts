@@ -84,6 +84,7 @@ import assistantProfileRoutes from './routes/assistant-profile.js';
 import threadsRoutes from './routes/threads.js';
 import projectsRoutes from './routes/projects.js';
 import controlPlaneRoutes from './routes/control-plane.js';
+import githubRoutes from './routes/github.js';
 import learningProposalsRoutes from './routes/learning-proposals.js';
 import sourceCollectionsRoutes from './routes/source-collections.js';
 
@@ -257,6 +258,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/chat', requireAuth, chatRoutes);
   app.use('/api/threads', requireAuth, threadsRoutes);
   app.use('/api/projects', requireAuth, projectsRoutes);
+  app.use('/api/github', requireAuth, requireRole('admin'), githubRoutes);
   app.use('/api/assistant-profile', requireAuth, assistantProfileRoutes);
   app.use(
     '/api/control-plane',
