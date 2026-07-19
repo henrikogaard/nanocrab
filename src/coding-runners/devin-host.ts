@@ -347,6 +347,20 @@ async function assertNoGitMetadataAliases(
   await walkWorkspace(workspace);
 }
 
+/**
+ * System paths every macOS process needs read access to (dyld, shared
+ * libraries, terminfo, certificates). Without these a deny-default profile
+ * cannot even start the Devin executable.
+ */
+const MAC_SYSTEM_READ_ROOTS = [
+  '/System',
+  '/Library',
+  '/usr/lib',
+  '/usr/share',
+  '/private/etc',
+  '/dev',
+] as const;
+
 function devinSandboxProfile(
   workspace: string,
   temporaryDirectory: string,
@@ -357,11 +371,15 @@ function devinSandboxProfile(
 ): string {
   const devinCredentialDir = path.join(devinCredentialDataHome, 'devin');
   const readableRoots = [
+    ...MAC_SYSTEM_READ_ROOTS,
     ...trustedRuntimeReadRoots,
     workspace,
     temporaryDirectory,
-    devinCredentialDir,
   ];
+  // Rule order matters: in sandbox-exec profiles, later rules take
+  // precedence. Protected-path denies are emitted before the credential
+  // directory allow so the Devin CLI can read its own credential even when
+  // the credential lives under a protected root such as $HOME.
   const rules = [
     '(version 1)',
     '(deny default)',
@@ -370,6 +388,7 @@ function devinSandboxProfile(
     '(allow network-outbound)',
     `(allow file-read* ${readableRoots.map(sandboxPathFilters).join(' ')})`,
     `(allow file-write* (subpath ${JSON.stringify(temporaryDirectory)}))`,
+    '(allow file-write-data (literal "/dev/null"))',
   ];
   if (workspaceWritable) {
     rules.push(
@@ -387,6 +406,14 @@ function devinSandboxProfile(
       `(deny file-write* ${sandboxPathFilters(protectedPath)})`,
     );
   }
+  // Emitted last so it overrides the protected-path denies above; the
+  // credential directory itself stays read-only and write-denied.
+  rules.push(
+    `(allow file-read* ${sandboxPathFilters(devinCredentialDir)})`,
+  );
+  rules.push(
+    `(deny file-write* ${sandboxPathFilters(devinCredentialDir)})`,
+  );
   return rules.join(' ');
 }
 

@@ -173,9 +173,13 @@ Devin credential itself is never mounted directly, but the `XDG_DATA_HOME`
 directory containing `devin/` is exposed read-only. Devin host launch is
 supported on Linux and macOS once authentication handoff is validated; Linux
 uses Bubblewrap and macOS uses an explicit deny-default `sandbox-exec` profile
-for runtime roots, workspace, and sandbox temp. Alias validation or sandbox
-preparation failure aborts the attempt before Devin is spawned, so `.git` is
-read-only to the whole Devin process on supported launches.
+for system libraries, runtime roots, workspace, and sandbox temp, with
+protected paths denied and only the Devin credential directory re-allowed
+read-only. The macOS profile is validated by unit tests but has not yet been
+exercised on macOS hardware; treat macOS launch as experimental until it has
+been verified end to end. Alias validation or sandbox preparation failure
+aborts the attempt before Devin is spawned, so `.git` is read-only to the
+whole Devin process on supported launches.
 
 The command broker is a separate, stricter boundary. It validates an exact
 command allowlist and routes every accepted inspection, Git, build, and test

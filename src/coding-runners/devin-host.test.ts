@@ -404,6 +404,65 @@ describe('Devin process sandbox', () => {
       ),
     ).rejects.toThrow('authentication handoff is disabled');
   });
+
+  it('keeps the credential directory readable after protected-path denies on macOS', async () => {
+    const launch = await buildSandboxedDevinLaunch(
+      {
+        ...launchInput,
+        sandboxExecutable: '/usr/bin/sandbox-exec',
+        devinCredentialDataHome: '/home/service/.config',
+        protectedPaths: [
+          '/home/service',
+          '/home/service/.ssh',
+          '/home/service/.gnupg',
+          '/home/service/.config/nanocrab',
+        ],
+      },
+      trustedSandboxFilesystem,
+    );
+    expect(launch.executable).toBe('/usr/bin/sandbox-exec');
+    expect(launch.args[0]).toBe('-p');
+    const profile = launch.args[1]!;
+    expect(profile).toContain('(deny default)');
+    // The final credential-dir allow must come after every protected deny so
+    // sandbox-exec precedence keeps the credential readable under $HOME.
+    const credentialAllow = profile.lastIndexOf(
+      'allow file-read* (literal "/home/service/.config/devin")',
+    );
+    const homeDeny = profile.lastIndexOf(
+      'deny file-read* (literal "/home/service")',
+    );
+    expect(credentialAllow).toBeGreaterThan(homeDeny);
+    expect(homeDeny).toBeGreaterThan(-1);
+    // The credential directory must never be writable.
+    expect(profile).toContain(
+      'deny file-write* (literal "/home/service/.config/devin")',
+    );
+    // System library roots required for dyld under deny-default.
+    for (const root of ['/System', '/Library', '/usr/lib']) {
+      expect(profile).toContain(`(subpath ${JSON.stringify(root)})`);
+    }
+  });
+
+  it('denies workspace .git writes in the writable macOS profile', async () => {
+    const launch = await buildSandboxedDevinLaunch(
+      {
+        ...launchInput,
+        stageKind: 'implement',
+        sandboxExecutable: '/usr/bin/sandbox-exec',
+        devinCredentialDataHome: '/home/service/.config',
+        protectedPaths: ['/home/service'],
+      },
+      trustedSandboxFilesystem,
+    );
+    const profile = launch.args[1]!;
+    expect(profile).toContain(
+      'allow file-write* (subpath "/jobs/job/repo")',
+    );
+    expect(profile).toContain(
+      'deny file-write* (literal "/jobs/job/repo/.git") (subpath "/jobs/job/repo/.git")',
+    );
+  });
 });
 
 describe('Devin command broker launcher', () => {
