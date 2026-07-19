@@ -4,6 +4,11 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  briefingApprovalTargetId,
+  webhookApprovalTargetId,
+} from './briefing-delivery.js';
+
+import {
   ASSISTANT_NAME,
   SCHEDULER_POLL_INTERVAL,
   STORE_DIR,
@@ -325,16 +330,28 @@ async function deliverTaskResult(
 
   if (!resolved.allowed) {
     if (resolved.requiresApproval) {
+      const approvalMode =
+        resolved.mode === 'dashboard' ||
+        resolved.mode === 'file' ||
+        resolved.mode === 'webhook'
+          ? resolved.mode
+          : 'chat';
+      const approvalTargetId = briefingApprovalTargetId({
+        taskId: task.id,
+        mode: approvalMode,
+        target: channelId,
+        result,
+      });
       const approved = hasApprovedTarget(
         'briefing-delivery',
-        'scheduled-task',
-        task.id,
+        'scheduled-task-result',
+        approvalTargetId,
       );
       if (!approved) {
         const existingApproval = findPendingApprovalForTarget(
           'briefing-delivery',
-          'scheduled-task',
-          task.id,
+          'scheduled-task-result',
+          approvalTargetId,
         );
         if (!existingApproval) {
           createApproval({
@@ -343,8 +360,8 @@ async function deliverTaskResult(
             summary: `Approve delivery of scheduled task output to ${channelId}.`,
             risk: 'medium',
             requester: 'task-scheduler',
-            targetType: 'scheduled-task',
-            targetId: task.id,
+            targetType: 'scheduled-task-result',
+            targetId: approvalTargetId,
             source: source === 'manual' ? 'manual-run' : 'scheduled-task',
             correlationId: `scheduled-task:${task.id}`,
             actionPreview: result.slice(0, 1000),
@@ -352,6 +369,7 @@ async function deliverTaskResult(
             payload: {
               taskId: task.id,
               channelId,
+              mode: approvalMode,
               result,
             },
           });
@@ -361,13 +379,19 @@ async function deliverTaskResult(
           'Scheduled task delivery blocked pending approval',
         );
         return {
-          mode: resolved.mode,
+          mode: approvalMode,
           status: 'approval-blocked',
           failureContext: resolved.reason,
           approvalState: 'pending',
         };
       }
-      // Approved: fall through to normal delivery below.
+      // The approval route delivers this exact stored result. Do not deliver it
+      // again if the same result is observed during a retry.
+      return {
+        mode: approvalMode,
+        status: 'completed',
+        approvalState: 'approved',
+      };
     } else {
       logger.info(
         { taskId: task.id, channelId, reason: resolved.reason },
@@ -407,8 +431,7 @@ async function deliverTaskResult(
         approvalState: resolved.requiresApproval ? 'approved' : 'none',
       };
     } catch (err) {
-      const failureContext =
-        err instanceof Error ? err.message : String(err);
+      const failureContext = err instanceof Error ? err.message : String(err);
       logger.error(
         { taskId: task.id, error: failureContext },
         'Scheduled task file delivery failed',
@@ -436,16 +459,17 @@ async function deliverTaskResult(
       };
     }
 
+    const approvalTargetId = webhookApprovalTargetId(task.id, url);
     const approved = hasApprovedTarget(
       'webhook-delivery',
       'scheduled-task',
-      task.id,
+      approvalTargetId,
     );
     if (!approved) {
       const existingApproval = findPendingApprovalForTarget(
         'webhook-delivery',
         'scheduled-task',
-        task.id,
+        approvalTargetId,
       );
       if (!existingApproval) {
         createApproval({
@@ -455,7 +479,7 @@ async function deliverTaskResult(
           risk: 'medium',
           requester: 'task-scheduler',
           targetType: 'scheduled-task',
-          targetId: task.id,
+          targetId: approvalTargetId,
           source: source === 'manual' ? 'manual-run' : 'scheduled-task',
           correlationId: `scheduled-task:${task.id}`,
           actionPreview: result.slice(0, 1000),
@@ -582,8 +606,8 @@ async function runTask(
   function recordTaskHistory(
     status: BriefingOutcome,
     failureContext: string | null,
-    deliveryMode: BriefingHistoryEntry['delivery']['mode'] =
-      task.delivery_mode || 'dashboard',
+    deliveryMode: BriefingHistoryEntry['delivery']['mode'] = task.delivery_mode ||
+      'dashboard',
     approvalState: BriefingHistoryEntry['approvalState'] = 'none',
     resultPreview: string | null = null,
   ): void {
@@ -771,6 +795,11 @@ async function runTask(
     if (outcome) {
       deliveredResult = true;
       deliveryOutcome = outcome;
+      if (outcome.status === 'failed') {
+        throw new Error(
+          outcome.failureContext || 'Scheduled task delivery failed',
+        );
+      }
     }
   };
 
@@ -870,7 +899,7 @@ async function runTask(
 
   const historyStatus: BriefingOutcome = error
     ? 'failed'
-    : deliveryOutcome?.status ?? 'completed';
+    : (deliveryOutcome?.status ?? 'completed');
   const historyApproval: BriefingHistoryEntry['approvalState'] =
     deliveryOutcome?.approvalState ?? 'none';
   const historyFailure = error ?? deliveryOutcome?.failureContext ?? null;

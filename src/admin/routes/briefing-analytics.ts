@@ -29,11 +29,15 @@ function isDeliveryMode(value: unknown): value is DeliveryPreferenceMode {
 
 router.get('/history', (req: Request, res: Response) => {
   const filters: BriefingHistoryFilters = {
-    ...(queryString(req.query.taskId) && { taskId: queryString(req.query.taskId) }),
+    ...(queryString(req.query.taskId) && {
+      taskId: queryString(req.query.taskId),
+    }),
     ...(queryString(req.query.groupFolder) && {
       groupFolder: queryString(req.query.groupFolder),
     }),
-    ...(queryString(req.query.channel) && { channel: queryString(req.query.channel) }),
+    ...(queryString(req.query.channel) && {
+      channel: queryString(req.query.channel),
+    }),
     ...(queryString(req.query.source) && {
       source: queryString(req.query.source) as BriefingHistoryFilters['source'],
     }),
@@ -53,11 +57,15 @@ router.get('/analytics', (_req: Request, res: Response) => {
 
 router.post('/export', (req: Request, res: Response) => {
   const filters: BriefingHistoryFilters = {
-    ...(queryString(req.body?.taskId) && { taskId: queryString(req.body.taskId) }),
+    ...(queryString(req.body?.taskId) && {
+      taskId: queryString(req.body.taskId),
+    }),
     ...(queryString(req.body?.groupFolder) && {
       groupFolder: queryString(req.body.groupFolder),
     }),
-    ...(queryString(req.body?.channel) && { channel: queryString(req.body.channel) }),
+    ...(queryString(req.body?.channel) && {
+      channel: queryString(req.body.channel),
+    }),
     ...(queryString(req.body?.source) && {
       source: queryString(req.body.source) as BriefingHistoryFilters['source'],
     }),
@@ -134,7 +142,10 @@ router.delete('/preferences', (req: Request, res: Response) => {
     res.status(400).json({ error: 'groupFolder and channelId are required' });
     return;
   }
-  const removed = removeDeliveryPreference(groupFolder.trim(), channelId.trim());
+  const removed = removeDeliveryPreference(
+    groupFolder.trim(),
+    channelId.trim(),
+  );
   res.json({ ok: true, removed });
 });
 

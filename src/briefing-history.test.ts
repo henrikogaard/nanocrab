@@ -203,6 +203,27 @@ describe('briefing history', () => {
     expect(bucket?.avgLatencyMs).toBe(1200);
   });
 
+  it('aggregates every retained entry instead of the newest 100', () => {
+    seedHistory();
+    const store = JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf8')) as {
+      entries: Array<Record<string, unknown>>;
+    };
+    const template = store.entries[0]!;
+    store.entries = Array.from({ length: 150 }, (_, index) => ({
+      ...template,
+      id: `entry-${index}`,
+      timestamp: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+    }));
+    fs.writeFileSync(HISTORY_PATH, JSON.stringify(store));
+
+    expect(
+      getBriefingAnalytics(
+        {},
+        { historyPath: HISTORY_PATH, preferencesPath: PREFERENCES_PATH },
+      ).total,
+    ).toBe(150);
+  });
+
   it('sets and resolves delivery preferences per group/channel', () => {
     setDeliveryPreference(
       {
@@ -213,19 +234,16 @@ describe('briefing history', () => {
       { historyPath: HISTORY_PATH, preferencesPath: PREFERENCES_PATH },
     );
 
-    const pref = getDeliveryPreference(
-      'main',
-      'wa:main',
-      { historyPath: HISTORY_PATH, preferencesPath: PREFERENCES_PATH },
-    );
+    const pref = getDeliveryPreference('main', 'wa:main', {
+      historyPath: HISTORY_PATH,
+      preferencesPath: PREFERENCES_PATH,
+    });
     expect(pref?.mode).toBe('disabled');
 
-    const resolved = resolveDeliveryMode(
-      'main',
-      'wa:main',
-      'chat',
-      { historyPath: HISTORY_PATH, preferencesPath: PREFERENCES_PATH },
-    );
+    const resolved = resolveDeliveryMode('main', 'wa:main', 'chat', {
+      historyPath: HISTORY_PATH,
+      preferencesPath: PREFERENCES_PATH,
+    });
     expect(resolved.allowed).toBe(false);
     expect(resolved.reason).toMatch(/disabled/i);
   });
@@ -305,15 +323,13 @@ describe('briefing history', () => {
       { historyPath: HISTORY_PATH, preferencesPath: PREFERENCES_PATH },
     );
 
-    const entry = await sendChannelFollowUp(
-      {
-        groupFolder: 'ops',
-        channelId: 'wa:ops',
-        text: 'follow up',
-        sendMessage: send,
-        options: { historyPath: HISTORY_PATH, preferencesPath: PREFERENCES_PATH },
-      },
-    );
+    const entry = await sendChannelFollowUp({
+      groupFolder: 'ops',
+      channelId: 'wa:ops',
+      text: 'follow up',
+      sendMessage: send,
+      options: { historyPath: HISTORY_PATH, preferencesPath: PREFERENCES_PATH },
+    });
 
     expect(send).not.toHaveBeenCalled();
     expect(entry.status).toBe('skipped');
@@ -331,15 +347,13 @@ describe('briefing history', () => {
       { historyPath: HISTORY_PATH, preferencesPath: PREFERENCES_PATH },
     );
 
-    const entry = await sendChannelFollowUp(
-      {
-        groupFolder: 'ops',
-        channelId: 'wa:ops',
-        text: 'follow up',
-        sendMessage: send,
-        options: { historyPath: HISTORY_PATH, preferencesPath: PREFERENCES_PATH },
-      },
-    );
+    const entry = await sendChannelFollowUp({
+      groupFolder: 'ops',
+      channelId: 'wa:ops',
+      text: 'follow up',
+      sendMessage: send,
+      options: { historyPath: HISTORY_PATH, preferencesPath: PREFERENCES_PATH },
+    });
 
     expect(send).not.toHaveBeenCalled();
     expect(entry.status).toBe('approval-blocked');

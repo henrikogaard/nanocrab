@@ -25,6 +25,7 @@ import {
   _initTestDatabase,
   createTask,
   getTaskById,
+  getTaskRunLogs,
   logTaskRun,
 } from './db.js';
 import {
@@ -605,7 +606,7 @@ describe('task scheduler', () => {
         kind: 'webhook-delivery',
         requester: 'task-scheduler',
         targetType: 'scheduled-task',
-        targetId: 'task-webhook-delivery',
+        targetId: expect.stringMatching(/^task-webhook-delivery:/),
         resourceSummary: 'https://example.com/hooks/nanocrab',
         payload: expect.objectContaining({
           taskId: 'task-webhook-delivery',
@@ -1158,9 +1159,80 @@ describe('task scheduler', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(createApproval).toHaveBeenCalled();
+    expect(createApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetType: 'scheduled-task-result',
+        targetId: expect.stringMatching(/^task-approval:/),
+        payload: expect.objectContaining({
+          mode: 'chat',
+          channelId: 'wa:main',
+          result: 'Approval required result.',
+        }),
+      }),
+    );
     const store = loadBriefingHistoryStore();
     const entry = store.entries.find((e) => e.taskId === 'task-approval');
     expect(entry?.status).toBe('approval-blocked');
     expect(entry?.approvalState).toBe('pending');
+  });
+
+  it('records a failed chat delivery as a failed task run', async () => {
+    vi.mocked(runContainerAgent).mockResolvedValueOnce({
+      status: 'success',
+      result: 'Undelivered result',
+    });
+    createTask({
+      id: 'task-chat-failure',
+      group_folder: 'main',
+      chat_jid: 'wa:main',
+      prompt: 'Send summary',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      delivery_mode: 'chat',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'wa:main': {
+          name: 'Main',
+          folder: 'main',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask: vi.fn(
+          (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+            void fn();
+          },
+        ),
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: vi.fn(async () => {
+        throw new Error('channel offline');
+      }),
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(getTaskRunLogs('task-chat-failure', 1)[0]).toMatchObject({
+      status: 'error',
+      error: 'channel offline',
+    });
+    expect(loadBriefingHistoryStore().entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskId: 'task-chat-failure',
+          status: 'failed',
+        }),
+      ]),
+    );
   });
 });

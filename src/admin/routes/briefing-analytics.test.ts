@@ -5,7 +5,10 @@ import os from 'os';
 import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const TEST_DIR = path.join(os.tmpdir(), `nanocrab-admin-analytics-${Date.now()}`);
+const TEST_DIR = path.join(
+  os.tmpdir(),
+  `nanocrab-admin-analytics-${Date.now()}`,
+);
 const HISTORY_PATH = path.join(TEST_DIR, 'briefing-history.json');
 
 vi.mock('../../config.js', () => ({
@@ -37,7 +40,8 @@ vi.mock('../middleware.js', () => ({
     },
 }));
 
-const { default: briefingAnalyticsRouter } = await import('./briefing-analytics.js');
+const { default: briefingAnalyticsRouter } =
+  await import('./briefing-analytics.js');
 
 function app(): express.Express {
   const server = express();
@@ -143,7 +147,9 @@ describe('briefing analytics admin routes', () => {
   it('returns analytics aggregation', async () => {
     seedHistory();
     await withServer(async (baseUrl) => {
-      const res = await fetch(new URL('/briefing-analytics/analytics', baseUrl));
+      const res = await fetch(
+        new URL('/briefing-analytics/analytics', baseUrl),
+      );
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         total: number;
@@ -206,10 +212,9 @@ describe('briefing analytics admin routes', () => {
   it('exports history as attachment', async () => {
     seedHistory();
     await withServer(async (baseUrl) => {
-      const res = await fetch(
-        new URL('/briefing-analytics/export', baseUrl),
-        { method: 'POST' },
-      );
+      const res = await fetch(new URL('/briefing-analytics/export', baseUrl), {
+        method: 'POST',
+      });
       expect(res.status).toBe(200);
       expect(res.headers.get('content-disposition')).toMatch(/attachment/);
       const body = (await res.json()) as { entries: unknown[] };

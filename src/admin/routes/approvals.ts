@@ -11,6 +11,8 @@ import {
 import { approveCodingJobRuntimeFallback } from '../../coding-jobs.js';
 import type { AgentRuntimeSelection } from '../../types.js';
 import { executeWebhookDeliveryApproval } from '../../webhook-delivery.js';
+import { executeBriefingDeliveryApproval } from '../../briefing-delivery.js';
+import { getState } from '../state.js';
 import { requireRole } from '../middleware.js';
 import { auditLog } from '../security.js';
 
@@ -134,6 +136,16 @@ router.post(
         auditLog(
           req,
           'approval_webhook_delivered',
+          `${approval.kind}/${approval.id}`,
+        );
+      }
+      if (approval.kind === 'briefing-delivery') {
+        await executeBriefingDeliveryApproval(approval, {
+          sendMessage: getState().sendMessage,
+        });
+        auditLog(
+          req,
+          'approval_briefing_delivered',
           `${approval.kind}/${approval.id}`,
         );
       }

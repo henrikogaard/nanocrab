@@ -188,7 +188,11 @@ export function loadDeliveryPreferencesStore(
         for (const [channel, pref] of Object.entries(
           channels as Record<string, unknown>,
         )) {
-          if (pref && typeof pref === 'object' && (pref as DeliveryPreference).mode) {
+          if (
+            pref &&
+            typeof pref === 'object' &&
+            (pref as DeliveryPreference).mode
+          ) {
             preferences[group][channel] = pref as DeliveryPreference;
           }
         }
@@ -233,7 +237,9 @@ export function setDeliveryPreference(
     mode !== 'disabled' &&
     mode !== 'approval-required'
   ) {
-    throw new Error('mode must be dashboard, chat, disabled, or approval-required');
+    throw new Error(
+      'mode must be dashboard, chat, disabled, or approval-required',
+    );
   }
   const timestamp = currentTime(options);
   const preference: DeliveryPreference = {
@@ -277,11 +283,14 @@ export function listDeliveryPreferences(
 }
 
 function normalizeGroupFolder(group: string): string {
-  return path.normalize(group).replace(/^(\.\.\/?)+/, '').replace(/^\//, '');
+  return path
+    .normalize(group)
+    .replace(/^(\.\.\/?)+/, '')
+    .replace(/^\//, '');
 }
 
 export interface ResolvedDelivery {
-  mode: DeliveryPreferenceMode | 'webhook' | 'file' | 'dashboard';
+  mode: BriefingDeliveryRecord['mode'];
   allowed: boolean;
   requiresApproval: boolean;
   reason: string | null;
@@ -296,7 +305,11 @@ export function resolveDeliveryMode(
 ): ResolvedDelivery {
   const normalizedGroup = normalizeGroupFolder(groupFolder);
   const normalizedChannel = channelId.trim();
-  const preference = getDeliveryPreference(normalizedGroup, normalizedChannel, options);
+  const preference = getDeliveryPreference(
+    normalizedGroup,
+    normalizedChannel,
+    options,
+  );
 
   if (preference?.mode === 'disabled') {
     return {
@@ -310,7 +323,7 @@ export function resolveDeliveryMode(
 
   if (preference?.mode === 'approval-required') {
     return {
-      mode: taskDeliveryMode === 'dashboard' ? 'dashboard' : 'chat',
+      mode: taskDeliveryMode || 'chat',
       allowed: false,
       requiresApproval: true,
       reason: 'Approval required by group delivery preference',
@@ -383,7 +396,7 @@ export function recordBriefingRun(
       attemptedAt: timestamp,
       deliveredAt: input.status === 'completed' ? timestamp : null,
       failureContext: input.failureContext
-        ? redactAuditValue(input.failureContext) as string
+        ? (redactAuditValue(input.failureContext) as string)
         : null,
     },
     approvalState: input.approvalState ?? 'none',
@@ -407,7 +420,9 @@ export function listBriefingHistory(
   options?: BriefingHistoryOptions,
 ): BriefingHistoryEntry[] {
   const store = loadBriefingHistoryStore(historyPath(options));
-  let entries = store.entries.slice().sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  let entries = store.entries
+    .slice()
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
   if (filters.taskId) {
     entries = entries.filter((e) => e.taskId === filters.taskId);
@@ -435,6 +450,25 @@ export function listBriefingHistory(
   return entries.slice(0, limit);
 }
 
+function matchingBriefingHistory(
+  filters: BriefingHistoryFilters,
+  options?: BriefingHistoryOptions,
+): BriefingHistoryEntry[] {
+  const store = loadBriefingHistoryStore(historyPath(options));
+  return store.entries
+    .filter((entry) => !filters.taskId || entry.taskId === filters.taskId)
+    .filter(
+      (entry) =>
+        !filters.groupFolder || entry.groupFolder === filters.groupFolder,
+    )
+    .filter((entry) => !filters.channel || entry.channel === filters.channel)
+    .filter((entry) => !filters.source || entry.source === filters.source)
+    .filter((entry) => !filters.status || entry.status === filters.status)
+    .filter((entry) => !filters.from || entry.timestamp >= filters.from)
+    .filter((entry) => !filters.to || entry.timestamp <= filters.to)
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
 export function aggregateBriefingAnalytics(
   entries: BriefingHistoryEntry[],
 ): BriefingAnalyticsResult {
@@ -448,12 +482,13 @@ export function aggregateBriefingAnalytics(
     failed: 0,
     'approval-blocked': 0,
   };
-  const byApprovalState: Record<BriefingHistoryEntry['approvalState'], number> = {
-    none: 0,
-    pending: 0,
-    approved: 0,
-    blocked: 0,
-  };
+  const byApprovalState: Record<BriefingHistoryEntry['approvalState'], number> =
+    {
+      none: 0,
+      pending: 0,
+      approved: 0,
+      blocked: 0,
+    };
 
   const buckets = new Map<string, BriefingAnalyticsBucket>();
 
@@ -462,7 +497,8 @@ export function aggregateBriefingAnalytics(
     byMission[entry.mission] = (byMission[entry.mission] || 0) + 1;
     byChannel[entry.channel] = (byChannel[entry.channel] || 0) + 1;
     byOutcome[entry.status] = (byOutcome[entry.status] || 0) + 1;
-    byApprovalState[entry.approvalState] = (byApprovalState[entry.approvalState] || 0) + 1;
+    byApprovalState[entry.approvalState] =
+      (byApprovalState[entry.approvalState] || 0) + 1;
 
     const key = [
       entry.routine,
@@ -479,8 +515,10 @@ export function aggregateBriefingAnalytics(
         existing.count;
       existing.maxLatencyMs = Math.max(existing.maxLatencyMs, entry.latencyMs);
       existing.minLatencyMs = Math.min(existing.minLatencyMs, entry.latencyMs);
-      existing.sources[entry.source] = (existing.sources[entry.source] || 0) + 1;
-      if (entry.timestamp < existing.firstAt) existing.firstAt = entry.timestamp;
+      existing.sources[entry.source] =
+        (existing.sources[entry.source] || 0) + 1;
+      if (entry.timestamp < existing.firstAt)
+        existing.firstAt = entry.timestamp;
       if (entry.timestamp > existing.lastAt) existing.lastAt = entry.timestamp;
     } else {
       buckets.set(key, {
@@ -517,7 +555,7 @@ export function getBriefingAnalytics(
   filters: BriefingHistoryFilters = {},
   options?: BriefingHistoryOptions,
 ): BriefingAnalyticsResult {
-  const entries = listBriefingHistory(filters, options);
+  const entries = matchingBriefingHistory(filters, options);
   return aggregateBriefingAnalytics(entries);
 }
 
@@ -530,7 +568,9 @@ export function pruneBriefingHistory(
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - retentionDays);
   const cutoffIso = cutoff.toISOString();
-  target.entries = target.entries.filter((entry) => entry.timestamp >= cutoffIso);
+  target.entries = target.entries.filter(
+    (entry) => entry.timestamp >= cutoffIso,
+  );
   saveBriefingHistoryStore(target, historyPath(options));
   return target;
 }
@@ -551,7 +591,10 @@ export function recordMobileFollowUp(
   input: Omit<RecordBriefingRunInput, 'source'> & { source?: BriefingSource },
   options?: BriefingHistoryOptions,
 ): BriefingHistoryEntry {
-  return recordBriefingRun({ ...input, source: input.source ?? 'mobile' }, options);
+  return recordBriefingRun(
+    { ...input, source: input.source ?? 'mobile' },
+    options,
+  );
 }
 
 export function exportBriefingHistory(
