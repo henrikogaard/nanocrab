@@ -1,8 +1,9 @@
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
-import { STORE_DIR } from './config.js';
+import { GROUPS_DIR, STORE_DIR } from './config.js';
 import { logAuditEvent } from './audit-log.js';
 import { listJournalEntryRecords, findJournalEvents } from './journal-store.js';
 import { listMemoryRecords } from './memory-store.js';
@@ -41,6 +42,7 @@ export type SourceScope =
 export interface SourceCollectionItem {
   scope: SourceScope;
   connectorId?: string;
+  sourceLabel?: string;
   status: SourceCollectionStatus;
   requestedAt: string;
   completedAt: string | null;
@@ -61,6 +63,15 @@ export interface SourceLedgerEntry {
   provenance: string[];
 }
 
+export interface SourceDescriptor {
+  scope: SourceScope;
+  connectorId?: string;
+  mountedPath?: string;
+  sourceLabel?: string;
+  sourceUrl?: string;
+  query?: string;
+}
+
 export interface SourceCollectionRecord {
   id: string;
   reportJobId: string;
@@ -71,6 +82,8 @@ export interface SourceCollectionRecord {
   startedAt: string;
   completedAt: string | null;
   failureReason: string | null;
+  query?: string;
+  actorContext?: SourceCollectionActorContext;
 }
 
 const SOURCE_COLLECTIONS_PATH = path.join(STORE_DIR, 'source-collections.json');
@@ -207,53 +220,132 @@ function getAvailableConnectors(): string[] {
     .map((item) => item.id);
 }
 
+interface StartSourceCollectionOptions {
+  availableConnectors?: string[];
+  sourceDescriptors?: SourceDescriptor[];
+  query?: string;
+  actorContext?: SourceCollectionActorContext;
+}
+
 export function startSourceCollection(
   reportJobId: string,
   requestedScopes: SourceScope[],
-  options: { availableConnectors?: string[] } = {},
+  options: StartSourceCollectionOptions = {},
 ): SourceCollectionRecord {
   const availableConnectors =
     options.availableConnectors ?? getAvailableConnectors();
 
   const items: SourceCollectionItem[] = [];
-  for (const scope of requestedScopes) {
-    if (scope === 'connector') {
-      if (availableConnectors.length === 0) {
+
+  if (options.sourceDescriptors && options.sourceDescriptors.length > 0) {
+    const seen = new Set<string>();
+    for (const descriptor of options.sourceDescriptors) {
+      const key =
+        descriptor.scope === 'connector'
+          ? `connector:${descriptor.connectorId || '*'}:${descriptor.sourceLabel || ''}`
+          : descriptor.scope === 'file'
+            ? `file:${descriptor.mountedPath || descriptor.sourceLabel || ''}`
+            : `${descriptor.scope}:${descriptor.sourceLabel || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      if (descriptor.scope === 'connector' && !descriptor.connectorId) {
+        if (availableConnectors.length === 0) {
+          items.push({
+            scope: 'connector',
+            connectorId: undefined,
+            sourceLabel: descriptor.sourceLabel,
+            status: 'failed',
+            requestedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            itemCount: 0,
+            failureReason: 'No connectors available for source collection',
+            provenance: [],
+          });
+        } else {
+          for (const connectorId of availableConnectors) {
+            const connectorKey = `connector:${connectorId}:${descriptor.sourceLabel || ''}`;
+            if (seen.has(connectorKey)) continue;
+            seen.add(connectorKey);
+            items.push({
+              scope: 'connector',
+              connectorId,
+              sourceLabel: descriptor.sourceLabel || connectorId,
+              status: 'pending',
+              requestedAt: new Date().toISOString(),
+              completedAt: null,
+              itemCount: 0,
+              failureReason: null,
+              provenance: [],
+            });
+          }
+        }
+      } else {
+        items.push({
+          scope: descriptor.scope,
+          connectorId:
+            descriptor.scope === 'connector'
+              ? descriptor.connectorId
+              : undefined,
+          sourceLabel:
+            descriptor.sourceLabel ||
+            (descriptor.scope === 'file'
+              ? descriptor.mountedPath
+              : descriptor.scope === 'connector'
+                ? descriptor.connectorId
+                : undefined),
+          status: 'pending',
+          requestedAt: new Date().toISOString(),
+          completedAt: null,
+          itemCount: 0,
+          failureReason: null,
+          provenance: [],
+        });
+      }
+    }
+  } else {
+    for (const scope of requestedScopes) {
+      if (scope === 'connector') {
+        if (availableConnectors.length === 0) {
+          items.push({
+            scope,
+            connectorId: undefined,
+            sourceLabel: undefined,
+            status: 'failed',
+            requestedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            itemCount: 0,
+            failureReason: 'No connectors available for source collection',
+            provenance: [],
+          });
+        } else {
+          for (const connectorId of availableConnectors) {
+            items.push({
+              scope,
+              connectorId,
+              sourceLabel: connectorId,
+              status: 'pending',
+              requestedAt: new Date().toISOString(),
+              completedAt: null,
+              itemCount: 0,
+              failureReason: null,
+              provenance: [],
+            });
+          }
+        }
+      } else {
         items.push({
           scope,
           connectorId: undefined,
-          status: 'failed',
+          sourceLabel: undefined,
+          status: 'pending',
           requestedAt: new Date().toISOString(),
-          completedAt: new Date().toISOString(),
+          completedAt: null,
           itemCount: 0,
-          failureReason: 'No connectors available for source collection',
+          failureReason: null,
           provenance: [],
         });
-      } else {
-        for (const connectorId of availableConnectors) {
-          items.push({
-            scope,
-            connectorId,
-            status: 'pending',
-            requestedAt: new Date().toISOString(),
-            completedAt: null,
-            itemCount: 0,
-            failureReason: null,
-            provenance: [],
-          });
-        }
       }
-    } else {
-      items.push({
-        scope,
-        connectorId: undefined,
-        status: 'pending',
-        requestedAt: new Date().toISOString(),
-        completedAt: null,
-        itemCount: 0,
-        failureReason: null,
-        provenance: [],
-      });
     }
   }
 
@@ -272,6 +364,8 @@ export function startSourceCollection(
     startedAt: new Date().toISOString(),
     completedAt: status === 'collecting' ? null : new Date().toISOString(),
     failureReason: null,
+    query: options.query,
+    actorContext: options.actorContext,
   };
 
   const collections = readCollections();
@@ -287,6 +381,7 @@ export function startSourceCollection(
     context: {
       collectionId: record.id,
       scopes: requestedScopes,
+      sourceDescriptorCount: options.sourceDescriptors?.length,
     },
   });
 
@@ -297,11 +392,13 @@ function findScopeItem(
   record: SourceCollectionRecord,
   scope: SourceScope,
   connectorId?: string,
+  sourceLabel?: string,
 ): SourceCollectionItem | undefined {
   return record.items.find(
     (i) =>
       i.scope === scope &&
-      (connectorId === undefined || i.connectorId === connectorId),
+      (connectorId === undefined || i.connectorId === connectorId) &&
+      (sourceLabel === undefined || i.sourceLabel === sourceLabel),
   );
 }
 
@@ -311,12 +408,13 @@ export function markScopeCollected(
   itemCount: number,
   provenance: string[] = [],
   connectorId?: string,
+  sourceLabel?: string,
 ): SourceCollectionRecord {
   const collections = readCollections();
   const record = collections.find((c) => c.id === collectionId);
   if (!record) throw new Error(`Source collection not found: ${collectionId}`);
 
-  const item = findScopeItem(record, scope, connectorId);
+  const item = findScopeItem(record, scope, connectorId, sourceLabel);
   if (!item)
     throw new Error(`Scope ${scope} not in collection ${collectionId}`);
 
@@ -340,12 +438,13 @@ export function markScopeFailed(
   reason: string,
   connectorId?: string,
   provenance: string[] = [],
+  sourceLabel?: string,
 ): SourceCollectionRecord {
   const collections = readCollections();
   const record = collections.find((c) => c.id === collectionId);
   if (!record) throw new Error(`Source collection not found: ${collectionId}`);
 
-  const item = findScopeItem(record, scope, connectorId);
+  const item = findScopeItem(record, scope, connectorId, sourceLabel);
   if (!item)
     throw new Error(`Scope ${scope} not in collection ${collectionId}`);
 
@@ -397,6 +496,18 @@ export function addLedgerEntry(
   const collections = readCollections();
   const record = collections.find((c) => c.id === collectionId);
   if (!record) throw new Error(`Source collection not found: ${collectionId}`);
+
+  const existing = record.ledger.find(
+    (entry) =>
+      entry.scope === scope &&
+      entry.connectorId === connectorId &&
+      entry.sourceLabel === sourceLabel &&
+      entry.sourceUrl === sourceUrl &&
+      entry.citationText === citationText,
+  );
+  if (existing) {
+    return existing;
+  }
 
   const entry: SourceLedgerEntry = {
     id: `ledger-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
@@ -502,6 +613,7 @@ async function fetchGitHubConnectorSources(
 async function fetchConnectorSource(
   collectionId: string,
   connectorId: string,
+  sourceLabel: string | undefined,
   query: string,
   sections: string[],
   citations: Array<{ label: string; source: string }>,
@@ -521,6 +633,7 @@ async function fetchConnectorSource(
       itemCount,
       provenance,
       connectorId,
+      sourceLabel,
     );
     return;
   }
@@ -583,6 +696,433 @@ function authorizeSourceConnector(
   return decision;
 }
 
+function validateMountedSource(mountedPath: string): {
+  allowed: boolean;
+  realPath: string;
+  reason: string;
+} {
+  try {
+    const expanded = mountedPath.startsWith('~/')
+      ? path.join(os.homedir(), mountedPath.slice(2))
+      : path.resolve(mountedPath);
+    if (!fs.existsSync(expanded)) {
+      return {
+        allowed: false,
+        realPath: expanded,
+        reason: 'Path does not exist',
+      };
+    }
+    const real = fs.realpathSync(expanded);
+    const stat = fs.statSync(real);
+    if (!stat.isFile()) {
+      return {
+        allowed: false,
+        realPath: real,
+        reason: 'Path is not a regular file',
+      };
+    }
+
+    const roots = [STORE_DIR, GROUPS_DIR, path.resolve(process.cwd())]
+      .filter((candidate) => fs.existsSync(candidate))
+      .map((candidate) => fs.realpathSync(candidate));
+    const underRoot = roots.some(
+      (root) => real === root || real.startsWith(`${root}${path.sep}`),
+    );
+    if (!underRoot) {
+      return {
+        allowed: false,
+        realPath: real,
+        reason: 'Path is outside allowed local roots',
+      };
+    }
+
+    const blockedPatterns = [
+      '.env',
+      '.ssh',
+      '.gnupg',
+      '.aws',
+      '.kube',
+      'credentials',
+      'secret',
+      'token',
+      'private_key',
+      '.npmrc',
+      '.netrc',
+    ];
+    const lower = real.toLowerCase();
+    const blockedMatch = blockedPatterns.find((pattern) =>
+      lower.includes(pattern),
+    );
+    if (blockedMatch) {
+      return {
+        allowed: false,
+        realPath: real,
+        reason: `Path matches blocked pattern: ${blockedMatch}`,
+      };
+    }
+
+    return { allowed: true, realPath: real, reason: '' };
+  } catch (err) {
+    return {
+      allowed: false,
+      realPath: mountedPath,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+async function collectMountedFileSource(
+  collectionId: string,
+  descriptor: SourceDescriptor,
+): Promise<{ section: string; citation: { label: string; source: string } }> {
+  const mountedPath = descriptor.mountedPath;
+  if (!mountedPath) {
+    throw new Error('mountedPath is required for file scope');
+  }
+  const validation = validateMountedSource(mountedPath);
+  if (!validation.allowed) {
+    throw new Error(validation.reason);
+  }
+
+  const content = fs.readFileSync(validation.realPath, 'utf-8');
+  const fileName = path.basename(validation.realPath);
+  const label = descriptor.sourceLabel || fileName;
+  const sourceUrl = descriptor.sourceUrl || `file://${validation.realPath}`;
+  const citationText = `Mounted file source: ${label}\n\n${content.slice(0, 500)}`;
+
+  addLedgerEntry(
+    collectionId,
+    'file',
+    label,
+    citationText,
+    sourceUrl,
+    undefined,
+  );
+
+  return {
+    section: `## ${label}\n\nSource: ${sourceUrl}\n\n\`\`\`\n${content.slice(0, 2000)}\n\`\`\``,
+    citation: { label, source: sourceUrl },
+  };
+}
+
+async function collectSourceDescriptor(
+  record: SourceCollectionRecord,
+  descriptor: SourceDescriptor,
+  actorContext: SourceCollectionActorContext,
+  helpers: {
+    sections: string[];
+    citations: Array<{ label: string; source: string }>;
+    availableConnectors: string[];
+    authorize: typeof authorizeConnectorAction;
+    githubFetch: typeof githubApi;
+    listMemories: typeof listMemoryRecords;
+  },
+): Promise<void> {
+  const {
+    sections,
+    citations,
+    availableConnectors,
+    authorize,
+    githubFetch,
+    listMemories,
+  } = helpers;
+  const itemLabel =
+    descriptor.sourceLabel || descriptor.mountedPath || descriptor.connectorId;
+
+  switch (descriptor.scope) {
+    case 'file': {
+      const { section, citation } = await collectMountedFileSource(
+        record.id,
+        descriptor,
+      );
+      sections.push(section);
+      citations.push(citation);
+      markScopeCollected(
+        record.id,
+        'file',
+        1,
+        [`mounted:${citation.source}`],
+        undefined,
+        itemLabel,
+      );
+      break;
+    }
+    case 'connector': {
+      if (!descriptor.connectorId) {
+        markScopeFailed(
+          record.id,
+          'connector',
+          'No connectors available for source collection',
+          undefined,
+          [],
+          itemLabel,
+        );
+        return;
+      }
+      if (!availableConnectors.includes(descriptor.connectorId)) {
+        markScopeFailed(
+          record.id,
+          'connector',
+          `Connector not available: ${descriptor.connectorId}`,
+          descriptor.connectorId,
+          [],
+          descriptor.sourceLabel,
+        );
+        return;
+      }
+      const authorization = authorizeSourceConnector(
+        record.reportJobId,
+        descriptor.connectorId,
+        actorContext,
+        authorize,
+      );
+      if (!authorization.allowed) {
+        markScopeFailed(
+          record.id,
+          'connector',
+          `Connector access ${authorization.decision}: ${authorization.reason}`,
+          descriptor.connectorId,
+          [`authorization:${authorization.decision}`],
+          descriptor.sourceLabel,
+        );
+        return;
+      }
+      try {
+        await fetchConnectorSource(
+          record.id,
+          descriptor.connectorId,
+          descriptor.sourceLabel,
+          descriptor.query || '',
+          sections,
+          citations,
+          githubFetch,
+        );
+      } catch (err) {
+        markScopeFailed(
+          record.id,
+          'connector',
+          err instanceof Error ? err.message : String(err),
+          descriptor.connectorId,
+          [],
+          descriptor.sourceLabel,
+        );
+      }
+      break;
+    }
+    case 'journal': {
+      const entries = listJournalEntryRecords({ limit: 10 });
+      const events = descriptor.query
+        ? findJournalEvents({ query: descriptor.query, limit: 10 })
+        : [];
+      sections.push(
+        `## Journal\n\n${
+          entries
+            .map((entry) => `### ${entry.date}\n${entry.summary}`)
+            .join('\n\n') || 'No journal entries found.'
+        }`,
+      );
+      for (const event of events) {
+        addLedgerEntry(
+          record.id,
+          'journal',
+          event.title,
+          `Journal event: ${event.title}`,
+          `journal:${event.id}`,
+        );
+        citations.push({
+          label: event.title,
+          source: `journal:${event.id}`,
+        });
+      }
+      markScopeCollected(
+        record.id,
+        'journal',
+        entries.length + events.length,
+        [],
+        undefined,
+        itemLabel,
+      );
+      break;
+    }
+    case 'memory': {
+      const memories = listMemories({ status: 'approved', limit: 25 });
+      sections.push(
+        `## Approved Memory\n\n${
+          memories.map((memory) => `- ${memory.content}`).join('\n') ||
+          'No approved memories found.'
+        }`,
+      );
+      for (const memory of memories.slice(0, 10)) {
+        addLedgerEntry(
+          record.id,
+          'memory',
+          memory.content.slice(0, 80),
+          memory.content,
+          `memory:${memory.id}`,
+        );
+        citations.push({
+          label: memory.content.slice(0, 80),
+          source: `memory:${memory.id}`,
+        });
+      }
+      markScopeCollected(
+        record.id,
+        'memory',
+        memories.length,
+        [],
+        undefined,
+        itemLabel,
+      );
+      break;
+    }
+    case 'research': {
+      const researchJobs = listResearchJobs();
+      const researchSection = researchJobs
+        .map(
+          (job) =>
+            `- ${job.query}${job.notesPath ? ` (notes: ${job.notesPath})` : ''}`,
+        )
+        .join('\n');
+      sections.push(
+        `## Research\n\n${researchSection || 'No research jobs found.'}`,
+      );
+      for (const job of researchJobs.slice(0, 10)) {
+        addLedgerEntry(
+          record.id,
+          'research',
+          `Research: ${job.query}`,
+          `Research query: ${job.query}`,
+          `research:${job.id}`,
+        );
+        citations.push({
+          label: `Research: ${job.query.slice(0, 80)}`,
+          source: `research:${job.id}`,
+        });
+      }
+      markScopeCollected(
+        record.id,
+        'research',
+        researchJobs.length,
+        [],
+        undefined,
+        itemLabel,
+      );
+      break;
+    }
+    case 'artifact': {
+      const artifacts = listArtifactVault();
+      const artifactSection = artifacts
+        .map((artifact) => `- ${artifact.title} (${artifact.sourceType})`)
+        .join('\n');
+      sections.push(
+        `## Artifacts\n\n${artifactSection || 'No artifacts found.'}`,
+      );
+      for (const artifact of artifacts.slice(0, 10)) {
+        addLedgerEntry(
+          record.id,
+          'artifact',
+          artifact.title,
+          `${artifact.sourceType} artifact: ${artifact.title}`,
+          `artifact:${artifact.id}`,
+        );
+        citations.push({
+          label: artifact.title,
+          source: `artifact:${artifact.id}`,
+        });
+      }
+      markScopeCollected(
+        record.id,
+        'artifact',
+        artifacts.length,
+        [],
+        undefined,
+        itemLabel,
+      );
+      break;
+    }
+    default:
+      markScopeFailed(
+        record.id,
+        descriptor.scope,
+        'Source scope not yet implemented',
+        descriptor.connectorId,
+        [],
+        itemLabel,
+      );
+  }
+}
+
+export async function collectReportSources(
+  reportJobId: string,
+  actorContext: SourceCollectionActorContext,
+  sourceDescriptors: SourceDescriptor[],
+  dependencies: SourceCollectionDependencies = {},
+): Promise<CollectedSources> {
+  const availableConnectors =
+    dependencies.availableConnectors ?? getAvailableConnectors();
+  const authorize =
+    dependencies.authorizeConnectorAction ?? authorizeConnectorAction;
+  const githubFetch = dependencies.githubApi ?? githubApi;
+  const listMemories = dependencies.listMemoryRecords ?? listMemoryRecords;
+
+  const expanded: SourceDescriptor[] = [];
+  for (const descriptor of sourceDescriptors) {
+    if (descriptor.scope === 'connector' && !descriptor.connectorId) {
+      if (availableConnectors.length === 0) {
+        expanded.push(descriptor);
+      } else {
+        for (const connectorId of availableConnectors) {
+          expanded.push({ ...descriptor, connectorId });
+        }
+      }
+    } else {
+      expanded.push(descriptor);
+    }
+  }
+
+  const requestedScopes = [
+    ...new Set(expanded.map((descriptor) => descriptor.scope)),
+  ];
+  const record = startSourceCollection(reportJobId, requestedScopes, {
+    availableConnectors,
+    sourceDescriptors: expanded,
+    query: expanded[0]?.query,
+    actorContext,
+  });
+
+  const sections: string[] = [];
+  const citations: Array<{ label: string; source: string }> = [];
+  const helpers = {
+    sections,
+    citations,
+    availableConnectors,
+    authorize,
+    githubFetch,
+    listMemories,
+  };
+
+  for (const descriptor of expanded) {
+    try {
+      await collectSourceDescriptor(record, descriptor, actorContext, helpers);
+    } catch (err) {
+      const itemLabel =
+        descriptor.sourceLabel ||
+        descriptor.mountedPath ||
+        descriptor.connectorId;
+      markScopeFailed(
+        record.id,
+        descriptor.scope,
+        err instanceof Error ? err.message : String(err),
+        descriptor.connectorId,
+        [],
+        itemLabel,
+      );
+    }
+  }
+
+  return { sections, citations, sourceCollectionId: record.id };
+}
+
 export async function collectSources(
   reportJobId: string,
   sourceScopes: string[],
@@ -590,187 +1130,166 @@ export async function collectSources(
   actorContext: SourceCollectionActorContext,
   dependencies: SourceCollectionDependencies = {},
 ): Promise<CollectedSources> {
-  const requestedScopes = sourceScopes.filter(isSourceScope);
+  const availableConnectors =
+    dependencies.availableConnectors ?? getAvailableConnectors();
+  const descriptors: SourceDescriptor[] = [];
+  for (const sourceScope of sourceScopes) {
+    const connectorMatch = /^(?:mcp|connector):(.+)$/.exec(sourceScope);
+    if (connectorMatch) {
+      descriptors.push({
+        scope: 'connector',
+        connectorId: connectorMatch[1],
+        query,
+      });
+      continue;
+    }
+    const fileMatch = /^(?:file|mounted):(.+)$/.exec(sourceScope);
+    if (fileMatch) {
+      descriptors.push({ scope: 'file', mountedPath: fileMatch[1], query });
+      continue;
+    }
+    if (!isSourceScope(sourceScope)) continue;
+    const scope = sourceScope;
+    if (scope === 'connector') {
+      if (availableConnectors.length === 0) {
+        descriptors.push({ scope: 'connector', query });
+      } else {
+        for (const connectorId of availableConnectors) {
+          descriptors.push({ scope: 'connector', connectorId, query });
+        }
+      }
+    } else {
+      descriptors.push({ scope, query });
+    }
+  }
+  return collectReportSources(
+    reportJobId,
+    actorContext,
+    descriptors,
+    dependencies,
+  );
+}
+
+export async function retrySourceCollection(
+  collectionId: string,
+  actorContext: SourceCollectionActorContext,
+  dependencies: SourceCollectionDependencies = {},
+): Promise<SourceCollectionRecord> {
+  const record = getSourceCollection(collectionId);
+  if (!record) throw new Error(`Source collection not found: ${collectionId}`);
+
   const availableConnectors =
     dependencies.availableConnectors ?? getAvailableConnectors();
   const authorize =
     dependencies.authorizeConnectorAction ?? authorizeConnectorAction;
   const githubFetch = dependencies.githubApi ?? githubApi;
-  const listMemories = dependencies.listMemoryRecords ?? listMemoryRecords;
-  const record = startSourceCollection(reportJobId, requestedScopes, {
-    availableConnectors,
-  });
-  const sections: string[] = [];
-  const citations: Array<{ label: string; source: string }> = [];
 
-  for (const scope of requestedScopes) {
-    try {
-      switch (scope) {
-        case 'journal': {
-          const entries = listJournalEntryRecords({ limit: 10 });
-          const events = query ? findJournalEvents({ query, limit: 10 }) : [];
-          sections.push(
-            `## Journal\n\n${
-              entries
-                .map((entry) => `### ${entry.date}\n${entry.summary}`)
-                .join('\n\n') || 'No journal entries found.'
-            }`,
-          );
-          for (const event of events) {
-            addLedgerEntry(
-              record.id,
-              'journal',
-              event.title,
-              `Journal event: ${event.title}`,
-              `journal:${event.id}`,
-            );
-            citations.push({
-              label: event.title,
-              source: `journal:${event.id}`,
-            });
-          }
-          markScopeCollected(
-            record.id,
-            'journal',
-            entries.length + events.length,
-          );
-          break;
+  let resetAny = false;
+  const expandedItems: SourceCollectionItem[] = [];
+  for (const item of record.items) {
+    if (item.scope === 'connector' && item.status === 'failed') {
+      if (!item.connectorId) {
+        if (availableConnectors.length === 0) continue;
+        for (const connectorId of availableConnectors) {
+          expandedItems.push({
+            ...item,
+            connectorId,
+            sourceLabel: item.sourceLabel || connectorId,
+            status: 'pending',
+            completedAt: null,
+            failureReason: null,
+            provenance: [],
+          });
         }
-        case 'memory': {
-          const memories = listMemories({ status: 'approved', limit: 25 });
-          sections.push(
-            `## Approved Memory\n\n${
-              memories.map((memory) => `- ${memory.content}`).join('\n') ||
-              'No approved memories found.'
-            }`,
-          );
-          for (const memory of memories.slice(0, 10)) {
-            addLedgerEntry(
-              record.id,
-              'memory',
-              memory.content.slice(0, 80),
-              memory.content,
-              `memory:${memory.id}`,
-            );
-            citations.push({
-              label: memory.content.slice(0, 80),
-              source: `memory:${memory.id}`,
-            });
-          }
-          markScopeCollected(record.id, 'memory', memories.length);
-          break;
-        }
-        case 'research': {
-          const researchJobs = listResearchJobs();
-          const researchSection = researchJobs
-            .map(
-              (job) =>
-                `- ${job.query}${job.notesPath ? ` (notes: ${job.notesPath})` : ''}`,
-            )
-            .join('\n');
-          sections.push(
-            `## Research\n\n${researchSection || 'No research jobs found.'}`,
-          );
-          for (const job of researchJobs.slice(0, 10)) {
-            addLedgerEntry(
-              record.id,
-              'research',
-              `Research: ${job.query}`,
-              `Research query: ${job.query}`,
-              `research:${job.id}`,
-            );
-            citations.push({
-              label: `Research: ${job.query.slice(0, 80)}`,
-              source: `research:${job.id}`,
-            });
-          }
-          markScopeCollected(record.id, 'research', researchJobs.length);
-          break;
-        }
-        case 'artifact': {
-          const artifacts = listArtifactVault();
-          const artifactSection = artifacts
-            .map((artifact) => `- ${artifact.title} (${artifact.sourceType})`)
-            .join('\n');
-          sections.push(
-            `## Artifacts\n\n${artifactSection || 'No artifacts found.'}`,
-          );
-          for (const artifact of artifacts.slice(0, 10)) {
-            addLedgerEntry(
-              record.id,
-              'artifact',
-              artifact.title,
-              `${artifact.sourceType} artifact: ${artifact.title}`,
-              `artifact:${artifact.id}`,
-            );
-            citations.push({
-              label: artifact.title,
-              source: `artifact:${artifact.id}`,
-            });
-          }
-          markScopeCollected(record.id, 'artifact', artifacts.length);
-          break;
-        }
-        case 'connector': {
-          const connectorItems = record.items.filter(
-            (i) => i.scope === 'connector',
-          );
-          if (connectorItems.length === 0) {
-            sections.push('## Connectors\n\nNo connectors available.');
-            break;
-          }
-          for (const item of connectorItems) {
-            if (item.status !== 'pending') continue;
-            const connectorId = item.connectorId as string;
-            const authorization = authorizeSourceConnector(
-              reportJobId,
-              connectorId,
-              actorContext,
-              authorize,
-            );
-            if (!authorization.allowed) {
-              markScopeFailed(
-                record.id,
-                'connector',
-                `Connector access ${authorization.decision}: ${authorization.reason}`,
-                connectorId,
-                [`authorization:${authorization.decision}`],
-              );
-              continue;
-            }
-            try {
-              await fetchConnectorSource(
-                record.id,
-                connectorId,
-                query,
-                sections,
-                citations,
-                githubFetch,
-              );
-            } catch (err) {
-              markScopeFailed(
-                record.id,
-                'connector',
-                err instanceof Error ? err.message : String(err),
-                item.connectorId,
-              );
-            }
-          }
-          break;
-        }
-        default:
-          markScopeFailed(record.id, scope, 'Source scope not yet implemented');
+        resetAny = true;
+        continue;
       }
+      item.status = 'pending';
+      item.completedAt = null;
+      item.failureReason = null;
+      item.provenance = [];
+      resetAny = true;
+    }
+    expandedItems.push(item);
+  }
+
+  if (resetAny) record.items = expandedItems;
+
+  if (!resetAny) {
+    return record;
+  }
+
+  record.status = 'collecting';
+  record.completedAt = null;
+  record.failureReason = null;
+
+  const collections = readCollections();
+  const idx = collections.findIndex((c) => c.id === collectionId);
+  if (idx >= 0) collections[idx] = record;
+  writeCollections(collections);
+
+  for (const item of record.items) {
+    if (
+      item.scope !== 'connector' ||
+      item.status !== 'pending' ||
+      !item.connectorId
+    ) {
+      continue;
+    }
+
+    if (!availableConnectors.includes(item.connectorId)) {
+      markScopeFailed(
+        record.id,
+        'connector',
+        `Connector not available: ${item.connectorId}`,
+        item.connectorId,
+        [],
+        item.sourceLabel,
+      );
+      continue;
+    }
+
+    const authorization = authorizeSourceConnector(
+      record.reportJobId,
+      item.connectorId,
+      actorContext,
+      authorize,
+    );
+    if (!authorization.allowed) {
+      markScopeFailed(
+        record.id,
+        'connector',
+        `Connector access ${authorization.decision}: ${authorization.reason}`,
+        item.connectorId,
+        [`authorization:${authorization.decision}`],
+        item.sourceLabel,
+      );
+      continue;
+    }
+
+    try {
+      await fetchConnectorSource(
+        record.id,
+        item.connectorId,
+        item.sourceLabel,
+        record.query || '',
+        [],
+        [],
+        githubFetch,
+      );
     } catch (err) {
       markScopeFailed(
         record.id,
-        scope,
+        'connector',
         err instanceof Error ? err.message : String(err),
+        item.connectorId,
+        [],
+        item.sourceLabel,
       );
     }
   }
 
-  return { sections, citations, sourceCollectionId: record.id };
+  return getSourceCollection(collectionId)!;
 }
 
 export function getSourceCollection(

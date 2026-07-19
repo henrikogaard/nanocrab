@@ -4,8 +4,11 @@ import path from 'path';
 import {
   buildArtifactVaultFromCoworkArtifacts,
   buildArtifactVaultFromReports,
+  getArtifactVaultRecord,
+  ingestArtifactFromSource,
   listArtifactVault,
   pruneArtifactVault,
+  resolveArtifactVaultPath,
   searchArtifactVault,
 } from '../../artifact-vault.js';
 import { coworkProjectPath } from '../../cowork-projects.js';
@@ -103,6 +106,73 @@ router.post(
     const result = pruneArtifactVault();
     auditLog(req, 'artifact_vault_pruned', 'artifact-vault');
     res.json({ ok: true, ...result });
+  },
+);
+
+router.post(
+  '/vault/ingest',
+  requireRole('admin'),
+  (req: Request, res: Response) => {
+    try {
+      const body = req.body || {};
+      const result = ingestArtifactFromSource({
+        title: body.title,
+        kind: body.kind,
+        format: body.format,
+        path: body.path,
+        sourceType: body.sourceType,
+        sourceId: body.sourceId,
+        sourceLinks: Array.isArray(body.sourceLinks) ? body.sourceLinks : [],
+        projectId: body.projectId,
+        projectSlug: body.projectSlug,
+        projectName: body.projectName,
+        projectFilePath: body.projectFilePath,
+        retentionDays: body.retentionDays,
+        tags: body.tags,
+      });
+      auditLog(req, 'artifact_vault_ingested', result.record.id);
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
+
+router.get('/vault/:id', (req: Request, res: Response) => {
+  try {
+    const record = getArtifactVaultRecord(req.params.id as string);
+    if (!record) {
+      res.status(404).json({ error: 'Artifact not found' });
+      return;
+    }
+    res.json(record);
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+router.get(
+  '/vault/:id/download',
+  requireRole('admin'),
+  (req: Request, res: Response) => {
+    try {
+      const record = getArtifactVaultRecord(req.params.id as string);
+      if (!record) {
+        res.status(404).json({ error: 'Artifact not found' });
+        return;
+      }
+      const resolved = resolveArtifactVaultPath(record);
+      auditLog(req, 'artifact_vault_downloaded', record.id);
+      res.download(resolved.path);
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   },
 );
 

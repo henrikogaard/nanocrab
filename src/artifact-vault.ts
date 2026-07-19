@@ -1,7 +1,8 @@
 import fs from 'fs';
+import crypto from 'crypto';
 import path from 'path';
 
-import { STORE_DIR } from './config.js';
+import { GROUPS_DIR, STORE_DIR } from './config.js';
 import type { ReportJob } from './report-jobs.js';
 
 export interface ArtifactSourceLink {
@@ -364,4 +365,136 @@ export function pruneArtifactVault(input: PruneArtifactVaultInput = {}): {
   const kept = records.filter((record) => !isExpired(record, now));
   writeRecords(kept);
   return { removed: records.length - kept.length, remaining: kept.length };
+}
+
+export interface IngestArtifactFromSourceInput {
+  title: string;
+  kind?: string;
+  format?: string;
+  path: string;
+  sourceType: string;
+  sourceId: string;
+  sourceLinks?: ArtifactSourceLink[];
+  projectId?: string;
+  projectSlug?: string;
+  projectName?: string;
+  projectFilePath?: string;
+  retentionDays?: number;
+  tags?: string[];
+  now?: Date;
+}
+
+export function ingestArtifactFromSource(
+  input: IngestArtifactFromSourceInput,
+): {
+  record: ArtifactVaultRecord;
+  added: boolean;
+  updated: boolean;
+} {
+  const records = readRecords();
+  const byId = new Map(records.map((record) => [record.id, record]));
+  const resolvedPath = path.resolve(input.path);
+  const realPath = fs.realpathSync(resolvedPath);
+  if (!fs.statSync(realPath).isFile()) {
+    throw new Error('Artifact path is not a regular file');
+  }
+  if (!allowedArtifactRoot(realPath)) {
+    throw new Error('Artifact path is outside allowed roots');
+  }
+  const sourceType = String(input.sourceType || 'unknown').trim();
+  const sourceId = String(input.sourceId || '').trim();
+  const pathHash = crypto
+    .createHash('sha256')
+    .update(realPath)
+    .digest('hex')
+    .slice(0, 16);
+  const id = `source:${sourceType}:${sourceId}:${pathHash}:${path.basename(realPath)}`;
+  const ext = path.extname(realPath).replace(/^\./, '').toLowerCase();
+  const existing = byId.get(id);
+  const now = nowIso(input.now);
+  const record = normalizeRecord({
+    id,
+    title: input.title,
+    kind: input.kind || 'source',
+    format: input.format || ext || 'file',
+    path: realPath,
+    sizeBytes: fileSize(realPath),
+    sourceType,
+    sourceId,
+    sourceArtifactIndex: null,
+    sourceLinks: input.sourceLinks || [],
+    projectId: input.projectId,
+    projectSlug: input.projectSlug,
+    projectName: input.projectName,
+    projectFilePath: input.projectFilePath,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    retentionDays: input.retentionDays,
+    expiresAt: expiresAt(now, input.retentionDays ?? DEFAULT_RETENTION_DAYS),
+    tags: ['source', sourceType, ...(input.tags || [])].filter(Boolean),
+  });
+  const added = !existing;
+  byId.set(id, record);
+  const next = Array.from(byId.values());
+  writeRecords(next);
+  return { record, added, updated: !added };
+}
+
+export function getArtifactVaultRecord(
+  id: string,
+): ArtifactVaultRecord | undefined {
+  return readRecords().find((record) => record.id === id);
+}
+
+function allowedArtifactRoot(realPath: string): string | null {
+  const candidates = [
+    STORE_DIR,
+    GROUPS_DIR,
+    path.resolve(process.cwd()),
+  ].filter((candidate) => {
+    try {
+      return fs.existsSync(candidate);
+    } catch {
+      return false;
+    }
+  });
+  for (const candidate of candidates) {
+    let realCandidate: string;
+    try {
+      realCandidate = fs.realpathSync(candidate);
+    } catch {
+      continue;
+    }
+    if (
+      realPath === realCandidate ||
+      realPath.startsWith(`${realCandidate}${path.sep}`)
+    ) {
+      return realCandidate;
+    }
+  }
+  return null;
+}
+
+export function resolveArtifactVaultPath(record: ArtifactVaultRecord): {
+  path: string;
+  root: string;
+} {
+  try {
+    const resolved = path.resolve(record.path);
+    const real = fs.realpathSync(resolved);
+    const stat = fs.statSync(real);
+    if (!stat.isFile()) {
+      throw new Error('Artifact path is not a regular file');
+    }
+    const root = allowedArtifactRoot(real);
+    if (!root) {
+      throw new Error('Artifact path is outside allowed roots');
+    }
+    return { path: real, root };
+  } catch (err) {
+    throw new Error(
+      `Unable to open artifact: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
 }

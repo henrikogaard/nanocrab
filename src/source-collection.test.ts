@@ -13,6 +13,9 @@ import {
   listSourceCollections,
   getSourceLedger,
   collectSources,
+  collectReportSources,
+  retrySourceCollection,
+  type SourceDescriptor,
 } from './source-collection.js';
 import { STORE_DIR } from './config.js';
 
@@ -375,6 +378,245 @@ describe('source-collection', () => {
 
     it('returns empty array for report job with no entries', () => {
       expect(getSourceLedger('non-existent')).toEqual([]);
+    });
+  });
+
+  describe('collectReportSources', () => {
+    it('validates connector permissions before fetching and records provenance', async () => {
+      const authorize = vi.fn().mockReturnValue({
+        allowed: false,
+        decision: 'denied',
+        reason: 'connector scope denied',
+      });
+
+      const collected = await collectReportSources(
+        'report-mcp',
+        { actor: 'henrik', groupFolder: 'main-group', isMain: true },
+        [{ scope: 'connector', connectorId: 'github' }],
+        {
+          availableConnectors: ['github'],
+          authorizeConnectorAction: authorize,
+          githubApi: vi.fn(),
+          listMemoryRecords: vi.fn().mockReturnValue([]),
+        },
+      );
+
+      expect(authorize).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connectorId: 'github',
+          action: 'issues.read',
+          groupFolder: 'main-group',
+          isMain: true,
+        }),
+      );
+      const collection = getSourceCollection(collected.sourceCollectionId)!;
+      expect(collection.status).toBe('failed');
+      expect(collection.items[0]).toMatchObject({
+        scope: 'connector',
+        connectorId: 'github',
+        status: 'failed',
+        provenance: ['authorization:denied'],
+      });
+      expect(collection.ledger.length).toBe(0);
+    });
+
+    it('collects mounted file sources with ledger provenance', async () => {
+      const filePath = path.join(STORE_DIR, 'mounted-note.md');
+      fs.writeFileSync(filePath, 'Mounted source content.');
+
+      const collected = await collectReportSources(
+        'report-mounted',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [
+          {
+            scope: 'file',
+            mountedPath: filePath,
+            sourceLabel: 'Mounted note',
+          } as SourceDescriptor,
+        ],
+      );
+
+      const collection = getSourceCollection(collected.sourceCollectionId)!;
+      expect(collection.status).toBe('completed');
+      expect(collection.ledger.length).toBe(1);
+      expect(collection.ledger[0]).toMatchObject({
+        scope: 'file',
+        sourceLabel: 'Mounted note',
+        citationText: expect.stringContaining('Mounted source content.'),
+      });
+      expect(collected.citations[0].source).toMatch(/^file:\/\//);
+    });
+
+    it('rejects mounted files outside allowed roots', async () => {
+      const outsideFile = '/tmp/restricted-outside.txt';
+      fs.writeFileSync(outsideFile, 'outside content');
+      const collected = await collectReportSources(
+        'report-bad-mount',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [
+          {
+            scope: 'file',
+            mountedPath: outsideFile,
+          } as SourceDescriptor,
+        ],
+      );
+
+      const collection = getSourceCollection(collected.sourceCollectionId)!;
+      expect(collection.status).toBe('failed');
+      expect(collection.items[0].failureReason).toContain(
+        'outside allowed local roots',
+      );
+    });
+
+    it('deduplicates repeated identical ledger entries', () => {
+      const collection = startSourceCollection('report-dedup', ['memory']);
+      addLedgerEntry(collection.id, 'memory', 'Same', 'Same citation');
+      addLedgerEntry(collection.id, 'memory', 'Same', 'Same citation');
+      const ledger = getSourceLedger('report-dedup');
+      expect(ledger.length).toBe(1);
+      expect(getSourceCollection(collection.id)!.ledger.length).toBe(1);
+    });
+
+    it('retries failed connector collection without duplicating ledger entries', async () => {
+      const authorize = vi.fn().mockReturnValue({
+        allowed: false,
+        decision: 'denied',
+        reason: 'connector scope denied',
+      });
+      const githubApi = vi.fn();
+
+      const collected = await collectReportSources(
+        'report-retry',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [{ scope: 'connector', connectorId: 'github' }],
+        {
+          availableConnectors: ['github'],
+          authorizeConnectorAction: authorize,
+          githubApi,
+          listMemoryRecords: vi.fn().mockReturnValue([]),
+        },
+      );
+
+      const collection = getSourceCollection(collected.sourceCollectionId)!;
+      expect(collection.status).toBe('failed');
+
+      authorize.mockReturnValue({
+        allowed: true,
+        decision: 'allowed',
+        reason: 'allowed',
+      });
+      githubApi.mockResolvedValue({
+        items: [
+          {
+            number: 42,
+            title: 'Retry issue',
+            html_url: 'https://github.com/org/repo/issues/42',
+            repository: { full_name: 'org/repo' },
+          },
+        ],
+      });
+
+      const retried = await retrySourceCollection(
+        collection.id,
+        { actor: 'henrik', groupFolder: 'main-group' },
+        {
+          availableConnectors: ['github'],
+          authorizeConnectorAction: authorize,
+          githubApi,
+          listMemoryRecords: vi.fn().mockReturnValue([]),
+        },
+      );
+
+      expect(retried.status).toBe('completed');
+      expect(retried.ledger.length).toBe(1);
+      expect(getSourceLedger('report-retry').length).toBe(1);
+      expect(githubApi).toHaveBeenCalledTimes(1);
+    });
+
+    it('completes separately labelled descriptors for the same connector', async () => {
+      const githubApi = vi.fn().mockResolvedValue({ items: [] });
+      const collected = await collectReportSources(
+        'report-labelled-connectors',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [
+          { scope: 'connector', connectorId: 'github', sourceLabel: 'Bugs' },
+          { scope: 'connector', connectorId: 'github', sourceLabel: 'Roadmap' },
+        ],
+        {
+          availableConnectors: ['github'],
+          authorizeConnectorAction: vi.fn().mockReturnValue({
+            allowed: true,
+            decision: 'allowed',
+            reason: 'allowed',
+          }),
+          githubApi,
+        },
+      );
+
+      const record = getSourceCollection(collected.sourceCollectionId)!;
+      expect(record.status).toBe('completed');
+      expect(record.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ sourceLabel: 'Bugs', status: 'completed' }),
+          expect.objectContaining({
+            sourceLabel: 'Roadmap',
+            status: 'completed',
+          }),
+        ]),
+      );
+    });
+
+    it('parses MCP and mounted-file source tokens before scope filtering', async () => {
+      const filePath = path.join(STORE_DIR, 'mounted-source.md');
+      fs.writeFileSync(filePath, 'Token source');
+      const collected = await collectSources(
+        'report-token-scopes',
+        [`mcp:github`, `file:${filePath}`],
+        'is:issue',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        {
+          availableConnectors: ['github'],
+          authorizeConnectorAction: vi.fn().mockReturnValue({
+            allowed: true,
+            decision: 'allowed',
+            reason: 'allowed',
+          }),
+          githubApi: vi.fn().mockResolvedValue({ items: [] }),
+        },
+      );
+
+      const record = getSourceCollection(collected.sourceCollectionId)!;
+      expect(record.requestedScopes).toEqual(
+        expect.arrayContaining(['connector', 'file']),
+      );
+      expect(record.status).toBe('completed');
+    });
+
+    it('expands a previously unassigned connector when retrying', async () => {
+      const collected = await collectReportSources(
+        'report-unassigned-retry',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [{ scope: 'connector' }],
+        { availableConnectors: [] },
+      );
+      const retried = await retrySourceCollection(
+        collected.sourceCollectionId,
+        { actor: 'henrik', groupFolder: 'main-group' },
+        {
+          availableConnectors: ['github'],
+          authorizeConnectorAction: vi.fn().mockReturnValue({
+            allowed: true,
+            decision: 'allowed',
+            reason: 'allowed',
+          }),
+          githubApi: vi.fn().mockResolvedValue({ items: [] }),
+        },
+      );
+
+      expect(retried.status).toBe('completed');
+      expect(retried.items).toContainEqual(
+        expect.objectContaining({ connectorId: 'github', status: 'completed' }),
+      );
     });
   });
 });

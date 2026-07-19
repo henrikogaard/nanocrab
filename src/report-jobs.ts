@@ -12,7 +12,12 @@ import {
   type ApprovalKind,
 } from './approvals.js';
 import { ProviderPurpose } from './provider-router.js';
-import { collectSources } from './source-collection.js';
+import {
+  collectSources,
+  getSourceCollection,
+  getSourceLedger,
+  type SourceLedgerEntry,
+} from './source-collection.js';
 import {
   designSystemSelectionSummary,
   type DesignSystem,
@@ -204,6 +209,21 @@ async function composeMarkdown(job: ReportJob): Promise<void> {
         )
         .join('\n')
     : '';
+  const sourceCollection = job.sourceCollectionId
+    ? getSourceCollection(job.sourceCollectionId)
+    : null;
+  const ledger: SourceLedgerEntry[] =
+    sourceCollection?.ledger || getSourceLedger(job.id);
+  const sourceLedgerSection = ledger.length
+    ? `## Source Ledger\n\n${ledger
+        .map(
+          (entry) =>
+            `- ${entry.sourceLabel} (${entry.scope}${
+              entry.connectorId ? `/${entry.connectorId}` : ''
+            }) — ${entry.sourceUrl || ''} — collected ${entry.collectedAt} — ledger:${entry.id}`,
+        )
+        .join('\n')}`
+    : '## Source Ledger\n\nNo source ledger entries.';
   job.markdown = [
     `# ${job.title}`,
     '',
@@ -225,6 +245,8 @@ async function composeMarkdown(job: ReportJob): Promise<void> {
     citations
       ? `## Sources\n\n${citations}`
       : '## Sources\n\nNo citations available.',
+    '',
+    sourceLedgerSection,
   ].join('\n');
 }
 
@@ -290,6 +312,20 @@ async function exportArtifacts(job: ReportJob): Promise<void> {
     if (format === 'docx') await writeDocx(filePath, job.markdown);
     if (format === 'pdf') await writePdf(filePath, html);
     job.artifacts.push({ format, path: filePath });
+  }
+
+  const generatedArtifacts = job.artifacts
+    .map((artifact) => `- ${artifact.format}: ${artifact.path}`)
+    .join('\n');
+  if (generatedArtifacts) {
+    const generatedArtifactsSection = `## Generated Artifacts\n\n${generatedArtifacts}`;
+    job.markdown = `${job.markdown}\n\n${generatedArtifactsSection}`;
+    const markdownArtifact = job.artifacts.find(
+      (artifact) => artifact.format === 'markdown',
+    );
+    if (markdownArtifact) {
+      fs.writeFileSync(markdownArtifact.path, `${job.markdown}\n`);
+    }
   }
 }
 

@@ -7,9 +7,11 @@ const STORE_DIR = path.join(
   os.tmpdir(),
   `nanocrab-artifact-vault-${Date.now()}`,
 );
+const GROUPS_DIR = path.join(STORE_DIR, 'groups');
 
 vi.mock('./config.js', () => ({
   STORE_DIR,
+  GROUPS_DIR,
 }));
 
 vi.mock('./journal-store.js', () => ({
@@ -24,8 +26,11 @@ vi.mock('./memory-store.js', () => ({
 const {
   buildArtifactVaultFromCoworkArtifacts,
   buildArtifactVaultFromReports,
+  getArtifactVaultRecord,
+  ingestArtifactFromSource,
   listArtifactVault,
   pruneArtifactVault,
+  resolveArtifactVaultPath,
   searchArtifactVault,
 } = await import('./artifact-vault.js');
 
@@ -54,6 +59,7 @@ function writeReportWithArtifact() {
 describe('artifact vault', () => {
   beforeEach(() => {
     fs.rmSync(STORE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(STORE_DIR, { recursive: true });
   });
 
   it('indexes report artifacts with searchable source links', async () => {
@@ -187,5 +193,121 @@ describe('artifact vault', () => {
     });
     expect(pruneResult.removed).toBe(0);
     expect(fs.existsSync(artifactPath)).toBe(true);
+  });
+
+  it('ingests non-report artifacts with provenance and source-ledger linkage', () => {
+    const sourceFile = path.join(STORE_DIR, 'external-note.md');
+    fs.writeFileSync(sourceFile, '# External note\n\nSource-backed content.');
+
+    const result = ingestArtifactFromSource({
+      title: 'External note',
+      path: sourceFile,
+      sourceType: 'mcp',
+      sourceId: 'collection-123',
+      sourceLinks: [{ label: 'Source ledger', source: 'ledger:ledger-abc' }],
+      tags: ['mcp'],
+    });
+
+    expect(result.added).toBe(true);
+    expect(result.record).toMatchObject({
+      title: 'External note',
+      kind: 'source',
+      sourceType: 'mcp',
+      sourceId: 'collection-123',
+      sourceLinks: expect.arrayContaining([
+        expect.objectContaining({ source: 'ledger:ledger-abc' }),
+      ]),
+      tags: expect.arrayContaining(['source', 'mcp']),
+    });
+    expect(searchArtifactVault({ query: 'External note' })).toContainEqual(
+      expect.objectContaining({ id: result.record.id }),
+    );
+    expect(getArtifactVaultRecord(result.record.id)?.id).toBe(result.record.id);
+  });
+
+  it('resolves an ingested artifact path for download inside allowed roots', () => {
+    const sourceFile = path.join(STORE_DIR, 'downloadable-note.md');
+    fs.writeFileSync(sourceFile, 'Downloadable content.');
+
+    const { record } = ingestArtifactFromSource({
+      title: 'Downloadable note',
+      path: sourceFile,
+      sourceType: 'mounted',
+      sourceId: 'collection-456',
+    });
+
+    const resolved = resolveArtifactVaultPath(record);
+    expect(resolved.path).toBe(fs.realpathSync(sourceFile));
+    expect(resolved.root).toBe(fs.realpathSync(STORE_DIR));
+  });
+
+  it('keeps same-named source artifacts from different directories distinct', () => {
+    const firstDirectory = path.join(STORE_DIR, 'first');
+    const secondDirectory = path.join(STORE_DIR, 'second');
+    fs.mkdirSync(firstDirectory, { recursive: true });
+    fs.mkdirSync(secondDirectory, { recursive: true });
+    const first = path.join(firstDirectory, 'note.md');
+    const second = path.join(secondDirectory, 'note.md');
+    fs.writeFileSync(first, 'First');
+    fs.writeFileSync(second, 'Second');
+
+    const firstRecord = ingestArtifactFromSource({
+      title: 'First note',
+      path: first,
+      sourceType: 'mcp',
+      sourceId: 'collection-same',
+    }).record;
+    const secondRecord = ingestArtifactFromSource({
+      title: 'Second note',
+      path: second,
+      sourceType: 'mcp',
+      sourceId: 'collection-same',
+    }).record;
+
+    expect(firstRecord.id).not.toBe(secondRecord.id);
+    expect(getArtifactVaultRecord(firstRecord.id)).toBeDefined();
+    expect(getArtifactVaultRecord(secondRecord.id)).toBeDefined();
+  });
+
+  it('rejects source paths that cannot be opened through vault controls', () => {
+    const outside = path.join('/tmp', `nanocrab-outside-${Date.now()}.md`);
+    fs.writeFileSync(outside, 'Outside');
+    try {
+      expect(() =>
+        ingestArtifactFromSource({
+          title: 'Outside',
+          path: outside,
+          sourceType: 'mounted',
+          sourceId: 'outside',
+        }),
+      ).toThrow(/outside allowed roots/i);
+    } finally {
+      fs.rmSync(outside, { force: true });
+    }
+  });
+
+  it('retains non-report artifacts with configurable retention and prunes on expiry', () => {
+    const sourceFile = path.join(STORE_DIR, 'retained-note.md');
+    fs.writeFileSync(sourceFile, 'Retained content.');
+
+    const { record } = ingestArtifactFromSource({
+      title: 'Retained note',
+      path: sourceFile,
+      sourceType: 'mounted',
+      sourceId: 'collection-789',
+      retentionDays: 1,
+    });
+
+    expect(record.retentionDays).toBe(1);
+    expect(record.expiresAt).not.toBeNull();
+
+    const pruned = pruneArtifactVault({
+      now: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
+    });
+    expect(pruned.removed).toBeGreaterThanOrEqual(1);
+    expect(listArtifactVault()).not.toContainEqual(
+      expect.objectContaining({ id: record.id }),
+    );
+    expect(fs.existsSync(sourceFile)).toBe(true);
   });
 });

@@ -36,6 +36,11 @@ function sourceLedgerEntry(entry) {
   </div>`;
 }
 
+function sourceCollectionRetryButton(collection) {
+  if (collection.status !== 'failed' && collection.status !== 'partial') return '';
+  return `<button class="source-collection-retry" data-id="${esc(collection.id)}">Retry failed sources</button>`;
+}
+
 function sourceCollectionCard(collection) {
   const scopes = (collection.items || [])
     .map((i) => sourceCollectionScopeItem(i))
@@ -47,6 +52,7 @@ function sourceCollectionCard(collection) {
     <div class="card-title">
       <span class="source-collection-id">${esc(collection.id)}</span>
       <span class="source-collection-status ${sourceCollectionBadge(collection.status)}">${esc(collection.status)}</span>
+      ${sourceCollectionRetryButton(collection)}
     </div>
     <div class="source-collection-meta">
       <span>report job: ${esc(collection.reportJobId)}</span>
@@ -60,6 +66,14 @@ function sourceCollectionCard(collection) {
       ${ledger || '<p class="muted">No ledger entries.</p>'}
     </div>
   </div>`;
+}
+
+async function retrySourceCollection(id) {
+  const response = await api(`/source-collections/${id}/retry`, { method: 'POST' });
+  if (!response.ok) {
+    throw new Error(response.error || 'Retry failed');
+  }
+  return response.collection;
 }
 
 async function renderSourceCollections(el) {
@@ -78,6 +92,22 @@ async function renderSourceCollections(el) {
         ${cards || '<p class="muted">No source collections.</p>'}
       </div>
     `;
+    el.querySelectorAll('.source-collection-retry').forEach((button) => {
+      button.addEventListener('click', async (event) => {
+        const id = event.currentTarget.getAttribute('data-id');
+        if (!id) return;
+        event.currentTarget.disabled = true;
+        event.currentTarget.textContent = 'Retrying…';
+        try {
+          await retrySourceCollection(id);
+          await renderSourceCollections(el);
+        } catch (err) {
+          event.currentTarget.disabled = false;
+          event.currentTarget.textContent = 'Retry failed sources';
+          console.error('Source collection retry failed:', err);
+        }
+      });
+    });
   } catch (err) {
     el.innerHTML = `
       <div class="page-header">
