@@ -122,25 +122,24 @@ incorrect deliveries before any external side effect occurs.
 Devin is a host-native Runner CLI, not a provider or container runner. The
 integration is currently disabled and fails closed. The empty-root sandbox has
 no safe authentication handoff, so coding readiness reports
-`Sandboxed Devin authentication handoff is unavailable; no credential or host
-auth directory is mounted`, and dispatch stops before workspace preparation or
-process spawn. No Devin credential contents or host auth directory are read,
-mounted, copied, serialized, or forwarded.
-
-The following boundary describes the reviewed implementation that remains
-behind this guard; it is not an operator enablement procedure. The NanoCrab
+When the credential or sandbox probe fails, readiness reports the fixed
+authentication-handoff error and dispatch stops before workspace preparation or
+process spawn. The NanoCrab
 process and the narrow Git children it starts for approved clone/fetch/push and
 evidence collection are trusted host processes. The Devin model is not trusted
 with general host access.
 
-If a future sandbox-safe authentication handoff is approved, readiness must
-verify a configured canonical `DEVIN_CREDENTIAL_PATH`, exact service-UID
-ownership and POSIX mode `0600`, required CLI capabilities, every configured
-model alias, the platform sandbox executable, and canonical Devin/Node/sandbox
-executables inside verified runtime roots. NanoCrab may stat a credential but
-must never read its contents. It must not guess, create, copy, mount, or delete
-the credential file. Mounting Devin credentials into a NanoCrab container is
-unsupported.
+Sandbox-safe authentication handoff is implemented. Readiness verifies a
+configured canonical `DEVIN_CREDENTIAL_PATH`, exact service-UID ownership and
+POSIX mode `0600`, required CLI capabilities, every configured model alias, the
+platform sandbox executable, and canonical Devin/Node/sandbox executables inside
+verified runtime roots. The configured path must end in
+`devin/credentials.toml`, preventing validation of a different file from the
+one the CLI reads. Readiness then executes `devin auth status` inside the actual
+deny-write sandbox with network disabled and discards all output. NanoCrab may
+stat a credential but must never read its contents itself. It must not guess,
+create, copy, or delete the credential file.
+Mounting Devin credentials into a NanoCrab container is unsupported.
 
 The host child environment is an allowlist: `HOME`, temporary-directory and
 locale variables, plus `XDG_CONFIG_HOME`/`XDG_DATA_HOME`; NanoCrab supplies a
@@ -170,14 +169,17 @@ OS isolation. On Linux, Bubblewrap creates a new PID namespace and session
 from an empty root, exposes only verified runtime directories read-only, binds
 the workspace and sandbox temp explicitly, and rebinds the workspace `.git`
 read-only. Prompt and agent-configuration files are mounted read-only; the
-Devin credential itself is never mounted. Devin host launch is currently
-disabled on macOS while authentication handoff remains unavailable; NanoCrab
-does not generate or use a permissive `sandbox-exec` profile. A future handoff
-must first add and review an explicit deny-default profile for runtime roots,
-workspace, and sandbox temp before macOS launch can be enabled. Alias
-validation or sandbox preparation failure aborts the attempt before Devin is
-spawned, so `.git` is read-only to the whole Devin process on supported Linux
-launches.
+Devin credential itself is never mounted directly, but the `XDG_DATA_HOME`
+directory containing `devin/` is exposed read-only. Devin host launch is
+supported on Linux and macOS once authentication handoff is validated; Linux
+uses Bubblewrap and macOS uses an explicit deny-default `sandbox-exec` profile
+for system libraries, runtime roots, workspace, and sandbox temp, with
+protected paths denied and only the Devin credential directory re-allowed
+read-only. The macOS profile is validated by unit tests but has not yet been
+exercised on macOS hardware; treat macOS launch as experimental until it has
+been verified end to end. Alias validation or sandbox preparation failure
+aborts the attempt before Devin is spawned, so `.git` is read-only to the
+whole Devin process on supported launches.
 
 The command broker is a separate, stricter boundary. It validates an exact
 command allowlist and routes every accepted inspection, Git, build, and test
@@ -188,6 +190,18 @@ temp, and the selected workspace are visible. Inspection and Git receive the
 workspace read-only. Every command may write to the sandbox temp directory;
 only implement/direct build and test commands may additionally write to the
 workspace.
+
+Operator setup:
+
+1. Authenticate the service account with the installed Devin CLI.
+2. Set `DEVIN_CREDENTIAL_PATH` to the canonical
+   `<XDG_DATA_HOME>/devin/credentials.toml` path.
+3. Ensure the file is owned by the NanoCrab service UID with mode `0600` and
+   that `bwrap` (Linux) or `sandbox-exec` (macOS) is executable.
+4. Restart NanoCrab and confirm the Devin runtime readiness surface reports
+   healthy. A low-risk manual smoke may then run a read-only planning job in a
+   disposable repository; verify the job cannot read the credential, `$HOME`,
+   or `.git`, and cancel it before approving any write stage.
 
 Before host evidence collection, publication, or remote branch deletion,
 NanoCrab recursively revalidates `.git` as canonical standalone metadata inside

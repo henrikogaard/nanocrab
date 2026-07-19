@@ -12,7 +12,7 @@ const workspace = '/jobs/job/repo';
 const home = '/home/service';
 const protectedPaths = [
   '/jobs/job/.nanocrab',
-  '/home/service/.config/devin/credentials.json',
+  '/home/service/.config/devin/credentials.toml',
   '/home/service/.config/nanocrab',
 ] as const;
 const trustedRuntimeReadRoots = ['/usr'] as const;
