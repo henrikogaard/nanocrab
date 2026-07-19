@@ -5,8 +5,10 @@ import {
   getSourceCollectionByReportJobId,
   getSourceLedger,
   listSourceCollections,
+  retrySourceCollection,
   type SourceCollectionStatus,
 } from '../../source-collection.js';
+import { requireRole } from '../middleware.js';
 
 const router = Router();
 
@@ -69,5 +71,30 @@ router.get('/:id', (req: Request, res: Response) => {
     res.status(500).json({ error: errorMessage(err) });
   }
 });
+
+router.post(
+  '/:id/retry',
+  requireRole('admin'),
+  async (req: Request, res: Response) => {
+    try {
+      const id = routeParam(req, 'id');
+      const collection = getSourceCollection(id);
+      if (!collection) {
+        res.status(404).json({ error: 'Source collection not found' });
+        return;
+      }
+      const actorContext = collection.actorContext || {
+        actor: req.user?.username || 'dashboard',
+        groupFolder: 'dashboard',
+        agentId: req.user?.id,
+        isMain: req.user?.role === 'owner',
+      };
+      const updated = await retrySourceCollection(id, actorContext);
+      res.json({ ok: true, collection: updated });
+    } catch (err) {
+      res.status(400).json({ error: errorMessage(err) });
+    }
+  },
+);
 
 export default router;
