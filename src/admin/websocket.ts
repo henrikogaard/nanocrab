@@ -9,7 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
-import { logger } from '../logger.js';
+import { createStreamingLogRedactor, logger } from '../logger.js';
 import {
   buildChannelStatus,
   isChannelEnabledForRegisteredGroups,
@@ -67,7 +67,6 @@ interface SessionMetadata {
   name: string;
   owner?: string;
   group?: string;
-  sessionToken?: string;
   createdAt: string;
   endedAt: string | null;
   bytes: number;
@@ -210,6 +209,20 @@ function generateSessionToken(): string {
   return crypto.randomBytes(24).toString('hex');
 }
 
+function terminalTokenMatches(
+  expectedToken: string,
+  providedToken: string | undefined,
+): boolean {
+  const expected = Buffer.from(expectedToken);
+  const provided = Buffer.from(
+    typeof providedToken === 'string' ? providedToken : '',
+  );
+  return (
+    expected.length === provided.length &&
+    crypto.timingSafeEqual(expected, provided)
+  );
+}
+
 export function isSafeTerminalSessionId(sessionId: string): boolean {
   return SAFE_SESSION_ID.test(sessionId);
 }
@@ -223,7 +236,6 @@ export function createSessionFile(
   sessionId: string,
   owner = 'owner',
   group?: string,
-  sessionToken?: string,
 ): boolean {
   if (!isSafeTerminalSessionId(sessionId)) return false;
   const index = loadSessionIndex();
@@ -233,7 +245,6 @@ export function createSessionFile(
     name: sessionId,
     owner,
     group: group || owner,
-    sessionToken: sessionToken || generateSessionToken(),
     createdAt: new Date().toISOString(),
     endedAt: null,
     bytes: 0,
@@ -244,6 +255,10 @@ export function createSessionFile(
 
 // Sessions whose log has hit the byte cap — used to warn only once per session.
 const maxSizeWarned = new Set<string>();
+const sessionRedactors = new Map<
+  string,
+  ReturnType<typeof createStreamingLogRedactor>
+>();
 
 export function redactTerminalOutput(data: string): string {
   return redactTerminalTranscript(data);
@@ -260,6 +275,11 @@ function safeUtf8Slice(buf: Buffer, maxBytes: number): Buffer {
 }
 
 export function finalizeSessionFile(sessionId: string): void {
+  const redactor = sessionRedactors.get(sessionId);
+  if (redactor) {
+    writeSessionLog(sessionId, redactor.flush());
+    sessionRedactors.delete(sessionId);
+  }
   maxSizeWarned.delete(sessionId);
   const index = loadSessionIndex();
   const entry = index.find((e) => e.id === sessionId);
@@ -290,9 +310,8 @@ export function getTerminalSessionAttachment(
   };
 }
 
-export function appendToSessionLog(sessionId: string, data: string): void {
-  if (!data) return;
-  const redacted = redactTerminalOutput(data);
+function writeSessionLog(sessionId: string, redacted: string): void {
+  if (!redacted) return;
   const logPath = sessionLogPath(sessionId);
   if (!logPath) return;
   try {
@@ -329,6 +348,20 @@ export function appendToSessionLog(sessionId: string, data: string): void {
   } catch (err) {
     logger.warn({ err, sessionId }, 'Failed to append to session log');
   }
+}
+
+function redactTerminalChunk(sessionId: string, data: string): string {
+  let redactor = sessionRedactors.get(sessionId);
+  if (!redactor) {
+    redactor = createStreamingLogRedactor();
+    sessionRedactors.set(sessionId, redactor);
+  }
+  return redactor.write(data);
+}
+
+export function appendToSessionLog(sessionId: string, data: string): void {
+  if (!data) return;
+  writeSessionLog(sessionId, redactTerminalChunk(sessionId, data));
 }
 
 export function readSessionLog(sessionId: string): string {
@@ -420,6 +453,7 @@ function removeTerminalSessionArtifacts(sessionId: string): void {
   closeTerminalSession(sessionId);
   historicalSessions.delete(sessionId);
   maxSizeWarned.delete(sessionId);
+  sessionRedactors.delete(sessionId);
   const logPath = sessionLogPath(sessionId);
   try {
     if (logPath && fs.existsSync(logPath)) fs.unlinkSync(logPath);
@@ -506,6 +540,15 @@ export function initWebSocket(server: HttpServer): void {
           }
           const term = terminals.get(sid);
           if (term) {
+            if (!terminalTokenMatches(term.sessionToken, msg.sessionToken)) {
+              denyTerminalOperation(
+                ws,
+                'attach',
+                sid,
+                'Invalid or missing terminal session token.',
+              );
+              return;
+            }
             term.clients.add(ws);
             send(ws, {
               type: 'terminal_attach_result',
@@ -558,14 +601,7 @@ export function initWebSocket(server: HttpServer): void {
             });
             return;
           }
-          const providedToken =
-            typeof msg.sessionToken === 'string' ? msg.sessionToken : '';
-          const expected = Buffer.from(term.sessionToken);
-          const provided = Buffer.from(providedToken);
-          const tokenMatches =
-            expected.length === provided.length &&
-            crypto.timingSafeEqual(expected, provided);
-          if (!tokenMatches) {
+          if (!terminalTokenMatches(term.sessionToken, msg.sessionToken)) {
             denyTerminalOperation(
               ws,
               'reconnect',
@@ -742,7 +778,7 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
 
   const sessionToken = generateSessionToken();
   const group = owner;
-  createSessionFile(sessionId, owner, group, sessionToken);
+  createSessionFile(sessionId, owner, group);
   appendToSessionLog(
     sessionId,
     `[Session started at ${new Date().toISOString()}]\r\n`,
@@ -808,10 +844,12 @@ export function closeTerminalSession(sessionId: string): boolean {
 function broadcastTerminal(sessionId: string, data: string): void {
   const term = terminals.get(sessionId);
   if (!term) return;
-  term.transcript = `${term.transcript}${data}`.slice(-200000);
-  appendToSessionLog(sessionId, data);
+  const redacted = redactTerminalChunk(sessionId, data);
+  if (!redacted) return;
+  term.transcript = `${term.transcript}${redacted}`.slice(-200000);
+  writeSessionLog(sessionId, redacted);
   for (const client of term.clients) {
-    send(client, { type: 'terminal_output', data, sessionId });
+    send(client, { type: 'terminal_output', data: redacted, sessionId });
   }
 }
 

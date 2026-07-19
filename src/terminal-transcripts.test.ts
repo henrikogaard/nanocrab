@@ -62,14 +62,20 @@ describe('terminal transcripts', () => {
     expect(
       redactTerminalTranscript('Authorization: Bearer sk-live-abc123'),
     ).toBe('Authorization: Bearer ***');
-    expect(redactTerminalTranscript('export API_KEY=super-secret-value')).not.toContain(
-      'super-secret-value',
-    );
+    expect(
+      redactTerminalTranscript('export API_KEY=super-secret-value'),
+    ).not.toContain('super-secret-value');
     expect(
       redactTerminalTranscript('{"password": "hunter2", "user": "henrik"}'),
     ).not.toContain('hunter2');
     expect(redactTerminalTranscript('plain build output')).toBe(
       'plain build output',
+    );
+    expect(redactTerminalTranscript('Cookie: sid=private-value')).not.toContain(
+      'private-value',
+    );
+    expect(redactTerminalTranscript('using sk-live-standalone')).not.toContain(
+      'sk-live-standalone',
     );
   });
 
@@ -84,5 +90,30 @@ describe('terminal transcripts', () => {
     const matches = searchTerminalTranscripts({ query: 'deploy' });
     expect(matches).toHaveLength(1);
     expect(matches[0]!.snippet).not.toContain('abc123def');
+  });
+
+  it('keeps identical session ids in different groups separate', () => {
+    appendTerminalTranscript({
+      sessionId: 'shared',
+      owner: 'henrik',
+      group: 'main',
+      type: 'output',
+      data: 'main transcript',
+    });
+    appendTerminalTranscript({
+      sessionId: 'shared',
+      owner: 'henrik',
+      group: 'operations',
+      type: 'output',
+      data: 'operations transcript',
+    });
+
+    expect(listTerminalTranscriptSummaries()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sessionId: 'shared', group: 'main' }),
+        expect.objectContaining({ sessionId: 'shared', group: 'operations' }),
+      ]),
+    );
+    expect(searchTerminalTranscripts({ query: 'transcript' })).toHaveLength(2);
   });
 });

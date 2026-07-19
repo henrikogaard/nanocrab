@@ -768,7 +768,13 @@ router.get(
             authorizeTerminalSessionAccess(entry.id, username) === 'allowed',
         )
         .map((entry: any) => ({
-          ...entry,
+          id: entry.id,
+          name: entry.name,
+          owner: entry.owner,
+          group: entry.group,
+          createdAt: entry.createdAt,
+          endedAt: entry.endedAt,
+          bytes: entry.bytes,
           active: activeIds.has(entry.id),
         }));
       history.sort((a: any, b: any) =>
