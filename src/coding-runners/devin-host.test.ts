@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 
 import { describe, expect, it, vi } from 'vitest';

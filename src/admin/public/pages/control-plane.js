@@ -1,10 +1,10 @@
 // NanoCrab Admin — Control Plane Page
 
 function controlPlaneBadge(status) {
-  if (status === 'healthy') return 'badge-success';
-  if (status === 'pending' || status === 'queued') return 'badge-warning';
+  if (status === 'healthy' || status === 'success' || status === 'ready') return 'badge-success';
+  if (status === 'pending' || status === 'queued' || status === 'attention' || status === 'stale') return 'badge-warning';
   if (status === 'approved') return 'badge-info';
-  if (status === 'rejected' || status === 'failed' || status === 'cancelled') return 'badge-error';
+  if (status === 'rejected' || status === 'failed' || status === 'cancelled' || status === 'failure' || status === 'error' || status === 'blocked') return 'badge-error';
   if (status === 'paused') return 'badge-warning';
   return 'badge-muted';
 }
@@ -14,6 +14,15 @@ function controlPlaneStat(label, value) {
     <div class="stat-label">${esc(label)}</div>
     <div class="stat-value">${esc(String(value))}</div>
   </div>`;
+}
+
+function controlPlaneCheckStatusPlaceholder(run) {
+  if (!run || !run.repo || !run.branch) return '';
+  const parts = String(run.repo).split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return '';
+  const [owner, repo] = parts;
+  const ref = run.commitSha || run.branch;
+  return `<div class="control-plane-check-status" data-owner="${esc(owner)}" data-repo="${esc(repo)}" data-ref="${esc(ref)}" data-branch="${esc(run.branch)}"><span class="check-status loading">Loading checks…</span></div>`;
 }
 
 function controlPlaneBoardCard(card) {
@@ -28,6 +37,7 @@ function controlPlaneBoardCard(card) {
       <span class="board-card-runtime">${esc(card.actualRuntime || '—')}</span>
     </div>
     <div class="board-card-run">${esc(card.run ? `run ${card.run.status}` : 'no run')}</div>
+    ${controlPlaneCheckStatusPlaceholder(card.run)}
     <div class="board-card-decision">${esc(card.decision ? card.decision.status : '—')}</div>
   </div>`;
 }
@@ -57,6 +67,7 @@ function controlPlaneRunCard(run) {
     <div class="run-card-id">${esc(run.id)}</div>
     <div class="run-card-repo">${esc(run.repo || '—')}</div>
     <div class="run-card-status ${esc(controlPlaneBadge(run.status))}">${esc(run.status)}</div>
+    ${controlPlaneCheckStatusPlaceholder(run)}
   </div>`;
 }
 
@@ -75,6 +86,75 @@ function controlPlaneRuntimeRow(runtime) {
     <span class="runtime-cli">${esc(runtime.cli)}</span>
     <span class="runtime-status ${esc(controlPlaneBadge(status))}">${esc(status)}</span>
   </div>`;
+}
+
+function controlPlaneCheckStatusHtml(status) {
+  if (!status || status.error) {
+    return `<span class="check-status error">${esc(status?.error || 'Checks unavailable')}</span>`;
+  }
+  const badgeClass = controlPlaneBadge(status.status);
+  const staleNote = status.stale ? ' (stale)' : '';
+  const parts = [];
+  if (status.failedRequired && status.failedRequired.length > 0) {
+    parts.push(`${status.failedRequired.length} required failed`);
+  }
+  if (status.failedOptional && status.failedOptional.length > 0) {
+    parts.push(`${status.failedOptional.length} optional failed`);
+  }
+  const summary = parts.length ? ` — ${parts.join(', ')}` : '';
+  const detail = status.failureSummary ? `<div class="check-status-detail">${esc(status.failureSummary)}</div>` : '';
+  const fetchedTime = status.fetchedAt
+    ? new Date(status.fetchedAt).toLocaleTimeString()
+    : 'unknown';
+  return `<div class="check-status-line">
+    <span class="check-status-badge ${esc(badgeClass)}">${esc(status.status)}${staleNote}</span>
+    <span class="check-status-meta">Updated ${esc(fetchedTime)}${esc(summary)}</span>
+    ${detail}
+  </div>`;
+}
+
+async function refreshControlPlaneCheckStatuses() {
+  const elements = document.querySelectorAll('.control-plane-check-status');
+  for (const el of elements) {
+    const owner = el.dataset.owner;
+    const repo = el.dataset.repo;
+    const ref = el.dataset.ref;
+    const branch = el.dataset.branch;
+    if (!owner || !repo || !ref) {
+      el.innerHTML = '<span class="check-status unavailable">No check data</span>';
+      continue;
+    }
+    try {
+      const status = await api('/github/checks?owner=' + encodeURIComponent(owner) + '&repo=' + encodeURIComponent(repo) + '&ref=' + encodeURIComponent(ref) + '&branch=' + encodeURIComponent(branch || ref));
+      el.innerHTML = controlPlaneCheckStatusHtml(status);
+    } catch (err) {
+      const retry = err.retryAfter ? ` (retry after ${esc(String(err.retryAfter))}s)` : '';
+      el.innerHTML = `<span class="check-status error" title="${esc(err.message || 'Checks unavailable')}">Checks unavailable${retry}</span>`;
+    }
+  }
+}
+
+function controlPlaneDiagnosticsHtml(data) {
+  const summary = data.summary || {};
+  const badgeClass = controlPlaneBadge(data.status);
+  return `<div class="card-title">Production diagnostics <span class="control-plane-diagnostics-badge ${esc(badgeClass)}">${esc(data.status)}</span></div>
+    <div class="control-plane-diagnostics-summary">${esc(String(summary.passed || 0))}/${esc(String(summary.total || 0))} checks passed</div>
+    <div class="control-plane-diagnostics-detail">${esc(data.stale ? 'Stale data detected; some signals may be out of date.' : 'Diagnostics are current.')}</div>`;
+}
+
+async function renderControlPlaneDiagnostics() {
+  const overview = document.getElementById('control-plane-overview');
+  if (!overview) return;
+  const panel = document.createElement('div');
+  panel.className = 'control-plane-diagnostics-panel card';
+  panel.innerHTML = '<div class="card-title">Production diagnostics</div><div class="control-plane-diagnostics-loading">Loading…</div>';
+  overview.appendChild(panel);
+  try {
+    const data = await api('/system/diagnostics');
+    panel.innerHTML = controlPlaneDiagnosticsHtml(data);
+  } catch (err) {
+    panel.innerHTML = `<div class="card-title">Production diagnostics</div><div class="check-status error">Could not load diagnostics: ${esc(err.message || 'unavailable')}</div>`;
+  }
 }
 
 function renderControlPlaneOverview(state, el) {
@@ -234,6 +314,8 @@ async function renderControlPlane(el) {
   renderControlPlaneRuns(state, el);
   renderControlPlaneDecisions(state, el);
   renderControlPlaneSettings(state, el);
+  void refreshControlPlaneCheckStatuses().catch(() => {});
+  void renderControlPlaneDiagnostics().catch(() => {});
 }
 
 window.renderControlPlane = renderControlPlane;

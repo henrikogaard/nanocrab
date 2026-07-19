@@ -375,6 +375,55 @@ export class GroupQueue {
     return result;
   }
 
+  getQueueDiagnostics(): {
+    activeCount: number;
+    waitingCount: number;
+    pendingTasks: number;
+    pendingMessages: number;
+    groups: Array<{
+      groupJid: string;
+      active: boolean;
+      isTask: boolean;
+      idleWaiting: boolean;
+      pendingTasks: number;
+      pendingMessages: boolean;
+      runningTaskId: string | null;
+    }>;
+  } {
+    const result: ReturnType<GroupQueue['getQueueDiagnostics']>['groups'] = [];
+    let pendingTasks = 0;
+    let pendingMessages = 0;
+
+    for (const [jid, state] of this.groups) {
+      pendingTasks += state.pendingTasks.length;
+      if (state.pendingMessages) pendingMessages += 1;
+      if (
+        state.active ||
+        state.pendingTasks.length > 0 ||
+        state.pendingMessages ||
+        this.waitingGroups.includes(jid)
+      ) {
+        result.push({
+          groupJid: jid,
+          active: state.active,
+          isTask: state.isTaskContainer,
+          idleWaiting: state.idleWaiting,
+          pendingTasks: state.pendingTasks.length,
+          pendingMessages: state.pendingMessages,
+          runningTaskId: state.runningTaskId,
+        });
+      }
+    }
+
+    return {
+      activeCount: this.activeCount,
+      waitingCount: this.waitingGroups.length,
+      pendingTasks,
+      pendingMessages,
+      groups: result,
+    };
+  }
+
   closeActiveContainers(reason: string, includeTasks = false): number {
     let count = 0;
     for (const [jid, state] of this.groups) {

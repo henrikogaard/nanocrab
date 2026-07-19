@@ -3,6 +3,15 @@ import express from 'express';
 import http from 'http';
 import type { AddressInfo } from 'net';
 
+vi.mock('../../production-diagnostics.js', () => ({
+  buildProductionDiagnostics: vi.fn(),
+  formatDiagnosticsSummary: vi.fn(),
+}));
+
+import {
+  buildProductionDiagnostics,
+  formatDiagnosticsSummary,
+} from '../../production-diagnostics.js';
 import systemRouter, { validateAvatarUpload } from './system.js';
 
 function requestJson<T>(port: number, path: string): Promise<T> {
@@ -97,6 +106,72 @@ describe('system routes', () => {
         'http://127.0.0.1:9999/v1/models',
         expect.any(Object),
       );
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('returns production diagnostics as JSON', async () => {
+    vi.mocked(buildProductionDiagnostics).mockResolvedValue({
+      status: 'ready',
+      generatedAt: new Date().toISOString(),
+      summary: { total: 6, passed: 6, failedRequired: 0, failedAdvisory: 0 },
+      sections: [],
+      loadIssues: [],
+      stale: false,
+    });
+
+    const app = express();
+    app.use('/system', systemRouter);
+    const server = await new Promise<http.Server>((resolve) => {
+      const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+    });
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const result = await requestJson<{ status: string; stale: boolean }>(
+        port,
+        '/system/diagnostics',
+      );
+      expect(result.status).toBe('ready');
+      expect(result.stale).toBe(false);
+      expect(buildProductionDiagnostics).toHaveBeenCalled();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('returns production diagnostics as plain text when requested', async () => {
+    vi.mocked(formatDiagnosticsSummary).mockReturnValue('NanoCrab diagnostics summary');
+    vi.mocked(buildProductionDiagnostics).mockResolvedValue({
+      status: 'attention',
+      generatedAt: new Date().toISOString(),
+      summary: { total: 5, passed: 4, failedRequired: 0, failedAdvisory: 1 },
+      sections: [],
+      loadIssues: [],
+      stale: true,
+    });
+
+    const app = express();
+    app.use('/system', systemRouter);
+    const server = await new Promise<http.Server>((resolve) => {
+      const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+    });
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const text = await new Promise<string>((resolve, reject) => {
+        const req = http.request(
+          { hostname: '127.0.0.1', port, path: '/system/diagnostics?format=text', method: 'GET' },
+          (res) => {
+            const chunks: Buffer[] = [];
+            res.on('data', (chunk) => chunks.push(chunk));
+            res.on('end', () => resolve(Buffer.concat(chunks).toString()));
+          },
+        );
+        req.on('error', reject);
+        req.end();
+      });
+      expect(text).toBe('NanoCrab diagnostics summary');
+      expect(formatDiagnosticsSummary).toHaveBeenCalled();
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
