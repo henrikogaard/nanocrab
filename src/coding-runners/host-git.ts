@@ -42,6 +42,7 @@ export interface HostGitRunnerDependencies {
       cwd?: string;
       env?: NodeJS.ProcessEnv;
       encoding?: string;
+      detached?: boolean;
     },
     callback: ExecFileCallback,
   ) => ChildProcess;
@@ -78,11 +79,15 @@ export function createHostGitRunner(
     let stableHandle: StableDirectoryHandle | undefined;
     let actualCwd = cwd;
     let actualArgs = args;
+    let actualEnv = env;
 
     try {
       if (actualCwd) {
         stableHandle = await openStableDirectory(actualCwd, 'Git cwd');
         actualCwd = stableHandle.path;
+        if (env?.GIT_WORK_TREE) {
+          actualEnv = { ...env, GIT_WORK_TREE: actualCwd };
+        }
       } else if (actualArgs[0] === 'clone') {
         const destination = actualArgs[actualArgs.length - 1];
         if (destination && typeof destination === 'string') {
@@ -118,7 +123,12 @@ export function createHostGitRunner(
       const child = execFile(
         'git',
         [...actualArgs],
-        { cwd: actualCwd, env, encoding: 'utf8' },
+        {
+          cwd: actualCwd,
+          env: actualEnv,
+          encoding: 'utf8',
+          detached: true,
+        },
         (error, stdout, stderr) => {
           if (lease) {
             registry.compareAndDelete(lease);

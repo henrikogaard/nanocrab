@@ -106,9 +106,49 @@ describe('createHostGitRunner', () => {
       'git',
       ['status'],
       expect.objectContaining({
-        cwd: expect.stringMatching(/^\/proc\/self\/fd\/\d+$/),
+        cwd: expect.stringMatching(/^\/(?:proc\/self|dev)\/fd\/\d+$/),
         env: {},
+        detached: true,
         encoding: 'utf8',
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it('points GIT_WORK_TREE at the stable descriptor', async () => {
+    const { execFile, children } = createFakeExecFile();
+    const run = createHostGitRunner({
+      execFile,
+      openStableDirectory,
+      registry,
+    });
+
+    const workspace = path.join(tmp, 'workspace');
+    fs.mkdirSync(workspace);
+
+    const resultPromise = run(['status'], {
+      cwd: workspace,
+      env: { GIT_WORK_TREE: workspace, KEEP_ME: 'yes' },
+      timeoutMs: 60_000,
+      jobId: 'job-1',
+      attemptId: 'attempt-1',
+    });
+
+    await vi.waitFor(() => expect(children).toHaveLength(1));
+    children[0].callback(null, 'ok', '');
+    await resultPromise;
+
+    expect(execFile).toHaveBeenCalledWith(
+      'git',
+      ['status'],
+      expect.objectContaining({
+        cwd: expect.stringMatching(/^\/(?:proc\/self|dev)\/fd\/\d+$/),
+        env: expect.objectContaining({
+          GIT_WORK_TREE: expect.stringMatching(
+            /^\/(?:proc\/self|dev)\/fd\/\d+$/,
+          ),
+          KEEP_ME: 'yes',
+        }),
       }),
       expect.any(Function),
     );
