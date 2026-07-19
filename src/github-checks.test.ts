@@ -327,12 +327,123 @@ describe('fetchGitHubCheckStatus', () => {
     expect(result.status).toBe('success');
     expect(result.requiredChecks).toEqual([]);
     expect(result.checks.every((c) => c.required === null)).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('fails closed when a required context has no check result', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = route(url);
+      if (path.includes('/branches/main/protection')) {
+        return mockResponse({
+          json: { required_status_checks: { contexts: ['ci/missing'] } },
+        });
+      }
+      if (path.includes('/check-runs')) {
+        return mockResponse({ json: { check_runs: [] } });
+      }
+      return mockResponse({ json: { state: 'success', statuses: [] } });
+    });
+
+    const result = await fetchGitHubCheckStatus(
+      'owner',
+      'repo',
+      'abc',
+      'token',
+      { branch: 'main' },
+    );
+
+    expect(result.status).toBe('failure');
+    expect(result.requiredChecks).toContain('ci/missing');
+    expect(result.failedRequired).toContain('ci/missing');
+  });
+
+  it('keeps an old failed required check blocking while marking it stale', async () => {
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = route(url);
+      if (path.includes('/branches/main/protection')) {
+        return mockResponse({
+          json: { required_status_checks: { contexts: ['ci/test'] } },
+        });
+      }
+      if (path.includes('/check-runs')) {
+        return mockResponse({
+          json: {
+            check_runs: [
+              {
+                id: 1,
+                name: 'ci/test',
+                status: 'completed',
+                conclusion: 'failure',
+                completed_at: old,
+              },
+            ],
+          },
+        });
+      }
+      return mockResponse({ json: { state: 'failure', statuses: [] } });
+    });
+
+    const result = await fetchGitHubCheckStatus(
+      'owner',
+      'repo',
+      'abc',
+      'token',
+      { branch: 'main' },
+    );
+
+    expect(result.checks[0]).toMatchObject({ state: 'failure', isStale: true });
+    expect(result.status).toBe('failure');
+  });
+
+  it('loads every page of check runs', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = route(url);
+      if (path.includes('/branches/main/protection')) {
+        return mockResponse({
+          json: { required_status_checks: { contexts: ['second-page'] } },
+        });
+      }
+      if (path.includes('/check-runs')) {
+        const page = new URL(url).searchParams.get('page');
+        return mockResponse({
+          json: {
+            check_runs:
+              page === '2'
+                ? [
+                    {
+                      id: 101,
+                      name: 'second-page',
+                      status: 'completed',
+                      conclusion: 'success',
+                    },
+                  ]
+                : Array.from({ length: 100 }, (_, index) => ({
+                    id: index + 1,
+                    name: `check-${index}`,
+                    status: 'completed',
+                    conclusion: 'success',
+                  })),
+          },
+        });
+      }
+      return mockResponse({ json: { state: 'success', statuses: [] } });
+    });
+
+    const result = await fetchGitHubCheckStatus(
+      'owner',
+      'repo',
+      'abc',
+      'token',
+      { branch: 'main' },
+    );
+
+    expect(result.checks).toHaveLength(101);
+    expect(result.requiredChecks).toContain('second-page');
   });
 
   it('reports unavailable when both check endpoints fail', async () => {
-    fetchMock.mockImplementation(async () =>
-      mockResponse({ status: 500 }),
-    );
+    fetchMock.mockImplementation(async () => mockResponse({ status: 500 }));
 
     const result = await fetchGitHubCheckStatus(
       'owner',

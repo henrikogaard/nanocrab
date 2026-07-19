@@ -180,6 +180,59 @@ describe('buildProductionDiagnostics', () => {
     expect(sandbox?.severity).toBe('required');
   });
 
+  it('does not let a healthy agent probe overwrite failed coding readiness', async () => {
+    const result = await buildProductionDiagnostics(
+      baseOptions({
+        codingReadiness: [
+          {
+            cli: 'codex',
+            executable: 'codex',
+            status: 'error',
+            version: null,
+            checkedAt: new Date().toISOString(),
+            detail: 'Coding sandbox unavailable',
+          } as AgentRuntimeHealth,
+        ],
+        agentRuntimes: [
+          {
+            cli: 'codex',
+            executable: 'codex',
+            status: 'healthy',
+            version: '1',
+            checkedAt: new Date().toISOString(),
+            detail: 'Runtime installed',
+          } as AgentRuntimeHealth,
+        ],
+      }),
+    );
+
+    const runtime = result.sections
+      .find((section) => section.id === 'runtime')
+      ?.checks.find((check) => check.id === 'runtime-codex');
+    expect(runtime?.ok).toBe(false);
+    expect(result.status).toBe('blocked');
+  });
+
+  it('fails closed when required runtime probes throw', async () => {
+    const options = baseOptions();
+    delete options.codingReadiness;
+    delete options.agentRuntimes;
+    options.codingReadinessProbe = async () => {
+      throw new Error('probe unavailable');
+    };
+    options.agentRuntimeProbe = async () => {
+      throw new Error('probe unavailable');
+    };
+
+    const result = await buildProductionDiagnostics(options);
+
+    expect(result.status).toBe('blocked');
+    expect(result.summary.failedRequired).toBeGreaterThanOrEqual(2);
+    expect(
+      result.sections.find((section) => section.id === 'diagnostic-load'),
+    ).toBeDefined();
+  });
+
   it('flags stale jobs older than the threshold', async () => {
     const staleAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     const job: CodingJob = {

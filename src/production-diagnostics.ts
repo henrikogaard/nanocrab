@@ -66,16 +66,12 @@ export interface ProductionDiagnosticsOptions {
   codingJobs?: CodingJob[];
   inferenceHealth?: ReturnType<typeof buildInferenceHealth>;
   githubConnectorInput?: GitHubConnectorHealthInput;
+  codingReadinessProbe?: typeof probeAllCodingRunnerReadiness;
+  agentRuntimeProbe?: typeof probeAllAgentRuntimes;
 }
 
-const GITHUB_WEBHOOK_CONFIG_PATH = path.join(
-  STORE_DIR,
-  'webhook-config.json',
-);
-const GITHUB_WEBHOOK_EVENTS_PATH = path.join(
-  STORE_DIR,
-  'webhook-events.jsonl',
-);
+const GITHUB_WEBHOOK_CONFIG_PATH = path.join(STORE_DIR, 'webhook-config.json');
+const GITHUB_WEBHOOK_EVENTS_PATH = path.join(STORE_DIR, 'webhook-events.jsonl');
 
 function redactSensitive(value: string): string {
   if (!value) return value;
@@ -94,7 +90,9 @@ function redactSensitive(value: string): string {
   );
 }
 
-function summarize(sections: DiagnosticSection[]): ProductionDiagnosticsResult['summary'] {
+function summarize(
+  sections: DiagnosticSection[],
+): ProductionDiagnosticsResult['summary'] {
   const checks = sections.flatMap((section) => section.checks);
   return {
     total: checks.length,
@@ -133,7 +131,9 @@ function loadWebhookEvents(limit = 20): GitHubConnectorHealthInput['events'] {
       .slice(-limit)
       .map((line) => {
         try {
-          return JSON.parse(line) as GitHubConnectorHealthInput['events'][number];
+          return JSON.parse(
+            line,
+          ) as GitHubConnectorHealthInput['events'][number];
         } catch {
           return null;
         }
@@ -149,17 +149,18 @@ function buildGitHubConnectorInput(
 ): GitHubConnectorHealthInput {
   const env = readEnvFile(['GITHUB_TOKEN', 'GITHUB_WEBHOOK_SECRET']);
   const token = !!(process.env.GITHUB_TOKEN || env.GITHUB_TOKEN);
+  const config = loadWebhookConfig();
   const webhookSecret = !!(
     process.env.GITHUB_WEBHOOK_SECRET ||
-    env.GITHUB_WEBHOOK_SECRET
+    env.GITHUB_WEBHOOK_SECRET ||
+    config.secret
   );
-  const config = loadWebhookConfig();
   const events = loadWebhookEvents();
 
   let targetGroupExists = false;
   if (state) {
-    targetGroupExists = Object.keys(state.registeredGroups()).some(
-      (jid) => jid === config.targetJid,
+    targetGroupExists = Object.entries(state.registeredGroups()).some(
+      ([jid, group]) => jid === config.targetJid && group.enabled !== false,
     );
   }
 
@@ -173,7 +174,9 @@ function buildGitHubConnectorInput(
   };
 }
 
-function runtimeSeverity(status: AgentRuntimeHealth['status']): DiagnosticSeverity {
+function runtimeSeverity(
+  status: AgentRuntimeHealth['status'],
+): DiagnosticSeverity {
   if (status === 'error' || status === 'missing') return 'required';
   return 'advisory';
 }
@@ -184,7 +187,11 @@ function buildRuntimeSection(
 ): DiagnosticSection {
   const byCli = new Map<string, AgentRuntimeHealth>();
   for (const health of [...codingReadiness, ...agentRuntimes]) {
-    if (!byCli.has(health.cli) || byCli.get(health.cli)?.status !== 'healthy') {
+    const existing = byCli.get(health.cli);
+    if (
+      !existing ||
+      (existing.status === 'healthy' && health.status !== 'healthy')
+    ) {
       byCli.set(health.cli, health);
     }
   }
@@ -199,11 +206,13 @@ function buildRuntimeSection(
     let hint: string | undefined;
     if (health.status !== 'healthy') {
       if (health.detail?.toLowerCase().includes('sandbox')) {
-        hint = 'Verify the host sandbox executable and that the container image is available';
+        hint =
+          'Verify the host sandbox executable and that the container image is available';
       } else if (health.status === 'missing') {
         hint = `Install or configure the ${cli} CLI before using it for coding jobs`;
       } else {
-        hint = 'Review the runtime status in Settings > Providers or agent profiles';
+        hint =
+          'Review the runtime status in Settings > Providers or agent profiles';
       }
     }
     checks.push({
@@ -226,8 +235,7 @@ function buildQueueSection(queue: GroupQueue): DiagnosticSection {
       id: 'queue-capacity',
       label: 'Queue capacity',
       ok:
-        diag.activeCount < MAX_CONCURRENT_CONTAINERS &&
-        diag.waitingCount === 0,
+        diag.activeCount < MAX_CONCURRENT_CONTAINERS && diag.waitingCount === 0,
       severity: diag.waitingCount > 0 ? 'required' : 'advisory',
       detail:
         diag.activeCount < MAX_CONCURRENT_CONTAINERS
@@ -288,8 +296,7 @@ function buildStaleJobsSection(
 
   for (const job of jobs) {
     if (terminal.has(job.status)) continue;
-    const lastTransition =
-      job.transitionedAt[job.status] || job.createdAt;
+    const lastTransition = job.transitionedAt[job.status] || job.createdAt;
     const lastAt = Date.parse(lastTransition);
     if (Number.isNaN(lastAt)) continue;
     const elapsedMs = now.getTime() - lastAt;
@@ -335,7 +342,8 @@ function buildSandboxSection(
       label: 'Sandbox readiness',
       ok: true,
       severity: 'required',
-      detail: 'Sandbox credential handoff and image checks passed where applicable',
+      detail:
+        'Sandbox credential handoff and image checks passed where applicable',
     });
   } else {
     for (const health of sandboxProblems) {
@@ -392,11 +400,12 @@ function buildConnectorsSection(
       ok: item.ok,
       severity: 'advisory',
       detail: `${item.status} (${item.provider}/${item.model}, ${item.locality})${item.failedChecks.length > 0 ? ` — ${item.failedChecks.join(', ')}` : ''}`,
-      hint: item.status === 'unconfigured'
-        ? 'Configure the provider API key or base URL'
-        : item.status === 'stale'
-          ? 'Re-run the provider probe to refresh the status'
-          : undefined,
+      hint:
+        item.status === 'unconfigured'
+          ? 'Configure the provider API key or base URL'
+          : item.status === 'stale'
+            ? 'Re-run the provider probe to refresh the status'
+            : undefined,
       stale: item.status === 'stale',
     });
   }
@@ -447,14 +456,10 @@ export function formatDiagnosticsSummary(
     `Checks: ${result.summary.passed}/${result.summary.total} passed`,
   ];
   if (result.summary.failedRequired > 0) {
-    lines.push(
-      `Required failures: ${result.summary.failedRequired}`,
-    );
+    lines.push(`Required failures: ${result.summary.failedRequired}`);
   }
   if (result.summary.failedAdvisory > 0) {
-    lines.push(
-      `Advisory failures: ${result.summary.failedAdvisory}`,
-    );
+    lines.push(`Advisory failures: ${result.summary.failedAdvisory}`);
   }
   if (result.stale) {
     lines.push('Stale data detected; some signals may be out of date.');
@@ -494,7 +499,8 @@ export async function buildProductionDiagnostics(
   let codingReadiness: AgentRuntimeHealth[];
   try {
     codingReadiness =
-      options.codingReadiness ?? (await probeAllCodingRunnerReadiness());
+      options.codingReadiness ??
+      (await (options.codingReadinessProbe ?? probeAllCodingRunnerReadiness)());
   } catch (_err) {
     loadIssues.push('Could not probe coding runner readiness');
     codingReadiness = [];
@@ -503,7 +509,8 @@ export async function buildProductionDiagnostics(
   let agentRuntimes: AgentRuntimeHealth[];
   try {
     agentRuntimes =
-      options.agentRuntimes ?? (await probeAllAgentRuntimes());
+      options.agentRuntimes ??
+      (await (options.agentRuntimeProbe ?? probeAllAgentRuntimes)());
   } catch (_err) {
     loadIssues.push('Could not probe agent runtimes');
     agentRuntimes = [];
@@ -517,13 +524,27 @@ export async function buildProductionDiagnostics(
     jobs = [];
   }
 
-  const inference =
-    options.inferenceHealth ?? buildInferenceHealth();
+  const inference = options.inferenceHealth ?? buildInferenceHealth();
 
   const githubConnectorInput =
     options.githubConnectorInput ?? buildGitHubConnectorInput(state);
 
   const sections: DiagnosticSection[] = [];
+
+  if (loadIssues.length > 0) {
+    sections.push({
+      id: 'diagnostic-load',
+      title: 'Diagnostic probes',
+      checks: loadIssues.map((issue, index) => ({
+        id: `diagnostic-load-${index}`,
+        label: 'Required diagnostic probe',
+        ok: false,
+        severity: 'required',
+        detail: issue,
+        hint: 'Retry diagnostics and inspect service logs before declaring readiness',
+      })),
+    });
+  }
 
   sections.push(buildRuntimeSection(codingReadiness, agentRuntimes));
 
@@ -540,7 +561,8 @@ export async function buildProductionDiagnostics(
           label: 'Queue state',
           ok: false,
           severity: 'advisory',
-          detail: 'Queue diagnostics are unavailable because NanoCrab state is not initialized',
+          detail:
+            'Queue diagnostics are unavailable because NanoCrab state is not initialized',
         },
       ],
     });
@@ -559,9 +581,7 @@ export async function buildProductionDiagnostics(
   sections.push(buildConnectorsSection(githubConnectorInput, inference));
 
   if (state?.channels) {
-    sections.push(
-      buildChannelsSection(state.channels, state.registeredGroups),
-    );
+    sections.push(buildChannelsSection(state.channels, state.registeredGroups));
   }
 
   const summary = summarize(sections);

@@ -7,10 +7,8 @@ import { logger } from '../../logger.js';
 const router = Router();
 
 router.get('/checks', async (req: Request, res: Response) => {
-  const owner =
-    typeof req.query.owner === 'string' ? req.query.owner : '';
-  const repo =
-    typeof req.query.repo === 'string' ? req.query.repo : '';
+  const owner = typeof req.query.owner === 'string' ? req.query.owner : '';
+  const repo = typeof req.query.repo === 'string' ? req.query.repo : '';
   const ref =
     (typeof req.query.ref === 'string' ? req.query.ref : '') ||
     (typeof req.query.branch === 'string' ? req.query.branch : '');
@@ -52,10 +50,7 @@ router.get('/checks', async (req: Request, res: Response) => {
     }
     res.json(result);
   } catch (err) {
-    logger.error(
-      { err, owner, repo, ref },
-      'GitHub check status route failed',
-    );
+    logger.error({ err, owner, repo, ref }, 'GitHub check status route failed');
     res.status(500).json({ error: 'Could not retrieve GitHub check status' });
   }
 });

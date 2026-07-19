@@ -456,19 +456,23 @@ router.get('/release-diagnostics', requireRole('owner'), async (_req, res) => {
   }
 });
 
-router.get('/diagnostics', requireRole('owner'), async (req: Request, res: Response) => {
-  try {
-    const result = await buildProductionDiagnostics();
-    if (req.query.format === 'text') {
-      res.type('text/plain').send(formatDiagnosticsSummary(result));
-      return;
+router.get(
+  '/diagnostics',
+  requireRole('owner'),
+  async (req: Request, res: Response) => {
+    try {
+      const result = await buildProductionDiagnostics();
+      if (req.query.format === 'text') {
+        res.type('text/plain').send(formatDiagnosticsSummary(result));
+        return;
+      }
+      res.json(result);
+    } catch (err) {
+      logger.error({ err }, 'Production diagnostics failed');
+      res.status(500).json({ error: 'Production diagnostics failed' });
     }
-    res.json(result);
-  } catch (err) {
-    logger.error({ err }, 'Production diagnostics failed');
-    res.status(500).json({ error: 'Production diagnostics failed' });
-  }
-});
+  },
+);
 
 // Usage stats
 router.get('/stats', (_req: Request, res: Response) => {

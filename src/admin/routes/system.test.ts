@@ -163,7 +163,12 @@ describe('system routes', () => {
       const port = (server.address() as AddressInfo).port;
       const status = await new Promise<number>((resolve, reject) => {
         const req = http.request(
-          { hostname: '127.0.0.1', port, path: '/system/diagnostics', method: 'GET' },
+          {
+            hostname: '127.0.0.1',
+            port,
+            path: '/system/diagnostics',
+            method: 'GET',
+          },
           (res) => {
             res.resume();
             res.on('end', () => resolve(res.statusCode || 0));
@@ -179,7 +184,9 @@ describe('system routes', () => {
   });
 
   it('returns production diagnostics as plain text when requested', async () => {
-    vi.mocked(formatDiagnosticsSummary).mockReturnValue('NanoCrab diagnostics summary');
+    vi.mocked(formatDiagnosticsSummary).mockReturnValue(
+      'NanoCrab diagnostics summary',
+    );
     vi.mocked(buildProductionDiagnostics).mockResolvedValue({
       status: 'attention',
       generatedAt: new Date().toISOString(),
@@ -197,7 +204,12 @@ describe('system routes', () => {
       const port = (server.address() as AddressInfo).port;
       const text = await new Promise<string>((resolve, reject) => {
         const req = http.request(
-          { hostname: '127.0.0.1', port, path: '/system/diagnostics?format=text', method: 'GET' },
+          {
+            hostname: '127.0.0.1',
+            port,
+            path: '/system/diagnostics?format=text',
+            method: 'GET',
+          },
           (res) => {
             const chunks: Buffer[] = [];
             res.on('data', (chunk) => chunks.push(chunk));

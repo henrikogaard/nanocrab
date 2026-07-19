@@ -107,7 +107,10 @@ function isSha(ref: string): boolean {
   return /^[0-9a-f]{40}$/i.test(ref);
 }
 
-function resolveBranchName(ref: string, explicitBranch?: string): string | null {
+function resolveBranchName(
+  ref: string,
+  explicitBranch?: string,
+): string | null {
   if (explicitBranch) return explicitBranch;
   const headMatch = ref.match(/^refs\/heads\/(.+)$/);
   if (headMatch) return headMatch[1];
@@ -193,9 +196,7 @@ function isFailingState(state: GitHubCheckState): boolean {
 }
 
 function isPassingState(state: GitHubCheckState): boolean {
-  return (
-    state === 'success' || state === 'skipped' || state === 'neutral'
-  );
+  return state === 'success' || state === 'skipped' || state === 'neutral';
 }
 
 function redactUrl(url: string | null | undefined): string | null {
@@ -232,7 +233,16 @@ async function fetchGitHubJson(
   url: string,
   token: string,
   signal: AbortSignal,
-): Promise<{ ok: true; response: Response; json: unknown } | { ok: false; response: Response; error: string; rateLimited: boolean; retryAfter: number | null }> {
+): Promise<
+  | { ok: true; response: Response; json: unknown }
+  | {
+      ok: false;
+      response: Response;
+      error: string;
+      rateLimited: boolean;
+      retryAfter: number | null;
+    }
+> {
   try {
     const response = await fetch(url, {
       signal,
@@ -292,7 +302,10 @@ async function fetchGitHubJson(
       retryAfter: null,
     };
   } catch (err: unknown) {
-    logger.warn({ url, err: err instanceof Error ? err.message : String(err) }, 'GitHub API fetch failed');
+    logger.warn(
+      { url, err: err instanceof Error ? err.message : String(err) },
+      'GitHub API fetch failed',
+    );
     return {
       ok: false,
       response: null as unknown as Response,
@@ -301,6 +314,35 @@ async function fetchGitHubJson(
       retryAfter: null,
     };
   }
+}
+
+async function fetchGitHubCheckRuns(
+  url: string,
+  token: string,
+  signal: AbortSignal,
+): Promise<Awaited<ReturnType<typeof fetchGitHubJson>>> {
+  const checkRuns: GitHubCheckRunApiItem[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const pageUrl = new URL(url);
+    pageUrl.searchParams.set('page', String(page));
+    const outcome = await fetchGitHubJson(pageUrl.toString(), token, signal);
+    if (!outcome.ok) return outcome;
+    const payload = outcome.json as { check_runs?: GitHubCheckRunApiItem[] };
+    const pageRuns = Array.isArray(payload.check_runs)
+      ? payload.check_runs
+      : [];
+    checkRuns.push(...pageRuns);
+    if (pageRuns.length < 100) {
+      return { ...outcome, json: { check_runs: checkRuns } };
+    }
+  }
+  return {
+    ok: false,
+    response: null as unknown as Response,
+    error: 'GitHub check run pagination limit exceeded',
+    rateLimited: false,
+    retryAfter: null,
+  };
 }
 
 function extractRequiredContexts(
@@ -377,17 +419,14 @@ function buildFailureSummary(
   failedOptional: string[],
   checks: GitHubCheck[],
 ): string | undefined {
-  if (failedRequired.length === 0 && failedOptional.length === 0) return undefined;
+  if (failedRequired.length === 0 && failedOptional.length === 0)
+    return undefined;
   const summaryParts: string[] = [];
   if (failedRequired.length > 0) {
-    summaryParts.push(
-      `Required checks failed: ${failedRequired.join(', ')}`,
-    );
+    summaryParts.push(`Required checks failed: ${failedRequired.join(', ')}`);
   }
   if (failedOptional.length > 0) {
-    summaryParts.push(
-      `Optional checks failed: ${failedOptional.join(', ')}`,
-    );
+    summaryParts.push(`Optional checks failed: ${failedOptional.join(', ')}`);
   }
   for (const name of [...failedRequired, ...failedOptional].slice(0, 3)) {
     const check = checks.find((c) => c.name === name);
@@ -457,9 +496,7 @@ export async function fetchGitHubCheckStatus(
   }
 
   const branch = resolveBranchName(ref, options.branch);
-  const signal = AbortSignal.timeout(
-    options.timeoutMs ?? REQUEST_TIMEOUT_MS,
-  );
+  const signal = AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS);
 
   const checkRunsUrl = apiUrl(
     `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(ref)}/check-runs?per_page=100`,
@@ -473,16 +510,17 @@ export async function fetchGitHubCheckStatus(
       )
     : null;
 
-  const [checkRunsResult, statusResult, protectionResult] = await Promise.allSettled([
-    fetchGitHubJson(checkRunsUrl, token, signal),
-    fetchGitHubJson(statusUrl, token, signal),
-    protectionUrl ? fetchGitHubJson(protectionUrl, token, signal) : Promise.resolve(null),
-  ]);
+  const [checkRunsResult, statusResult, protectionResult] =
+    await Promise.allSettled([
+      fetchGitHubCheckRuns(checkRunsUrl, token, signal),
+      fetchGitHubJson(statusUrl, token, signal),
+      protectionUrl
+        ? fetchGitHubJson(protectionUrl, token, signal)
+        : Promise.resolve(null),
+    ]);
 
   const checkRunsOutcome =
-    checkRunsResult.status === 'fulfilled'
-      ? checkRunsResult.value
-      : null;
+    checkRunsResult.status === 'fulfilled' ? checkRunsResult.value : null;
   const statusOutcome =
     statusResult.status === 'fulfilled' ? statusResult.value : null;
   const protectionOutcome =
@@ -491,19 +529,33 @@ export async function fetchGitHubCheckStatus(
       : null;
 
   const errors: string[] = [];
+  const primaryErrors: string[] = [];
   let rateLimited = false;
   let retryAfter: number | null = null;
-  for (const outcome of [checkRunsOutcome, statusOutcome, protectionOutcome]) {
+  for (const outcome of [checkRunsOutcome, statusOutcome]) {
     if (!outcome || outcome.ok) continue;
     errors.push(outcome.error);
+    primaryErrors.push(outcome.error);
     if (outcome.rateLimited) rateLimited = true;
     if (outcome.retryAfter != null && retryAfter == null) {
       retryAfter = outcome.retryAfter;
     }
   }
+  if (protectionOutcome && !protectionOutcome.ok) {
+    const optionalUnavailable =
+      protectionOutcome.response?.status === 403 ||
+      protectionOutcome.response?.status === 404;
+    if (!optionalUnavailable || protectionOutcome.rateLimited) {
+      errors.push(protectionOutcome.error);
+    }
+    if (protectionOutcome.rateLimited) rateLimited = true;
+    if (protectionOutcome.retryAfter != null && retryAfter == null) {
+      retryAfter = protectionOutcome.retryAfter;
+    }
+  }
 
   let permission: GitHubCheckPermission = 'checks-only';
-  if (rateLimited || errors.length >= 2) {
+  if (rateLimited || primaryErrors.length >= 2) {
     // If both check APIs failed, we have no useful permission.
     permission = 'none';
   } else if (protectionOutcome && protectionOutcome.ok) {
@@ -512,7 +564,8 @@ export async function fetchGitHubCheckStatus(
 
   let protectionData: GitHubBranchProtectionApiItem | null = null;
   if (protectionOutcome && protectionOutcome.ok) {
-    protectionData = (protectionOutcome.json as GitHubBranchProtectionApiItem) || null;
+    protectionData =
+      (protectionOutcome.json as GitHubBranchProtectionApiItem) || null;
   }
 
   const required = extractRequiredContexts(protectionData);
@@ -520,7 +573,9 @@ export async function fetchGitHubCheckStatus(
   const rawChecks: RawCheck[] = [];
 
   if (checkRunsOutcome && checkRunsOutcome.ok) {
-    const payload = checkRunsOutcome.json as { check_runs?: GitHubCheckRunApiItem[] };
+    const payload = checkRunsOutcome.json as {
+      check_runs?: GitHubCheckRunApiItem[];
+    };
     for (const run of payload.check_runs || []) {
       rawChecks.push(buildCheckFromRun(run));
     }
@@ -551,7 +606,7 @@ export async function fetchGitHubCheckStatus(
       required: requiredValue,
       status: raw.status,
       conclusion: raw.conclusion,
-      state: isStale ? 'stale' : state,
+      state: isStale && !isFailingState(state) ? 'stale' : state,
       detailsUrl: raw.detailsUrl,
       outputTitle: raw.outputTitle,
       outputSummary: raw.outputSummary,
@@ -561,6 +616,30 @@ export async function fetchGitHubCheckStatus(
       isStale,
     };
   });
+
+  if (required.known) {
+    const observed = new Set(checks.map((check) => check.name));
+    for (const requiredName of required.contexts) {
+      if (observed.has(requiredName)) continue;
+      checks.push({
+        id: 0,
+        name: requiredName,
+        suite: null,
+        suiteId: null,
+        required: true,
+        status: 'missing',
+        conclusion: null,
+        state: 'failure',
+        detailsUrl: null,
+        outputTitle: 'Required check has not reported a result',
+        outputSummary: null,
+        startedAt: null,
+        completedAt: null,
+        updatedAt: null,
+        isStale: false,
+      });
+    }
+  }
 
   const suiteMap = new Map<number, GitHubCheckSuiteSummary>();
   for (const check of checks) {
@@ -588,7 +667,9 @@ export async function fetchGitHubCheckStatus(
     .map((c) => c.name);
   const failedOptional = checks
     .filter(
-      (c) => (c.required === false || c.required === null) && isFailingState(c.state),
+      (c) =>
+        (c.required === false || c.required === null) &&
+        isFailingState(c.state),
     )
     .map((c) => c.name);
 
@@ -606,7 +687,10 @@ export async function fetchGitHubCheckStatus(
     status = 'stale';
   } else if (checks.some((c) => c.state === 'pending')) {
     status = 'pending';
-  } else if (checks.length > 0 && checks.every((c) => isPassingState(c.state))) {
+  } else if (
+    checks.length > 0 &&
+    checks.every((c) => isPassingState(c.state))
+  ) {
     status = 'success';
   } else if (errors.length > 0) {
     status = 'unknown';
