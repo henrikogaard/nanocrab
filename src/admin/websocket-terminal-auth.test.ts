@@ -15,6 +15,7 @@ const TEST_DIR = vi.hoisted(() =>
 
 vi.mock('../config.js', () => ({
   SESSIONS_DIR: TEST_DIR,
+  DATA_DIR: TEST_DIR + '/data',
   TERMINAL_IDLE_TIMEOUT_MS: 7200000,
   MAX_SESSION_LOG_BYTES: 1024 * 1024,
   MAX_SESSION_RETENTION_DAYS: 90,

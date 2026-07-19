@@ -7,6 +7,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 
 import { logger } from '../logger.js';
 import {
@@ -23,11 +24,14 @@ import {
   MAX_SESSIONS_COUNT,
   SESSION_PRUNE_INTERVAL_MS,
 } from '../config.js';
+import { redactTerminalTranscript } from '../terminal-transcripts.js';
 
 interface WsMessage {
   type: string;
   data: unknown;
   sessionId?: string;
+  sessionToken?: string;
+  group?: string;
 }
 
 let wss: WebSocketServer | null = null;
@@ -48,6 +52,8 @@ const terminals = new Map<
     name: string;
     idleTimer: ReturnType<typeof setTimeout>;
     owner: string;
+    sessionToken: string;
+    group: string;
   }
 >();
 const MAX_TERMINALS = 3;
@@ -60,12 +66,14 @@ interface SessionMetadata {
   id: string;
   name: string;
   owner?: string;
+  group?: string;
+  sessionToken?: string;
   createdAt: string;
   endedAt: string | null;
   bytes: number;
 }
 
-type TerminalOperation = 'spawn' | 'attach' | 'input' | 'close';
+type TerminalOperation = 'spawn' | 'attach' | 'input' | 'close' | 'reconnect';
 
 function terminalSessionOwner(sessionId: string): string | undefined {
   return (
@@ -198,6 +206,10 @@ function saveSessionIndex(index: SessionMetadata[]): void {
   fs.writeFileSync(INDEX_PATH, JSON.stringify(index, null, 2));
 }
 
+function generateSessionToken(): string {
+  return crypto.randomBytes(24).toString('hex');
+}
+
 export function isSafeTerminalSessionId(sessionId: string): boolean {
   return SAFE_SESSION_ID.test(sessionId);
 }
@@ -207,7 +219,12 @@ function sessionLogPath(sessionId: string): string | null {
   return path.join(SESSIONS_DIR, `${sessionId}.log`);
 }
 
-export function createSessionFile(sessionId: string, owner = 'owner'): boolean {
+export function createSessionFile(
+  sessionId: string,
+  owner = 'owner',
+  group?: string,
+  sessionToken?: string,
+): boolean {
   if (!isSafeTerminalSessionId(sessionId)) return false;
   const index = loadSessionIndex();
   if (index.some((entry) => entry.id === sessionId)) return false;
@@ -215,6 +232,8 @@ export function createSessionFile(sessionId: string, owner = 'owner'): boolean {
     id: sessionId,
     name: sessionId,
     owner,
+    group: group || owner,
+    sessionToken: sessionToken || generateSessionToken(),
     createdAt: new Date().toISOString(),
     endedAt: null,
     bytes: 0,
@@ -225,6 +244,10 @@ export function createSessionFile(sessionId: string, owner = 'owner'): boolean {
 
 // Sessions whose log has hit the byte cap — used to warn only once per session.
 const maxSizeWarned = new Set<string>();
+
+export function redactTerminalOutput(data: string): string {
+  return redactTerminalTranscript(data);
+}
 
 // Truncate a UTF-8 buffer to at most maxBytes without splitting a multi-byte
 // codepoint (which would write an invalid byte sequence to the log file).
@@ -269,6 +292,7 @@ export function getTerminalSessionAttachment(
 
 export function appendToSessionLog(sessionId: string, data: string): void {
   if (!data) return;
+  const redacted = redactTerminalOutput(data);
   const logPath = sessionLogPath(sessionId);
   if (!logPath) return;
   try {
@@ -288,7 +312,7 @@ export function appendToSessionLog(sessionId: string, data: string): void {
         return;
       }
       const remaining = MAX_SESSION_LOG_BYTES - stat.size;
-      const buf = Buffer.from(data, 'utf-8');
+      const buf = Buffer.from(redacted, 'utf-8');
       if (buf.length > remaining) {
         fs.appendFileSync(logPath, safeUtf8Slice(buf, remaining));
         if (!maxSizeWarned.has(sessionId)) {
@@ -301,7 +325,7 @@ export function appendToSessionLog(sessionId: string, data: string): void {
         return;
       }
     }
-    fs.appendFileSync(logPath, data, 'utf-8');
+    fs.appendFileSync(logPath, redacted, 'utf-8');
   } catch (err) {
     logger.warn({ err, sessionId }, 'Failed to append to session log');
   }
@@ -520,6 +544,48 @@ export function initWebSocket(server: HttpServer): void {
             }
           }
         }
+        if (msg.type === 'terminal_reconnect' && msg.sessionId) {
+          const sid = msg.sessionId as string;
+          if (!authorizeTerminalOperation(ws, wsUser, 'reconnect', sid)) {
+            return;
+          }
+          const term = terminals.get(sid);
+          if (!term) {
+            send(ws, {
+              type: 'terminal_attach_result',
+              data: { status: 'not-found', readOnly: false },
+              sessionId: sid,
+            });
+            return;
+          }
+          const providedToken =
+            typeof msg.sessionToken === 'string' ? msg.sessionToken : '';
+          const expected = Buffer.from(term.sessionToken);
+          const provided = Buffer.from(providedToken);
+          const tokenMatches =
+            expected.length === provided.length &&
+            crypto.timingSafeEqual(expected, provided);
+          if (!tokenMatches) {
+            denyTerminalOperation(
+              ws,
+              'reconnect',
+              sid,
+              'Invalid or missing terminal session token.',
+            );
+            return;
+          }
+          term.clients.add(ws);
+          send(ws, {
+            type: 'terminal_attach_result',
+            data: { status: 'active', readOnly: false },
+            sessionId: sid,
+          });
+          send(ws, {
+            type: 'terminal_output',
+            data: term.transcript.slice(-50000),
+            sessionId: sid,
+          });
+        }
         if (msg.type === 'terminal_close' && msg.sessionId) {
           if (authorizeTerminalOperation(ws, wsUser, 'close', msg.sessionId)) {
             closeTerminalSession(msg.sessionId);
@@ -674,7 +740,9 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
     cwd: process.cwd(),
   });
 
-  createSessionFile(sessionId, owner);
+  const sessionToken = generateSessionToken();
+  const group = owner;
+  createSessionFile(sessionId, owner, group, sessionToken);
   appendToSessionLog(
     sessionId,
     `[Session started at ${new Date().toISOString()}]\r\n`,
@@ -697,6 +765,16 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
     name: sessionId,
     idleTimer,
     owner,
+    sessionToken,
+    group,
+  });
+
+  // Hand the reconnect token to the spawning client only; it is never
+  // broadcast or included in session listings.
+  send(ws, {
+    type: 'terminal_session',
+    sessionId,
+    data: { sessionToken },
   });
 
   proc.stdout?.on('data', (data: Buffer) => {
