@@ -172,6 +172,34 @@ describe('process lease registry', () => {
     expect(signalGroup).toHaveBeenCalledTimes(1);
   });
 
+  it('terminates every active lease for a job', () => {
+    const signalGroup = vi.fn();
+    const registry = createProcessRegistry({
+      randomToken: vi.fn().mockReturnValueOnce('a').mockReturnValueOnce('b'),
+      signalGroup,
+    });
+    const processA = createProcess(101);
+    const processB = createProcess(202);
+    registry.register({
+      jobId: 'job',
+      attemptId: 'attempt-a',
+      process: processA,
+    });
+    registry.register({
+      jobId: 'job',
+      attemptId: 'attempt-b',
+      process: processB,
+    });
+
+    expect(registry.terminateAll('job', 'cancelled')).toBe(true);
+    expect(signalGroup).toHaveBeenCalledWith(-101, 'SIGTERM');
+    expect(signalGroup).toHaveBeenCalledWith(-202, 'SIGTERM');
+
+    vi.advanceTimersByTime(5_000);
+    expect(signalGroup).toHaveBeenCalledWith(-101, 'SIGKILL');
+    expect(signalGroup).toHaveBeenCalledWith(-202, 'SIGKILL');
+  });
+
   it('uses only the captured process kill method when no pid is available', () => {
     const signalGroup = vi.fn();
     const registry = createProcessRegistry({
