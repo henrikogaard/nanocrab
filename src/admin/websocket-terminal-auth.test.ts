@@ -15,6 +15,7 @@ const TEST_DIR = vi.hoisted(() =>
 
 vi.mock('../config.js', () => ({
   SESSIONS_DIR: TEST_DIR,
+  DATA_DIR: TEST_DIR + '/data',
   TERMINAL_IDLE_TIMEOUT_MS: 7200000,
   MAX_SESSION_LOG_BYTES: 1024 * 1024,
   MAX_SESSION_RETENTION_DAYS: 90,
@@ -22,7 +23,8 @@ vi.mock('../config.js', () => ({
   SESSION_PRUNE_INTERVAL_MS: 3600000,
 }));
 
-vi.mock('../logger.js', () => ({
+vi.mock('../logger.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../logger.js')>()),
   logger: {
     info: vi.fn(),
     debug: vi.fn(),
@@ -185,5 +187,43 @@ describe('terminal websocket authorization', () => {
       data: { status: 'historical', readOnly: true },
     });
     expect(JSON.stringify(messages)).toContain('private transcript');
+  });
+
+  it('requires the reconnect capability to attach to an active terminal', async () => {
+    const spawning = await connect(port, 'owner-alice');
+    clients.push(spawning);
+    const spawned = await collectAfter(spawning, [
+      { type: 'terminal_spawn', data: 'active-capability' },
+    ]);
+    const token = (
+      spawned.find((message) => message.type === 'terminal_session')?.data as {
+        sessionToken: string;
+      }
+    ).sessionToken;
+
+    const attaching = await connect(port, 'owner-alice');
+    clients.push(attaching);
+    const denied = await collectAfter(attaching, [
+      { type: 'terminal_attach', sessionId: 'active-capability' },
+    ]);
+    expect(denied).toContainEqual(
+      expect.objectContaining({
+        type: 'terminal_denied',
+        data: expect.objectContaining({ operation: 'attach' }),
+      }),
+    );
+
+    const allowed = await collectAfter(attaching, [
+      {
+        type: 'terminal_attach',
+        sessionId: 'active-capability',
+        sessionToken: token,
+      },
+    ]);
+    expect(allowed).toContainEqual({
+      type: 'terminal_attach_result',
+      sessionId: 'active-capability',
+      data: { status: 'active', readOnly: false },
+    });
   });
 });

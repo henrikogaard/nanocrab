@@ -11,6 +11,7 @@ vi.mock('./config.js', () => ({
 import {
   appendTerminalTranscript,
   listTerminalTranscriptSummaries,
+  redactTerminalTranscript,
   searchTerminalTranscripts,
 } from './terminal-transcripts.js';
 
@@ -55,5 +56,64 @@ describe('terminal transcripts', () => {
     expect(() => searchTerminalTranscripts({ query: '  ' })).toThrow(
       'terminal transcript query is required',
     );
+  });
+
+  it('redacts credential material from transcript data', () => {
+    expect(
+      redactTerminalTranscript('Authorization: Bearer sk-live-abc123'),
+    ).toBe('Authorization: Bearer ***');
+    expect(
+      redactTerminalTranscript('export API_KEY=super-secret-value'),
+    ).not.toContain('super-secret-value');
+    expect(
+      redactTerminalTranscript('{"password": "hunter2", "user": "henrik"}'),
+    ).not.toContain('hunter2');
+    expect(redactTerminalTranscript('plain build output')).toBe(
+      'plain build output',
+    );
+    expect(redactTerminalTranscript('Cookie: sid=private-value')).not.toContain(
+      'private-value',
+    );
+    expect(redactTerminalTranscript('using sk-live-standalone')).not.toContain(
+      'sk-live-standalone',
+    );
+  });
+
+  it('persists redacted data when appending transcripts', () => {
+    appendTerminalTranscript({
+      sessionId: 'term-secret',
+      owner: 'henrik',
+      type: 'output',
+      data: 'token=abc123def deploy done',
+      timestamp: '2026-06-10T00:00:00.000Z',
+    });
+    const matches = searchTerminalTranscripts({ query: 'deploy' });
+    expect(matches).toHaveLength(1);
+    expect(matches[0]!.snippet).not.toContain('abc123def');
+  });
+
+  it('keeps identical session ids in different groups separate', () => {
+    appendTerminalTranscript({
+      sessionId: 'shared',
+      owner: 'henrik',
+      group: 'main',
+      type: 'output',
+      data: 'main transcript',
+    });
+    appendTerminalTranscript({
+      sessionId: 'shared',
+      owner: 'henrik',
+      group: 'operations',
+      type: 'output',
+      data: 'operations transcript',
+    });
+
+    expect(listTerminalTranscriptSummaries()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sessionId: 'shared', group: 'main' }),
+        expect.objectContaining({ sessionId: 'shared', group: 'operations' }),
+      ]),
+    );
+    expect(searchTerminalTranscripts({ query: 'transcript' })).toHaveLength(2);
   });
 });

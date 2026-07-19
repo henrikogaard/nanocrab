@@ -13,13 +13,15 @@ const TEST_DIR = vi.hoisted(
 
 vi.mock('../config.js', () => ({
   SESSIONS_DIR: TEST_DIR,
+  DATA_DIR: TEST_DIR + '/data',
   TERMINAL_IDLE_TIMEOUT_MS: 7200000,
   MAX_SESSION_LOG_BYTES: 1024,
   MAX_SESSION_RETENTION_DAYS: 90,
   MAX_SESSIONS_COUNT: 100,
 }));
 
-vi.mock('../logger.js', () => ({
+vi.mock('../logger.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../logger.js')>()),
   logger: {
     info: vi.fn(),
     debug: vi.fn(),
@@ -65,6 +67,37 @@ describe('file-backed terminal sessions', () => {
     expect(index[0].id).toBe('term-test-1');
     expect(index[0].owner).toBe('alice');
     expect(index[0].endedAt).toBeNull();
+  });
+
+  it('createSessionFile stores group without persisting reconnect credentials', () => {
+    createSessionFile('term-token', 'alice', 'team-a');
+    const index: Array<{
+      id: string;
+      group?: string;
+      sessionToken?: string;
+    }> = JSON.parse(
+      fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8'),
+    );
+    expect(index[0].group).toBe('team-a');
+    expect(index[0]).not.toHaveProperty('sessionToken');
+  });
+
+  it('redacts secrets split across append chunks', () => {
+    createSessionFile('term-split-secret', 'alice');
+    appendToSessionLog('term-split-secret', 'Authorization: Bearer sk-live-');
+    appendToSessionLog('term-split-secret', 'split-secret finished\n');
+    finalizeSessionFile('term-split-secret');
+
+    const transcript = readSessionLog('term-split-secret');
+    expect(transcript).not.toContain('sk-live-split-secret');
+    expect(transcript).toContain('[REDACTED]');
+  });
+
+  it('does not expose session tokens through listTerminalSessions', () => {
+    createSessionFile('term-token-list', 'alice');
+    for (const session of listTerminalSessions()) {
+      expect(session).not.toHaveProperty('sessionToken');
+    }
   });
 
   it('does not reuse an ended historical session id', () => {
