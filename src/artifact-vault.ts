@@ -1,4 +1,5 @@
 import fs from 'fs';
+import crypto from 'crypto';
 import path from 'path';
 
 import { GROUPS_DIR, STORE_DIR } from './config.js';
@@ -393,10 +394,22 @@ export function ingestArtifactFromSource(
   const records = readRecords();
   const byId = new Map(records.map((record) => [record.id, record]));
   const resolvedPath = path.resolve(input.path);
+  const realPath = fs.realpathSync(resolvedPath);
+  if (!fs.statSync(realPath).isFile()) {
+    throw new Error('Artifact path is not a regular file');
+  }
+  if (!allowedArtifactRoot(realPath)) {
+    throw new Error('Artifact path is outside allowed roots');
+  }
   const sourceType = String(input.sourceType || 'unknown').trim();
   const sourceId = String(input.sourceId || '').trim();
-  const id = `source:${sourceType}:${sourceId}:${path.basename(resolvedPath)}`;
-  const ext = path.extname(resolvedPath).replace(/^\./, '').toLowerCase();
+  const pathHash = crypto
+    .createHash('sha256')
+    .update(realPath)
+    .digest('hex')
+    .slice(0, 16);
+  const id = `source:${sourceType}:${sourceId}:${pathHash}:${path.basename(realPath)}`;
+  const ext = path.extname(realPath).replace(/^\./, '').toLowerCase();
   const existing = byId.get(id);
   const now = nowIso(input.now);
   const record = normalizeRecord({
@@ -404,8 +417,8 @@ export function ingestArtifactFromSource(
     title: input.title,
     kind: input.kind || 'source',
     format: input.format || ext || 'file',
-    path: resolvedPath,
-    sizeBytes: fileSize(resolvedPath),
+    path: realPath,
+    sizeBytes: fileSize(realPath),
     sourceType,
     sourceId,
     sourceArtifactIndex: null,
@@ -434,15 +447,17 @@ export function getArtifactVaultRecord(
 }
 
 function allowedArtifactRoot(realPath: string): string | null {
-  const candidates = [STORE_DIR, GROUPS_DIR, path.resolve(process.cwd())].filter(
-    (candidate) => {
-      try {
-        return fs.existsSync(candidate);
-      } catch {
-        return false;
-      }
-    },
-  );
+  const candidates = [
+    STORE_DIR,
+    GROUPS_DIR,
+    path.resolve(process.cwd()),
+  ].filter((candidate) => {
+    try {
+      return fs.existsSync(candidate);
+    } catch {
+      return false;
+    }
+  });
   for (const candidate of candidates) {
     let realCandidate: string;
     try {
@@ -460,9 +475,10 @@ function allowedArtifactRoot(realPath: string): string | null {
   return null;
 }
 
-export function resolveArtifactVaultPath(
-  record: ArtifactVaultRecord,
-): { path: string; root: string } {
+export function resolveArtifactVaultPath(record: ArtifactVaultRecord): {
+  path: string;
+  root: string;
+} {
   try {
     const resolved = path.resolve(record.path);
     const real = fs.realpathSync(resolved);

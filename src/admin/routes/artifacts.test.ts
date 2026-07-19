@@ -12,6 +12,7 @@ const STORE_DIR = path.join(
 
 vi.mock('../../config.js', () => ({
   STORE_DIR,
+  GROUPS_DIR: path.join(STORE_DIR, 'groups'),
 }));
 
 const { default: artifactsRouter } = await import('./artifacts.js');
@@ -70,9 +71,12 @@ describe('artifacts admin routes', () => {
           ],
         }),
       });
-      const body = (await response.json()) as { ok: boolean; record: { id: string } };
+      const body = (await response.json()) as {
+        ok: boolean;
+        record: { id: string };
+      };
 
-      expect(response.status).toBe(200);
+      expect(response.status, JSON.stringify(body)).toBe(200);
       expect(body.ok).toBe(true);
       expect(body.record.id).toBeTruthy();
     });

@@ -14,13 +14,10 @@ vi.mock('../../config.js', () => ({
   STORE_DIR,
 }));
 
-const {
-  startSourceCollection,
-  markScopeFailed,
-} = await import('../../source-collection.js');
-const { default: sourceCollectionsRouter } = await import(
-  './source-collections.js'
-);
+const { startSourceCollection, markScopeFailed } =
+  await import('../../source-collection.js');
+const { default: sourceCollectionsRouter } =
+  await import('./source-collections.js');
 
 function app(): express.Express {
   const server = express();
@@ -76,14 +73,22 @@ describe('source collections admin routes', () => {
     const collection = startSourceCollection('report-retry', ['connector'], {
       availableConnectors: ['github'],
     });
-    markScopeFailed(collection.id, 'connector', 'connector unavailable', 'github');
+    markScopeFailed(
+      collection.id,
+      'connector',
+      'connector unavailable',
+      'github',
+    );
 
     await withServer(async (baseUrl) => {
       const response = await fetch(
         `${baseUrl}/source-collections/${collection.id}/retry`,
         { method: 'POST' },
       );
-      const body = (await response.json()) as { ok: boolean; collection: { status: string } };
+      const body = (await response.json()) as {
+        ok: boolean;
+        collection: { status: string };
+      };
 
       expect(response.status).toBe(200);
       expect(body.ok).toBe(true);

@@ -155,21 +155,25 @@ router.get('/vault/:id', (req: Request, res: Response) => {
   }
 });
 
-router.get('/vault/:id/download', requireRole('admin'), (req: Request, res: Response) => {
-  try {
-    const record = getArtifactVaultRecord(req.params.id as string);
-    if (!record) {
-      res.status(404).json({ error: 'Artifact not found' });
-      return;
+router.get(
+  '/vault/:id/download',
+  requireRole('admin'),
+  (req: Request, res: Response) => {
+    try {
+      const record = getArtifactVaultRecord(req.params.id as string);
+      if (!record) {
+        res.status(404).json({ error: 'Artifact not found' });
+        return;
+      }
+      const resolved = resolveArtifactVaultPath(record);
+      auditLog(req, 'artifact_vault_downloaded', record.id);
+      res.download(resolved.path);
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
-    const resolved = resolveArtifactVaultPath(record);
-    auditLog(req, 'artifact_vault_downloaded', record.id);
-    res.download(resolved.path);
-  } catch (err) {
-    res.status(400).json({
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-});
+  },
+);
 
 export default router;

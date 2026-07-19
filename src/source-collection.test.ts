@@ -532,5 +532,91 @@ describe('source-collection', () => {
       expect(getSourceLedger('report-retry').length).toBe(1);
       expect(githubApi).toHaveBeenCalledTimes(1);
     });
+
+    it('completes separately labelled descriptors for the same connector', async () => {
+      const githubApi = vi.fn().mockResolvedValue({ items: [] });
+      const collected = await collectReportSources(
+        'report-labelled-connectors',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [
+          { scope: 'connector', connectorId: 'github', sourceLabel: 'Bugs' },
+          { scope: 'connector', connectorId: 'github', sourceLabel: 'Roadmap' },
+        ],
+        {
+          availableConnectors: ['github'],
+          authorizeConnectorAction: vi.fn().mockReturnValue({
+            allowed: true,
+            decision: 'allowed',
+            reason: 'allowed',
+          }),
+          githubApi,
+        },
+      );
+
+      const record = getSourceCollection(collected.sourceCollectionId)!;
+      expect(record.status).toBe('completed');
+      expect(record.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ sourceLabel: 'Bugs', status: 'completed' }),
+          expect.objectContaining({
+            sourceLabel: 'Roadmap',
+            status: 'completed',
+          }),
+        ]),
+      );
+    });
+
+    it('parses MCP and mounted-file source tokens before scope filtering', async () => {
+      const filePath = path.join(STORE_DIR, 'mounted-source.md');
+      fs.writeFileSync(filePath, 'Token source');
+      const collected = await collectSources(
+        'report-token-scopes',
+        [`mcp:github`, `file:${filePath}`],
+        'is:issue',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        {
+          availableConnectors: ['github'],
+          authorizeConnectorAction: vi.fn().mockReturnValue({
+            allowed: true,
+            decision: 'allowed',
+            reason: 'allowed',
+          }),
+          githubApi: vi.fn().mockResolvedValue({ items: [] }),
+        },
+      );
+
+      const record = getSourceCollection(collected.sourceCollectionId)!;
+      expect(record.requestedScopes).toEqual(
+        expect.arrayContaining(['connector', 'file']),
+      );
+      expect(record.status).toBe('completed');
+    });
+
+    it('expands a previously unassigned connector when retrying', async () => {
+      const collected = await collectReportSources(
+        'report-unassigned-retry',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [{ scope: 'connector' }],
+        { availableConnectors: [] },
+      );
+      const retried = await retrySourceCollection(
+        collected.sourceCollectionId,
+        { actor: 'henrik', groupFolder: 'main-group' },
+        {
+          availableConnectors: ['github'],
+          authorizeConnectorAction: vi.fn().mockReturnValue({
+            allowed: true,
+            decision: 'allowed',
+            reason: 'allowed',
+          }),
+          githubApi: vi.fn().mockResolvedValue({ items: [] }),
+        },
+      );
+
+      expect(retried.status).toBe('completed');
+      expect(retried.items).toContainEqual(
+        expect.objectContaining({ connectorId: 'github', status: 'completed' }),
+      );
+    });
   });
 });

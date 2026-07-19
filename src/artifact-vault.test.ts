@@ -204,9 +204,7 @@ describe('artifact vault', () => {
       path: sourceFile,
       sourceType: 'mcp',
       sourceId: 'collection-123',
-      sourceLinks: [
-        { label: 'Source ledger', source: 'ledger:ledger-abc' },
-      ],
+      sourceLinks: [{ label: 'Source ledger', source: 'ledger:ledger-abc' }],
       tags: ['mcp'],
     });
 
@@ -239,8 +237,53 @@ describe('artifact vault', () => {
     });
 
     const resolved = resolveArtifactVaultPath(record);
-    expect(resolved.path).toBe(path.resolve(sourceFile));
-    expect(resolved.root).toBe(STORE_DIR);
+    expect(resolved.path).toBe(fs.realpathSync(sourceFile));
+    expect(resolved.root).toBe(fs.realpathSync(STORE_DIR));
+  });
+
+  it('keeps same-named source artifacts from different directories distinct', () => {
+    const firstDirectory = path.join(STORE_DIR, 'first');
+    const secondDirectory = path.join(STORE_DIR, 'second');
+    fs.mkdirSync(firstDirectory, { recursive: true });
+    fs.mkdirSync(secondDirectory, { recursive: true });
+    const first = path.join(firstDirectory, 'note.md');
+    const second = path.join(secondDirectory, 'note.md');
+    fs.writeFileSync(first, 'First');
+    fs.writeFileSync(second, 'Second');
+
+    const firstRecord = ingestArtifactFromSource({
+      title: 'First note',
+      path: first,
+      sourceType: 'mcp',
+      sourceId: 'collection-same',
+    }).record;
+    const secondRecord = ingestArtifactFromSource({
+      title: 'Second note',
+      path: second,
+      sourceType: 'mcp',
+      sourceId: 'collection-same',
+    }).record;
+
+    expect(firstRecord.id).not.toBe(secondRecord.id);
+    expect(getArtifactVaultRecord(firstRecord.id)).toBeDefined();
+    expect(getArtifactVaultRecord(secondRecord.id)).toBeDefined();
+  });
+
+  it('rejects source paths that cannot be opened through vault controls', () => {
+    const outside = path.join('/tmp', `nanocrab-outside-${Date.now()}.md`);
+    fs.writeFileSync(outside, 'Outside');
+    try {
+      expect(() =>
+        ingestArtifactFromSource({
+          title: 'Outside',
+          path: outside,
+          sourceType: 'mounted',
+          sourceId: 'outside',
+        }),
+      ).toThrow(/outside allowed roots/i);
+    } finally {
+      fs.rmSync(outside, { force: true });
+    }
   });
 
   it('retains non-report artifacts with configurable retention and prunes on expiry', () => {

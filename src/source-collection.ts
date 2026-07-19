@@ -284,7 +284,9 @@ export function startSourceCollection(
         items.push({
           scope: descriptor.scope,
           connectorId:
-            descriptor.scope === 'connector' ? descriptor.connectorId : undefined,
+            descriptor.scope === 'connector'
+              ? descriptor.connectorId
+              : undefined,
           sourceLabel:
             descriptor.sourceLabel ||
             (descriptor.scope === 'file'
@@ -611,6 +613,7 @@ async function fetchGitHubConnectorSources(
 async function fetchConnectorSource(
   collectionId: string,
   connectorId: string,
+  sourceLabel: string | undefined,
   query: string,
   sections: string[],
   citations: Array<{ label: string; source: string }>,
@@ -630,6 +633,7 @@ async function fetchConnectorSource(
       itemCount,
       provenance,
       connectorId,
+      sourceLabel,
     );
     return;
   }
@@ -692,28 +696,37 @@ function authorizeSourceConnector(
   return decision;
 }
 
-function validateMountedSource(
-  mountedPath: string,
-): { allowed: boolean; realPath: string; reason: string } {
+function validateMountedSource(mountedPath: string): {
+  allowed: boolean;
+  realPath: string;
+  reason: string;
+} {
   try {
     const expanded = mountedPath.startsWith('~/')
       ? path.join(os.homedir(), mountedPath.slice(2))
       : path.resolve(mountedPath);
     if (!fs.existsSync(expanded)) {
-      return { allowed: false, realPath: expanded, reason: 'Path does not exist' };
+      return {
+        allowed: false,
+        realPath: expanded,
+        reason: 'Path does not exist',
+      };
     }
     const real = fs.realpathSync(expanded);
     const stat = fs.statSync(real);
     if (!stat.isFile()) {
-      return { allowed: false, realPath: real, reason: 'Path is not a regular file' };
+      return {
+        allowed: false,
+        realPath: real,
+        reason: 'Path is not a regular file',
+      };
     }
 
     const roots = [STORE_DIR, GROUPS_DIR, path.resolve(process.cwd())]
       .filter((candidate) => fs.existsSync(candidate))
       .map((candidate) => fs.realpathSync(candidate));
     const underRoot = roots.some(
-      (root) =>
-        real === root || real.startsWith(`${root}${path.sep}`),
+      (root) => real === root || real.startsWith(`${root}${path.sep}`),
     );
     if (!underRoot) {
       return {
@@ -805,8 +818,14 @@ async function collectSourceDescriptor(
     listMemories: typeof listMemoryRecords;
   },
 ): Promise<void> {
-  const { sections, citations, availableConnectors, authorize, githubFetch, listMemories } =
-    helpers;
+  const {
+    sections,
+    citations,
+    availableConnectors,
+    authorize,
+    githubFetch,
+    listMemories,
+  } = helpers;
   const itemLabel =
     descriptor.sourceLabel || descriptor.mountedPath || descriptor.connectorId;
 
@@ -872,6 +891,7 @@ async function collectSourceDescriptor(
         await fetchConnectorSource(
           record.id,
           descriptor.connectorId,
+          descriptor.sourceLabel,
           descriptor.query || '',
           sections,
           citations,
@@ -1086,7 +1106,9 @@ export async function collectReportSources(
       await collectSourceDescriptor(record, descriptor, actorContext, helpers);
     } catch (err) {
       const itemLabel =
-        descriptor.sourceLabel || descriptor.mountedPath || descriptor.connectorId;
+        descriptor.sourceLabel ||
+        descriptor.mountedPath ||
+        descriptor.connectorId;
       markScopeFailed(
         record.id,
         descriptor.scope,
@@ -1111,7 +1133,23 @@ export async function collectSources(
   const availableConnectors =
     dependencies.availableConnectors ?? getAvailableConnectors();
   const descriptors: SourceDescriptor[] = [];
-  for (const scope of sourceScopes.filter(isSourceScope)) {
+  for (const sourceScope of sourceScopes) {
+    const connectorMatch = /^(?:mcp|connector):(.+)$/.exec(sourceScope);
+    if (connectorMatch) {
+      descriptors.push({
+        scope: 'connector',
+        connectorId: connectorMatch[1],
+        query,
+      });
+      continue;
+    }
+    const fileMatch = /^(?:file|mounted):(.+)$/.exec(sourceScope);
+    if (fileMatch) {
+      descriptors.push({ scope: 'file', mountedPath: fileMatch[1], query });
+      continue;
+    }
+    if (!isSourceScope(sourceScope)) continue;
+    const scope = sourceScope;
     if (scope === 'connector') {
       if (availableConnectors.length === 0) {
         descriptors.push({ scope: 'connector', query });
@@ -1147,15 +1185,35 @@ export async function retrySourceCollection(
   const githubFetch = dependencies.githubApi ?? githubApi;
 
   let resetAny = false;
+  const expandedItems: SourceCollectionItem[] = [];
   for (const item of record.items) {
     if (item.scope === 'connector' && item.status === 'failed') {
+      if (!item.connectorId) {
+        if (availableConnectors.length === 0) continue;
+        for (const connectorId of availableConnectors) {
+          expandedItems.push({
+            ...item,
+            connectorId,
+            sourceLabel: item.sourceLabel || connectorId,
+            status: 'pending',
+            completedAt: null,
+            failureReason: null,
+            provenance: [],
+          });
+        }
+        resetAny = true;
+        continue;
+      }
       item.status = 'pending';
       item.completedAt = null;
       item.failureReason = null;
       item.provenance = [];
       resetAny = true;
     }
+    expandedItems.push(item);
   }
+
+  if (resetAny) record.items = expandedItems;
 
   if (!resetAny) {
     return record;
@@ -1213,6 +1271,7 @@ export async function retrySourceCollection(
       await fetchConnectorSource(
         record.id,
         item.connectorId,
+        item.sourceLabel,
         record.query || '',
         [],
         [],
