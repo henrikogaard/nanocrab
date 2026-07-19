@@ -168,6 +168,39 @@ describe('Terminal operator console UI', () => {
     expect(source).not.toContain('<div class="terminal-shell-card">">');
   });
 
+  it('provides persistent, keyboard-accessible workspace pane combinations', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const styles = fs.readFileSync(stylePath, 'utf8');
+
+    expect(source).toContain('role="tablist"');
+    expect(source).toContain('role="tab"');
+    expect(source).toContain('aria-selected="true"');
+    expect(source).toContain('data-tab="chat"');
+    expect(source).toContain('data-tab="diff"');
+    expect(source).toContain('id="right-chat"');
+    expect(source).toContain('id="right-diff"');
+    expect(source).toContain('terminal_pane_left');
+    expect(source).toContain('terminal_pane_right');
+    expect(source).toContain('bindTerminalPaneKeyboard');
+    expect(source).toContain("e.key === 'ArrowRight'");
+    expect(source).toContain("e.key !== 'ArrowLeft'");
+    expect(source).toContain("e.key === 'ArrowRight' ? 1 : -1");
+    expect(source).toContain('loadTerminalChatPane');
+    expect(source).toContain('loadTerminalDiffPane');
+    expect(styles).toContain('.terminal-chat-pane');
+    expect(styles).toContain('.terminal-diff-pane');
+    expect(styles).toContain('overflow-x: hidden;');
+    expect(styles).toContain('.terminal-split-pane {\n    min-width: 0;');
+  });
+
+  it('labels sessions interrupted by restart as transcript-only', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+
+    expect(source).toContain("s.recoveryState === 'interrupted'");
+    expect(source).toContain('Interrupted by service restart');
+    expect(source).toContain('Transcript only');
+  });
+
   it('drives the real message handler without spawning after historical attach', () => {
     const source = fs.readFileSync(appPath, 'utf8');
     const start = source.indexOf('let handleWsMessage = function (msg)');

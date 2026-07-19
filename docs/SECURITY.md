@@ -53,6 +53,8 @@ private_key, .secret
 
 The main group's project root is mounted read-only. Writable paths the agent needs (store, group folder, IPC, and provider runtime homes such as `.claude`, `.codex`, and OpenCode config/auth directories) are mounted separately. This prevents the agent from modifying host application code (`src/`, `dist/`, `package.json`, etc.) which would bypass the sandbox entirely on next restart. The `store/` directory is mounted read-write so the main agent can access the SQLite database directly.
 
+Terminal session transcripts are owner-scoped local runtime state. Output is redacted before it is broadcast or written, log size and retention are bounded, and reconnect credentials remain memory-only. A service restart cannot restore the child shell process; startup reconciliation marks any interrupted session as ended and exposes only its read-only transcript metadata to the owning operator.
+
 ### 3. Session Isolation
 
 Each group has isolated provider session state under `data/sessions/{group}/`. Claude SDK compatibility data currently lives at `data/sessions/{group}/.claude/`:

@@ -12764,9 +12764,9 @@ async function renderTerminal(el) {
     <div class="terminal-shell-card">
       <div class="split-container" id="terminal-split">
         <div class="split-pane terminal-split-pane" id="pane-left">
-          <div class="pane-tabs" id="pane-left-tabs">
-            <div class="pane-tab active" data-tab="terminal" onclick="switchTermPane('left', 'terminal')">Terminal</div>
-            <div class="pane-tab" data-tab="files" onclick="switchTermPane('left', 'files')">Files</div>
+          <div class="pane-tabs" id="pane-left-tabs" role="tablist" aria-label="Primary workspace pane">
+            <button class="pane-tab active" role="tab" aria-selected="true" tabindex="0" data-tab="terminal" onclick="switchTermPane('left', 'terminal')">Terminal</button>
+            <button class="pane-tab" role="tab" aria-selected="false" tabindex="-1" data-tab="files" onclick="switchTermPane('left', 'files')">Files</button>
           </div>
           <div class="pane-content" id="pane-left-content">
             <div class="tab-content active" id="left-terminal">
@@ -12779,13 +12779,21 @@ async function renderTerminal(el) {
         </div>
         <div class="split-divider" id="split-divider"></div>
         <div class="split-pane terminal-split-pane" id="pane-right">
-          <div class="pane-tabs" id="pane-right-tabs">
-            <div class="pane-tab active" data-tab="logs" onclick="switchTermPane('right', 'logs')">Logs</div>
-            <div class="pane-tab" data-tab="search" onclick="switchTermPane('right', 'search')">Search</div>
+          <div class="pane-tabs" id="pane-right-tabs" role="tablist" aria-label="Supporting workspace pane">
+            <button class="pane-tab active" role="tab" aria-selected="true" tabindex="0" data-tab="logs" onclick="switchTermPane('right', 'logs')">Logs</button>
+            <button class="pane-tab" role="tab" aria-selected="false" tabindex="-1" data-tab="chat" onclick="switchTermPane('right', 'chat')">Chat</button>
+            <button class="pane-tab" role="tab" aria-selected="false" tabindex="-1" data-tab="diff" onclick="switchTermPane('right', 'diff')">Diff</button>
+            <button class="pane-tab" role="tab" aria-selected="false" tabindex="-1" data-tab="search" onclick="switchTermPane('right', 'search')">Search</button>
           </div>
           <div class="pane-content" id="pane-right-content">
             <div class="tab-content active" id="right-logs">
               <div class="term-log-viewer" id="term-log-viewer">${renderTerminalLogState('loading')}</div>
+            </div>
+            <div class="tab-content is-hidden" id="right-chat">
+              <div class="terminal-chat-pane" id="terminal-chat-pane"><p>Open this pane to load channel chat.</p></div>
+            </div>
+            <div class="tab-content is-hidden" id="right-diff">
+              <div class="terminal-diff-pane" id="terminal-diff-pane"><p>Open this pane to load the current working-tree diff.</p></div>
             </div>
             <div class="tab-content is-hidden" id="right-search">
               <div class="term-search-pane" id="term-search-pane">
@@ -12844,6 +12852,17 @@ async function renderTerminal(el) {
         .getElementById('terminal-split')
         ?.style.setProperty('--terminal-left-pct', `${pct}%`);
     }
+  }
+
+  bindTerminalPaneKeyboard('left');
+  bindTerminalPaneKeyboard('right');
+  const savedLeftPane = localStorage.getItem('terminal_pane_left');
+  const savedRightPane = localStorage.getItem('terminal_pane_right');
+  if (['terminal', 'files'].includes(savedLeftPane)) {
+    window.switchTermPane('left', savedLeftPane);
+  }
+  if (['logs', 'chat', 'diff', 'search'].includes(savedRightPane)) {
+    window.switchTermPane('right', savedRightPane);
   }
 
   // --- Load xterm.js ---
@@ -12994,9 +13013,17 @@ window.switchTermPane = function (side, tabId) {
   if (!tabs) return;
   tabs
     .querySelectorAll('.pane-tab')
-    .forEach((t) => t.classList.remove('active'));
+    .forEach((t) => {
+      t.classList.remove('active');
+      t.setAttribute('aria-selected', 'false');
+      t.setAttribute('tabindex', '-1');
+    });
   const tab = tabs.querySelector(`[data-tab="${tabId}"]`);
-  if (tab) tab.classList.add('active');
+  if (tab) {
+    tab.classList.add('active');
+    tab.setAttribute('aria-selected', 'true');
+    tab.setAttribute('tabindex', '0');
+  }
 
   const contents = document.getElementById(`pane-${side}-content`);
   if (!contents) return;
@@ -13011,7 +13038,145 @@ window.switchTermPane = function (side, tabId) {
     target.classList.remove('is-hidden');
     target.classList.add('active');
   }
+  localStorage.setItem(`terminal_pane_${side}`, tabId);
+  if (side === 'right' && tabId === 'chat') loadTerminalChatPane();
+  if (side === 'right' && tabId === 'diff') loadTerminalDiffPane();
 };
+
+function bindTerminalPaneKeyboard(side) {
+  const tabs = document.getElementById(`pane-${side}-tabs`);
+  if (!tabs) return;
+  tabs.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    const items = [...tabs.querySelectorAll('[role="tab"]')];
+    const current = items.indexOf(document.activeElement);
+    if (current < 0) return;
+    e.preventDefault();
+    const delta = e.key === 'ArrowRight' ? 1 : -1;
+    const next = items[(current + delta + items.length) % items.length];
+    window.switchTermPane(side, next.dataset.tab);
+    next.focus();
+  });
+}
+
+async function loadTerminalChatPane(force = false) {
+  const pane = document.getElementById('terminal-chat-pane');
+  if (!pane || (pane.dataset.loaded === 'true' && !force)) return;
+  pane.dataset.loaded = 'loading';
+  pane.innerHTML = '<p class="terminal-pane-state">Loading channel chat...</p>';
+  try {
+    const groups = await api('/groups');
+    if (!groups.length) {
+      pane.innerHTML = '<p class="terminal-pane-state">No channel groups are configured. Open Chat to create or connect one.</p>';
+      pane.dataset.loaded = 'true';
+      return;
+    }
+    const selected = groups[0].jid;
+    const messages = await api(`/messages/${encodeURIComponent(selected)}?limit=30`);
+    pane.innerHTML = `
+      <div class="terminal-pane-toolbar">
+        <label>Group
+          <select class="search-input" id="terminal-chat-group" onchange="loadTerminalChatMessages(this.value)">
+            ${groups.map((group) => `<option value="${esc(group.jid)}">${esc(group.name || group.jid)}</option>`).join('')}
+          </select>
+        </label>
+        <button class="btn btn-sm btn-ghost" onclick="navigate('chat')">Open full chat</button>
+      </div>
+      <div class="terminal-chat-messages" id="terminal-chat-messages">${renderTerminalChatMessages(messages)}</div>
+      <div class="terminal-chat-composer">
+        <input class="search-input" id="terminal-chat-input" placeholder="Send a message to this group">
+        <button class="btn btn-sm btn-primary" onclick="sendTerminalChatMessage()">Send</button>
+      </div>`;
+    pane.dataset.loaded = 'true';
+  } catch {
+    pane.innerHTML = '<p class="terminal-pane-state is-error">Chat is unavailable. The terminal remains usable; open full Chat or check channel health.</p>';
+    pane.dataset.loaded = 'false';
+  }
+}
+
+function renderTerminalChatMessages(messages) {
+  if (!Array.isArray(messages) || !messages.length) {
+    return '<p class="terminal-pane-state">No messages yet.</p>';
+  }
+  return messages
+    .slice()
+    .reverse()
+    .map(
+      (message) => `<article class="terminal-chat-message ${message.is_bot_message ? 'is-agent' : 'is-user'}">
+        <strong>${esc(message.sender_name || 'Unknown')}</strong>
+        <p>${esc(message.content || '')}</p>
+      </article>`,
+    )
+    .join('');
+}
+
+window.loadTerminalChatMessages = async function (jid) {
+  const messagesEl = document.getElementById('terminal-chat-messages');
+  if (!messagesEl || !jid) return;
+  messagesEl.innerHTML = '<p class="terminal-pane-state">Loading messages...</p>';
+  try {
+    const messages = await api(`/messages/${encodeURIComponent(jid)}?limit=30`);
+    messagesEl.innerHTML = renderTerminalChatMessages(messages);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  } catch {
+    messagesEl.innerHTML = '<p class="terminal-pane-state is-error">Messages could not be loaded.</p>';
+  }
+};
+
+window.sendTerminalChatMessage = async function () {
+  const group = document.getElementById('terminal-chat-group');
+  const input = document.getElementById('terminal-chat-input');
+  const message = input?.value?.trim();
+  if (!group?.value || !message) return;
+  input.disabled = true;
+  try {
+    await api('/chat/send', {
+      method: 'POST',
+      body: JSON.stringify({ message, targetJid: group.value }),
+    });
+    input.value = '';
+    await window.loadTerminalChatMessages(group.value);
+  } catch (err) {
+    toast(legacyChatSendErrorMessage(err), 'error');
+  } finally {
+    input.disabled = false;
+    input.focus();
+  }
+};
+
+async function loadTerminalDiffPane(repoName = '', force = false) {
+  const pane = document.getElementById('terminal-diff-pane');
+  if (!pane || (pane.dataset.loaded === 'true' && !force && !repoName)) return;
+  pane.dataset.loaded = 'loading';
+  pane.innerHTML = '<p class="terminal-pane-state">Loading working-tree diff...</p>';
+  try {
+    const repos = await api('/files/repos');
+    if (!repos.length) {
+      pane.innerHTML = '<p class="terminal-pane-state">No repositories are mounted. Open Code to mount a workspace.</p>';
+      pane.dataset.loaded = 'true';
+      return;
+    }
+    const selected = repoName || repos[0].name;
+    const result = await api(`/dev/git/${encodeURIComponent(selected)}/diff`);
+    const diff = [result.staged, result.diff].filter(Boolean).join('\n');
+    pane.innerHTML = `
+      <div class="terminal-pane-toolbar">
+        <label>Repository
+          <select class="search-input" onchange="loadTerminalDiffPane(this.value, true)">
+            ${repos.map((repo) => `<option value="${esc(repo.name)}" ${repo.name === selected ? 'selected' : ''}>${esc(repo.name)}</option>`).join('')}
+          </select>
+        </label>
+        <button class="btn btn-sm btn-ghost" onclick="navigate('gitcode');setTimeout(function(){window.switchTab?.('gc-tabs','git')},0)">Open Git Ops</button>
+      </div>
+      ${diff ? `<pre class="terminal-diff-content">${esc(diff)}</pre>` : '<p class="terminal-pane-state">Working tree is clean.</p>'}`;
+    pane.dataset.loaded = 'true';
+  } catch {
+    pane.innerHTML = '<p class="terminal-pane-state is-error">Diff could not be loaded. Open Git Ops to inspect repository state.</p>';
+    pane.dataset.loaded = 'false';
+  }
+}
+
+window.loadTerminalDiffPane = loadTerminalDiffPane;
 
 // File tree in terminal pane
 async function loadTerminalFileTree() {
@@ -13150,14 +13315,22 @@ window.loadTerminalSessions = async function () {
     }
     listEl.innerHTML = sessions
       .map(
-        (s) =>
-          `<div class="terminal-session-item ${s.active ? 'active' : ''}" data-session-id="${esc(s.id)}">
+        (s) => {
+          const recoveryLabel = s.active
+            ? 'Active'
+            : s.recoveryState === 'interrupted'
+              ? 'Interrupted by service restart · Transcript only'
+              : s.endedAt
+                ? timeAgo(s.endedAt)
+                : 'Transcript only';
+          return `<div class="terminal-session-item ${s.active ? 'active' : ''}" data-session-id="${esc(s.id)}">
             <div class="terminal-session-item-info" onclick="loadTerminalSession('${esc(s.id)}')">
               <strong>${esc(s.id)}</strong>
-              <span class="terminal-session-meta">${s.active ? 'Active' : s.endedAt ? timeAgo(s.endedAt) : 'Never ended'} &middot; ${s.owner || 'unknown'} &middot; ${s.bytes ? formatBytes(s.bytes) : '0 B'}</span>
+              <span class="terminal-session-meta">${esc(recoveryLabel)} &middot; ${esc(s.owner || 'unknown')} &middot; ${s.bytes ? formatBytes(s.bytes) : '0 B'}</span>
             </div>
             <button class="btn btn-sm btn-ghost terminal-session-delete" onclick="event.stopPropagation(); deleteTerminalSession('${esc(s.id)}')" title="Delete session">🗑</button>
-          </div>`,
+          </div>`;
+        },
       )
       .join('');
   } catch {

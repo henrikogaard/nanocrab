@@ -290,11 +290,11 @@ Goal: give agents a durable research/reporting workflow without making the core 
 ### Better Terminal And Chat
 
 - Replace the current dev terminal experience with a session-based terminal/chat surface:
-  - PARTIAL: named terminal session id, reconnect, clear, and copy transcript controls exist.
-  - NEXT: persistent terminal sessions across WebSocket reconnects.
-  - NEXT: split panes for terminal, chat, file tree, diff, logs
+  - DONE: named terminal sessions reconnect across WebSocket disconnects while the NanoCrab process remains running.
+  - DONE: bounded, redacted transcripts and safe session metadata survive service restarts; interrupted shells are clearly presented as read-only transcript history because child processes cannot be restored.
+  - DONE: responsive split panes pair terminal/files with chat/diff/logs/search, persist the selected tabs and divider position, and support arrow-key tab navigation.
   - DONE: copyable terminal transcript
-  - searchable transcript
+  - DONE: searchable transcript
   - provider/model selector per chat/task
   - tool-call timeline
   - approve/deny prompts inline
