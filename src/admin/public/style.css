@@ -28296,6 +28296,7 @@ body.is-terminal-resizing {
 .pane-tabs {
   display: flex;
   gap: 0;
+  overflow-x: auto;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   flex-shrink: 0;
@@ -28303,6 +28304,8 @@ body.is-terminal-resizing {
 
 .pane-tab {
   padding: 6px 14px;
+  border: 0;
+  background: transparent;
   font-size: 12px;
   color: var(--text-muted);
   cursor: pointer;
@@ -28322,10 +28325,119 @@ body.is-terminal-resizing {
   color: var(--text-secondary);
 }
 
+.pane-tab:focus-visible {
+  color: var(--text);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .pane-content {
   flex: 1;
   overflow: auto;
   position: relative;
+}
+
+.terminal-chat-pane,
+.terminal-diff-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  padding: 10px;
+  background: var(--bg);
+}
+
+.terminal-pane-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.terminal-pane-toolbar label {
+  display: grid;
+  flex: 1 1 180px;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.terminal-pane-state {
+  margin: auto;
+  max-width: 40ch;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.terminal-pane-state.is-error {
+  color: var(--error);
+}
+
+.terminal-chat-messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.terminal-chat-message {
+  max-width: 92%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.terminal-chat-message.is-user {
+  align-self: end;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.terminal-chat-message strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.terminal-chat-message p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.terminal-chat-composer {
+  display: flex;
+  gap: 6px;
+}
+
+.terminal-chat-composer input {
+  min-width: 0;
+}
+
+.terminal-diff-content {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .pane-content > .tab-content {
@@ -28862,6 +28974,12 @@ body.is-terminal-resizing {
   }
   .split-container {
     flex-direction: column;
+    overflow-x: hidden;
+  }
+  .terminal-split-pane {
+    min-width: 0;
+    width: 100%;
+    flex: 1 1 50%;
   }
   .split-pane:first-child {
     border-right: none;

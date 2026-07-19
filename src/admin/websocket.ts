@@ -70,6 +70,11 @@ interface SessionMetadata {
   createdAt: string;
   endedAt: string | null;
   bytes: number;
+  terminationReason?:
+    | 'operator-terminated'
+    | 'idle-timeout'
+    | 'process-exit'
+    | 'service-restart';
 }
 
 type TerminalOperation = 'spawn' | 'attach' | 'input' | 'close' | 'reconnect';
@@ -274,7 +279,10 @@ function safeUtf8Slice(buf: Buffer, maxBytes: number): Buffer {
   return buf.subarray(0, end);
 }
 
-export function finalizeSessionFile(sessionId: string): void {
+export function finalizeSessionFile(
+  sessionId: string,
+  terminationReason: SessionMetadata['terminationReason'] = 'process-exit',
+): void {
   const redactor = sessionRedactors.get(sessionId);
   if (redactor) {
     writeSessionLog(sessionId, redactor.flush());
@@ -284,7 +292,8 @@ export function finalizeSessionFile(sessionId: string): void {
   const index = loadSessionIndex();
   const entry = index.find((e) => e.id === sessionId);
   if (entry) {
-    entry.endedAt = new Date().toISOString();
+    entry.endedAt ||= new Date().toISOString();
+    entry.terminationReason ||= terminationReason;
     const logPath = sessionLogPath(sessionId);
     try {
       entry.bytes = logPath ? fs.statSync(logPath).size : 0;
@@ -294,6 +303,27 @@ export function finalizeSessionFile(sessionId: string): void {
     saveSessionIndex(index);
   }
   if (entry) historicalSessions.set(sessionId, readSessionLog(sessionId));
+}
+
+export function reconcileInterruptedTerminalSessions(
+  interruptedAt = new Date().toISOString(),
+): number {
+  const index = loadSessionIndex();
+  let reconciled = 0;
+  for (const entry of index) {
+    if (entry.endedAt || terminals.has(entry.id)) continue;
+    entry.endedAt = interruptedAt;
+    entry.terminationReason = 'service-restart';
+    const logPath = sessionLogPath(entry.id);
+    try {
+      entry.bytes = logPath ? fs.statSync(logPath).size : 0;
+    } catch {
+      entry.bytes = 0;
+    }
+    reconciled++;
+  }
+  if (reconciled > 0) saveSessionIndex(index);
+  return reconciled;
 }
 
 export type TerminalSessionAttachment =
@@ -523,7 +553,7 @@ export function initWebSocket(server: HttpServer): void {
             // Reset idle timer
             clearTimeout(term.idleTimer);
             term.idleTimer = setTimeout(() => {
-              finalizeSessionFile(msg.sessionId!);
+              finalizeSessionFile(msg.sessionId!, 'idle-timeout');
               term.process.kill();
               terminals.delete(msg.sessionId!);
               broadcastTerminal(
@@ -643,6 +673,7 @@ export function initWebSocket(server: HttpServer): void {
     broadcast({ type: 'status', data: getStatusData() });
   }, 3000);
 
+  reconcileInterruptedTerminalSessions();
   pruneOldSessions();
   loadHistoricalSessions();
   // Enforce retention periodically, not only at startup, so long-running
@@ -789,7 +820,7 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
       sessionId,
       '\r\n[Session timed out after 30 minutes of inactivity]\r\n',
     );
-    finalizeSessionFile(sessionId);
+    finalizeSessionFile(sessionId, 'idle-timeout');
     proc.kill();
     terminals.delete(sessionId);
   }, TERMINAL_IDLE_TIMEOUT_MS);
@@ -821,7 +852,7 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
   });
   proc.on('close', () => {
     broadcastTerminal(sessionId, '\r\n[Process exited]\r\n');
-    finalizeSessionFile(sessionId);
+    finalizeSessionFile(sessionId, 'process-exit');
     terminals.delete(sessionId);
   });
 
@@ -835,7 +866,7 @@ export function closeTerminalSession(sessionId: string): boolean {
   const term = terminals.get(sessionId);
   if (!term) return false;
   clearTimeout(term.idleTimer);
-  finalizeSessionFile(sessionId);
+  finalizeSessionFile(sessionId, 'operator-terminated');
   term.process.kill();
   terminals.delete(sessionId);
   return true;

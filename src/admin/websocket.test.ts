@@ -39,6 +39,7 @@ import {
   getTerminalSessionAttachment,
   loadHistoricalSessions,
   listTerminalSessions,
+  reconcileInterruptedTerminalSessions,
   pruneOldSessions,
   startLogStream,
   stopLogStream,
@@ -178,6 +179,25 @@ describe('file-backed terminal sessions', () => {
         expect.objectContaining({ id: 'term-hist-2', owner: 'bob' }),
       ]),
     );
+  });
+
+  it('marks sessions interrupted by a service restart as transcript-only history', () => {
+    createSessionFile('term-restart', 'alice', 'team-a');
+    appendToSessionLog('term-restart', 'safe output\n');
+    const interruptedAt = '2026-07-19T10:00:00.000Z';
+
+    expect(reconcileInterruptedTerminalSessions(interruptedAt)).toBe(1);
+
+    const index = JSON.parse(
+      fs.readFileSync(path.join(TEST_DIR, 'index.json'), 'utf-8'),
+    ) as Array<Record<string, unknown>>;
+    expect(index[0]).toMatchObject({
+      id: 'term-restart',
+      endedAt: interruptedAt,
+      terminationReason: 'service-restart',
+      bytes: Buffer.byteLength('safe output\n'),
+    });
+    expect(index[0]).not.toHaveProperty('sessionToken');
   });
 
   it('readSessionLog returns empty string for missing session', () => {

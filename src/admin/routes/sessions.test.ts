@@ -217,6 +217,8 @@ describe('terminal session API', () => {
         id: string;
         owner: string;
         active: boolean;
+        recoveryState: string;
+        restorable: boolean;
       }>;
 
       expect(response.status).toBe(200);
@@ -226,6 +228,13 @@ describe('terminal session API', () => {
             id: 'term-1',
             owner: 'owner',
             active: false,
+            recoveryState: 'historical',
+            restorable: false,
+          }),
+          expect.objectContaining({
+            id: 'term-2',
+            recoveryState: 'interrupted',
+            restorable: false,
           }),
         ]),
       );

@@ -776,6 +776,15 @@ router.get(
           endedAt: entry.endedAt,
           bytes: entry.bytes,
           active: activeIds.has(entry.id),
+          recoveryState: activeIds.has(entry.id)
+            ? 'active'
+            : entry.terminationReason === 'service-restart' || !entry.endedAt
+              ? 'interrupted'
+              : 'historical',
+          restorable: activeIds.has(entry.id),
+          terminationReason:
+            entry.terminationReason ||
+            (!entry.endedAt ? 'service-restart' : undefined),
         }));
       history.sort((a: any, b: any) =>
         (b.createdAt || '').localeCompare(a.createdAt || ''),

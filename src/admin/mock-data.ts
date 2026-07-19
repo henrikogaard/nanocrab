@@ -555,6 +555,8 @@ const terminalHistory = [
     endedAt: null,
     bytes: 1834,
     active: true,
+    recoveryState: 'active',
+    restorable: true,
   },
   {
     id: 'mock-terminal-audit',
@@ -564,6 +566,9 @@ const terminalHistory = [
     endedAt: iso(300),
     bytes: 2940,
     active: false,
+    recoveryState: 'interrupted',
+    restorable: false,
+    terminationReason: 'service-restart',
   },
 ];
 
