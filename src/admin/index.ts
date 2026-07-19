@@ -57,6 +57,7 @@ import reportsRoutes from './routes/reports.js';
 import artifactsRoutes from './routes/artifacts.js';
 import missionsRoutes from './routes/missions.js';
 import briefingsRoutes from './routes/briefings.js';
+import briefingAnalyticsRoutes from './routes/briefing-analytics.js';
 import researchRoutes from './routes/research.js';
 import usageRoutes from './routes/usage.js';
 import sessionsRoutes from './routes/sessions.js';
@@ -243,6 +244,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/artifacts', requireAuth, artifactsRoutes);
   app.use('/api/missions', requireAuth, missionsRoutes);
   app.use('/api/briefings', requireAuth, briefingsRoutes);
+  app.use('/api/briefing-analytics', requireAuth, briefingAnalyticsRoutes);
   app.use('/api/research', requireAuth, researchRoutes);
   app.use('/api/usage', requireAuth, usageRoutes);
   app.use('/api/sessions', requireAuth, sessionsRoutes);

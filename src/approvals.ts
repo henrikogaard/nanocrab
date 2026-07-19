@@ -13,6 +13,7 @@ export type ApprovalKind =
   | 'report-outline'
   | 'report-delivery'
   | 'webhook-delivery'
+  | 'briefing-delivery'
   | 'publish'
   | 'external-message'
   | 'upload'

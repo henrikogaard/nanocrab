@@ -120,6 +120,7 @@ import {
   startCodingJob,
 } from './coding-jobs.js';
 import { handleMobileCodingCommand } from './mobile-coding-commands.js';
+import { sendChannelFollowUp } from './briefing-history.js';
 import { getAllProviders } from './providers/index.js';
 import {
   getProviderCapabilityMatrix,
@@ -1349,12 +1350,22 @@ async function main(): Promise<void> {
   ): Promise<boolean> {
     const channel = findChannel(channels, chatJid);
     if (!channel) return false;
+    const group = registeredGroups[chatJid];
     return handleMobileCodingCommand({
       text: msg.content,
       chatJid,
       sender: msg.sender,
-      group: registeredGroups[chatJid],
-      sendMessage: (jid, text) => channel.sendMessage(jid, text),
+      group,
+      sendMessage: async (jid, text) => {
+        await sendChannelFollowUp({
+          groupFolder: group?.folder || 'unknown',
+          channelId: jid,
+          text,
+          sendMessage: (j, t) => channel.sendMessage(j, t),
+          taskId: `mobile:${jid}`,
+          source: 'mobile',
+        });
+      },
       deps: {
         startCodingJob,
         pickGitHubIssue,

@@ -14,6 +14,7 @@ vi.mock('./approvals.js', () => ({
     status: 'pending',
   })),
   findPendingApprovalForTarget: vi.fn(() => undefined),
+  hasApprovedTarget: vi.fn(() => false),
 }));
 
 import {
@@ -30,6 +31,10 @@ import {
 import { runContainerAgent } from './container-runner.js';
 import { STORE_DIR } from './config.js';
 import { createApproval, findPendingApprovalForTarget } from './approvals.js';
+import {
+  loadBriefingHistoryStore,
+  setDeliveryPreference,
+} from './briefing-history.js';
 
 describe('task scheduler', () => {
   beforeEach(() => {
@@ -42,6 +47,13 @@ describe('task scheduler', () => {
       recursive: true,
       force: true,
     });
+    for (const file of [
+      'briefing-history.json',
+      'delivery-preferences.json',
+      'approvals.json',
+    ]) {
+      fs.rmSync(path.join(STORE_DIR, file), { force: true });
+    }
   });
 
   afterEach(() => {
@@ -50,6 +62,13 @@ describe('task scheduler', () => {
       recursive: true,
       force: true,
     });
+    for (const file of [
+      'briefing-history.json',
+      'delivery-preferences.json',
+      'approvals.json',
+    ]) {
+      fs.rmSync(path.join(STORE_DIR, file), { force: true });
+    }
   });
 
   it('pauses due tasks with invalid group folders to prevent retry churn', async () => {
@@ -863,5 +882,207 @@ describe('task scheduler', () => {
     const offset =
       (new Date(nextRun!).getTime() - new Date(scheduledTime).getTime()) % ms;
     expect(offset).toBe(0);
+  });
+
+  it('records a briefing history entry after a successful run', async () => {
+    vi.mocked(runContainerAgent).mockImplementationOnce(
+      async (_group, _input, _onProcess, onOutput) => {
+        await onOutput?.({
+          status: 'success',
+          result: 'Scheduled summary complete.',
+        });
+        return {
+          status: 'success',
+          result: 'Scheduled summary complete.',
+        };
+      },
+    );
+
+    createTask({
+      id: 'task-history',
+      group_folder: 'main',
+      chat_jid: 'wa:main',
+      prompt: 'Send summary',
+      provider_profile_id: 'default_reports',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      delivery_mode: 'chat',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+
+    const enqueueTask = vi.fn(
+      (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+        void fn();
+      },
+    );
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'wa:main': {
+          name: 'Main',
+          folder: 'main',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask,
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const store = loadBriefingHistoryStore();
+    const entry = store.entries.find((e) => e.taskId === 'task-history');
+    expect(entry).toBeDefined();
+    expect(entry?.status).toBe('completed');
+    expect(entry?.source).toBe('scheduled');
+    expect(entry?.delivery.mode).toBe('chat');
+  });
+
+  it('skips chat delivery when group/channel preference is disabled', async () => {
+    vi.mocked(runContainerAgent).mockImplementationOnce(
+      async (_group, _input, _onProcess, onOutput) => {
+        await onOutput?.({
+          status: 'success',
+          result: 'Disabled channel result.',
+        });
+        return {
+          status: 'success',
+          result: 'Disabled channel result.',
+        };
+      },
+    );
+
+    setDeliveryPreference({
+      groupFolder: 'main',
+      channelId: 'wa:main',
+      mode: 'disabled',
+    });
+
+    const sendMessage = vi.fn();
+
+    createTask({
+      id: 'task-disabled',
+      group_folder: 'main',
+      chat_jid: 'wa:main',
+      prompt: 'Send summary',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      delivery_mode: 'chat',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+
+    const enqueueTask = vi.fn(
+      (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+        void fn();
+      },
+    );
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'wa:main': {
+          name: 'Main',
+          folder: 'main',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask,
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage,
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    const store = loadBriefingHistoryStore();
+    const entry = store.entries.find((e) => e.taskId === 'task-disabled');
+    expect(entry?.status).toBe('skipped');
+    expect(entry?.delivery.failureContext).toMatch(/disabled/i);
+  });
+
+  it('creates an approval and records approval-blocked when preference requires it', async () => {
+    vi.mocked(runContainerAgent).mockImplementationOnce(
+      async (_group, _input, _onProcess, onOutput) => {
+        await onOutput?.({
+          status: 'success',
+          result: 'Approval required result.',
+        });
+        return {
+          status: 'success',
+          result: 'Approval required result.',
+        };
+      },
+    );
+
+    setDeliveryPreference({
+      groupFolder: 'main',
+      channelId: 'wa:main',
+      mode: 'approval-required',
+    });
+
+    createTask({
+      id: 'task-approval',
+      group_folder: 'main',
+      chat_jid: 'wa:main',
+      prompt: 'Send summary',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      delivery_mode: 'chat',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+
+    const enqueueTask = vi.fn(
+      (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+        void fn();
+      },
+    );
+
+    startSchedulerLoop({
+      registeredGroups: () => ({
+        'wa:main': {
+          name: 'Main',
+          folder: 'main',
+          trigger: '@Andy',
+          added_at: '2026-02-22T00:00:00.000Z',
+        },
+      }),
+      getSessions: () => ({}),
+      queue: {
+        enqueueTask,
+        closeStdin: vi.fn(),
+        notifyIdle: vi.fn(),
+      } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(createApproval).toHaveBeenCalled();
+    const store = loadBriefingHistoryStore();
+    const entry = store.entries.find((e) => e.taskId === 'task-approval');
+    expect(entry?.status).toBe('approval-blocked');
+    expect(entry?.approvalState).toBe('pending');
   });
 });
