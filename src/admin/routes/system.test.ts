@@ -14,6 +14,16 @@ import {
 } from '../../production-diagnostics.js';
 import systemRouter, { validateAvatarUpload } from './system.js';
 
+function ownerApp(): express.Express {
+  const app = express();
+  app.use((req, _res, next) => {
+    req.user = { id: 'test', username: 'test', role: 'owner' };
+    next();
+  });
+  app.use('/system', systemRouter);
+  return app;
+}
+
 function requestJson<T>(port: number, path: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = http.request(
@@ -121,8 +131,7 @@ describe('system routes', () => {
       stale: false,
     });
 
-    const app = express();
-    app.use('/system', systemRouter);
+    const app = ownerApp();
     const server = await new Promise<http.Server>((resolve) => {
       const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
     });
@@ -140,6 +149,35 @@ describe('system routes', () => {
     }
   });
 
+  it('rejects production diagnostics for non-owner roles', async () => {
+    const app = express();
+    app.use((req, _res, next) => {
+      req.user = { id: 'viewer', username: 'viewer', role: 'viewer' };
+      next();
+    });
+    app.use('/system', systemRouter);
+    const server = await new Promise<http.Server>((resolve) => {
+      const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+    });
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const status = await new Promise<number>((resolve, reject) => {
+        const req = http.request(
+          { hostname: '127.0.0.1', port, path: '/system/diagnostics', method: 'GET' },
+          (res) => {
+            res.resume();
+            res.on('end', () => resolve(res.statusCode || 0));
+          },
+        );
+        req.on('error', reject);
+        req.end();
+      });
+      expect(status).toBe(403);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('returns production diagnostics as plain text when requested', async () => {
     vi.mocked(formatDiagnosticsSummary).mockReturnValue('NanoCrab diagnostics summary');
     vi.mocked(buildProductionDiagnostics).mockResolvedValue({
@@ -151,8 +189,7 @@ describe('system routes', () => {
       stale: true,
     });
 
-    const app = express();
-    app.use('/system', systemRouter);
+    const app = ownerApp();
     const server = await new Promise<http.Server>((resolve) => {
       const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
     });

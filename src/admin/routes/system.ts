@@ -456,7 +456,7 @@ router.get('/release-diagnostics', requireRole('owner'), async (_req, res) => {
   }
 });
 
-router.get('/diagnostics', async (req: Request, res: Response) => {
+router.get('/diagnostics', requireRole('owner'), async (req: Request, res: Response) => {
   try {
     const result = await buildProductionDiagnostics();
     if (req.query.format === 'text') {

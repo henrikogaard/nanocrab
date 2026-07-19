@@ -390,7 +390,7 @@ function buildConnectorsSection(
       id: `inference-${item.profileId}`,
       label: `Provider profile: ${item.label}`,
       ok: item.ok,
-      severity: item.status === 'degraded' || item.status === 'stale' ? 'advisory' : 'advisory',
+      severity: 'advisory',
       detail: `${item.status} (${item.provider}/${item.model}, ${item.locality})${item.failedChecks.length > 0 ? ` — ${item.failedChecks.join(', ')}` : ''}`,
       hint: item.status === 'unconfigured'
         ? 'Configure the provider API key or base URL'
