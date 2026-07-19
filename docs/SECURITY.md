@@ -133,14 +133,13 @@ process and the narrow Git children it starts for approved clone/fetch/push and
 evidence collection are trusted host processes. The Devin model is not trusted
 with general host access.
 
-If a future sandbox-safe authentication handoff is approved, readiness must
-verify a configured canonical `DEVIN_CREDENTIAL_PATH`, exact service-UID
-ownership and POSIX mode `0600`, required CLI capabilities, every configured
-model alias, the platform sandbox executable, and canonical Devin/Node/sandbox
-executables inside verified runtime roots. NanoCrab may stat a credential but
-must never read its contents. It must not guess, create, copy, mount, or delete
-the credential file. Mounting Devin credentials into a NanoCrab container is
-unsupported.
+Sandbox-safe authentication handoff is implemented. Readiness verifies a
+configured canonical `DEVIN_CREDENTIAL_PATH`, exact service-UID ownership and
+POSIX mode `0600`, required CLI capabilities, every configured model alias, the
+platform sandbox executable, and canonical Devin/Node/sandbox executables inside
+verified runtime roots. NanoCrab may stat a credential but must never read its
+contents. It must not guess, create, copy, mount, or delete the credential file.
+Mounting Devin credentials into a NanoCrab container is unsupported.
 
 The host child environment is an allowlist: `HOME`, temporary-directory and
 locale variables, plus `XDG_CONFIG_HOME`/`XDG_DATA_HOME`; NanoCrab supplies a
@@ -170,14 +169,13 @@ OS isolation. On Linux, Bubblewrap creates a new PID namespace and session
 from an empty root, exposes only verified runtime directories read-only, binds
 the workspace and sandbox temp explicitly, and rebinds the workspace `.git`
 read-only. Prompt and agent-configuration files are mounted read-only; the
-Devin credential itself is never mounted. Devin host launch is currently
-disabled on macOS while authentication handoff remains unavailable; NanoCrab
-does not generate or use a permissive `sandbox-exec` profile. A future handoff
-must first add and review an explicit deny-default profile for runtime roots,
-workspace, and sandbox temp before macOS launch can be enabled. Alias
-validation or sandbox preparation failure aborts the attempt before Devin is
-spawned, so `.git` is read-only to the whole Devin process on supported Linux
-launches.
+Devin credential itself is never mounted directly, but the `XDG_DATA_HOME`
+directory containing `devin/` is exposed read-only. Devin host launch is
+supported on Linux and macOS once authentication handoff is validated; Linux
+uses Bubblewrap and macOS uses an explicit deny-default `sandbox-exec` profile
+for runtime roots, workspace, and sandbox temp. Alias validation or sandbox
+preparation failure aborts the attempt before Devin is spawned, so `.git` is
+read-only to the whole Devin process on supported launches.
 
 The command broker is a separate, stricter boundary. It validates an exact
 command allowlist and routes every accepted inspection, Git, build, and test

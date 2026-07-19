@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -43,6 +42,8 @@ const trustedSandboxFilesystem = {
           '/usr',
           '/usr/local',
           '/usr/bin',
+          '/home/service/.config',
+          '/home/service/.config/devin',
         ].includes(value),
       isFile: () =>
         value.endsWith('.txt') ||
@@ -1103,6 +1104,13 @@ describe('Devin host process runner', () => {
         '/jobs/job/.nanocrab/bin/nanocrab-job-exec',
         '/opt/nanocrab/dist/coding-runners/command-broker.js',
       ],
+      devinCredentialDataHome: '/home/service/.config',
+      protectedPaths: [
+        '/home/service',
+        '/home/service/.ssh',
+        '/home/service/.gnupg',
+        '/home/service/.config/nanocrab',
+      ],
     });
     expect(harness.spawn).toHaveBeenCalledWith(
       '/usr/bin/bwrap',
@@ -1125,6 +1133,8 @@ describe('Devin host process runner', () => {
         '--dir',
         '/tmp',
         '--dir',
+        '/home',
+        '--dir',
         '/opt/devin',
         '--dir',
         '/usr/local',
@@ -1135,17 +1145,23 @@ describe('Devin host process runner', () => {
         '--dir',
         '/opt/nanocrab',
         '--dir',
+        '/home/service',
+        '--dir',
         '/jobs/job/owner__repo',
         '--dir',
         '/jobs/job/.nanocrab',
         '--dir',
         '/opt/nanocrab/dist',
         '--dir',
+        '/home/service/.config',
+        '--dir',
         '/jobs/job/owner__repo/.git',
         '--dir',
         '/jobs/job/.nanocrab/bin',
         '--dir',
         '/opt/nanocrab/dist/coding-runners',
+        '--dir',
+        '/home/service/.config/devin',
         '--ro-bind',
         '/opt/devin',
         '/opt/devin',
@@ -1164,6 +1180,9 @@ describe('Devin host process runner', () => {
         '--bind',
         '/tmp',
         '/tmp',
+        '--ro-bind',
+        '/home/service/.config/devin',
+        '/home/service/.config/devin',
         '--ro-bind',
         '/jobs/job/.nanocrab/prompt.txt',
         '/jobs/job/.nanocrab/prompt.txt',
@@ -1198,6 +1217,7 @@ describe('Devin host process runner', () => {
         env: {
           HOME: '/home/service',
           XDG_CONFIG_HOME: '/home/service/.config',
+          XDG_DATA_HOME: '/home/service/.config',
           PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
           TMPDIR: '/tmp',
           TERM: 'dumb',

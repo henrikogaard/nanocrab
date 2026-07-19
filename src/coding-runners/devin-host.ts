@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import type { VerifiedDevinRuntimeContext } from '../agent-runtime-registry.js';
+import { getDevinCredentialDataHome } from './devin-auth.js';
 import type { PipelineStageKind } from '../control-plane/types.js';
 import { createStreamingLogRedactor } from '../logger.js';
 import type { ProcessLease, ProcessRegistry } from './process-registry.js';
@@ -108,6 +109,9 @@ export interface SandboxedDevinLaunchInput {
   trustedRuntimeReadRoots?: readonly string[];
   temporaryDirectory?: string;
   readOnlyPaths?: readonly string[];
+  /** XDG_DATA_HOME parent; the `<dataHome>/devin` directory is exposed read-only. */
+  devinCredentialDataHome?: string;
+  protectedPaths?: readonly string[];
 }
 
 interface DevinSandboxFilesystem {
@@ -203,6 +207,31 @@ async function assertMinimalLinuxSandboxLayout(
     throw new Error('Sandbox temp is not a directory');
   }
 
+  let devinCredentialDir: string | undefined;
+  if (input.devinCredentialDataHome) {
+    devinCredentialDir = path.join(input.devinCredentialDataHome, 'devin');
+    assertCanonicalSandboxPath(
+      input.devinCredentialDataHome,
+      'Devin credential data home',
+    );
+    assertCanonicalSandboxPath(
+      devinCredentialDir,
+      'Devin credential directory',
+    );
+    if ((await deps.realpath(devinCredentialDir)) !== devinCredentialDir) {
+      throw new Error('Devin credential directory is not canonical');
+    }
+    if (!(await deps.lstat(devinCredentialDir)).isDirectory()) {
+      throw new Error('Devin credential directory is not a directory');
+    }
+    if (
+      pathsOverlap(devinCredentialDir, input.workspace) ||
+      pathsOverlap(devinCredentialDir, temporaryDirectory)
+    ) {
+      throw new Error('Devin credential directory overlaps a writable root');
+    }
+  }
+
   const seenReadOnlyPaths = new Set<string>();
   for (const readOnlyPath of readOnlyPaths) {
     assertCanonicalSandboxPath(readOnlyPath, 'Read-only launch path');
@@ -212,7 +241,8 @@ async function assertMinimalLinuxSandboxLayout(
     seenReadOnlyPaths.add(readOnlyPath);
     if (
       pathsOverlap(readOnlyPath, input.workspace) ||
-      pathsOverlap(readOnlyPath, temporaryDirectory)
+      pathsOverlap(readOnlyPath, temporaryDirectory) ||
+      (devinCredentialDir && pathsOverlap(readOnlyPath, devinCredentialDir))
     ) {
       throw new Error('Read-only launch path overlaps a sandbox root');
     }
@@ -238,6 +268,10 @@ async function assertMinimalLinuxSandboxLayout(
   ) {
     throw new Error('Devin executable is outside trusted runtime roots');
   }
+}
+
+function sandboxPathFilters(value: string): string {
+  return `(literal ${JSON.stringify(value)}) (subpath ${JSON.stringify(value)})`;
 }
 
 function sandboxDirectoryArgs(values: readonly string[]): string[] {
@@ -313,6 +347,159 @@ async function assertNoGitMetadataAliases(
   await walkWorkspace(workspace);
 }
 
+function devinSandboxProfile(
+  workspace: string,
+  temporaryDirectory: string,
+  trustedRuntimeReadRoots: readonly string[],
+  devinCredentialDataHome: string,
+  workspaceWritable: boolean,
+  protectedPaths: readonly string[],
+): string {
+  const devinCredentialDir = path.join(devinCredentialDataHome, 'devin');
+  const readableRoots = [
+    ...trustedRuntimeReadRoots,
+    workspace,
+    temporaryDirectory,
+    devinCredentialDir,
+  ];
+  const rules = [
+    '(version 1)',
+    '(deny default)',
+    '(allow process-exec)',
+    '(allow process-fork)',
+    '(allow network-outbound)',
+    `(allow file-read* ${readableRoots.map(sandboxPathFilters).join(' ')})`,
+    `(allow file-write* (subpath ${JSON.stringify(temporaryDirectory)}))`,
+  ];
+  if (workspaceWritable) {
+    rules.push(
+      `(allow file-write* (subpath ${JSON.stringify(workspace)}))`,
+    );
+    rules.push(
+      `(deny file-write* ${sandboxPathFilters(path.join(workspace, '.git'))})`,
+    );
+  }
+  for (const protectedPath of protectedPaths) {
+    rules.push(
+      `(deny file-read* ${sandboxPathFilters(protectedPath)})`,
+    );
+    rules.push(
+      `(deny file-write* ${sandboxPathFilters(protectedPath)})`,
+    );
+  }
+  return rules.join(' ');
+}
+
+async function assertMinimalMacSandboxLayout(
+  input: SandboxedDevinLaunchInput,
+  gitDir: string,
+  deps: DevinSandboxFilesystem,
+): Promise<void> {
+  const trustedRuntimeReadRoots = input.trustedRuntimeReadRoots;
+  const temporaryDirectory = input.temporaryDirectory;
+  const readOnlyPaths = input.readOnlyPaths;
+  const devinCredentialDataHome = input.devinCredentialDataHome;
+  if (!devinCredentialDataHome) {
+    throw new Error('Devin macOS sandbox authentication handoff is disabled');
+  }
+
+  assertCanonicalSandboxPath(input.workspace, 'Workspace');
+  if (!temporaryDirectory) throw new Error('Sandbox temp is required');
+  assertCanonicalSandboxPath(temporaryDirectory, 'Sandbox temp');
+  if (
+    !Array.isArray(trustedRuntimeReadRoots) ||
+    trustedRuntimeReadRoots.length === 0
+  ) {
+    throw new Error('Trusted runtime read roots are required');
+  }
+  if (!Array.isArray(readOnlyPaths) || readOnlyPaths.length === 0) {
+    throw new Error('Read-only launch paths are required');
+  }
+
+  const seenRoots = new Set<string>();
+  for (const root of trustedRuntimeReadRoots) {
+    assertCanonicalSandboxPath(root, 'Trusted runtime read root');
+    if (seenRoots.has(root)) throw new Error('Duplicate runtime read root');
+    if ([...seenRoots].some((seenRoot) => pathsOverlap(root, seenRoot))) {
+      throw new Error('Overlapping runtime read roots');
+    }
+    seenRoots.add(root);
+    if (
+      pathsOverlap(root, input.workspace) ||
+      pathsOverlap(root, temporaryDirectory)
+    ) {
+      throw new Error('Runtime read root overlaps a writable root');
+    }
+    if ((await deps.realpath(root)) !== root) {
+      throw new Error('Trusted runtime read root is not canonical');
+    }
+    if (!(await deps.lstat(root)).isDirectory()) {
+      throw new Error('Trusted runtime read root is not a directory');
+    }
+  }
+
+  assertCanonicalSandboxPath(temporaryDirectory, 'Sandbox temp');
+  if ((await deps.realpath(temporaryDirectory)) !== temporaryDirectory) {
+    throw new Error('Sandbox temp is not canonical');
+  }
+  if (!(await deps.lstat(temporaryDirectory)).isDirectory()) {
+    throw new Error('Sandbox temp is not a directory');
+  }
+
+  const devinCredentialDir = path.join(devinCredentialDataHome, 'devin');
+  assertCanonicalSandboxPath(devinCredentialDataHome, 'Devin credential data home');
+  assertCanonicalSandboxPath(devinCredentialDir, 'Devin credential directory');
+  if ((await deps.realpath(devinCredentialDir)) !== devinCredentialDir) {
+    throw new Error('Devin credential directory is not canonical');
+  }
+  if (!(await deps.lstat(devinCredentialDir)).isDirectory()) {
+    throw new Error('Devin credential directory is not a directory');
+  }
+  if (
+    pathsOverlap(devinCredentialDir, input.workspace) ||
+    pathsOverlap(devinCredentialDir, temporaryDirectory)
+  ) {
+    throw new Error('Devin credential directory overlaps a writable root');
+  }
+
+  const seenReadOnlyPaths = new Set<string>();
+  for (const readOnlyPath of readOnlyPaths) {
+    assertCanonicalSandboxPath(readOnlyPath, 'Read-only launch path');
+    if (seenReadOnlyPaths.has(readOnlyPath)) {
+      throw new Error('Duplicate read-only launch path');
+    }
+    seenReadOnlyPaths.add(readOnlyPath);
+    if (
+      pathsOverlap(readOnlyPath, input.workspace) ||
+      pathsOverlap(readOnlyPath, temporaryDirectory) ||
+      pathsOverlap(readOnlyPath, devinCredentialDir)
+    ) {
+      throw new Error('Read-only launch path overlaps a sandbox root');
+    }
+    if ((await deps.realpath(readOnlyPath)) !== readOnlyPath) {
+      throw new Error('Read-only launch path is not canonical');
+    }
+    const stats = await deps.lstat(readOnlyPath);
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+      throw new Error('Read-only launch path is not a regular file');
+    }
+  }
+
+  if (
+    (await deps.realpath(input.workspace)) !== input.workspace ||
+    (await deps.realpath(gitDir)) !== gitDir
+  ) {
+    throw new Error('Workspace sandbox roots are not canonical');
+  }
+  if (
+    !trustedRuntimeReadRoots.some((root) =>
+      isSandboxPathAtOrBelow(input.executable, root),
+    )
+  ) {
+    throw new Error('Devin executable is outside trusted runtime roots');
+  }
+}
+
 export async function buildSandboxedDevinLaunch(
   input: SandboxedDevinLaunchInput,
   deps: DevinSandboxFilesystem = devinSandboxFilesystem,
@@ -324,6 +511,10 @@ export async function buildSandboxedDevinLaunch(
     const trustedRuntimeReadRoots = input.trustedRuntimeReadRoots ?? [];
     const temporaryDirectory = input.temporaryDirectory ?? '';
     const readOnlyPaths = input.readOnlyPaths ?? [];
+    const devinCredentialDataHome = input.devinCredentialDataHome;
+    const devinCredentialDir = devinCredentialDataHome
+      ? path.join(devinCredentialDataHome, 'devin')
+      : undefined;
     const explicitReadOnlyPaths = readOnlyPaths.filter(
       (readOnlyPath) =>
         !trustedRuntimeReadRoots.some((root) =>
@@ -336,7 +527,12 @@ export async function buildSandboxedDevinLaunch(
       temporaryDirectory,
       gitDir,
       ...explicitReadOnlyPaths.map((value) => path.dirname(value)),
+      ...(devinCredentialDir ? [devinCredentialDir] : []),
     ];
+    const roBinds: string[] = [];
+    if (devinCredentialDir) {
+      roBinds.push('--ro-bind', devinCredentialDir, devinCredentialDir);
+    }
     return {
       executable: input.sandboxExecutable,
       args: [
@@ -366,6 +562,7 @@ export async function buildSandboxedDevinLaunch(
         '--bind',
         temporaryDirectory,
         temporaryDirectory,
+        ...roBinds,
         ...explicitReadOnlyPaths.flatMap((readOnlyPath) => [
           '--ro-bind',
           readOnlyPath,
@@ -380,9 +577,28 @@ export async function buildSandboxedDevinLaunch(
     };
   }
   if (input.sandboxExecutable === '/usr/bin/sandbox-exec') {
-    throw new Error(
-      'Devin macOS sandbox isolation is unavailable while authentication handoff is disabled',
+    await assertMinimalMacSandboxLayout(input, gitDir, deps);
+    const trustedRuntimeReadRoots = input.trustedRuntimeReadRoots ?? [];
+    const temporaryDirectory = input.temporaryDirectory ?? '';
+    const devinCredentialDataHome = input.devinCredentialDataHome;
+    const protectedPaths = input.protectedPaths ?? [];
+    const workspaceWritable =
+      input.stageKind === 'implement' || input.stageKind === 'direct';
+    if (!devinCredentialDataHome) {
+      throw new Error('Devin macOS sandbox authentication handoff is disabled');
+    }
+    const profile = devinSandboxProfile(
+      input.workspace,
+      temporaryDirectory,
+      trustedRuntimeReadRoots,
+      devinCredentialDataHome,
+      workspaceWritable,
+      protectedPaths,
     );
+    return {
+      executable: input.sandboxExecutable,
+      args: ['-p', profile, '--', input.executable, ...input.args],
+    };
   }
   throw new Error('Devin process sandbox isolation is unavailable');
 }
@@ -850,7 +1066,6 @@ export function createProductionDevinHostRunner(
     ensureCommandBrokerLauncher: (input) =>
       ensureDevinCommandBrokerLauncher(input, filesystem),
     buildSandboxedLaunch: (input) => buildSandboxedDevinLaunch(input),
-    authHandoffAvailable: () => false,
   });
 }
 
@@ -970,6 +1185,13 @@ export function createDevinHostRunner(
       }
 
       const stageKind = input.stageKind ?? 'direct';
+      const devinCredentialDataHome = getDevinCredentialDataHome(devinCredentialPath);
+      const protectedPaths = [
+        home,
+        path.join(home, '.ssh'),
+        path.join(home, '.gnupg'),
+        nanocrabConfigRoot,
+      ];
       let brokerPath: string;
       const agentConfigPath = path.join(metadataDir, 'devin-agent.json');
       try {
@@ -1045,6 +1267,8 @@ export function createDevinHostRunner(
             commandBrokerModulePath,
             ...(runtime.trustedRuntimeReadFiles ?? []),
           ],
+          devinCredentialDataHome,
+          protectedPaths,
         });
       } catch {
         return failedBeforeSpawn(
@@ -1059,7 +1283,10 @@ export function createDevinHostRunner(
         const childEnvironment = buildDevinChildEnvironment(
           deps.environmentSource,
         );
+        childEnvironment.HOME = home;
         childEnvironment.TMPDIR = temporaryDirectory;
+        childEnvironment.XDG_DATA_HOME = devinCredentialDataHome;
+        childEnvironment.XDG_CONFIG_HOME = path.join(home, '.config');
         child = deps.spawn(launch.executable, launch.args, {
           cwd: workspace,
           env: childEnvironment,

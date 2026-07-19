@@ -9,6 +9,10 @@ import {
   buildDevinChildEnvironment,
   DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
 } from './coding-runners/devin-host.js';
+import {
+  validateDevinCredentialHandoff,
+  type DevinCredentialHandoffResult,
+} from './coding-runners/devin-auth.js';
 
 export { DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL } from './coding-runners/devin-host.js';
 import type {
@@ -37,12 +41,59 @@ export interface VerifiedDevinRuntimeContext {
   readonly trustedRuntimeReadFiles?: readonly string[];
 }
 
+export interface DevinSandboxAuthHandoffEnvironment {
+  platform?: NodeJS.Platform;
+  credentialPath?: string | null;
+  sandboxPath?: string;
+  validate?: (credentialPath: string) => DevinCredentialHandoffResult;
+  sandboxAccessible?: (sandboxExecutable: string) => boolean;
+}
+
+function defaultSandboxAccessible(sandboxExecutable: string): boolean {
+  try {
+    fs.accessSync(sandboxExecutable, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Devin remains intentionally disabled until authentication can be handed off
- * into the empty-root sandbox without mounting or reading host credentials.
+ * Return true only when a canonical, service-user-owned, mode-0600 credential
+ * file is configured and the platform sandbox executable is available. This
+ * function never reads the credential file contents.
  */
-export function isDevinSandboxAuthHandoffAvailable(): boolean {
-  return false;
+export function isDevinSandboxAuthHandoffAvailable(
+  deps: DevinSandboxAuthHandoffEnvironment = {},
+): boolean {
+  const platform = deps.platform ?? process.platform;
+  if (platform !== 'linux' && platform !== 'darwin') {
+    return false;
+  }
+
+  const credentialPath = deps.credentialPath ?? DEVIN_CREDENTIAL_PATH;
+  if (!credentialPath) {
+    return false;
+  }
+
+  const sandboxExecutable =
+    deps.sandboxPath ??
+    (platform === 'linux' ? '/usr/bin/bwrap' : '/usr/bin/sandbox-exec');
+
+  const validation = (deps.validate ?? validateDevinCredentialHandoff)(
+    credentialPath,
+  );
+  if (!validation.ok) {
+    return false;
+  }
+
+  if (
+    !(deps.sandboxAccessible ?? defaultSandboxAccessible)(sandboxExecutable)
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 interface VerifiedDevinState {
@@ -566,10 +617,8 @@ export async function probeDevinRuntime(
     );
   }
 
-  const options = {
-    env: buildDevinChildEnvironment(deps.env),
-    timeout: DEVIN_PROBE_TIMEOUT_MS,
-  };
+  const baseEnv = buildDevinChildEnvironment(deps.env);
+  const options = { env: baseEnv, timeout: DEVIN_PROBE_TIMEOUT_MS };
   let runtimeContext: VerifiedDevinRuntimeContext | null;
   try {
     runtimeContext = await verifyDevinRuntimeContext(deps, sandboxExecutable);
