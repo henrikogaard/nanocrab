@@ -19,6 +19,7 @@ export interface ProcessRegistry {
   get(jobId: string, attemptId: string): ProcessLease | null;
   compareAndDelete(lease: ProcessLease): boolean;
   terminate(lease: ProcessLease, terminal: 'timed_out' | 'cancelled'): boolean;
+  terminateAll(jobId: string, terminal: 'timed_out' | 'cancelled'): boolean;
 }
 
 interface LeaseRecord {
@@ -127,6 +128,16 @@ export function createProcessRegistry(options?: {
         compareAndDelete(ownedLease);
       }, graceMs);
       return true;
+    },
+
+    terminateAll(jobId, terminal) {
+      let any = false;
+      for (const record of records.values()) {
+        if (record.lease.jobId === jobId) {
+          any = this.terminate(record.lease, terminal) || any;
+        }
+      }
+      return any;
     },
   };
 }
