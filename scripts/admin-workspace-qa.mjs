@@ -1229,6 +1229,41 @@ async function waitForMockWebSocket(page) {
   );
 }
 
+async function forceLatestMockSocketConnecting(page) {
+  return page.evaluate(() => {
+    const socket = window.__qaWebSockets.at(-1);
+    if (!socket) throw new Error('Mock WebSocket is unavailable');
+    socket.__qaForceConnecting = true;
+    window.__qaCreateConnectingSockets = true;
+    return window.__qaWebSockets.length;
+  });
+}
+
+async function waitForRecreatedMockSocket(page, previousCount) {
+  await page.waitForFunction(
+    (count) => {
+      const socket = window.__qaWebSockets.at(-1);
+      return (
+        window.__qaWebSockets.length > count &&
+        typeof socket?.__qaOnOpen === 'function'
+      );
+    },
+    previousCount,
+  );
+  return page.evaluate(() => window.__qaWebSockets.length - 1);
+}
+
+async function driveMockSocketOpen(page, socketIndex) {
+  await page.evaluate((index) => {
+    const socket = window.__qaWebSockets[index];
+    if (!socket || typeof socket.__qaOnOpen !== 'function') {
+      throw new Error('Mock WebSocket onopen handler is unavailable');
+    }
+    socket.__qaForceConnecting = false;
+    socket.__qaOnOpen.call(socket, new Event('open'));
+  }, socketIndex);
+}
+
 function createSyntheticTerminalCapability() {
   return `qa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
@@ -1301,25 +1336,34 @@ async function inspectTerminalAttachFrameWindow(
   }, { frameStart, sessionId, capability });
 }
 
-async function invokeMockWebSocketCallback(page, callback) {
-  await page.evaluate((name) => {
-    const socket = [...window.__qaWebSockets]
-      .reverse()
-      .find((candidate) => typeof candidate.__qaOnMessage === 'function');
+async function invokeMockWebSocketCallback(page, callback, socketIndex = null) {
+  await page.evaluate(({ callback, socketIndex }) => {
+    const socket =
+      typeof socketIndex === 'number'
+        ? window.__qaWebSockets[socketIndex]
+        : [...window.__qaWebSockets]
+            .reverse()
+            .find((candidate) => typeof candidate.__qaOnMessage === 'function');
     if (!socket) {
       throw new Error('Mock WebSocket is unavailable');
     }
     const handler =
-      name === 'onclose' ? socket.__qaOnClose : socket.__qaOnOpen;
+      callback === 'onclose'
+        ? socket.__qaOnClose
+        : callback === 'onerror'
+          ? socket.__qaOnError
+          : socket.__qaOnOpen;
     if (typeof handler !== 'function') {
-      throw new Error(`Mock WebSocket ${name} handler is unavailable`);
+      throw new Error(`Mock WebSocket ${callback} handler is unavailable`);
     }
     const event =
-      name === 'onclose'
+      callback === 'onclose'
         ? new CloseEvent('close', { code: 1006, reason: 'QA transport loss' })
+        : callback === 'onerror'
+          ? new Event('error')
         : new Event('open');
     handler.call(socket, event);
-  }, callback);
+  }, { callback, socketIndex });
 }
 
 async function captureVisibleScreenshot(page, selector, screenshotPath) {
@@ -1485,6 +1529,8 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
   await page.evaluate(() => {
     window.location.hash = '#/devhub';
   });
+  await waitForMockWebSocket(page);
+  const socketCountBeforeTerminal = await forceLatestMockSocketConnecting(page);
   await page.evaluate(() => {
     window.__qaWebSocketSends = [];
   });
@@ -1538,7 +1584,8 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
     isReadOnly: false,
   });
   await page.waitForSelector('#terminal-container .xterm');
-  await waitForMockWebSocket(page);
+  const initialSocketIndex = socketCountBeforeTerminal - 1;
+  await driveMockSocketOpen(page, initialSocketIndex);
   const initialAttach = await inspectTerminalAttachFrameWindow(
     page,
     initialFrameStart,
@@ -1587,47 +1634,131 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
   if (outputEvidence.state !== 'ready') {
     errors.push('Terminal output changed lifecycle state without a typed event');
   }
-  const reconnectFrameStart = await capturedOutboundFrameCount(page);
-  await invokeMockWebSocketCallback(page, 'onclose');
+  await page.evaluate(() => {
+    window._mockMode = false;
+  });
+  const automaticFrameStart = await capturedOutboundFrameCount(page);
+  await invokeMockWebSocketCallback(page, 'onclose', initialSocketIndex);
   const closeEvidence = await terminalStateEvidence(page);
-  if (closeEvidence.state !== 'unavailable') {
-    errors.push('Terminal close did not expose unavailable transport state');
+  if (closeEvidence.state !== 'reconnecting') {
+    errors.push('Terminal close did not expose automatic reconnecting state');
   }
   await recordState({
-    kind: 'unavailable',
-    expectedStatus: 'failed',
+    kind: 'reconnecting',
+    expectedStatus: 'running',
     isReadOnly: false,
   });
-  const socketCountBeforeReconnect = await page.evaluate(
-    () => window.__qaWebSockets.length,
-  );
-  await page
-    .locator('[onclick="reconnectTerminal()"]')
-    .click();
-  await page.waitForFunction(
-    (previousCount) =>
-      window.__qaWebSockets.length > previousCount &&
-      window.__qaWebSockets.at(-1)?.readyState === WebSocket.OPEN &&
-      typeof window.__qaWebSockets.at(-1)?.__qaOnOpen === 'function',
-    socketCountBeforeReconnect,
-  );
-  await invokeMockWebSocketCallback(page, 'onopen');
-  const reconnectAttach = await inspectTerminalAttachFrameWindow(
+  const automaticSocketIndex = await waitForRecreatedMockSocket(
     page,
-    reconnectFrameStart,
+    initialSocketIndex + 1,
+  );
+  await driveMockSocketOpen(page, automaticSocketIndex);
+  const automaticReconnectAttach = await inspectTerminalAttachFrameWindow(
+    page,
+    automaticFrameStart,
     sessionId,
     capability,
   );
-  if (reconnectAttach.attachCount !== 1) {
+  if (automaticReconnectAttach.attachCount !== 1) {
     errors.push(
-      `Reconnect terminal attach count is ${reconnectAttach.attachCount}, expected 1`,
+      `Automatic terminal attach count is ${automaticReconnectAttach.attachCount}, expected 1`,
     );
   }
-  if (!reconnectAttach.sessionIdsMatch) {
-    errors.push('Reconnect terminal_attach used a different session id');
+  if (!automaticReconnectAttach.sessionIdsMatch) {
+    errors.push('Automatic terminal_attach used a different session id');
   }
-  if (!reconnectAttach.capabilitiesMatch) {
-    errors.push('Reconnect terminal_attach did not use the in-memory capability');
+  if (!automaticReconnectAttach.capabilitiesMatch) {
+    errors.push(
+      'Automatic terminal_attach did not use the in-memory capability',
+    );
+  }
+  await deliverMockWebSocketMessage(page, {
+    type: 'terminal_lifecycle',
+    sessionId,
+    data: { state: 'ready' },
+  });
+  await recordState({
+    kind: 'ready',
+    expectedStatus: 'running',
+    isReadOnly: false,
+  });
+  const staleSocketState = await terminalStateEvidence(page);
+  const staleSocketFrameStart = await capturedOutboundFrameCount(page);
+  const staleSocketCount = await page.evaluate(
+    () => window.__qaWebSockets.length,
+  );
+  await invokeMockWebSocketCallback(page, 'onclose', initialSocketIndex);
+  await invokeMockWebSocketCallback(page, 'onerror', initialSocketIndex);
+  await page.waitForTimeout(5250);
+  const staleSocketAfterState = await terminalStateEvidence(page);
+  const staleSocketFrameCount =
+    (await capturedOutboundFrameCount(page)) - staleSocketFrameStart;
+  const staleSocketCountAfter = await page.evaluate(
+    () => window.__qaWebSockets.length,
+  );
+  if (JSON.stringify(staleSocketAfterState) !== JSON.stringify(staleSocketState)) {
+    errors.push('Stale socket callbacks changed the active terminal state');
+  }
+  if (staleSocketFrameCount !== 0) {
+    errors.push(
+      `Stale socket callbacks sent ${staleSocketFrameCount} outbound frame(s)`,
+    );
+  }
+  if (staleSocketCountAfter !== staleSocketCount) {
+    errors.push('Stale socket callbacks created a replacement connection');
+  }
+
+  const manualReconnectControl = page.locator('[onclick="reconnectTerminal()"]');
+  if (!(await manualReconnectControl.isVisible())) {
+    errors.push('Manual Reconnect control is not visible after automatic recovery');
+  }
+  const manualReconnectFrameStart = await capturedOutboundFrameCount(page);
+  await manualReconnectControl.click();
+  const manualReconnectAttach = await inspectTerminalAttachFrameWindow(
+    page,
+    manualReconnectFrameStart,
+    sessionId,
+    capability,
+  );
+  if (manualReconnectAttach.attachCount !== 1) {
+    errors.push(
+      `Manual Reconnect terminal attach count is ${manualReconnectAttach.attachCount}, expected 1`,
+    );
+  }
+  if (
+    !manualReconnectAttach.sessionIdsMatch ||
+    !manualReconnectAttach.capabilitiesMatch
+  ) {
+    errors.push(
+      'Manual Reconnect terminal_attach did not retain the session and capability',
+    );
+  }
+
+  const repeatedFrameStart = await capturedOutboundFrameCount(page);
+  await invokeMockWebSocketCallback(page, 'onclose', automaticSocketIndex);
+  const repeatedSocketIndex = await waitForRecreatedMockSocket(
+    page,
+    automaticSocketIndex + 1,
+  );
+  await driveMockSocketOpen(page, repeatedSocketIndex);
+  const repeatedReconnectAttach = await inspectTerminalAttachFrameWindow(
+    page,
+    repeatedFrameStart,
+    sessionId,
+    capability,
+  );
+  if (repeatedReconnectAttach.attachCount !== 1) {
+    errors.push(
+      `Repeated automatic terminal attach count is ${repeatedReconnectAttach.attachCount}, expected 1`,
+    );
+  }
+  if (
+    !repeatedReconnectAttach.sessionIdsMatch ||
+    !repeatedReconnectAttach.capabilitiesMatch
+  ) {
+    errors.push(
+      'Repeated automatic terminal_attach did not retain the session and capability',
+    );
   }
   const currentSessionId = await page.locator('#terminal-session-id').inputValue();
   if (currentSessionId !== sessionId) {
@@ -1664,7 +1795,11 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
     outputEvidence,
     closeEvidence,
     initialAttach,
-    reconnectAttach,
+    automaticReconnectAttach,
+    manualReconnectAttach,
+    repeatedReconnectAttach,
+    staleSocketState,
+    staleSocketFrameCount,
     capabilityPrivacy,
     errors,
   };
@@ -1679,10 +1814,18 @@ async function runTargetedFlowCase(browser, viewport, screenshots) {
     const NativeWebSocket = window.WebSocket;
     window.__qaWebSockets = [];
     window.__qaWebSocketSends = [];
+    window.__qaCreateConnectingSockets = false;
     class CapturedWebSocket extends NativeWebSocket {
       constructor(...args) {
         super(...args);
+        this.__qaForceConnecting = Boolean(window.__qaCreateConnectingSockets);
         window.__qaWebSockets.push(this);
+      }
+
+      get readyState() {
+        return this.__qaForceConnecting
+          ? NativeWebSocket.CONNECTING
+          : super.readyState;
       }
 
       get onopen() {
@@ -1713,6 +1856,17 @@ async function runTargetedFlowCase(browser, viewport, screenshots) {
         this.__qaOnClose = handler;
         super.onclose = (event) => {
           this.__qaDeferredCloseEvent = event;
+        };
+      }
+
+      get onerror() {
+        return this.__qaOnError;
+      }
+
+      set onerror(handler) {
+        this.__qaOnError = handler;
+        super.onerror = (event) => {
+          this.__qaDeferredErrorEvent = event;
         };
       }
 

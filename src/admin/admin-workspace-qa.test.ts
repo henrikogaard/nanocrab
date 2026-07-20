@@ -86,7 +86,6 @@ describe('Focus Stack rendered QA contract', () => {
       "'loading'",
       "'ready'",
       "'reconnecting'",
-      "'unavailable'",
       "'interrupted'",
       'Resume',
       'chat-run-before-progress',
@@ -154,7 +153,7 @@ describe('Focus Stack rendered QA contract', () => {
     );
   });
 
-  it('counts bounded initial and reconnect terminal-attach frame windows without selecting a latest frame', () => {
+  it('counts bounded initial and recovery terminal-attach frame windows without selecting a latest frame', () => {
     const source = qaScriptSource();
 
     for (const contractMarker of [
@@ -163,18 +162,52 @@ describe('Focus Stack rendered QA contract', () => {
       'slice(frameStart)',
       'attachCount',
       'initialAttach',
-      'reconnectAttach',
+      'automaticReconnectAttach',
+      'manualReconnectAttach',
+      'repeatedReconnectAttach',
       'initialAttach.attachCount !== 1',
-      'reconnectAttach.attachCount !== 1',
+      'automaticReconnectAttach.attachCount !== 1',
+      'manualReconnectAttach.attachCount !== 1',
+      'repeatedReconnectAttach.attachCount !== 1',
       'initialAttach.sessionIdsMatch',
-      'reconnectAttach.sessionIdsMatch',
-      'reconnectAttach.capabilitiesMatch',
+      'automaticReconnectAttach.sessionIdsMatch',
+      'automaticReconnectAttach.capabilitiesMatch',
+      'manualReconnectAttach.sessionIdsMatch',
+      'manualReconnectAttach.capabilitiesMatch',
+      'repeatedReconnectAttach.sessionIdsMatch',
+      'repeatedReconnectAttach.capabilitiesMatch',
     ]) {
       expect(source).toContain(contractMarker);
     }
 
     expect(source).not.toContain('.reverse()\n      .map((entry) =>');
     expect(source).not.toContain('.find((entry) => entry && entry.type');
+  });
+
+  it('drives a connecting terminal socket through replacement, manual reconnect, and stale callback races', () => {
+    const source = qaScriptSource();
+
+    for (const contractMarker of [
+      '__qaForceConnecting',
+      'async function forceLatestMockSocketConnecting',
+      'async function driveMockSocketOpen',
+      'async function waitForRecreatedMockSocket',
+      'socket.__qaOnError',
+      "callback === 'onerror'",
+      'automaticReconnectAttach',
+      'manualReconnectAttach',
+      'repeatedReconnectAttach',
+      'staleSocketState',
+      'staleSocketFrameCount',
+      'Initial terminal attach count',
+      'Repeated automatic terminal attach count',
+    ]) {
+      expect(source).toContain(contractMarker);
+    }
+
+    expect(source).not.toContain('WebChat.processRunEvent');
+    expect(source).not.toContain('setTerminalSessionState');
+    expect(source).not.toContain('window.eval');
   });
 
   it('records the route, landmark, overflow, accessibility, selection, layout, error, interaction, screenshot, and summary evidence', () => {

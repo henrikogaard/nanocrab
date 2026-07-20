@@ -375,12 +375,29 @@ function dispatchWsMessageSubscribers(msg) {
   }
 }
 
-function connectWs() {
+function detachWebSocketCallbacks(socket) {
+  if (!socket) return;
+  socket.onopen = null;
+  socket.onmessage = null;
+  socket.onclose = null;
+  socket.onerror = null;
+}
+
+function connectWs(options = {}) {
+  const replace = options.replace === true;
   if (wsReconnectTimer) {
     clearTimeout(wsReconnectTimer);
     wsReconnectTimer = null;
   }
-  if (ws && ws.readyState <= 1) ws.close();
+  const existingSocket = ws;
+  if (existingSocket && existingSocket.readyState <= 1 && !replace) {
+    return existingSocket;
+  }
+  if (existingSocket) {
+    detachWebSocketCallbacks(existingSocket);
+    if (ws === existingSocket) ws = null;
+    if (existingSocket.readyState <= 1) existingSocket.close();
+  }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const match = document.cookie.match(/nanocrab_session=([^;]+)/);
   const token = match?.[1] || '';
@@ -390,19 +407,22 @@ function connectWs() {
     } else {
       console.warn('WS: no session cookie found');
     }
-    return;
+    return null;
   }
   const url = `${proto}://${location.host}/ws?token=${token}`;
   console.log(
     'WS connecting to:',
     url.replace(token, token.slice(0, 8) + '...'),
   );
-  ws = new WebSocket(url);
-  ws.onopen = () => {
+  const socket = new WebSocket(url);
+  ws = socket;
+  socket.onopen = () => {
+    if (ws !== socket) return;
     console.log('WS connected');
     handleTerminalSocketOpen();
   };
-  ws.onmessage = (e) => {
+  socket.onmessage = (e) => {
+    if (ws !== socket) return;
     let message;
     try {
       message = JSON.parse(e.data);
@@ -414,7 +434,8 @@ function connectWs() {
     } catch {}
     dispatchWsMessageSubscribers(message);
   };
-  ws.onclose = (e) => {
+  socket.onclose = (e) => {
+    if (ws !== socket) return;
     console.log('WS closed:', e.code, e.reason);
     ws = null;
     if (!window._mockMode) {
@@ -424,9 +445,11 @@ function connectWs() {
       setTerminalSessionState(wsReconnectTimer ? 'reconnecting' : 'unavailable', activeTerminal.sessionId);
     }
   };
-  ws.onerror = (e) => {
+  socket.onerror = (e) => {
+    if (ws !== socket) return;
     console.debug('WS error:', e);
   };
+  return socket;
 }
 
 let activeTerminal = null; // { sessionId, term }

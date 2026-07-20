@@ -329,6 +329,151 @@ describe('Terminal operator console UI', () => {
     expect(send).toHaveBeenCalledTimes(4);
   });
 
+  it('retains a connecting socket and ignores every stale callback after replacement', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const connectStart = source.indexOf('function detachWebSocketCallbacks(');
+    const connectEnd = source.indexOf(
+      '\nlet activeTerminal = null',
+      connectStart,
+    );
+    const helpersStart = source.indexOf('function activeTerminalId()');
+    const helpersEnd = source.indexOf('\nconst PAGE_ALIASES', helpersStart);
+    const sockets: FakeSocket[] = [];
+    const timers: Array<{
+      callback: () => void;
+      delay: number;
+      cleared: boolean;
+    }> = [];
+    const setTerminalSessionState = vi.fn();
+    const handleWsMessage = vi.fn();
+    const dispatchWsMessageSubscribers = vi.fn();
+
+    class FakeSocket {
+      static OPEN = 1;
+      readyState = 0;
+      sent: string[] = [];
+      closed = false;
+      onopen: null | (() => void) = null;
+      onmessage: null | ((event: { data: string }) => void) = null;
+      onclose: null | ((event: { code: number; reason: string }) => void) =
+        null;
+      onerror: null | ((event: unknown) => void) = null;
+
+      constructor(public url: string) {
+        sockets.push(this);
+      }
+
+      send(payload: string) {
+        this.sent.push(payload);
+      }
+
+      close() {
+        this.closed = true;
+        this.readyState = 3;
+      }
+    }
+
+    const activeTerminal = {
+      sessionId: 'term-current',
+      reconnectCapability: 'current-capability',
+      attachTimer: null,
+      term: { write: vi.fn() },
+    };
+    const context = {
+      initialActiveTerminal: null,
+      WebSocket: FakeSocket,
+      location: { protocol: 'http:', host: 'localhost' },
+      document: { cookie: 'nanocrab_session=dashboard-auth' },
+      window: { _mockMode: false },
+      console: { log: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+      setTerminalSessionState,
+      handleWsMessage,
+      dispatchWsMessageSubscribers,
+      setTimeout: (callback: () => void, delay: number) => {
+        const timer = { callback, delay, cleared: false };
+        timers.push(timer);
+        return timer;
+      },
+      clearTimeout: (timer: { cleared: boolean } | null) => {
+        if (timer) timer.cleared = true;
+      },
+    } as Record<string, unknown>;
+    vm.runInNewContext(
+      'let ws = null; let wsReconnectTimer = null;' +
+        ' let activeTerminal = globalThis.initialActiveTerminal;\n' +
+        source.slice(connectStart, connectEnd) +
+        '\n' +
+        source.slice(helpersStart, helpersEnd) +
+        '\n;globalThis.connect = connectWs;' +
+        '\n;globalThis.requestAttach = requestTerminalAttach;' +
+        '\n;globalThis.setActive = (value) => { activeTerminal = value; };' +
+        '\n;globalThis.currentSocket = () => ws;',
+      context,
+    );
+    const connect = context.connect as (options?: {
+      replace?: boolean;
+    }) => void;
+    const requestAttach = context.requestAttach as () => boolean;
+    const setActive = context.setActive as (value: unknown) => void;
+    const currentSocket = context.currentSocket as () => FakeSocket | null;
+
+    connect();
+    const initialSocket = sockets[0];
+    const staleOpen = initialSocket.onopen!;
+    const staleMessage = initialSocket.onmessage!;
+    const staleClose = initialSocket.onclose!;
+    const staleError = initialSocket.onerror!;
+    setActive(activeTerminal);
+    requestAttach();
+
+    expect(sockets).toHaveLength(1);
+    expect(initialSocket.closed).toBe(false);
+    initialSocket.readyState = FakeSocket.OPEN;
+    initialSocket.onopen!();
+    expect(initialSocket.sent).toHaveLength(1);
+    expect(JSON.parse(initialSocket.sent[0])).toEqual({
+      type: 'terminal_attach',
+      sessionId: 'term-current',
+      sessionToken: 'current-capability',
+    });
+
+    connect({ replace: true });
+    const replacement = sockets[1];
+    expect(currentSocket()).toBe(replacement);
+    staleOpen();
+    staleMessage({ data: JSON.stringify({ type: 'status' }) });
+    staleClose({ code: 1006, reason: 'stale close' });
+    staleError(new Error('stale error'));
+    expect(currentSocket()).toBe(replacement);
+    expect(replacement.sent).toHaveLength(0);
+    expect(handleWsMessage).not.toHaveBeenCalled();
+    expect(timers.filter((timer) => timer.delay === 5000)).toHaveLength(0);
+
+    replacement.readyState = FakeSocket.OPEN;
+    replacement.onopen!();
+    expect(replacement.sent).toHaveLength(1);
+    replacement.onclose!({ code: 1006, reason: 'current close' });
+    const automaticReconnect = timers.find(
+      (timer) => timer.delay === 5000 && !timer.cleared,
+    );
+    expect(automaticReconnect).toBeDefined();
+    automaticReconnect!.callback();
+    const automaticSocket = sockets[2];
+    automaticSocket.readyState = FakeSocket.OPEN;
+    automaticSocket.onopen!();
+    expect(automaticSocket.sent).toHaveLength(1);
+
+    requestAttach();
+    expect(automaticSocket.sent).toHaveLength(2);
+    for (const payload of automaticSocket.sent) {
+      expect(JSON.parse(payload)).toEqual({
+        type: 'terminal_attach',
+        sessionId: 'term-current',
+        sessionToken: 'current-capability',
+      });
+    }
+  });
+
   it('never leaks a reconnect capability across session selection, history, or teardown', () => {
     const source = fs.readFileSync(appPath, 'utf8');
     const stopBlock = source.slice(
@@ -385,7 +530,7 @@ describe('Terminal operator console UI', () => {
     const source = fs.readFileSync(appPath, 'utf8');
     const registrySource = source.slice(
       source.indexOf('const wsMessageSubscribers = new Map()'),
-      source.indexOf('function connectWs()'),
+      source.indexOf('function detachWebSocketCallbacks('),
     );
     const context = {} as Record<string, unknown>;
     vm.runInNewContext(
@@ -608,9 +753,10 @@ describe('Terminal operator console UI', () => {
 
   it('keeps historical terminal attachment read-only until a deliberate new session', () => {
     const source = fs.readFileSync(appPath, 'utf8');
+    const socketOpenStart = source.indexOf('socket.onopen = () =>');
     const connectBlock = source.slice(
-      source.indexOf('ws.onopen = () =>'),
-      source.indexOf('ws.onmessage ='),
+      socketOpenStart,
+      source.indexOf('socket.onmessage =', socketOpenStart),
     );
     const initBlock = source.slice(
       source.indexOf('// Spawn or attach terminal session'),
