@@ -52,6 +52,28 @@ export interface HostGitRunnerDependencies {
     setTimeout: typeof setTimeout;
     clearTimeout: typeof clearTimeout;
   };
+  signalProcessGroup?: (pid: number, signal: NodeJS.Signals) => void;
+}
+
+function terminateUnleasedChild(
+  child: ChildProcess,
+  signalProcessGroup: (pid: number, signal: NodeJS.Signals) => void,
+): void {
+  /* eslint-disable no-catch-all/no-catch-all -- termination must preserve the registration error */
+  if (child.pid && child.pid > 0) {
+    try {
+      signalProcessGroup(-child.pid, 'SIGTERM');
+      return;
+    } catch {
+      // Fall back to signalling the child on platforms without process groups.
+    }
+  }
+  try {
+    child.kill('SIGTERM');
+  } catch {
+    // Best-effort termination must not replace the registration error.
+  }
+  /* eslint-enable no-catch-all/no-catch-all */
 }
 
 export function createHostGitRunner(
@@ -62,6 +84,9 @@ export function createHostGitRunner(
     openStableDirectory,
     registry,
     timers = { setTimeout, clearTimeout },
+    signalProcessGroup = (pid, signal) => {
+      process.kill(pid, signal);
+    },
   } = deps;
 
   return async (args, options) => {
@@ -75,6 +100,12 @@ export function createHostGitRunner(
     } = options;
     const attemptId =
       jobId && !suppliedAttemptId ? randomUUID() : suppliedAttemptId;
+
+    if (jobId && attemptId && registry.get(jobId, attemptId)) {
+      throw new Error(
+        `Process lease already registered for ${jobId}/${attemptId}`,
+      );
+    }
 
     let stableHandle: StableDirectoryHandle | undefined;
     let actualCwd = cwd;
@@ -120,64 +151,76 @@ export function createHostGitRunner(
         }
       };
 
-      const child = execFile(
-        'git',
-        [...actualArgs],
-        {
-          cwd: actualCwd,
-          env: actualEnv,
-          encoding: 'utf8',
-          detached: true,
-        },
-        (error, stdout, stderr) => {
-          if (lease) {
-            registry.compareAndDelete(lease);
-            lease = undefined;
-          }
-          cleanup();
+      let child: ChildProcess;
+      try {
+        child = execFile(
+          'git',
+          [...actualArgs],
+          {
+            cwd: actualCwd,
+            env: actualEnv,
+            encoding: 'utf8',
+            detached: true,
+          },
+          (error, stdout, stderr) => {
+            if (lease) {
+              registry.compareAndDelete(lease);
+              lease = undefined;
+            }
+            cleanup();
 
-          if (error) {
-            const execError = error as {
-              killed?: boolean;
-              code?: string | number | null;
-              signal?: NodeJS.Signals;
-            };
-            if (execError.killed) {
-              if (timedOut) {
-                reject(new HostGitTimeoutError());
-              } else {
-                reject(new HostGitCancelledError());
+            if (error) {
+              const execError = error as {
+                killed?: boolean;
+                code?: string | number | null;
+                signal?: NodeJS.Signals;
+              };
+              if (execError.killed) {
+                if (timedOut) {
+                  reject(new HostGitTimeoutError());
+                } else {
+                  reject(new HostGitCancelledError());
+                }
+                return;
               }
+              if (typeof execError.code === 'number') {
+                resolve({
+                  stdout: String(stdout ?? ''),
+                  stderr: String(stderr ?? ''),
+                  exitCode: execError.code,
+                });
+                return;
+              }
+              reject(error);
               return;
             }
-            if (typeof execError.code === 'number') {
-              resolve({
-                stdout: String(stdout ?? ''),
-                stderr: String(stderr ?? ''),
-                exitCode: execError.code,
-              });
-              return;
-            }
-            reject(error);
-            return;
-          }
 
-          resolve({
-            stdout: String(stdout ?? ''),
-            stderr: String(stderr ?? ''),
-            exitCode: 0,
-          });
-        },
-      );
+            resolve({
+              stdout: String(stdout ?? ''),
+              stderr: String(stderr ?? ''),
+              exitCode: 0,
+            });
+          },
+        );
+      } catch (error) {
+        cleanup();
+        throw error;
+      }
 
       if (jobId && attemptId) {
-        lease = registry.register({
-          jobId,
-          attemptId,
-          process: child as unknown as Parameters<
-            ProcessRegistry['register']
-          >[0]['process'],
-        });
+        try {
+          lease = registry.register({
+            jobId,
+            attemptId,
+            process: child as unknown as Parameters<
+              ProcessRegistry['register']
+            >[0]['process'],
+          });
+        } catch (error) {
+          cleanup();
+          terminateUnleasedChild(child, signalProcessGroup);
+          throw error;
+        }
         timeoutHandle = timers.setTimeout(() => {
           timedOut = true;
           if (lease) registry.terminate(lease, 'timed_out');

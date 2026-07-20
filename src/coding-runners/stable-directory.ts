@@ -11,7 +11,12 @@ export interface StableDirectoryDependencies {
   open(
     path: string,
     flags: number,
-  ): Promise<{ fd: number; stat(): Promise<fs.Stats>; close(): Promise<void> }>;
+  ): Promise<{
+    fd: number;
+    stat(): Promise<fs.Stats>;
+    statBigInt(): Promise<fs.BigIntStats>;
+    close(): Promise<void>;
+  }>;
 }
 
 const defaultDependencies: StableDirectoryDependencies = {
@@ -20,6 +25,7 @@ const defaultDependencies: StableDirectoryDependencies = {
     return {
       fd: handle.fd,
       stat: () => handle.stat(),
+      statBigInt: () => handle.stat({ bigint: true }),
       close: () => handle.close(),
     };
   },
@@ -30,10 +36,23 @@ export function fdDirectoryPath(
   platform: NodeJS.Platform = process.platform,
 ): string {
   if (platform === 'linux') return `/proc/self/fd/${fd}`;
-  if (platform === 'darwin') return `/dev/fd/${fd}`;
+  if (platform === 'darwin') {
+    const stat = fs.fstatSync(fd, { bigint: true });
+    return `/.vol/${stat.dev}/${stat.ino}`;
+  }
   throw new Error(
     'Stable directory descriptors are only supported on Linux and macOS',
   );
+}
+
+function stableDirectoryError(label: string): Error {
+  return new Error(`${label} is not a stable directory`, {
+    cause: new Error(`${label} is not a stable directory`),
+  });
+}
+
+function hasSameIdentity(left: fs.BigIntStats, right: fs.BigIntStats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
 }
 
 export async function openStableDirectory(
@@ -47,28 +66,52 @@ export async function openStableDirectory(
     (fs.constants.O_DIRECTORY ?? 0);
 
   let handle:
-    | { fd: number; stat(): Promise<fs.Stats>; close(): Promise<void> }
+    | {
+        fd: number;
+        stat(): Promise<fs.Stats>;
+        statBigInt(): Promise<fs.BigIntStats>;
+        close(): Promise<void>;
+      }
     | undefined;
   try {
     handle = await deps.open(directory, flags);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`${label} is not a stable directory: ${message}`, {
-      // Filesystem errors may expose paths outside the approved workspace.
-      // eslint-disable-next-line preserve-caught-error
-      cause: new Error(`${label} is not a stable directory`),
-    });
+  } catch {
+    throw stableDirectoryError(label);
   }
 
-  const stat = await handle.stat();
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    await handle.close();
-    throw new Error(`${label} is not a stable directory`);
+  let stablePath: string;
+  try {
+    const stat = await handle.statBigInt();
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw stableDirectoryError(label);
+    }
+
+    stablePath = fdDirectoryPath(handle.fd);
+    // Linux exposes the already-open descriptor through a kernel-owned symlink.
+    // O_NOFOLLOW still applies to every caller-provided directory and child.
+    const stablePathFlags =
+      process.platform === 'linux' ? flags & ~fs.constants.O_NOFOLLOW : flags;
+    const stableHandle = await deps.open(stablePath, stablePathFlags);
+    try {
+      const stableStat = await stableHandle.statBigInt();
+      if (
+        !stableStat.isDirectory() ||
+        stableStat.isSymbolicLink() ||
+        !hasSameIdentity(stat, stableStat)
+      ) {
+        throw stableDirectoryError(label);
+      }
+    } finally {
+      await stableHandle.close();
+    }
+  } catch {
+    await handle.close().catch(() => undefined);
+    throw stableDirectoryError(label);
   }
 
   return {
     fd: handle.fd,
-    path: fdDirectoryPath(handle.fd),
+    path: stablePath,
     stat: () => handle!.stat(),
     close: () => handle!.close(),
   };

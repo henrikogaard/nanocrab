@@ -28,7 +28,7 @@ interface FakeChild extends EventEmitter {
   callback: (error: unknown, stdout: string, stderr: string) => void;
 }
 
-function createFakeExecFile() {
+function createFakeExecFile(pid?: number) {
   const children: FakeChild[] = [];
   const execFile = vi.fn(
     (
@@ -38,6 +38,7 @@ function createFakeExecFile() {
       callback: (error: unknown, stdout: string, stderr: string) => void,
     ): ChildProcess => {
       const child = new EventEmitter() as FakeChild;
+      Object.assign(child, { pid });
       child.callback = callback;
       child.kill = vi.fn((signal: string) => {
         callback(
@@ -61,6 +62,18 @@ function createFakeExecFile() {
     execFile: execFile as unknown as HostGitRunnerDependencies['execFile'],
     children,
   };
+}
+
+function expectStablePathForDirectory(
+  stablePath: string | undefined,
+  directory: string,
+): void {
+  expect(stablePath).toEqual(expect.any(String));
+  expect(stablePath).not.toBe(directory);
+  const stableStat = fs.statSync(stablePath!, { bigint: true });
+  const directoryStat = fs.statSync(directory, { bigint: true });
+  expect(stableStat.dev).toBe(directoryStat.dev);
+  expect(stableStat.ino).toBe(directoryStat.ino);
 }
 
 describe('createHostGitRunner', () => {
@@ -96,23 +109,131 @@ describe('createHostGitRunner', () => {
     });
 
     await vi.waitFor(() => expect(children).toHaveLength(1));
+    const execOptions = vi.mocked(execFile).mock.calls[0]![2];
+    expectStablePathForDirectory(execOptions.cwd, workspace);
+    expect(execOptions).toEqual(
+      expect.objectContaining({
+        env: {},
+        detached: true,
+        encoding: 'utf8',
+      }),
+    );
     const [child] = children;
     child.callback(null, 'ok', '');
 
     const result = await resultPromise;
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe('ok');
-    expect(execFile).toHaveBeenCalledWith(
-      'git',
-      ['status'],
-      expect.objectContaining({
-        cwd: expect.stringMatching(/^\/(?:proc\/self|dev)\/fd\/\d+$/),
+    expect(vi.mocked(execFile).mock.calls[0]![0]).toBe('git');
+    expect(vi.mocked(execFile).mock.calls[0]![1]).toEqual(['status']);
+  });
+
+  it('closes the stable directory once when execFile throws synchronously', async () => {
+    const close = vi.fn(async () => undefined);
+    const stableStat = fs.statSync(tmp);
+    const openStableDirectory = vi.fn(async () => ({
+      fd: 7,
+      path: '/stable/workspace',
+      stat: async () => stableStat,
+      close,
+    }));
+    const execFile = vi.fn(() => {
+      throw new Error('spawn failed');
+    });
+    const run = createHostGitRunner({
+      execFile: execFile as unknown as HostGitRunnerDependencies['execFile'],
+      openStableDirectory:
+        openStableDirectory as unknown as HostGitRunnerDependencies['openStableDirectory'],
+      registry,
+    });
+
+    await expect(
+      run(['status'], {
+        cwd: path.join(tmp, 'workspace'),
         env: {},
-        detached: true,
-        encoding: 'utf8',
+        timeoutMs: 60_000,
       }),
-      expect.any(Function),
-    );
+    ).rejects.toThrow('spawn failed');
+
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an existing lease before opening or spawning', async () => {
+    registry.register({
+      jobId: 'job-1',
+      attemptId: 'attempt-1',
+      process: new EventEmitter() as unknown as Parameters<
+        typeof registry.register
+      >[0]['process'],
+    });
+    const close = vi.fn(async () => undefined);
+    const openStableDirectory = vi.fn(async () => ({
+      fd: 7,
+      path: '/stable/workspace',
+      stat: async () => fs.statSync(tmp),
+      close,
+    }));
+    const { execFile, children } = createFakeExecFile(4_321);
+    const run = createHostGitRunner({
+      execFile,
+      openStableDirectory:
+        openStableDirectory as unknown as HostGitRunnerDependencies['openStableDirectory'],
+      registry,
+    });
+
+    await expect(
+      run(['status'], {
+        cwd: path.join(tmp, 'workspace'),
+        env: {},
+        timeoutMs: 60_000,
+        jobId: 'job-1',
+        attemptId: 'attempt-1',
+      }),
+    ).rejects.toThrow(/already registered/i);
+
+    expect(openStableDirectory).not.toHaveBeenCalled();
+    expect(children).toHaveLength(0);
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it('closes the stable directory and terminates the unleased child when registration throws', async () => {
+    const registrationError = new Error('registration race');
+    vi.spyOn(registry, 'register').mockImplementation(() => {
+      throw registrationError;
+    });
+    const close = vi.fn(async () => undefined);
+    const openStableDirectory = vi.fn(async () => ({
+      fd: 7,
+      path: '/stable/workspace',
+      stat: async () => fs.statSync(tmp),
+      close,
+    }));
+    const { execFile, children } = createFakeExecFile(4_321);
+    const signalProcessGroup = vi.fn();
+    const run = createHostGitRunner({
+      execFile,
+      openStableDirectory:
+        openStableDirectory as unknown as HostGitRunnerDependencies['openStableDirectory'],
+      registry,
+      signalProcessGroup,
+    });
+
+    await expect(
+      run(['status'], {
+        cwd: path.join(tmp, 'workspace'),
+        env: {},
+        timeoutMs: 60_000,
+        jobId: 'job-1',
+        attemptId: 'attempt-1',
+      }),
+    ).rejects.toBe(registrationError);
+
+    expect(children).toHaveLength(1);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(signalProcessGroup).toHaveBeenCalledTimes(1);
+    expect(signalProcessGroup).toHaveBeenCalledWith(-4_321, 'SIGTERM');
+    expect(children[0].kill).not.toHaveBeenCalled();
+    expect(registry.get('job-1', 'attempt-1')).toBeNull();
   });
 
   it('points GIT_WORK_TREE at the stable descriptor', async () => {
@@ -135,23 +256,12 @@ describe('createHostGitRunner', () => {
     });
 
     await vi.waitFor(() => expect(children).toHaveLength(1));
+    const execOptions = vi.mocked(execFile).mock.calls[0]![2];
+    expectStablePathForDirectory(execOptions.cwd, workspace);
+    expect(execOptions.env?.GIT_WORK_TREE).toBe(execOptions.cwd);
+    expect(execOptions.env?.KEEP_ME).toBe('yes');
     children[0].callback(null, 'ok', '');
     await resultPromise;
-
-    expect(execFile).toHaveBeenCalledWith(
-      'git',
-      ['status'],
-      expect.objectContaining({
-        cwd: expect.stringMatching(/^\/(?:proc\/self|dev)\/fd\/\d+$/),
-        env: expect.objectContaining({
-          GIT_WORK_TREE: expect.stringMatching(
-            /^\/(?:proc\/self|dev)\/fd\/\d+$/,
-          ),
-          KEEP_ME: 'yes',
-        }),
-      }),
-      expect.any(Function),
-    );
   });
 
   it('registers the child in the attempt-aware registry', async () => {

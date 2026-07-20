@@ -229,14 +229,19 @@ This process lease covers the Devin/container runner. Host Git commands are
 started through `runHostGit` in `src/coding-runners/host-git.ts` and registered
 in the attempt-aware `codingProcessRegistry` under the exact job/attempt lease.
 `runHostGit` begins by opening the working directory (or clone parent) with
-`O_NOFOLLOW | O_DIRECTORY` and resolving a stable `/proc/self/fd/<n>` path via
-`src/coding-runners/stable-directory.ts`, so the same-UID TOCTOU window between
-path validation and `execFile` is closed for host Git. The spawned `git` process
-runs in a new process group; cancellation/timeout escalate from `SIGTERM` to
-`SIGKILL` against the negative PID, tearing down `git` and any credential or
-SSH children it spawned. `terminateAll` cancels every active host Git attempt
-for a job when the whole job is cancelled. A timed-out or cancelled attempt
-throws `HostGitTimeoutError`/`HostGitCancelledError` and the result is not used.
+`O_NOFOLLOW | O_DIRECTORY` and resolving a stable descriptor path via
+`src/coding-runners/stable-directory.ts`: Linux uses `/proc/self/fd/<n>`, while
+macOS uses the descriptor's inode-addressed `/.vol/<device>/<inode>` path. The
+stable path is reopened and checked against the descriptor identity before use,
+so the same-UID TOCTOU window between path validation and `execFile` is closed
+for host Git. Darwin mounted filesystems must support that `/.vol` identity
+namespace; unsupported filesystems fail closed, and NanoCrab never falls back
+to a mutable pathname. The spawned `git` process runs in a new process group;
+cancellation/timeout escalate from `SIGTERM` to `SIGKILL` against the negative
+PID, tearing down `git` and any credential or SSH children it spawned.
+`terminateAll` cancels every active host Git attempt for a job when the whole
+job is cancelled. A timed-out or cancelled attempt throws
+`HostGitTimeoutError`/`HostGitCancelledError` and the result is not used.
 
 Devin stdout and stderr pass through independent stateful streaming redactors
 before persistence or display. The redactors carry partial tokens across chunk
