@@ -66,6 +66,59 @@ describe('stable directory', () => {
     );
   });
 
+  it('rejects distinct bigint identities that collapse to the same number', async () => {
+    const originalIno = 9_007_199_254_740_992n;
+    const reopenedIno = originalIno + 1n;
+    const roundedIno = Number(originalIno);
+    expect(Number(reopenedIno)).toBe(roundedIno);
+
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY ?? 0);
+    const originalHandle = await fs.promises.open(tmp, flags);
+    const reopenedHandle = await fs.promises.open(tmp, flags);
+    let openCount = 0;
+    const withIdentity = <T extends fs.Stats | fs.BigIntStats>(
+      stat: T,
+      dev: number | bigint,
+      ino: number | bigint,
+    ): T =>
+      new Proxy(stat, {
+        get(target, property, receiver) {
+          if (property === 'dev') return dev;
+          if (property === 'ino') return ino;
+          return Reflect.get(target, property, receiver);
+        },
+      });
+    const deps: StableDirectoryDependencies = {
+      open: async () => {
+        const isOriginal = openCount++ === 0;
+        const handle = isOriginal ? originalHandle : reopenedHandle;
+        const ino = isOriginal ? originalIno : reopenedIno;
+        return {
+          fd: handle.fd,
+          stat: async () =>
+            withIdentity(await handle.stat(), 1, roundedIno) as fs.Stats,
+          statBigInt: async () =>
+            withIdentity(
+              await handle.stat({ bigint: true }),
+              1n,
+              ino,
+            ) as fs.BigIntStats,
+          close: () => handle.close(),
+        };
+      },
+    };
+
+    const accepted = await openStableDirectory(tmp, 'test', deps).then(
+      async (handle) => {
+        await handle.close();
+        return true;
+      },
+      () => false,
+    );
+
+    expect(accepted).toBe(false);
+  });
+
   it('opens a child directory relative to a stable parent', async () => {
     const parentPath = path.join(tmp, 'parent');
     const childPath = path.join(parentPath, 'child');

@@ -11,7 +11,12 @@ export interface StableDirectoryDependencies {
   open(
     path: string,
     flags: number,
-  ): Promise<{ fd: number; stat(): Promise<fs.Stats>; close(): Promise<void> }>;
+  ): Promise<{
+    fd: number;
+    stat(): Promise<fs.Stats>;
+    statBigInt(): Promise<fs.BigIntStats>;
+    close(): Promise<void>;
+  }>;
 }
 
 const defaultDependencies: StableDirectoryDependencies = {
@@ -20,6 +25,7 @@ const defaultDependencies: StableDirectoryDependencies = {
     return {
       fd: handle.fd,
       stat: () => handle.stat(),
+      statBigInt: () => handle.stat({ bigint: true }),
       close: () => handle.close(),
     };
   },
@@ -45,7 +51,7 @@ function stableDirectoryError(label: string): Error {
   });
 }
 
-function hasSameIdentity(left: fs.Stats, right: fs.Stats): boolean {
+function hasSameIdentity(left: fs.BigIntStats, right: fs.BigIntStats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
@@ -60,7 +66,12 @@ export async function openStableDirectory(
     (fs.constants.O_DIRECTORY ?? 0);
 
   let handle:
-    | { fd: number; stat(): Promise<fs.Stats>; close(): Promise<void> }
+    | {
+        fd: number;
+        stat(): Promise<fs.Stats>;
+        statBigInt(): Promise<fs.BigIntStats>;
+        close(): Promise<void>;
+      }
     | undefined;
   try {
     handle = await deps.open(directory, flags);
@@ -70,7 +81,7 @@ export async function openStableDirectory(
 
   let stablePath: string;
   try {
-    const stat = await handle.stat();
+    const stat = await handle.statBigInt();
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
       throw stableDirectoryError(label);
     }
@@ -84,7 +95,7 @@ export async function openStableDirectory(
         : flags;
     const stableHandle = await deps.open(stablePath, stablePathFlags);
     try {
-      const stableStat = await stableHandle.stat();
+      const stableStat = await stableHandle.statBigInt();
       if (
         !stableStat.isDirectory() ||
         stableStat.isSymbolicLink() ||
