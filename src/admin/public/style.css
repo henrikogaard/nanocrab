@@ -22366,17 +22366,14 @@ button.sessions-command-stat:active {
     flex: 1 1 auto;
   }
 
-  .work-session-inspector {
-    position: fixed;
-    inset: auto 0 0;
-    z-index: 1100;
+  .focus-stack-inspector.is-open .work-session-inspector {
     width: 100%;
-    max-height: min(78dvh, 680px);
+    max-height: 100%;
     border-right: 0;
     border-bottom: 0;
     border-left: 0;
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    box-shadow: 0 -24px 64px color-mix(in oklch, black 44%, transparent);
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .work-session-tabs {

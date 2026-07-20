@@ -279,6 +279,7 @@
   function nextAction(session) {
     var model = asRecord(session);
     var status = normalizeStatus(model.status);
+    if (model.isReadOnly === true) return null;
     if (status === 'waiting_approval') return 'review_approvals';
     if (
       (status === 'failed' || status === 'cancelled') &&
@@ -435,27 +436,38 @@
   }
 
   function sessionActions(session) {
+    var status = normalizeStatus(session.status);
+    var isWritable = session.isReadOnly !== true;
     var primaryAction = nextAction(session);
     return [
       {
         id: 'review_approvals',
         label: 'Review approvals',
-        visible: normalizeStatus(session.status) === 'waiting_approval',
+        visible: isWritable && status === 'waiting_approval',
       },
       {
         id: 'resume',
         label: 'Resume',
-        visible: session.canResume === true,
+        visible:
+          isWritable &&
+          session.canResume === true &&
+          (status === 'running' || status === 'completed'),
       },
       {
         id: 'retry',
         label: 'Retry',
-        visible: session.canRetry === true,
+        visible:
+          isWritable &&
+          session.canRetry === true &&
+          (status === 'failed' || status === 'cancelled'),
       },
       {
         id: 'cancel',
         label: 'Cancel',
-        visible: session.canCancel === true,
+        visible:
+          isWritable &&
+          session.canCancel === true &&
+          (status === 'running' || status === 'waiting_approval'),
       },
     ].map(function (action) {
       action.primary = action.id === primaryAction;
@@ -709,19 +721,29 @@
     );
   }
 
+  function domIdToken(value) {
+    var text = stringValue(value);
+    if (!text) return 'u-empty';
+    return (
+      'u-' +
+      Array.from(text)
+        .map(function (character) {
+          return character.codePointAt(0).toString(16);
+        })
+        .join('-')
+    );
+  }
+
   function renderInspector(session, activeTab) {
     var model = asRecord(session);
     var selectedTab = validInspectorTab(activeTab);
-    var token = stringValue(model.id)
-      .replace(/[^a-zA-Z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-    if (!token) token = 'session';
+    var token = domIdToken(model.id);
     var titleId = 'work-session-' + token + '-title';
     var panelId = 'work-session-' + token + '-panel';
     var selectedTabId = 'work-session-' + token + '-' + selectedTab + '-tab';
 
     return (
-      '<aside class="work-session-inspector" role="dialog" aria-modal="true" aria-labelledby="' +
+      '<section class="work-session-inspector" role="region" aria-labelledby="' +
       esc(titleId) +
       '" tabindex="-1">' +
       '<header class="work-session-inspector-head"><div><span>Work session</span><h2 id="' +
@@ -761,7 +783,7 @@
       esc(selectedTabId) +
       '" tabindex="0">' +
       inspectorPanel(model, selectedTab) +
-      '</div></aside>'
+      '</div></section>'
     );
   }
 

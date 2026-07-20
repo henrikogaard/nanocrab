@@ -689,6 +689,40 @@ describe('NanoWorkSession shared views', () => {
     expect(html).not.toContain('data-work-session-action="retry"');
   });
 
+  it.each([
+    ['unknown', false, []],
+    ['interrupted', false, []],
+    ['running', true, []],
+    ['running', false, ['resume', 'cancel']],
+    ['waiting_approval', false, ['review_approvals', 'cancel']],
+    ['failed', false, ['retry']],
+    ['cancelled', false, ['retry']],
+    ['completed', false, ['resume']],
+  ])(
+    'gates hostile capability flags for %s status (read-only: %s)',
+    (status, isReadOnly, expectedActions) => {
+      const adapter = loadWorkSession();
+      const hostileSession = {
+        ...session,
+        status,
+        canCancel: true,
+        canRetry: true,
+        canResume: true,
+        isReadOnly,
+      };
+      const html = adapter.renderRunStrip(hostileSession);
+      const actions = Array.from(
+        html.matchAll(/data-work-session-action="([^"]+)"/g),
+        (match) => match[1],
+      );
+
+      expect(actions).toEqual(expectedActions);
+      expect(adapter.nextAction(hostileSession)).toBe(
+        expectedActions[0] || null,
+      );
+    },
+  );
+
   it('renders an ordered timeline and escapes producer-controlled content', () => {
     const html = loadWorkSession().renderTimeline({
       ...session,
@@ -722,12 +756,13 @@ describe('NanoWorkSession shared views', () => {
     expect(html).toContain('No timeline recorded');
   });
 
-  it('renders exactly the seven inspector tabs with dialog and tab semantics', () => {
+  it('renders exactly the seven inspector tabs with non-modal region and tab semantics', () => {
     const html = loadWorkSession().renderInspector(session, 'approvals');
 
     expect(html).toContain('class="work-session-inspector"');
-    expect(html).toContain('role="dialog"');
-    expect(html).toContain('aria-modal="true"');
+    expect(html).toContain('role="region"');
+    expect(html).not.toContain('role="dialog"');
+    expect(html).not.toContain('aria-modal');
     expect(html).toContain('tabindex="-1"');
     expect(html).toContain('role="tablist"');
     expect((html.match(/role="tab"/g) || []).length).toBe(7);
@@ -735,10 +770,11 @@ describe('NanoWorkSession shared views', () => {
     expect(html).toContain('data-work-session-tab="approvals"');
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('role="tabpanel"');
-    expect(html).toContain('id="work-session-session-42-approvals-tab"');
-    expect(html).toContain(
-      'aria-labelledby="work-session-session-42-approvals-tab"',
-    );
+    const selectedTabId = html.match(
+      /id="([^"]+-approvals-tab)" role="tab"[^>]+aria-selected="true"/,
+    )?.[1];
+    expect(selectedTabId).toBeTruthy();
+    expect(html).toContain(`aria-labelledby="${selectedTabId}"`);
     expect(html).toContain('Pending approvals');
     expect(html).toContain('<strong>1</strong>');
     expect(html).toContain('Apply the patch');
@@ -785,12 +821,46 @@ describe('NanoWorkSession shared views', () => {
     expect(strip).not.toContain('data-session-id="session-42" onmouseover=');
   });
 
+  it('uses deterministic collision-resistant DOM IDs and matching ARIA references', () => {
+    const adapter = loadWorkSession();
+    const sessionIds = ['', 'session', '😀', 'team/main', 'team main'];
+    const outputs = sessionIds.map((id) =>
+      adapter.renderInspector({ ...session, id }, 'tools'),
+    );
+    const titleIds = outputs.map(
+      (html) => html.match(/<h2 id="([^"]+)">/)?.[1],
+    );
+
+    expect(new Set(titleIds).size).toBe(sessionIds.length);
+    expect(titleIds.every((id) => /^[a-zA-Z0-9_-]+$/.test(id || ''))).toBe(
+      true,
+    );
+    outputs.forEach((html, index) => {
+      const titleId = titleIds[index];
+      const selectedTabId = html.match(
+        /id="([^"]+-tools-tab)" role="tab"[^>]+aria-selected="true"/,
+      )?.[1];
+      expect(html).toContain(`role="region" aria-labelledby="${titleId}"`);
+      expect(selectedTabId).toBeTruthy();
+      expect(html).toContain(
+        `role="tabpanel" aria-labelledby="${selectedTabId}"`,
+      );
+      expect(
+        adapter.renderInspector({ ...session, id: sessionIds[index] }, 'tools'),
+      ).toBe(html);
+    });
+  });
+
   it('defines token-based responsive run-strip and inspector layouts for a 390px viewport', () => {
     const style = fs.readFileSync(stylePath, 'utf8');
     const responsiveStart = style.indexOf(
       '@media (max-width: 480px) {\n  .work-session-run-strip',
     );
-    const responsive = style.slice(responsiveStart);
+    const responsiveEnd = style.indexOf(
+      '@media (max-width: 480px) {',
+      responsiveStart + 1,
+    );
+    const responsive = style.slice(responsiveStart, responsiveEnd);
 
     expect(style).toContain('.work-session-run-strip');
     expect(style).toContain('.work-session-counter');
@@ -802,8 +872,13 @@ describe('NanoWorkSession shared views', () => {
     expect(responsive).toContain('grid-template-columns: 1fr');
     expect(responsive).toContain('.work-session-run-status');
     expect(responsive).toContain('.work-session-actions');
-    expect(responsive).toContain('position: fixed');
-    expect(responsive).toContain('inset: auto 0 0');
+    expect(responsive).toContain(
+      '.focus-stack-inspector.is-open .work-session-inspector',
+    );
+    expect(responsive).not.toContain(
+      '.work-session-inspector {\n    position: fixed',
+    );
+    expect(responsive).not.toContain('inset: auto 0 0');
     expect(responsive).toContain('overflow-x: auto');
   });
 });
