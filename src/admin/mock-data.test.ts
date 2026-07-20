@@ -43,6 +43,7 @@ describe('mock admin data', () => {
       expect(sessions.map((session) => session.status).sort()).toEqual([
         'completed',
         'failed',
+        'interrupted',
         'running',
         'waiting_approval',
       ]);
@@ -103,6 +104,35 @@ describe('mock admin data', () => {
           expect.objectContaining({ type: 'progress', pct: 80 }),
         ]),
       );
+    });
+  });
+
+  it('serves interrupted and partial-data fixtures for unified session recovery', async () => {
+    await withServer(async (baseUrl) => {
+      const listResponse = await fetch(`${baseUrl}/api/sessions/cockpit`);
+      const sessions = (await listResponse.json()) as Array<{
+        id: string;
+        source: string;
+        status: string;
+      }>;
+      const interrupted = sessions.find(
+        (session) => session.id === 'cockpit-interrupted-005',
+      );
+
+      expect(interrupted).toMatchObject({
+        source: 'transcript',
+        status: 'interrupted',
+      });
+
+      const detailResponse = await fetch(
+        `${baseUrl}/api/sessions/cockpit/cockpit-interrupted-005`,
+      );
+      expect(detailResponse.status).toBe(200);
+      expect(await detailResponse.json()).toMatchObject({
+        id: 'cockpit-interrupted-005',
+        partialData: true,
+        status: 'interrupted',
+      });
     });
   });
 

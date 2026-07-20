@@ -17,7 +17,7 @@ describe('Sessions handoff cockpit UI', () => {
     expect(source).toContain("navigate('approvals')");
     expect(source).toContain("navigate('artifacts')");
     expect(source).toContain('class="sessions-command-main"');
-    expect(source.match(/class="sessions-command-stat"/g)).toHaveLength(3);
+    expect(source.match(/class="sessions-command-stat"/g)).toHaveLength(4);
     expect(source).not.toContain(
       '<button class="session-stat" onclick="navigate(\'approvals\')">',
     );
@@ -110,6 +110,66 @@ describe('Sessions handoff cockpit UI', () => {
     expect(source).toContain('filterSessions');
     expect(source).toContain("'session-detail'");
     expect(source).toContain('renderSessionDetail');
+  });
+
+  it('uses one contextual run list and one shared work-session canvas', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+
+    expect(source).toContain('class="sessions-contextual-column"');
+    expect(source).toContain('class="sessions-primary-canvas"');
+    expect(source).toContain('data-session-select');
+    expect(source).toContain("api('/sessions/cockpit')");
+    expect(source).toContain('NanoWorkSession.normalize');
+    expect(source).toContain('NanoWorkSession.renderRunStrip');
+    expect(source).toContain('NanoWorkSession.renderInspector');
+  });
+
+  it('loads each detail surface independently and keeps warnings in the inspector', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+
+    expect(source).toContain('loadUnifiedSessionDetail');
+    expect(source).toContain(
+      '/sessions/cockpit/${encodeURIComponent(cockpitId)}',
+    );
+    expect(source).toContain(
+      '/sessions/cockpit/${encodeURIComponent(cockpitId)}/stream',
+    );
+    expect(source).toContain(
+      '/sessions/${encodeURIComponent(params.group)}/${encodeURIComponent(params.sessionId)}/detail',
+    );
+    expect(source).toContain('class="work-session-partial-warning"');
+    expect(source).toContain('_sessionDetailParams');
+    expect(source).toContain("'session-detail'");
+  });
+
+  it('delegates run actions through verified mutations and navigation', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+
+    expect(source).toContain('bindUnifiedSessionActions');
+    expect(source).toContain('[data-work-session-action]');
+    expect(source).toContain("['cancel', 'retry'].includes(action)");
+    expect(source).toContain(
+      '/agents/coding/jobs/${encodeURIComponent(session.id)}/${action}',
+    );
+    expect(source).toContain("action === 'review_approvals'");
+    expect(source).toContain("action === 'handoff'");
+    expect(source).toContain('await refreshUnifiedSessionDetail');
+  });
+
+  it('keeps mobile run, group, approval, and artifact summaries as separate nodes', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const commandCenter = source.slice(
+      source.indexOf('<section class="sessions-command-center">'),
+      source.indexOf('${renderSessionContinuationGuide()}'),
+    );
+
+    expect(commandCenter.match(/class="sessions-command-stat"/g)).toHaveLength(
+      4,
+    );
+    expect(commandCenter).toContain('<span>Runs</span>');
+    expect(commandCenter).toContain('<span>Groups</span>');
+    expect(commandCenter).toContain('<span>Approvals</span>');
+    expect(commandCenter).toContain('<span>Artifacts</span>');
   });
 
   it('uses class-based session viewer and transcript detail chrome', () => {

@@ -470,6 +470,7 @@ const cockpitSessions = [
   {
     id: 'cockpit-running-001',
     sessionId: 'cockpit-running-001',
+    source: 'coding-job',
     group: 'main',
     provider: 'codex',
     model: 'gpt-5.4',
@@ -492,6 +493,7 @@ const cockpitSessions = [
   {
     id: 'cockpit-approval-002',
     sessionId: 'cockpit-approval-002',
+    source: 'active-container',
     group: 'operations',
     provider: 'claude',
     model: 'claude-sonnet-4-6',
@@ -510,6 +512,7 @@ const cockpitSessions = [
   {
     id: 'cockpit-failed-003',
     sessionId: 'cockpit-failed-003',
+    source: 'coding-job',
     group: 'scouts',
     provider: 'openrouter',
     model: 'openrouter/auto',
@@ -529,6 +532,7 @@ const cockpitSessions = [
   {
     id: 'cockpit-complete-004',
     sessionId: 'cockpit-complete-004',
+    source: 'coding-job',
     group: 'HenrikOrg/nanocrab',
     provider: 'codex',
     model: 'gpt-5.4',
@@ -543,6 +547,26 @@ const cockpitSessions = [
     changedFiles: ['src/admin/routes/containers.ts', 'src/admin/websocket.ts'],
     currentStep: 'Completed implementation and recorded focused test results.',
     filePath: '',
+  },
+  {
+    id: 'cockpit-interrupted-005',
+    sessionId: 'cockpit-interrupted-005',
+    source: 'transcript',
+    group: 'main',
+    provider: 'codex',
+    model: 'gpt-5.4',
+    status: 'interrupted',
+    startedAt: iso(520),
+    updatedAt: iso(490),
+    lastEventAt: iso(490),
+    lastActivity: iso(490),
+    messageCount: 8,
+    approvalCount: 0,
+    artifactCount: 0,
+    changedFiles: [],
+    currentStep: 'Session stopped before a final result was recorded.',
+    filePath: 'cockpit-interrupted-005.jsonl',
+    partialData: true,
   },
 ];
 

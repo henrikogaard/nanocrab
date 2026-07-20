@@ -17088,7 +17088,7 @@ function renderSessionLoadingState(kind = 'cockpit') {
 async function renderSessions(el) {
   el.innerHTML = renderSessionLoadingState('cockpit');
   try {
-    const sessions = await api('/sessions');
+    const sessions = await api('/sessions/cockpit');
     if (sessions.length === 0) {
       el.innerHTML = renderSessionsEmptyState();
       return;
@@ -17116,7 +17116,8 @@ async function renderSessions(el) {
           <p>See what agents are doing, what needs you, and what can be reused across Copilot, Cowork, Code, and routines.</p>
         </div>
         <div class="sessions-command-stats">
-          <div class="sessions-command-stat"><span>Runs</span><strong>${sessions.length}</strong><small>${Object.keys(grouped).length} groups</small></div>
+          <div class="sessions-command-stat"><span>Runs</span><strong>${sessions.length}</strong><small>recorded sessions</small></div>
+          <div class="sessions-command-stat"><span>Groups</span><strong>${Object.keys(grouped).length}</strong><small>active contexts</small></div>
           <button type="button" class="sessions-command-stat" onclick="navigate('approvals')"><span>Approvals</span><strong>${approvals.length}</strong><small>needs review</small></button>
           <button type="button" class="sessions-command-stat" onclick="navigate('artifacts')"><span>Artifacts</span><strong>${artifactRuns.length}</strong><small>${fileRuns.length} file trails</small></button>
         </div>
@@ -17127,6 +17128,7 @@ async function renderSessions(el) {
       ${renderSessionContinuationGuide()}
       <div class="sessions-layout">
         <aside class="sessions-rail">
+          <div class="sessions-contextual-column">
           <input id="session-search" class="search-input" aria-label="Search sessions" placeholder="Search runs..." oninput="filterSessions(window._sessionGroupFilter || 'all')">
           <div class="sessions-filter-card">
             <div class="card-title">Groups</div>
@@ -17144,17 +17146,32 @@ async function renderSessions(el) {
               <span class="badge badge-muted">${sessions.length}</span>
             </button>
           </div>
-        </aside>
-        <section>
           <div id="session-list" class="sessions-handoff-list"></div>
-          <div id="session-viewer"></div>
+          </div>
+        </aside>
+        <section class="sessions-primary-canvas">
+          <div id="session-viewer">${renderSessionLoadingState('viewer')}</div>
         </section>
       </div>`;
 
     window._allSessions = sessions;
     window._sessionContinuityBrief = sessionContinuityBriefText(sessions);
     window._sessionGroupFilter = 'all';
+    const preferred =
+      sessions.find(
+        (session) => session.id === window._sessionDetailParams?.cockpitId,
+      ) || sessions[0];
+    const state = {
+      activeTab: 'overview',
+      el,
+      model: null,
+      selectedId: preferred.id,
+      summaries: sessions,
+    };
+    window._unifiedSessionsState = state;
     renderSessionList(sessions);
+    bindUnifiedSessionActions(el, state);
+    await refreshUnifiedSessionDetail(state);
   } catch (err) {
     el.innerHTML = renderSessionRecoveryState('loadError');
   }
@@ -17175,6 +17192,7 @@ function renderSessionList(sessions) {
             if (s.sessionId) window._sessionById[s.sessionId] = s;
             return `
         <article class="session-run-card">
+          <button type="button" class="session-run-select" data-session-select="${esc(s.id || s.sessionId)}" aria-pressed="${window._unifiedSessionsState?.selectedId === (s.id || s.sessionId) ? 'true' : 'false'}">
           <div class="session-run-head">
             <div>
               <span class="messages-kicker">${esc(sessionPriorityLabel(s))}</span>
@@ -17188,6 +17206,7 @@ function renderSessionList(sessions) {
             <div><span>Messages</span><strong>${esc(String(s.messageCount || 0))}</strong></div>
             <div><span>Handoff</span><strong>${sessionHandoffScore(s)}%</strong></div>
           </div>
+          </button>
           <div class="session-file-strip">
             ${
               changedFiles.length
@@ -17212,11 +17231,216 @@ function renderSessionList(sessions) {
           </div>
           <div class="session-run-actions">
             <span>${s.startedAt ? formatTime(s.startedAt) : '-'} / ${s.lastActivity ? timeAgo(s.lastActivity) : '-'}</span>
-            <button class="btn btn-sm btn-primary" onclick="window._sessionDetailParams={group:'${esc(s.group)}',sessionId:'${esc(s.sessionId)}'};navigate('session-detail')">View</button>
+            <button type="button" class="btn btn-sm btn-primary" data-session-select="${esc(s.id || s.sessionId)}">View run</button>
           </div>
         </article>`;
           })
           .join('');
+}
+
+function unifiedSessionWarning(failures, partialData) {
+  const labels = failures.map((failure) => failure.label);
+  if (partialData) labels.push('recorded data');
+  const unique = [...new Set(labels)];
+  if (!unique.length) return '';
+  return `<div class="work-session-partial-warning" role="status"><strong>Partial session data</strong><p>${esc(unique.join(', '))} ${unique.length === 1 ? 'is' : 'are'} unavailable. Available run evidence remains visible.</p></div>`;
+}
+
+function renderUnifiedSessionCanvas(state) {
+  const viewer = state.el.querySelector('#session-viewer');
+  if (!viewer || !state.model) return;
+  const warning = unifiedSessionWarning(state.failures || [], state.partialData);
+  let inspector = NanoWorkSession.renderInspector(state.model, state.activeTab);
+  if (warning) {
+    inspector = inspector.replace(
+      '<div class="work-session-tabs"',
+      `${warning}<div class="work-session-tabs"`,
+    );
+  }
+  viewer.innerHTML = `
+    <div class="session-viewer-card" data-unified-session-id="${esc(state.model.id)}">
+      ${NanoWorkSession.renderRunStrip(state.model)}
+      <div class="session-detail-actions">
+        <button type="button" class="btn btn-sm btn-ghost" data-work-session-action="handoff" data-session-id="${esc(state.model.id)}">Copy handoff</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-open-session-detail="${esc(state.model.id)}">Open detail</button>
+      </div>
+      ${inspector}
+    </div>`;
+}
+
+async function captureSessionSurface(label, request) {
+  try {
+    return { data: await request, error: null, label };
+  } catch (error) {
+    return { data: null, error, label };
+  }
+}
+
+async function loadUnifiedSessionDetail(state, params) {
+  const selectedSummary = state.summaries.find(
+    (session) =>
+      session.id === state.selectedId || session.sessionId === state.selectedId,
+  );
+  const cockpitId =
+    params.cockpitId || selectedSummary?.id || params.sessionId || state.selectedId;
+  const requests = await Promise.all([
+    captureSessionSurface('summary', api('/sessions/cockpit')),
+    captureSessionSurface(
+      'cockpit detail',
+      api(`/sessions/cockpit/${encodeURIComponent(cockpitId)}`),
+    ),
+    captureSessionSurface(
+      'stream',
+      api(`/sessions/cockpit/${encodeURIComponent(cockpitId)}/stream`),
+    ),
+    captureSessionSurface(
+      'structured detail',
+      api(
+        `/sessions/${encodeURIComponent(params.group)}/${encodeURIComponent(params.sessionId)}/detail`,
+      ),
+    ),
+  ]);
+  const summaryList = requests[0].data;
+  const summary =
+    (Array.isArray(summaryList)
+      ? summaryList.find(
+          (session) =>
+            session.id === cockpitId ||
+            (session.group === params.group &&
+              session.sessionId === params.sessionId),
+        )
+      : null) || selectedSummary;
+  const cockpit = requests[1].data;
+  const stream = requests[2].data;
+  const structured = requests[3].data;
+  const model = NanoWorkSession.normalize(summary, cockpit, structured, stream);
+  if (summary?.source !== 'coding-job') {
+    model.canCancel = false;
+    model.canRetry = false;
+  }
+  return {
+    cockpit,
+    failures: requests.filter((result) => result.error),
+    model,
+    partialData: cockpit?.partialData === true,
+    structured,
+    summary,
+  };
+}
+
+async function refreshUnifiedSessionDetail(state) {
+  const summary = state.summaries.find(
+    (session) =>
+      session.id === state.selectedId || session.sessionId === state.selectedId,
+  );
+  if (!summary) return;
+  const params = {
+    cockpitId: summary.id,
+    group: summary.group,
+    sessionId: summary.sessionId,
+  };
+  const loadToken = Symbol('session-detail-load');
+  state.loadToken = loadToken;
+  const viewer = state.el.querySelector('#session-viewer');
+  if (viewer) viewer.innerHTML = renderSessionLoadingState('viewer');
+  const result = await loadUnifiedSessionDetail(state, params);
+  if (state.loadToken !== loadToken || window._unifiedSessionsState !== state) return;
+  state.model = result.model;
+  state.summary = result.summary || summary;
+  if (result.summary) {
+    state.summaries = state.summaries.map((candidate) =>
+      candidate.id === result.summary.id ? result.summary : candidate,
+    );
+    const visibleSummaries =
+      window._sessionGroupFilter === 'all'
+        ? state.summaries
+        : state.summaries.filter(
+            (candidate) => candidate.group === window._sessionGroupFilter,
+          );
+    renderSessionList(visibleSummaries);
+  }
+  state.failures = result.failures;
+  state.partialData = result.partialData;
+  state.structured = result.structured;
+  window._sessionDetailParams = params;
+  window._sessionDetailContinuationState = {
+    params,
+    messages: result.structured?.messages || [],
+    stats: result.structured?.stats || {},
+  };
+  renderUnifiedSessionCanvas(state);
+}
+
+function bindUnifiedSessionActions(root, state) {
+  root.onclick = async function (event) {
+    const selection = event.target.closest('[data-session-select]');
+    if (selection && root.contains(selection)) {
+      state.selectedId = selection.dataset.sessionSelect;
+      state.activeTab = 'overview';
+      renderSessionList(
+        window._sessionGroupFilter === 'all'
+          ? state.summaries
+          : state.summaries.filter(
+              (session) => session.group === window._sessionGroupFilter,
+            ),
+      );
+      await refreshUnifiedSessionDetail(state);
+      return;
+    }
+    const detailLink = event.target.closest('[data-open-session-detail]');
+    if (detailLink && root.contains(detailLink)) {
+      navigate('session-detail');
+      return;
+    }
+    const tab = event.target.closest('[data-work-session-tab]');
+    if (tab && root.contains(tab)) {
+      state.activeTab = tab.dataset.workSessionTab;
+      renderUnifiedSessionCanvas(state);
+      state.el.querySelector('[aria-selected="true"]')?.focus();
+      return;
+    }
+    const actionButton = event.target.closest('[data-work-session-action]');
+    if (!actionButton || !root.contains(actionButton) || !state.model) return;
+    const action = actionButton.dataset.workSessionAction;
+    const session = state.summary;
+    if (action === 'review_approvals') {
+      if (state.model.status === 'waiting_approval') navigate('approvals');
+      return;
+    }
+    if (action === 'handoff') {
+      await copyTextWithFallback(
+        sessionHandoffPrompt(session),
+        'Session handoff copied',
+        'Copy session handoff',
+      );
+      return;
+    }
+    if (action === 'resume') {
+      if (state.model.canResume) navigate(sessionWorkspaceTarget(session).page);
+      return;
+    }
+    if (!['cancel', 'retry'].includes(action)) return;
+    const allowed =
+      session?.source === 'coding-job' &&
+      ((action === 'cancel' && state.model.canCancel) ||
+        (action === 'retry' && state.model.canRetry));
+    if (!allowed) {
+      toast('This run cannot be changed from Sessions', 'warning');
+      return;
+    }
+    actionButton.disabled = true;
+    try {
+      await api(
+        `/agents/coding/jobs/${encodeURIComponent(session.id)}/${action}`,
+        { method: 'POST' },
+      );
+      await refreshUnifiedSessionDetail(state);
+      toast(`Session ${action} request accepted`, 'success');
+    } catch (error) {
+      toast(error?.message || `Could not ${action} session`, 'error');
+      actionButton.disabled = false;
+    }
+  };
 }
 
 window.copySessionHandoff = async function (sessionId) {
@@ -17396,29 +17620,25 @@ window.renderSessionDetail = async function (el) {
         <button class="btn btn-sm btn-ghost" onclick="navigate('sessions')">Back</button>
       </div>
     </div>
-    <div id="session-stats-bar"></div>
-    <div id="session-transcript" class="card session-transcript-card">
+    <div id="session-viewer" class="session-transcript-card">
       ${renderSessionLoadingState('detail')}
     </div>
   `;
-
-  try {
-    const data = await api(
-      `/sessions/${encodeURIComponent(params.group)}/${encodeURIComponent(params.sessionId)}/detail`,
-    );
-    const transcriptEl = document.getElementById('session-transcript');
-    if (transcriptEl) transcriptEl.dataset.stats = JSON.stringify(data.stats);
-    window._sessionDetailContinuationState = {
-      params,
-      messages: data.messages || [],
-      stats: data.stats || {},
-    };
-    renderSessionStats(data.stats);
-    renderSessionTranscript(data.messages, data.stats);
-  } catch (e) {
-    const t = document.getElementById('session-transcript');
-    if (t) t.innerHTML = renderSessionRecoveryState('loadError');
-  }
+  const summary = {
+    id: params.cockpitId || params.sessionId,
+    sessionId: params.sessionId,
+    group: params.group,
+  };
+  const state = {
+    activeTab: 'overview',
+    el,
+    model: null,
+    selectedId: summary.id,
+    summaries: [summary],
+  };
+  window._unifiedSessionsState = state;
+  bindUnifiedSessionActions(el, state);
+  await refreshUnifiedSessionDetail(state);
 };
 
 window.copySessionDetailContinuationBrief = async function () {
