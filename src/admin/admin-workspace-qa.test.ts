@@ -192,6 +192,35 @@ describe('Focus Stack rendered QA contract', () => {
     expect(inspectorBlock).toContain('focusReturned');
   });
 
+  it('proves global alerts stay visible outside Inspector and collapse when empty', () => {
+    const source = qaScriptSource();
+    const alertsBlock = source.slice(
+      source.indexOf('async function exerciseGlobalAlerts'),
+      source.indexOf('async function exerciseInspector'),
+    );
+
+    for (const contractMarker of [
+      "closest('#workspace-inspector')",
+      "getAttribute('role')",
+      "getAttribute('aria-live')",
+      "getAttribute('aria-atomic')",
+      'activeAlertCount',
+      'activeVisible',
+      'inspectorClosed',
+      'overlapsPageContent',
+      'overlapsMobileControls',
+      "page.route('**/api/system/alerts'",
+      'window.loadAlerts',
+      'emptyAlertCount',
+      'emptyDisplay',
+      'emptyHeight',
+      'pageContentVisible',
+    ]) {
+      expect(alertsBlock).toContain(contractMarker);
+    }
+    expect(source).toContain('await exerciseGlobalAlerts(page)');
+  });
+
   it('uses a dynamic default port and waits for its spawned child to announce readiness', () => {
     const source = qaScriptSource();
 

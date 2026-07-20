@@ -305,6 +305,28 @@ describe('App shell accessibility UI', () => {
     expect(source).toContain('</main>');
   });
 
+  it('renders one semantic alert surface in the visible canvas, not Inspector', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const canvasStart = source.indexOf('<main class="main focus-stack-canvas"');
+    const canvas = source.slice(
+      canvasStart,
+      source.indexOf('</main>', canvasStart),
+    );
+    const inspectorStart = source.indexOf('<aside id="workspace-inspector"');
+    const inspector = source.slice(
+      inspectorStart,
+      source.indexOf('</aside>', inspectorStart),
+    );
+
+    expect(source.match(/id="alerts-bar"/g)).toHaveLength(1);
+    expect(canvas).toContain(
+      '<div id="alerts-bar" class="focus-stack-alerts" role="status" aria-live="polite" aria-atomic="true"></div>',
+    );
+    expect(inspector).not.toContain('id="alerts-bar"');
+    expect(source.match(/api\('\/system\/alerts'\)/g)).toHaveLength(1);
+    expect(source.match(/\bloadAlerts\(\);/g)).toHaveLength(1);
+  });
+
   it('derives stable Focus Stack layers and cues from the resolved route', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
@@ -776,10 +798,12 @@ describe('App shell accessibility UI', () => {
     expect(navigation.PAGE_META['project-chat']).toEqual({
       label: 'Project chat',
       icon: 'chat',
+      palette: false,
     });
     expect(navigation.PAGE_META['session-detail']).toEqual({
       label: 'Session Detail',
       icon: 'sessions',
+      palette: false,
     });
     expect(
       navigation
@@ -924,9 +948,7 @@ describe('App shell accessibility UI', () => {
       'utf8',
     );
 
-    expect(shellNavigationSource).toContain(
-      "'session-detail': { label: 'Session Detail', icon: 'sessions' }",
-    );
+    expect(shellNavigationSource).toContain("'session-detail': {");
     expect(source).toContain("'session-detail': 'renderSessionDetail'");
     expect(source).toContain(
       "editor: { page: 'gitcode', container: 'gc-tabs', tab: 'editor' }",
@@ -1111,14 +1133,21 @@ describe('App shell accessibility UI', () => {
     expect(typeof palette.close).toBe('function');
   });
 
-  it('renders the dashboard route as Today in command palette metadata', () => {
+  it('only renders palette-visible routes while keeping Today and normal pages', () => {
     const { palette, results } = loadCommandPalette();
 
     palette.open();
 
     expect(results.innerHTML).toContain('data-page="dashboard"');
+    expect(results.innerHTML).toContain('data-page="chat"');
+    expect(results.innerHTML).toContain('data-page="projects"');
     expect(results.innerHTML).toContain(
       '<span class="cp-item-label">Today</span>',
+    );
+    expect(results.innerHTML).not.toContain('data-page="project-chat"');
+    expect(results.innerHTML).not.toContain('data-page="session-detail"');
+    expect(results.innerHTML).not.toContain(
+      '<span class="cp-item-label">Project chat</span>',
     );
     expect(results.innerHTML).not.toContain(
       '<span class="cp-item-label">Dashboard</span>',

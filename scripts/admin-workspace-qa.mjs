@@ -545,6 +545,148 @@ async function tabOutsideInspector(page, maxSteps = 100) {
   return { moved: false, steps: maxSteps, descriptor: '' };
 }
 
+async function exerciseGlobalAlerts(page) {
+  const errors = [];
+  await page.waitForSelector('#alerts-bar .alert-banner', {
+    state: 'visible',
+    timeout: 5000,
+  });
+  const active = await page.evaluate(() => {
+    const container = document.getElementById('alerts-bar');
+    const inspector = document.getElementById('workspace-inspector');
+    const pageContent = document.getElementById('page-content');
+    const mobileControls = document.querySelector('.bottom-tabs');
+    const rectOf = (element) => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      };
+    };
+    const overlaps = (left, right) =>
+      Boolean(
+        left &&
+          right &&
+          left.width > 0 &&
+          left.height > 0 &&
+          right.width > 0 &&
+          right.height > 0 &&
+          left.left < right.right &&
+          left.right > right.left &&
+          left.top < right.bottom &&
+          left.bottom > right.top,
+      );
+    const containerRect = rectOf(container);
+    const style = container ? window.getComputedStyle(container) : null;
+    return {
+      idCount: document.querySelectorAll('#alerts-bar').length,
+      activeAlertCount:
+        container?.querySelectorAll('.alert-banner').length || 0,
+      activeVisible: Boolean(
+        containerRect &&
+          containerRect.width > 0 &&
+          containerRect.height > 0 &&
+          style?.display !== 'none' &&
+          style?.visibility !== 'hidden',
+      ),
+      outsideInspector: Boolean(
+        container && !container.closest('#workspace-inspector'),
+      ),
+      role: container?.getAttribute('role'),
+      ariaLive: container?.getAttribute('aria-live'),
+      ariaAtomic: container?.getAttribute('aria-atomic'),
+      inspectorClosed: Boolean(
+        inspector &&
+          inspector.hasAttribute('inert') &&
+          inspector.getAttribute('aria-hidden') === 'true' &&
+          !inspector.classList.contains('is-open'),
+      ),
+      position: style?.position,
+      overlapsPageContent: overlaps(containerRect, rectOf(pageContent)),
+      overlapsMobileControls: overlaps(containerRect, rectOf(mobileControls)),
+      text: container?.textContent?.trim() || '',
+    };
+  });
+
+  if (active.idCount !== 1)
+    errors.push(`Expected one global alert container, found ${active.idCount}`);
+  if (active.activeAlertCount < 1 || !active.activeVisible || !active.text)
+    errors.push('Active system alerts are not visibly rendered');
+  if (!active.outsideInspector || !active.inspectorClosed)
+    errors.push('Active system alerts depend on the closed Inspector');
+  if (
+    active.role !== 'status' ||
+    active.ariaLive !== 'polite' ||
+    active.ariaAtomic !== 'true'
+  ) {
+    errors.push('Global alerts are missing live-region semantics');
+  }
+  if (active.position !== 'static')
+    errors.push(`Global alerts use obstructive positioning: ${active.position}`);
+  if (active.overlapsPageContent || active.overlapsMobileControls)
+    errors.push('Global alerts obstruct route content or mobile controls');
+
+  const emptyAlertsRoute = (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: '[]',
+    });
+  await page.route('**/api/system/alerts', emptyAlertsRoute);
+  let empty;
+  try {
+    await page.evaluate(async () => {
+      if (typeof window.loadAlerts !== 'function') {
+        throw new Error('loadAlerts is unavailable');
+      }
+      await window.loadAlerts();
+    });
+    empty = await page.evaluate(() => {
+      const container = document.getElementById('alerts-bar');
+      const pageContent = document.getElementById('page-content');
+      const rect = container?.getBoundingClientRect();
+      const contentRect = pageContent?.getBoundingClientRect();
+      const contentStyle = pageContent
+        ? window.getComputedStyle(pageContent)
+        : null;
+      return {
+        emptyAlertCount:
+          container?.querySelectorAll('.alert-banner').length || 0,
+        emptyDisplay: container
+          ? window.getComputedStyle(container).display
+          : 'missing',
+        emptyHeight: rect?.height || 0,
+        pageContentVisible: Boolean(
+          contentRect &&
+            contentRect.width > 0 &&
+            contentRect.height > 0 &&
+            contentStyle?.display !== 'none' &&
+            contentStyle?.visibility !== 'hidden',
+        ),
+      };
+    });
+  } finally {
+    await page.unroute('**/api/system/alerts', emptyAlertsRoute);
+  }
+
+  if (
+    empty.emptyAlertCount !== 0 ||
+    empty.emptyDisplay !== 'none' ||
+    empty.emptyHeight !== 0
+  ) {
+    errors.push('Empty global alert state does not collapse cleanly');
+  }
+  if (!empty.pageContentVisible)
+    errors.push('Empty global alert state disrupts route content');
+
+  return { active, empty, errors };
+}
+
 async function exerciseInspector(page, screenshotPath = '') {
   const errors = [];
   const trigger = await firstVisible(
@@ -1101,6 +1243,7 @@ async function runRouteCase(
     evidence: null,
     pageErrors,
     consoleErrors,
+    alerts: null,
     issues: [],
   };
 
@@ -1113,6 +1256,13 @@ async function runRouteCase(
     screenshots.push(evidencePath(screenshotPath));
     record.evidence = await collectRouteEvidence(page, route, viewport);
     record.issues.push(...record.evidence.issues);
+
+    if (route.name === 'dashboard') {
+      record.alerts = await exerciseGlobalAlerts(page);
+      record.issues.push(
+        ...record.alerts.errors.map((error) => `alerts: ${error}`),
+      );
+    }
 
     if (route.name === 'dashboard' || route.name === 'reports') {
       const inspectorScreenshot = path.join(

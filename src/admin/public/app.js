@@ -1073,6 +1073,7 @@ function showShell(page) {
           </div>
           <button class="focus-stack-inspector-trigger" type="button" onclick="toggleWorkspaceInspector(this)" aria-controls="workspace-inspector" aria-expanded="false" aria-label="Show workspace details">Details</button>
         </header>
+        <div id="alerts-bar" class="focus-stack-alerts" role="status" aria-live="polite" aria-atomic="true"></div>
         <div id="page-content" tabindex="-1">${renderShellLoadingState()}</div>
       </main>
       <aside id="workspace-inspector" class="focus-stack-inspector" inert aria-hidden="true">
@@ -1089,7 +1090,6 @@ function showShell(page) {
           <p>${esc(modeCue.detail)}</p>
         </section>
         <div class="metrics-bar" id="metrics-bar"></div>
-        <div id="alerts-bar"></div>
       </aside>
       <div class="bottom-tabs">
         <nav>
@@ -24200,10 +24200,8 @@ window.addEventListener('hashchange', () => {
         // Explicit deep link wins; showShell derives the mode from the page.
         showShell(hashPage);
       } else {
-        // No deep link: open the last-used mode's first page.
-        const mode = window.NanoModes.loadActiveMode(window.localStorage);
-        const landing = window.NanoModes.navPagesForMode(mode)[0] || 'chat';
-        navigate(landing);
+        // Empty and invalid startup routes recover to the stable Today surface.
+        navigate('dashboard');
       }
     }
   } else showLogin();

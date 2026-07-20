@@ -3,7 +3,7 @@
   const PAGE_META = {
     chat: { label: 'Chat', icon: 'chat' },
     projects: { label: 'Cowork Projects', icon: 'agents' },
-    'project-chat': { label: 'Project chat', icon: 'chat' },
+    'project-chat': { label: 'Project chat', icon: 'chat', palette: false },
     channels: { label: 'Channels', icon: 'messages' },
     messages: { label: 'Messages', icon: 'messages' },
     agents: { label: 'Agents', icon: 'agents' },
@@ -11,7 +11,11 @@
     tasks: { label: 'Tasks', icon: 'tasks' },
     approvals: { label: 'Approvals', icon: 'approvals' },
     sessions: { label: 'Sessions', icon: 'sessions' },
-    'session-detail': { label: 'Session Detail', icon: 'sessions' },
+    'session-detail': {
+      label: 'Session Detail',
+      icon: 'sessions',
+      palette: false,
+    },
     workflows: { label: 'Workflows', icon: 'workflows' },
     reports: { label: 'Reports', icon: 'audit' },
     artifacts: { label: 'Artifacts', icon: 'artifacts' },

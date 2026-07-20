@@ -50,6 +50,7 @@
     for (var ki = 0; ki < keys.length; ki++) {
       var id = keys[ki];
       var entry = meta[id];
+      if (entry.palette === false) continue;
       var group = null;
       if (MODE_MAP) {
         var modeId = window.NanoModes && window.NanoModes.resolveMode(id);

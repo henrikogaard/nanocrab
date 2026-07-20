@@ -37929,6 +37929,17 @@ select {
   white-space: nowrap;
 }
 
+.focus-stack-alerts {
+  width: 100%;
+  min-width: 0;
+  max-width: 1480px;
+  margin: 0 auto 12px;
+}
+
+.focus-stack-alerts .alert-banner:last-child {
+  margin-bottom: 0;
+}
+
 .focus-stack-inspector-trigger,
 .focus-stack-inspector-close {
   border: 1px solid var(--border);

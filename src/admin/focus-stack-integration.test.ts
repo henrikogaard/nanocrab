@@ -6,6 +6,7 @@ import * as vm from 'node:vm';
 const publicRoot = path.join(process.cwd(), 'src/admin/public');
 const scriptPaths = [
   path.join(publicRoot, 'modes.js'),
+  path.join(publicRoot, 'ui/data-health.js'),
   path.join(publicRoot, 'ui/shell-navigation.js'),
   path.join(publicRoot, 'ui/command-palette.js'),
   path.join(publicRoot, 'ui/workspace-shell.js'),
@@ -258,9 +259,9 @@ class FakeDocument {
     const attr = (tag: string, name: string) =>
       tag.match(new RegExp(`${name}="([^"]*)"`))?.[1] || '';
     const tagForClass = (className: string) =>
-      html.match(
-        new RegExp(`<[^>]+class="[^"]*${className}[^"]*"[^>]*>`),
-      )?.[0] || '';
+      (html.match(/<[^>]+class="[^"]*"[^>]*>/g) || []).find((tag) =>
+        attr(tag, 'class').split(/\s+/).includes(className),
+      ) || '';
     const add = (tagName: string, id: string, className: string, tag = '') => {
       const element = new FakeElement(this, tagName, id, className);
       for (const name of [
@@ -342,6 +343,8 @@ class FakeDocument {
 type ShellHarness = {
   app: FakeElement;
   document: FakeDocument;
+  apiCallCount(path: string): number;
+  currentHash(): string;
   showShell(pageId: string): void;
   parseProjectChatHash(hash: string): {
     isProjectChatRoute: boolean;
@@ -355,8 +358,13 @@ type ShellHarness = {
   palette: { open(): void; close(): void };
 };
 
-function loadShellHarness(initialHash = '', persistedMode = ''): ShellHarness {
+function loadShellHarness(
+  initialHash = '',
+  persistedMode = '',
+  alerts: Array<{ type: string; message: string }> = [],
+): ShellHarness {
   const document = new FakeDocument();
+  const apiCalls = new Map<string, number>();
   const storageValues = new Map<string, string>();
   if (persistedMode) storageValues.set('active_mode', persistedMode);
   const storage = {
@@ -372,6 +380,7 @@ function loadShellHarness(initialHash = '', persistedMode = ''): ShellHarness {
   });
   const fetchMock = (input: unknown) => {
     const url = String(input);
+    apiCalls.set(url, (apiCalls.get(url) || 0) + 1);
     if (url === '/api/auth/check') return new Promise(() => {});
     if (url === '/api/sessions/cockpit') {
       return Promise.resolve(response({ error: 'unavailable' }, false));
@@ -389,6 +398,9 @@ function loadShellHarness(initialHash = '', persistedMode = ''): ShellHarness {
     }
     if (url === '/api/projects') {
       return Promise.resolve(response({ projects: [] }));
+    }
+    if (url === '/api/system/alerts') {
+      return Promise.resolve(response(alerts));
     }
     return Promise.resolve(response([]));
   };
@@ -409,7 +421,18 @@ function loadShellHarness(initialHash = '', persistedMode = ''): ShellHarness {
     Element: FakeElement,
     Notification: { permission: 'denied' },
     NanoShared: {
-      esc: (value: unknown) => String(value ?? ''),
+      esc: (value: unknown) =>
+        String(value ?? '').replace(
+          /[&<>"']/g,
+          (character) =>
+            ({
+              '&': '&amp;',
+              '<': '&lt;',
+              '>': '&gt;',
+              '"': '&quot;',
+              "'": '&#39;',
+            })[character] || character,
+        ),
     },
     NanoFeedback: {
       toast: () => {},
@@ -447,6 +470,8 @@ function loadShellHarness(initialHash = '', persistedMode = ''): ShellHarness {
   return {
     app: document.app,
     document,
+    apiCallCount: (path) => apiCalls.get(path) || 0,
+    currentHash: () => String((context.location as { hash: string }).hash),
     showShell: context.showShell as (pageId: string) => void,
     parseProjectChatHash:
       context.parseProjectChatHash as ShellHarness['parseProjectChatHash'],
@@ -471,6 +496,90 @@ function markupSection(markup: string, start: string, end: string) {
 }
 
 describe('Focus Stack executable shell integration', () => {
+  it('opens Today on authenticated startup with an empty hash', async () => {
+    const harness = loadShellHarness('', 'code');
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(harness.currentHash()).toBe('#/dashboard');
+  });
+
+  it('preserves explicit startup deep links instead of replacing them', async () => {
+    const harness = loadShellHarness('#/reports', 'chat');
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(harness.currentHash()).toBe('#/reports');
+    expect(harness.app.innerHTML).toContain('data-workspace-mode="cowork"');
+    expect(harness.app.innerHTML).toContain('<strong>Reports</strong>');
+  });
+
+  it('recovers an invalid startup hash to Today', async () => {
+    const harness = loadShellHarness('#/does-not-exist', 'cowork');
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(harness.currentHash()).toBe('#/dashboard');
+  });
+
+  it.each([
+    ['#/projects/project%201/chat/thread%202', 'project-chat'],
+    ['#/projects/project%201/files/docs%2Fbrief.md', 'projects'],
+  ])(
+    'preserves nested startup route %s through the %s shell',
+    async (hash, pageLabel) => {
+      const harness = loadShellHarness(hash, 'chat');
+
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(harness.currentHash()).toBe(hash);
+      expect(harness.app.innerHTML).toContain('data-workspace-mode="cowork"');
+      expect(harness.app.innerHTML).toContain(
+        `<strong>${pageLabel === 'project-chat' ? 'Project chat' : 'Cowork Projects'}</strong>`,
+      );
+    },
+  );
+
+  it('keeps active alerts visible and announced outside the closed Inspector', async () => {
+    const harness = loadShellHarness('#/reports', 'chat', [
+      { type: 'warning', message: 'Queue <blocked>' },
+    ]);
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const canvasMarkup = markupSection(
+      harness.app.innerHTML,
+      '<main class="main focus-stack-canvas"',
+      '</main>',
+    );
+    const inspectorMarkup = markupSection(
+      harness.app.innerHTML,
+      '<aside id="workspace-inspector"',
+      '</aside>',
+    );
+    const alertsBar = harness.document.getElementById('alerts-bar')!;
+    const inspector = harness.document.getElementById('workspace-inspector')!;
+
+    expect(harness.app.innerHTML.match(/id="alerts-bar"/g)).toHaveLength(1);
+    expect(canvasMarkup).toContain(
+      '<div id="alerts-bar" class="focus-stack-alerts" role="status" aria-live="polite" aria-atomic="true"></div>',
+    );
+    expect(inspectorMarkup).not.toContain('id="alerts-bar"');
+    expect(inspector.hasAttribute('inert')).toBe(true);
+    expect(inspector.getAttribute('aria-hidden')).toBe('true');
+    expect(alertsBar.innerHTML).toContain('Queue &lt;blocked&gt;');
+    expect(harness.apiCallCount('/api/system/alerts')).toBe(1);
+  });
+
+  it('keeps the visible alert live region empty when no alerts are active', async () => {
+    const harness = loadShellHarness('#/reports', 'chat');
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(harness.document.getElementById('alerts-bar')?.innerHTML).toBe('');
+    expect(harness.apiCallCount('/api/system/alerts')).toBe(1);
+  });
+
   it('closes the non-modal inspector from global Escape after focus moves outside', () => {
     const harness = loadShellHarness('#/reports');
     harness.showShell('reports');
