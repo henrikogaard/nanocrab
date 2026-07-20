@@ -93,6 +93,16 @@
     );
   }
 
+  function modePageIds() {
+    const pageIds = MODE_ORDER.flatMap((modeId) =>
+      MODES[modeId] ? MODES[modeId].pages : [],
+    );
+    for (const pageId of Object.keys(HIDDEN_PAGE_MODES)) {
+      if (pageIds.indexOf(pageId) === -1) pageIds.push(pageId);
+    }
+    return pageIds;
+  }
+
   function modeGuidance(modeId) {
     return MODES[modeId] ? MODES[modeId].guidance || '' : '';
   }
@@ -126,6 +136,7 @@
     resolveMode,
     navPagesForMode,
     primaryModeIds,
+    modePageIds,
     modeGuidance,
     loadActiveMode,
     saveActiveMode,

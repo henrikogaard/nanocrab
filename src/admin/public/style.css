@@ -37987,7 +37987,9 @@ select {
   .focus-stack-shell,
   .focus-stack-shell.is-inspector-open {
     display: block;
+    max-width: 100%;
     min-height: 100dvh;
+    overflow-x: clip;
   }
 
   .focus-stack-rail,
@@ -38000,21 +38002,6 @@ select {
     width: 100%;
     min-height: 100dvh;
     margin-left: 0;
-  }
-}
-
-@media (max-width: 720px) {
-  .focus-stack-shell,
-  .focus-stack-shell.is-inspector-open {
-    display: block;
-    max-width: 100%;
-    overflow-x: clip;
-  }
-
-  .focus-stack-rail,
-  .focus-stack-context,
-  .focus-stack-shell > .sidebar-resize-handle {
-    display: none !important;
   }
 
   .focus-stack-canvas-header {

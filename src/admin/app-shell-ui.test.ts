@@ -56,10 +56,16 @@ function loadCommandPalette() {
     addEventListener: () => {},
     focus: () => {},
   };
+  const resultsMock = {
+    innerHTML: '',
+    querySelector: () => null,
+    addEventListener: () => {},
+  };
   const elMock = {
     id: '',
     className: '',
     setAttribute: () => {},
+    classList: { add: () => {}, remove: () => {} },
     addEventListener: () => {},
     appendChild: (child: any) => child,
     innerHTML: '',
@@ -67,11 +73,7 @@ function loadCommandPalette() {
       sel === '.cp-input' || sel === '.cp-results'
         ? sel === '.cp-input'
           ? inputMock
-          : {
-              innerHTML: '',
-              querySelector: () => null,
-              addEventListener: () => {},
-            }
+          : resultsMock
         : null,
     querySelectorAll: () => [],
     closest: (_s: string) => null,
@@ -94,7 +96,10 @@ function loadCommandPalette() {
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(shellNavigationUiPath, 'utf8'), context);
   vm.runInContext(fs.readFileSync(commandPaletteUiPath, 'utf8'), context);
-  return context.window.NanoCommandPalette;
+  return {
+    palette: context.window.NanoCommandPalette,
+    results: resultsMock,
+  };
 }
 
 function loadSharedUi() {
@@ -414,12 +419,14 @@ describe('App shell accessibility UI', () => {
     expect(rail).toContain('${primaryModeIds.map((m) => {');
     expect(rail).not.toContain('MODE_ORDER.map');
     expect(rail.match(/<span>More<\/span>/g)).toHaveLength(1);
-    expect(rail.match(/onclick="toggleMoreDrawer\(\)"/g)).toHaveLength(1);
+    expect(rail.match(/onclick="toggleMoreDrawer\(this\)"/g)).toHaveLength(1);
     expect(rail).toContain("displayedMode === 'more' ? ' active' : ''");
     expect(bottomTabs).toContain('${primaryModeIds.map((m) => {');
     expect(bottomTabs).not.toContain('MODE_ORDER.map');
     expect(bottomTabs.match(/<span>More<\/span>/g)).toHaveLength(1);
-    expect(bottomTabs.match(/onclick="toggleMoreDrawer\(\)"/g)).toHaveLength(1);
+    expect(bottomTabs.match(/onclick="toggleMoreDrawer\(this\)"/g)).toHaveLength(
+      1,
+    );
     expect(bottomTabs).toContain("displayedMode === 'more' ? ' active' : ''");
 
     const specialActionIndex = appSource.indexOf("if (mode === 'more') {");
@@ -468,8 +475,12 @@ describe('App shell accessibility UI', () => {
     const source = fs.readFileSync(appPath, 'utf8');
 
     expect(source).toContain('let workspaceInspectorTrigger = null');
+    expect(source).toContain('let moreDrawerTrigger = null');
     expect(source).toContain(
-      'function setWorkspaceInspectorState(isOpen, trigger)',
+      'function setWorkspaceInspectorState(isOpen, trigger, options = {})',
+    );
+    expect(source).toContain(
+      'function setMoreDrawerState(isOpen, trigger, options = {})',
     );
     expect(source).toContain("inspector.toggleAttribute('inert', !isOpen)");
     expect(source).toContain(
@@ -481,7 +492,9 @@ describe('App shell accessibility UI', () => {
     expect(source).toContain(
       "inspector.querySelector('.focus-stack-inspector-close')?.focus()",
     );
-    expect(source).toContain('workspaceInspectorTrigger.focus()');
+    expect(source).toContain(
+      'if (options.restoreFocus !== false && returnTarget) returnTarget.focus()',
+    );
     expect(source).toContain("if (event.key === 'Escape')");
     expect(source).toContain(
       'window.toggleWorkspaceInspector = function (trigger)',
@@ -492,16 +505,23 @@ describe('App shell accessibility UI', () => {
     expect(source).toContain('aria-label="Close workspace details"');
   });
 
-  it('renders exactly four stable mobile mode actions and sheet-ready context at 720px', () => {
+  it('renders four mobile actions and a fixed inspector across the full collapsed range', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
     const bottomTabsStart = appSource.indexOf('<div class="bottom-tabs">');
     const bottomTabsEnd = appSource.indexOf('</nav>', bottomTabsStart);
     const bottomTabs = appSource.slice(bottomTabsStart, bottomTabsEnd);
-    const focusMobileStart = styleSource.indexOf(
-      '@media (max-width: 720px) {\n  .focus-stack-shell',
+    const focusMobileStart = styleSource.lastIndexOf(
+      '@media (max-width: 768px)',
     );
-    const focusMobile = styleSource.slice(focusMobileStart);
+    const focusMobileEnd = styleSource.indexOf(
+      '\n}\n\n@media',
+      focusMobileStart,
+    );
+    const focusMobile = styleSource.slice(
+      focusMobileStart,
+      focusMobileEnd === -1 ? undefined : focusMobileEnd + 2,
+    );
 
     expect(bottomTabs).toContain('${primaryModeIds.map((m) => {');
     expect(bottomTabs.match(/<button class="bottom-tab/g)).toHaveLength(2);
@@ -512,6 +532,10 @@ describe('App shell accessibility UI', () => {
     expect(focusMobile).toContain('.focus-stack-inspector');
     expect(focusMobile).toContain('position: fixed;');
     expect(focusMobile).toContain('max-width: 100%;');
+    expect(focusMobile).toContain('inset: auto 0 56px;');
+    expect(styleSource).not.toContain(
+      '@media (max-width: 720px) {\n  .focus-stack-shell',
+    );
     expect(styleSource).toContain('overflow-x: clip;');
   });
 
@@ -652,6 +676,7 @@ describe('App shell accessibility UI', () => {
     const navigation = loadShellNavigation();
 
     expect(navigation.metaLabel('projects')).toBe('Cowork Projects');
+    expect(navigation.metaLabel('dashboard')).toBe('Today');
     expect(navigation.metaIcon('projects')).toBe('agents');
     expect(navigation.metaLabel('unknown-route')).toBe('unknown-route');
     expect(navigation.metaIcon('unknown-route')).toBe('integrations');
@@ -983,9 +1008,23 @@ describe('App shell accessibility UI', () => {
   });
 
   it('registers NanoCommandPalette with open and close methods', () => {
-    const palette = loadCommandPalette();
+    const { palette } = loadCommandPalette();
     expect(palette).toBeDefined();
     expect(typeof palette.open).toBe('function');
     expect(typeof palette.close).toBe('function');
+  });
+
+  it('renders the dashboard route as Today in command palette metadata', () => {
+    const { palette, results } = loadCommandPalette();
+
+    palette.open();
+
+    expect(results.innerHTML).toContain('data-page="dashboard"');
+    expect(results.innerHTML).toContain(
+      '<span class="cp-item-label">Today</span>',
+    );
+    expect(results.innerHTML).not.toContain(
+      '<span class="cp-item-label">Dashboard</span>',
+    );
   });
 });

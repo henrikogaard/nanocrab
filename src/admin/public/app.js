@@ -141,12 +141,19 @@ function initSidebarResize() {
 loadSidebarWidth();
 
 let workspaceInspectorTrigger = null;
+let moreDrawerTrigger = null;
 
-function setWorkspaceInspectorState(isOpen, trigger) {
+function setWorkspaceInspectorState(isOpen, trigger, options = {}) {
   const inspector = document.getElementById('workspace-inspector');
   const shell = document.querySelector('.focus-stack-shell');
   if (!inspector || !shell) return;
 
+  if (isOpen) {
+    const drawer = document.getElementById('more-drawer');
+    if (drawer?.classList.contains('open')) {
+      setMoreDrawerState(false, null, { restoreFocus: false });
+    }
+  }
   if (isOpen && trigger) workspaceInspectorTrigger = trigger;
   inspector.classList.toggle('is-open', isOpen);
   shell.classList.toggle('is-inspector-open', isOpen);
@@ -160,9 +167,44 @@ function setWorkspaceInspectorState(isOpen, trigger) {
 
   if (isOpen) {
     inspector.querySelector('.focus-stack-inspector-close')?.focus();
-  } else if (workspaceInspectorTrigger) {
-    workspaceInspectorTrigger.focus();
+  } else {
+    const returnTarget = workspaceInspectorTrigger;
     workspaceInspectorTrigger = null;
+    if (options.restoreFocus !== false && returnTarget) returnTarget.focus();
+  }
+}
+
+function setMoreDrawerState(isOpen, trigger, options = {}) {
+  const drawer = document.getElementById('more-drawer');
+  const overlay = document.querySelector('.more-overlay');
+  if (!drawer) return;
+
+  if (isOpen) {
+    const inspector = document.getElementById('workspace-inspector');
+    if (inspector?.classList.contains('is-open')) {
+      setWorkspaceInspectorState(false, null, { restoreFocus: false });
+    }
+  }
+  if (isOpen && trigger) moreDrawerTrigger = trigger;
+  drawer.classList.toggle('open', isOpen);
+  drawer.toggleAttribute('inert', !isOpen);
+  drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  if (overlay) {
+    overlay.classList.toggle('visible', isOpen);
+    overlay.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  }
+  document
+    .querySelectorAll('[aria-controls="more-drawer"]')
+    .forEach((trigger) => {
+      trigger.setAttribute('aria-expanded', String(isOpen));
+    });
+
+  if (isOpen) {
+    drawer.querySelector('.more-close')?.focus();
+  } else {
+    const returnTarget = moreDrawerTrigger;
+    moreDrawerTrigger = null;
+    if (options.restoreFocus !== false && returnTarget) returnTarget.focus();
   }
 }
 
@@ -860,7 +902,7 @@ function showShell(page) {
             ${section.pages
               .map(
                 (id) =>
-                  `<a class="nav-link" href="#/${id}" onclick="toggleMoreDrawer(); navigate('${id}'); return false;">${navIcon(metaIcon(id))}<span class="nav-label">${metaLabel(id)}</span></a>`,
+                  `<a class="nav-link" href="#/${id}" onclick="closeMoreDrawer(); navigate('${id}'); return false;">${navIcon(metaIcon(id))}<span class="nav-label">${metaLabel(id)}</span></a>`,
               )
               .join('')}
           </div>
@@ -881,14 +923,14 @@ function showShell(page) {
   app.innerHTML = `
     <div class="app focus-stack-shell" data-workspace-mode="${esc(displayedMode)}" data-workspace-section="${esc(routeContext.section)}">
       <a class="skip-link" href="#page-content">Skip to content</a>
-      <div class="more-overlay" onclick="toggleMoreDrawer()" aria-hidden="true"></div>
+      <div class="more-overlay" onclick="closeMoreDrawer()" aria-hidden="true"></div>
       <div class="more-drawer" id="more-drawer" aria-hidden="true" inert>
-        <div class="more-drawer-header"><span>Workspace tools</span><button class="more-close" onclick="toggleMoreDrawer()" aria-label="Close">✕</button></div>
+        <div class="more-drawer-header"><span>Workspace tools</span><button class="more-close" onclick="closeMoreDrawer()" aria-label="Close workspace tools">✕</button></div>
         <div class="more-drawer-body">
           <div class="more-drawer-route-map" aria-label="Where to configure work">
-            <button type="button" onclick="toggleMoreDrawer(); navigate('settings')"><span>Personal</span><small>Memory, skills, identity</small></button>
-            <button type="button" onclick="toggleMoreDrawer(); navigate('integrations')"><span>Connectors</span><small>MCP, channels, credentials</small></button>
-            <button type="button" onclick="toggleMoreDrawer(); navigate('backup')"><span>Recovery</span><small>Backups, monitoring, audit</small></button>
+            <button type="button" onclick="closeMoreDrawer(); navigate('settings')"><span>Personal</span><small>Memory, skills, identity</small></button>
+            <button type="button" onclick="closeMoreDrawer(); navigate('integrations')"><span>Connectors</span><small>MCP, channels, credentials</small></button>
+            <button type="button" onclick="closeMoreDrawer(); navigate('backup')"><span>Recovery</span><small>Backups, monitoring, audit</small></button>
           </div>
           ${moreDrawerHtml}
         </div>
@@ -917,7 +959,7 @@ function showShell(page) {
             return `<button class="mode-tab${displayedMode === m ? ' active' : ''}" onclick="setMode('${m}')" type="button" title="${esc(cfg.guidance || '')}" aria-pressed="${displayedMode === m ? 'true' : 'false'}">${navIcon(cfg.icon)}<span>${cfg.label}</span></button>`;
           }).join('')}
         </div>
-        <button class="focus-stack-more${displayedMode === 'more' ? ' active' : ''}" type="button" onclick="toggleMoreDrawer()" aria-pressed="${displayedMode === 'more' ? 'true' : 'false'}">
+        <button class="focus-stack-more${displayedMode === 'more' ? ' active' : ''}" type="button" onclick="toggleMoreDrawer(this)" aria-controls="more-drawer" aria-expanded="false" aria-pressed="${displayedMode === 'more' ? 'true' : 'false'}">
           ${navIcon('menu')}
           <span>More</span>
         </button>
@@ -974,7 +1016,7 @@ function showShell(page) {
             const cfg = window.NanoModes.MODES[m];
             return `<button class="bottom-tab${displayedMode === m ? ' active' : ''}" onclick="setMode('${m}')" aria-pressed="${displayedMode === m ? 'true' : 'false'}">${navIcon(cfg.icon, 'tab-icon')}<span>${cfg.label}</span></button>`;
           }).join('')}
-          <button class="bottom-tab${displayedMode === 'more' ? ' active' : ''}" onclick="toggleMoreDrawer()" aria-pressed="${displayedMode === 'more' ? 'true' : 'false'}">${navIcon('menu', 'tab-icon')}<span>More</span></button>
+          <button class="bottom-tab${displayedMode === 'more' ? ' active' : ''}" onclick="toggleMoreDrawer(this)" aria-controls="more-drawer" aria-expanded="false" aria-pressed="${displayedMode === 'more' ? 'true' : 'false'}">${navIcon('menu', 'tab-icon')}<span>More</span></button>
         </nav>
       </div>
     </div>`;
@@ -1035,18 +1077,14 @@ window.setMode = function (mode) {
   if (first) navigate(first);
 };
 
-window.toggleMoreDrawer = function () {
+window.toggleMoreDrawer = function (trigger) {
   const drawer = document.getElementById('more-drawer');
-  const overlay = document.querySelector('.more-overlay');
-  if (drawer) {
-    const isOpen = drawer.classList.toggle('open');
-    drawer.toggleAttribute('inert', !isOpen);
-    drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
-  }
-  if (overlay) {
-    const isVisible = overlay.classList.toggle('visible');
-    overlay.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
-  }
+  if (!drawer) return;
+  setMoreDrawerState(!drawer.classList.contains('open'), trigger);
+};
+
+window.closeMoreDrawer = function () {
+  setMoreDrawerState(false);
 };
 
 window.logout = async function () {

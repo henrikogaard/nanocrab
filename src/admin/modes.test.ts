@@ -39,6 +39,19 @@ describe('MODES config', () => {
     expect(new Set(all).size).toBe(all.length);
   });
 
+  it('enumerates primary and hidden mode-owned page ids without exposing mutable state', () => {
+    const pageIds = M().modePageIds();
+
+    expect(pageIds).toEqual(['chat', 'projects', 'gitcode', 'project-chat']);
+    pageIds.push('tampered');
+    expect(M().modePageIds()).toEqual([
+      'chat',
+      'projects',
+      'gitcode',
+      'project-chat',
+    ]);
+  });
+
   it('keeps More stable while exposing only navigable primary modes', () => {
     expect(M().MODE_ORDER).toContain('more');
     expect(M().primaryModeIds()).toEqual(['chat', 'cowork', 'code']);

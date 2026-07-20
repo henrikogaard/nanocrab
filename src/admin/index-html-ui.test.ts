@@ -84,7 +84,7 @@ describe('Admin HTML entry metadata', () => {
       manifest.shortcuts.map((shortcut: { name: string }) => shortcut.name),
     ).toEqual(
       expect.arrayContaining([
-        'Dashboard',
+        'Today',
         'Copilot chat',
         'Cowork projects',
         'Code workspace',
@@ -92,6 +92,13 @@ describe('Admin HTML entry metadata', () => {
     );
     expect(
       manifest.shortcuts.map((shortcut: { url: string }) => shortcut.url),
-    ).toEqual(expect.arrayContaining(['/#/chat', '/#/projects', '/#/gitcode']));
+    ).toEqual(
+      expect.arrayContaining([
+        '/#/dashboard',
+        '/#/chat',
+        '/#/projects',
+        '/#/gitcode',
+      ]),
+    );
   });
 });

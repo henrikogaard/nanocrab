@@ -7,6 +7,7 @@
     dashboard: route('today', 'overview'),
     chat: route('chat', 'conversation'),
     projects: route('cowork', 'project'),
+    'project-chat': route('cowork', 'conversation'),
     reports: route('cowork', 'report'),
     'source-collections': route('cowork', 'source'),
     tasks: route('cowork', 'routine'),

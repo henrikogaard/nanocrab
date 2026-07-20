@@ -21,7 +21,7 @@
     autofix: { label: 'AutoFix', icon: 'autofix' },
     skills: { label: 'Skills', icon: 'skills' },
     marketplace: { label: 'Marketplace', icon: 'marketplace' },
-    dashboard: { label: 'Dashboard', icon: 'dashboard' },
+    dashboard: { label: 'Today', icon: 'dashboard' },
     pipelines: { label: 'Deploy', icon: 'pipelines' },
     'control-plane': { label: 'Control Plane', icon: 'control-plane' },
     'learning-proposals': { label: 'Learning Proposals', icon: 'learning' },

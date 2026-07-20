@@ -7,6 +7,7 @@ const workspaceShellPath = path.join(
   process.cwd(),
   'src/admin/public/ui/workspace-shell.js',
 );
+const modesPath = path.join(process.cwd(), 'src/admin/public/modes.js');
 
 type WorkspaceShell = {
   ROUTES: Record<string, readonly [string, string]>;
@@ -45,11 +46,33 @@ function loadWorkspaceShell() {
   ).NanoWorkspaceShell;
 }
 
+function loadWorkspaceRuntime() {
+  const context: {
+    window: { NanoModes?: unknown };
+    NanoModes?: unknown;
+  } = { window: {} };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(modesPath, 'utf8'), context);
+  context.window.NanoModes = context.NanoModes;
+  vm.runInContext(fs.readFileSync(workspaceShellPath, 'utf8'), context);
+  return {
+    ...context.window,
+    NanoModes: context.NanoModes,
+  } as typeof context.window & {
+    NanoModes: {
+      modePageIds(): string[];
+      resolveMode(pageId: string): string | null;
+    };
+    NanoWorkspaceShell: WorkspaceShell;
+  };
+}
+
 describe('Focus Stack route context', () => {
   it.each([
     ['dashboard', 'today', 'overview', true],
     ['chat', 'chat', 'conversation', false],
     ['projects', 'cowork', 'project', false],
+    ['project-chat', 'cowork', 'conversation', false],
     ['reports', 'cowork', 'report', false],
     ['source-collections', 'cowork', 'source', false],
     ['tasks', 'cowork', 'routine', false],
@@ -121,6 +144,17 @@ describe('Focus Stack route context', () => {
     expect(
       Object.values(shell.ROUTES).every((route) => Object.isFrozen(route)),
     ).toBe(true);
+  });
+
+  it('covers every current mode-owned page with the same resolver mode', () => {
+    const runtime = loadWorkspaceRuntime();
+
+    for (const pageId of runtime.NanoModes.modePageIds()) {
+      expect(runtime.NanoWorkspaceShell.ROUTES[pageId]).toBeDefined();
+      expect(runtime.NanoWorkspaceShell.resolveRoute(pageId).mode).toBe(
+        runtime.NanoModes.resolveMode(pageId),
+      );
+    }
   });
 });
 
