@@ -5,7 +5,7 @@ function dashboardOperatingBriefText(data) {
   const dailyBriefStats = data.dailyBriefStats || [];
   const loadIssues = data.loadIssues || [];
   const lines = [
-    'NanoCrab workspace brief',
+    'NanoCrab Today brief',
     '',
     'Next action: ' + (data.dailyBriefTitle || 'Pick the most useful surface'),
     'Why: ' + (data.dailyBriefDetail || 'No detail available'),
@@ -16,8 +16,8 @@ function dashboardOperatingBriefText(data) {
       ? dailyBriefStats
           .map((stat) => `- ${stat.label}: ${stat.value}`)
           .join('\n')
-      : '- No dashboard counts available',
-    `Data health: ${loadIssues.length ? loadIssues.join('; ') : 'Dashboard feeds loaded without known fallback.'}`,
+      : '- No Today counts available',
+    `Data health: ${loadIssues.length ? loadIssues.join('; ') : 'Today feeds loaded without known fallback.'}`,
     '',
     'Workspace surfaces',
     workspaceLaneItems.length
@@ -29,7 +29,7 @@ function dashboardOperatingBriefText(data) {
           .join('\n')
       : '- Workspace lane data unavailable',
     '',
-    'Use this brief to decide whether to start in Chat, Cowork, Code, or More.',
+    'Use this Today brief to decide whether to start in Chat, Cowork, Code, or More.',
   ];
   return lines.join('\n');
 }
@@ -49,8 +49,8 @@ function dashboardKickoffPromptText(data) {
   return [
     'Start my NanoCrab work session.',
     '',
-    `Recommended next action: ${data.dailyBriefTitle || 'Review dashboard'}`,
-    `Reason: ${data.dailyBriefDetail || 'No current dashboard detail was available.'}`,
+    `Recommended next action: ${data.dailyBriefTitle || 'Review Today'}`,
+    `Reason: ${data.dailyBriefDetail || 'No current Today detail was available.'}`,
     `Open route: ${routeHint}`,
     '',
     'Workspace choice',
@@ -59,7 +59,7 @@ function dashboardKickoffPromptText(data) {
     'Data confidence',
     loadIssues.length
       ? loadIssues.map((issue) => `- ${issue}`).join('\n')
-      : '- Dashboard feeds loaded without known fallback.',
+      : '- Today feeds loaded without known fallback.',
     '',
     'Instructions',
     '- Decide whether this belongs in Chat, Cowork, Code, or More.',
@@ -238,7 +238,7 @@ async function renderDashboard(el) {
   const renderLoading = () => {
     el.innerHTML = `
       <div class="dashboard-shell">
-        <div class="dashboard-loading-grid" aria-label="Loading dashboard">
+        <div class="dashboard-loading-grid" aria-label="Loading Today">
           <div class="dash-skeleton dash-skeleton-hero"></div>
           <div class="dash-skeleton dash-skeleton-strip"></div>
           <div class="dash-skeleton dash-skeleton-panel"></div>
@@ -670,7 +670,7 @@ async function renderDashboard(el) {
       const dailyBriefDetail = nextBest
         ? `${nextBest.label}: ${nextBest.detail || 'Open the related workspace.'}`
         : loadIssues.length > 0
-          ? `${loadIssues.length} dashboard feed${loadIssues.length === 1 ? '' : 's'} did not load. Open More for monitoring before assuming the day is quiet.`
+          ? `${loadIssues.length} Today feed${loadIssues.length === 1 ? '' : 's'} did not load. Open More for monitoring before assuming the day is quiet.`
         : cockpitCounts.active > 0
           ? 'There are active agent runs. Inspect the cockpit if you want to review progress or artifacts.'
           : projects.length > 0
@@ -679,10 +679,14 @@ async function renderDashboard(el) {
       const dailyBriefAction = nextBest
         ? nextBest.action
         : loadIssues.length > 0
-          ? 'toggleMoreDrawer()'
+          ? 'toggleMoreDrawer(this)'
         : projects.length > 0
           ? "navigate('projects')"
           : "navigate('chat')";
+      const dailyBriefActionAria =
+        dailyBriefAction === 'toggleMoreDrawer(this)'
+          ? ' aria-controls="more-drawer" aria-expanded="false"'
+          : '';
       const dailyBriefActionLabel = nextBest
         ? nextBest.actionLabel || 'Open'
         : loadIssues.length > 0
@@ -757,16 +761,14 @@ async function renderDashboard(el) {
           actionLabel: 'Open Code',
         },
       ];
-      const workspaceLaneRows = workspaceLaneItems
+      const workspaceFocusRows = workspaceLaneItems
         .map(
           (lane, index) => `
-            <button class="dash-workspace-lane dash-primary-lane is-${lane.id} dash-reveal" ${dashRevealStyle(index)} onclick="${lane.action}">
-              <span class="dash-workspace-label">${esc(lane.label)}</span>
+            <button class="dash-focus-link is-${lane.id} dash-reveal" ${dashRevealStyle(index)} onclick="${lane.action}">
+              <span>${esc(lane.label)}</span>
               <strong>${esc(lane.title)}</strong>
-              <p>${esc(lane.detail)}</p>
-              <em>${esc(lane.metric)}</em>
-              ${lane.submetric ? `<small>${esc(lane.submetric)}</small>` : ''}
-              <span class="dash-workspace-action">${esc(lane.actionLabel)}</span>
+              <small>${esc(lane.metric)}${lane.submetric ? ` · ${esc(lane.submetric)}` : ''}</small>
+              <em>${esc(lane.actionLabel)}</em>
             </button>`,
         )
         .join('');
@@ -797,11 +799,11 @@ async function renderDashboard(el) {
 
       el.innerHTML = `
         <div class="dashboard-shell dash-home-shell">
-          <section class="dash-home-hero">
+          <section class="dash-today-header" aria-labelledby="today-title">
             <div>
-              <span class="dash-kicker">Workspace home</span>
-              <h2>${esc(botName)}</h2>
-              <p>Start with the right surface. Use Chat for quick thinking, Cowork for durable project context, Code for repository work, and More for administration.</p>
+              <span class="dash-kicker">Today</span>
+              <h2 id="today-title">What needs your attention</h2>
+              <p>${esc(botName)} keeps current decisions and active work ahead of secondary workspace health.</p>
             </div>
             <div class="dashboard-toolbar-actions">
               ${renderDashboardDataHealthChip(loadIssues)}
@@ -810,36 +812,16 @@ async function renderDashboard(el) {
             </div>
           </section>
 
-          <section class="dash-next-action is-${dailyBriefTone}">
+          <section class="dash-next-action is-${dailyBriefTone}" aria-label="Recommended next action">
             <div>
               <span class="dash-kicker">Next action</span>
               <h3>${esc(dailyBriefTitle)}</h3>
               <p>${esc(truncate(dailyBriefDetail, 180))}</p>
             </div>
-            <div class="dash-next-stats">
-              ${dailyBriefStats
-                .map(
-                  (stat) => `<span><strong>${esc(String(stat.value))}</strong><small>${esc(stat.label)}</small></span>`,
-                )
-                .join('')}
-            </div>
-            <button class="btn btn-primary" onclick="${dailyBriefAction}">${esc(dailyBriefActionLabel)}</button>
+            <button class="btn btn-primary dash-next-primary" onclick="${dailyBriefAction}"${dailyBriefActionAria}>${esc(dailyBriefActionLabel)}</button>
           </section>
 
-          <section class="dash-primary-lanes" aria-label="Primary workspace surfaces">
-            ${workspaceLaneRows}
-          </section>
-
-          <section class="dash-more-strip">
-            <div>
-              <span class="dash-kicker">More</span>
-              <strong>Settings, channels, approvals, monitoring, memory, credentials, and recovery stay out of the main path.</strong>
-              <p>${esc(moreStatusCopy)}</p>
-            </div>
-            <button class="btn btn-ghost" onclick="toggleMoreDrawer()">Open More</button>
-          </section>
-
-          <section class="dash-quiet-state">
+          <section class="dash-attention-list" aria-label="Attention items">
             ${priorityItems.length
               ? `<div class="dash-quiet-list">${priorityRows}</div>`
               : dashEmptyState({
@@ -854,6 +836,23 @@ async function renderDashboard(el) {
                   secondaryLabel: 'Open Cowork',
                 })}
           </section>
+
+          <details class="dash-focus-paths">
+            <summary>
+              <span>Choose another focus</span>
+              <small>Chat, Cowork, or Code</small>
+            </summary>
+            <div class="dash-focus-path-list">${workspaceFocusRows}</div>
+          </details>
+
+          <section class="dash-more-strip" aria-label="Secondary workspace tools">
+            <div>
+              <span class="dash-kicker">More</span>
+              <strong>Settings, channels, approvals, monitoring, memory, credentials, and recovery stay out of the main path.</strong>
+              <p>${esc(moreStatusCopy)}</p>
+            </div>
+            <button class="btn btn-ghost" onclick="toggleMoreDrawer(this)" aria-controls="more-drawer" aria-expanded="false">Open More</button>
+          </section>
         </div>`;
 
       window._cockpitSessions = cockpitSessions;
@@ -864,11 +863,11 @@ async function renderDashboard(el) {
         <div class="dashboard-shell">
           <div class="dash-error-state">
             <div>
-              <span class="dash-kicker">Dashboard unavailable</span>
-              <h2>Could not load command data</h2>
-              <p>${esc(e.message || 'The dashboard API returned an unexpected response.')}</p>
+              <span class="dash-kicker">Today unavailable</span>
+              <h2>Could not load Today</h2>
+              <p>${esc(e.message || 'The Today feed returned an unexpected response.')}</p>
             </div>
-            <button class="btn btn-primary" onclick="navigate('dashboard')">Retry</button>
+            <button class="btn btn-primary" onclick="navigate('dashboard')">Retry Today</button>
           </div>
         </div>`;
     }
@@ -882,7 +881,7 @@ async function renderDashboard(el) {
       api('/sessions/cockpit'),
     ]);
     if (cockpitResult.status === 'rejected') {
-      updateDashboardRefreshDataHealth(['Dashboard smart refresh cockpit feed unavailable']);
+      updateDashboardRefreshDataHealth(['Today smart refresh cockpit feed unavailable']);
       return;
     }
     updateDashboardRefreshDataHealth([]);
@@ -1247,7 +1246,7 @@ window.refreshCockpitDashboard = async function () {
       kicker: 'Run cockpit',
       title: 'Cockpit run feed unavailable.',
       detail:
-        'The dashboard could not refresh current agent runs. Open Monitoring or Sessions before assuming there is no active work.',
+        'Today could not refresh current agent runs. Open Monitoring or Sessions before assuming there is no active work.',
       action: "navigate('monitoring')",
       actionLabel: 'Monitoring',
       secondaryAction: "navigate('sessions')",
@@ -1370,7 +1369,7 @@ function dashboardActionErrorMessage(kind, err) {
   if (kind === 'restart-channel') {
     return 'Channel restart was not queued. Check channel credentials, adapter health, and monitoring logs before relying on new messages.' + detail;
   }
-  return 'Dashboard action could not complete. Refresh command data and check monitoring before retrying.' + detail;
+  return 'Today action could not complete. Refresh command data and check monitoring before retrying.' + detail;
 }
 
 window.restartChannel = async (name, btnEl) => {
@@ -1402,22 +1401,22 @@ window.restartService = async (btnEl) => {
 window.copyDashboardOperatingBrief = async () => {
   const text = window._dashboardOperatingBrief || '';
   if (!text) {
-    toast('Dashboard brief is not ready', 'error');
+    toast('Today brief is not ready', 'error');
     return;
   }
-  await copyTextWithFallback(text, 'Dashboard brief copied', 'Copy dashboard brief');
+  await copyTextWithFallback(text, 'Today brief copied', 'Copy Today brief');
 };
 
 window.copyDashboardKickoffPrompt = async () => {
   const text = window._dashboardKickoffPrompt || '';
   if (!text) {
-    toast('Dashboard kickoff prompt is not ready', 'error');
+    toast('Today kickoff prompt is not ready', 'error');
     return;
   }
   await copyTextWithFallback(
     text,
-    'Dashboard kickoff prompt copied',
-    'Copy dashboard kickoff prompt',
+    'Today kickoff prompt copied',
+    'Copy Today kickoff prompt',
   );
 };
 
@@ -1447,6 +1446,6 @@ window.hideWidget = (id) => {
 
 window.resetDashboardWidgets = () => {
   localStorage.removeItem('hidden_widgets');
-  toast('Dashboard reset', 'success');
+  toast('Today layout reset', 'success');
   navigate('dashboard');
 };

@@ -1,6 +1,6 @@
 # NanoCrab User Guide
 
-Last updated: 2026-07-09
+Last updated: 2026-07-20
 
 Applies to: NanoCrab 2.0-RC8
 
@@ -26,14 +26,42 @@ maintenance tasks.
 
 ## Dashboard Map
 
-NanoCrab opens around **Copilot / Cowork / Code / More**.
+NanoCrab opens on **Today**, which summarizes current attention, active work,
+and a useful next action. Today is an overview, not a saved mode. The four
+stable modes are **Chat / Cowork / Code / More**.
 
-| Focus   | Use It For                                                                                                                                                                                                                             |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Copilot | ChatGPT-style plain conversations with provider/model selection, optional title, generated title fallback, and thread history.                                                                                                         |
-| Cowork  | durable project, document, MCP, and artifact work with project files, project chats, source context, reports, approvals, and local drafts.                                                                                             |
-| Code    | repository automation, tests, PRs, snippets, and coding-agent handoffs through Git & Code, Autofix, GitHub Copilot, and terminal/developer tools.                                                                                      |
-| More    | Platform operations: dashboard, agents, tasks, workflows, reports, artifacts, approvals, channels, messages, integrations, webhooks, credentials, security, audit, monitoring, backup, usage, groups, sessions, marketplace, and help. |
+| Focus  | Use It For                                                                                                                                                                                                                  |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat   | Plain conversations with provider/model selection, optional title, generated title fallback, and thread history.                                                                                                            |
+| Cowork | Durable project, document, MCP, and artifact work with project files, project chats, source context, reports, approvals, and local drafts.                                                                                  |
+| Code   | Repository automation, tests, PRs, snippets, and coding-agent handoffs through Git & Code, Autofix, GitHub Copilot, and terminal/developer tools.                                                                           |
+| More   | Platform operations: agents, tasks, workflows, reports, artifacts, approvals, channels, messages, integrations, webhooks, credentials, security, audit, monitoring, backup, usage, groups, sessions, marketplace, and help. |
+
+### Using Focus Stack navigation
+
+On desktop, the narrow rail selects Today or a global mode. The context column
+shows navigation for the current route, the canvas contains the page's single
+main work area, and **Details** opens the optional workspace inspector. The
+inspector and More drawer cannot be open together. Close either one with its
+close control or `Escape`; the modal More drawer also contains Tab focus until
+it closes. Focus returns to the control that opened the layer, and all rail,
+bottom-bar, drawer, and inspector controls are keyboard reachable with a visible
+focus indicator.
+Whichever responsive **Today** control is visible also exposes the current-page
+state, so keyboard and assistive-technology users receive the same route cue at
+desktop, tablet, and mobile widths.
+
+Direct links continue to work. The current hash determines the visible context:
+for example, `#/reports` and `#/source-collections` open in Cowork, `#/devhub`
+and a direct `#/sessions` link open in Code, and `#/security` opens in More. A
+Sessions link preserves an explicitly selected Chat, Cowork, or Code context;
+without one it defaults to Code.
+
+At 390px and other mobile widths, the desktop rail and context column collapse.
+Use the four-action Chat/Cowork/Code/More bottom bar to change focus, the header
+menu for route navigation, and **Details** for the bottom-sheet inspector. The
+page remains the only main landmark and scrolls vertically without horizontal
+overflow.
 
 ### Capability overview
 
@@ -497,16 +525,17 @@ npm run mock:admin:build
 
 ## Troubleshooting
 
-| Symptom                  | First Place To Check                                                                                                                                                                                                                                |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dashboard does not load  | `npm run setup -- --dry-run`, service logs, reverse proxy config, firewall.                                                                                                                                                                         |
-| Provider fails           | **Monitoring -> Inference Health**, provider credentials, base URL, model name.                                                                                                                                                                     |
-| Channel does not respond | Channel auth state, group registration, trigger name, message logs.                                                                                                                                                                                 |
-| Coding job stuck         | **Agents -> GitHub Coding Jobs**, job timeline, approvals, selected runner readiness/detail, and job output. Check container logs for container-backed runners; for Devin, check NanoCrab service logs and host readiness/auth/sandbox diagnostics. |
-| Routine did not run      | **Tasks** run history, paused state, schedule timezone, max active runs.                                                                                                                                                                            |
-| Webhook did not send     | Pending delivery approval, webhook target, connector policy, audit log.                                                                                                                                                                             |
-| Memory feels wrong       | **Memory** proposals, approved records, stale/contradicted markers.                                                                                                                                                                                 |
-| Update fails             | Dirty worktree, Node version, Docker availability, setup logs.                                                                                                                                                                                      |
+| Symptom                  | First Place To Check                                                                                                                                                                                                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dashboard does not load  | `npm run setup -- --dry-run`, service logs, reverse proxy config, firewall.                                                                                                                                                                                                                     |
+| Provider fails           | **Monitoring -> Inference Health**, provider credentials, base URL, model name.                                                                                                                                                                                                                 |
+| Channel does not respond | Channel auth state, group registration, trigger name, message logs.                                                                                                                                                                                                                             |
+| Coding job stuck         | **Agents -> GitHub Coding Jobs**, job timeline, approvals, selected runner readiness/detail, and job output. Check container logs for container-backed runners; for Devin, check NanoCrab service logs and host readiness/auth/sandbox diagnostics.                                             |
+| Routine did not run      | **Tasks** run history, paused state, schedule timezone, max active runs.                                                                                                                                                                                                                        |
+| Webhook did not send     | Pending delivery approval, webhook target, connector policy, audit log.                                                                                                                                                                                                                         |
+| Memory feels wrong       | **Memory** proposals, approved records, stale/contradicted markers.                                                                                                                                                                                                                             |
+| Source Collections fails | Confirm `GET /api/source-collections` returns a top-level JSON array. Mock mode uses the same contract and deliberately shows an error for malformed responses. For partial or failed collections, inspect the connector or mount failure and use **Retry failed sources** after correcting it. |
+| Update fails             | Dirty worktree, Node version, Docker availability, setup logs.                                                                                                                                                                                                                                  |
 
 For a Devin launch-isolation error, inspect the workspace before retrying:
 launch preparation fails closed before spawn if it contains any symlink or

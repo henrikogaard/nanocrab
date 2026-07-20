@@ -25,8 +25,14 @@
       guidance: 'Repositories, Copilot, tests, PRs, and handoffs.',
       pages: ['gitcode'],
     },
+    more: {
+      id: 'more',
+      label: 'More',
+      icon: 'integrations',
+      pages: [],
+    },
   };
-  const MODE_ORDER = ['chat', 'cowork', 'code'];
+  const MODE_ORDER = ['chat', 'cowork', 'code', 'more'];
   const HIDDEN_PAGE_MODES = {
     'project-chat': 'cowork',
   };
@@ -81,8 +87,24 @@
     return MODES[modeId] ? MODES[modeId].pages.slice() : [];
   }
 
+  function primaryModeIds() {
+    return MODE_ORDER.filter(
+      (modeId) => MODES[modeId] && MODES[modeId].pages.length > 0,
+    );
+  }
+
+  function modePageIds() {
+    const pageIds = MODE_ORDER.flatMap((modeId) =>
+      MODES[modeId] ? MODES[modeId].pages : [],
+    );
+    for (const pageId of Object.keys(HIDDEN_PAGE_MODES)) {
+      if (pageIds.indexOf(pageId) === -1) pageIds.push(pageId);
+    }
+    return pageIds;
+  }
+
   function modeGuidance(modeId) {
-    return MODES[modeId] ? MODES[modeId].guidance : '';
+    return MODES[modeId] ? MODES[modeId].guidance || '' : '';
   }
 
   function loadActiveMode(storage) {
@@ -93,11 +115,12 @@
       saved = null;
     }
     if (saved === 'work') return 'cowork';
-    return MODE_ORDER.indexOf(saved) !== -1 ? saved : MODE_ORDER[0];
+    const primaryModes = primaryModeIds();
+    return primaryModes.indexOf(saved) !== -1 ? saved : primaryModes[0];
   }
 
   function saveActiveMode(modeId, storage) {
-    if (MODE_ORDER.indexOf(modeId) === -1) return false;
+    if (primaryModeIds().indexOf(modeId) === -1) return false;
     try {
       if (storage) storage.setItem('active_mode', modeId);
       return true;
@@ -106,7 +129,18 @@
     }
   }
 
-  const NanoModes = { MODES, MODE_ORDER, MORE_IDS, resolveMode, navPagesForMode, modeGuidance, loadActiveMode, saveActiveMode };
+  const NanoModes = {
+    MODES,
+    MODE_ORDER,
+    MORE_IDS,
+    resolveMode,
+    navPagesForMode,
+    primaryModeIds,
+    modePageIds,
+    modeGuidance,
+    loadActiveMode,
+    saveActiveMode,
+  };
   const g = typeof globalThis !== 'undefined' ? globalThis : window;
   g.NanoModes = NanoModes;
 })();

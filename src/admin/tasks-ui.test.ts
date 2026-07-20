@@ -187,6 +187,12 @@ describe('Scheduled tasks productivity UI', () => {
     const scheduled = scheduledWorkSource(source);
 
     expect(scheduled).toContain('routine-kind-filter');
+    expect(scheduled).toContain('aria-label="Filter scheduled work by type"');
+    expect(scheduled).toContain('<label for="operation-group">Group</label>');
+    expect(scheduled).toContain('<label for="operation-intent">Kind</label>');
+    expect(scheduled).toContain(
+      '<label for="operation-schedule-type">Schedule</label>',
+    );
     expect(scheduled).toContain('routine-operation-schedule');
     expect(scheduled).toContain('routine-operation-type');
     expect(scheduled).not.toContain(
@@ -199,6 +205,30 @@ describe('Scheduled tasks productivity UI', () => {
     expect(style).toContain('.routine-kind-filter');
     expect(style).toContain('.routine-operation-schedule');
     expect(style).toContain('.routine-operation-type');
+  });
+
+  it('associates every visible task filter and operation field with a name', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const scheduled = scheduledWorkSource(source);
+
+    expect(source).toContain(
+      'id="routine-search" class="search-input routine-search" aria-label="Search routines and scheduled tasks"',
+    );
+    for (const [label, id] of [
+      ['Group', 'operation-group'],
+      ['Kind', 'operation-intent'],
+      ['Title', 'operation-title'],
+      ['Schedule', 'operation-schedule-type'],
+      ['Orders / Reminder Text', 'operation-orders'],
+    ]) {
+      expect(scheduled).toContain(`<label for="${id}">${label}</label>`);
+    }
+    expect(scheduled).toContain(
+      'id="operation-schedule-value" aria-label="Schedule value"',
+    );
+    expect(scheduled).toContain(
+      '<label class="routine-check"><input type="checkbox" id="operation-delivery-approved">',
+    );
   });
 
   it('uses class-based inline confirmations and task editor controls', () => {

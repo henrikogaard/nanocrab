@@ -10,26 +10,51 @@ beforeAll(async () => {
 const M = () => (globalThis as any).NanoModes;
 
 describe('MODES config', () => {
-  it('exposes three modes in order', () => {
-    expect(M().MODE_ORDER).toEqual(['chat', 'cowork', 'code']);
+  it('exposes four stable modes in order', () => {
+    expect(M().MODE_ORDER).toEqual(['chat', 'cowork', 'code', 'more']);
   });
 
   it('labels the top-level focus modes', () => {
     expect(M().MODES.chat.label).toBe('Chat');
     expect(M().MODES.cowork.label).toBe('Cowork');
     expect(M().MODES.code.label).toBe('Code');
+    expect(M().MODES.more).toEqual({
+      id: 'more',
+      label: 'More',
+      icon: 'integrations',
+      pages: [],
+    });
   });
 
   it('describes when to use each focus mode', () => {
     expect(M().modeGuidance('chat')).toContain('Plain chat');
     expect(M().modeGuidance('cowork')).toContain('Projects, files');
     expect(M().modeGuidance('code')).toContain('Repos');
+    expect(M().modeGuidance('more')).toBe('');
     expect(M().modeGuidance('unknown')).toBe('');
   });
 
   it('every mode page id is unique across modes', () => {
     const all = M().MODE_ORDER.flatMap((m: string) => M().MODES[m].pages);
     expect(new Set(all).size).toBe(all.length);
+  });
+
+  it('enumerates primary and hidden mode-owned page ids without exposing mutable state', () => {
+    const pageIds = M().modePageIds();
+
+    expect(pageIds).toEqual(['chat', 'projects', 'gitcode', 'project-chat']);
+    pageIds.push('tampered');
+    expect(M().modePageIds()).toEqual([
+      'chat',
+      'projects',
+      'gitcode',
+      'project-chat',
+    ]);
+  });
+
+  it('keeps More stable while exposing only navigable primary modes', () => {
+    expect(M().MODE_ORDER).toContain('more');
+    expect(M().primaryModeIds()).toEqual(['chat', 'cowork', 'code']);
   });
 });
 
@@ -120,6 +145,11 @@ describe('loadActiveMode', () => {
     s.setItem('active_mode', 'garbage');
     expect(M().loadActiveMode(s)).toBe('chat');
   });
+  it('recovers from a previously persisted More drawer action', () => {
+    const s = mkStore();
+    s.setItem('active_mode', 'more');
+    expect(M().loadActiveMode(s)).toBe('chat');
+  });
 });
 
 describe('saveActiveMode', () => {
@@ -131,6 +161,11 @@ describe('saveActiveMode', () => {
   it('rejects an invalid mode without writing', () => {
     const s = mkStore();
     expect(M().saveActiveMode('garbage', s)).toBe(false);
+    expect(s.getItem('active_mode')).toBeNull();
+  });
+  it('does not persist More as an unusable primary active mode', () => {
+    const s = mkStore();
+    expect(M().saveActiveMode('more', s)).toBe(false);
     expect(s.getItem('active_mode')).toBeNull();
   });
 });

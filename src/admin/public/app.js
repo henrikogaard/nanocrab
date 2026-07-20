@@ -13,8 +13,16 @@ const {
   moreDrawerSections,
   isVisibleForRole,
 } = window.NanoShellNavigation;
-// Seed from the persisted last-used mode so deep-links to admin/More pages
-// (which don't resolve to a mode) still show the correct mode in the switcher.
+// Seed the persisted primary mode for landing and explicit session preference.
+// Each rendered route derives its displayed Focus Stack mode independently.
+let hasExplicitActiveMode = false;
+try {
+  hasExplicitActiveMode = ['chat', 'cowork', 'code', 'work'].includes(
+    window.localStorage.getItem('active_mode'),
+  );
+} catch {
+  hasExplicitActiveMode = false;
+}
 let activeMode =
   (window.NanoModes &&
     window.NanoModes.loadActiveMode(window.localStorage)) ||
@@ -50,8 +58,8 @@ initTheme();
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'nanocrab_sidebar_width';
 const SIDEBAR_WIDTH_DEFAULT = 280;
-const SIDEBAR_WIDTH_MIN = 232;
-const SIDEBAR_WIDTH_MAX = 420;
+const SIDEBAR_WIDTH_MIN = 220;
+const SIDEBAR_WIDTH_MAX = 300;
 
 function clampSidebarWidth(width) {
   const n = Number(width);
@@ -139,6 +147,147 @@ function initSidebarResize() {
   });
 }
 loadSidebarWidth();
+
+let workspaceInspectorTrigger = null;
+let moreDrawerTrigger = null;
+let workspaceInspectorEscapeReady = false;
+
+function synchronizeMoreDrawerControls() {
+  const drawer = document.getElementById('more-drawer');
+  const isOpen = Boolean(drawer?.classList.contains('open'));
+  document
+    .querySelectorAll('[aria-controls="more-drawer"]')
+    .forEach((trigger) => {
+      trigger.setAttribute('aria-expanded', String(isOpen));
+    });
+}
+
+function setWorkspaceInspectorState(isOpen, trigger, options = {}) {
+  const inspector = document.getElementById('workspace-inspector');
+  const shell = document.querySelector('.focus-stack-shell');
+  if (!inspector || !shell) return;
+
+  if (isOpen) {
+    const drawer = document.getElementById('more-drawer');
+    if (drawer?.classList.contains('open')) {
+      setMoreDrawerState(false, null, { restoreFocus: false });
+    }
+  }
+  if (isOpen && trigger) workspaceInspectorTrigger = trigger;
+  inspector.classList.toggle('is-open', isOpen);
+  shell.classList.toggle('is-inspector-open', isOpen);
+  inspector.toggleAttribute('inert', !isOpen);
+  inspector.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  document
+    .querySelectorAll('[aria-controls="workspace-inspector"]')
+    .forEach((trigger) => {
+      trigger.setAttribute('aria-expanded', String(isOpen));
+    });
+
+  if (isOpen) {
+    inspector.querySelector('.focus-stack-inspector-close')?.focus();
+  } else {
+    const returnTarget = workspaceInspectorTrigger;
+    workspaceInspectorTrigger = null;
+    if (options.restoreFocus !== false && returnTarget) returnTarget.focus();
+  }
+}
+
+function setMoreDrawerState(isOpen, trigger, options = {}) {
+  const drawer = document.getElementById('more-drawer');
+  const overlay = document.querySelector('.more-overlay');
+  if (!drawer) return;
+
+  if (isOpen) {
+    const inspector = document.getElementById('workspace-inspector');
+    if (inspector?.classList.contains('is-open')) {
+      setWorkspaceInspectorState(false, null, { restoreFocus: false });
+    }
+  }
+  if (isOpen && trigger) moreDrawerTrigger = trigger;
+  drawer.classList.toggle('open', isOpen);
+  drawer.toggleAttribute('inert', !isOpen);
+  drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  if (overlay) {
+    overlay.classList.toggle('visible', isOpen);
+    overlay.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  }
+  synchronizeMoreDrawerControls();
+
+  if (isOpen) {
+    drawer.querySelector('.more-close')?.focus();
+  } else {
+    const returnTarget = moreDrawerTrigger;
+    moreDrawerTrigger = null;
+    if (options.restoreFocus !== false && returnTarget) returnTarget.focus();
+  }
+}
+
+function initWorkspaceInspector() {
+  if (workspaceInspectorEscapeReady) return;
+  workspaceInspectorEscapeReady = true;
+  document.addEventListener('keydown', (event) => {
+    const inspector = document.getElementById('workspace-inspector');
+    if (
+      event.defaultPrevented ||
+      event.key !== 'Escape' ||
+      !inspector?.classList.contains('is-open')
+    ) {
+      return;
+    }
+    event.preventDefault();
+    setWorkspaceInspectorState(false);
+  });
+}
+
+function initMoreDrawer() {
+  const drawer = document.getElementById('more-drawer');
+  if (!drawer || drawer.dataset.keyboardReady === 'true') return;
+  drawer.dataset.keyboardReady = 'true';
+  drawer.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setMoreDrawerState(false);
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusable = Array.from(
+      drawer.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden'
+      );
+    });
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+}
+
+window.toggleWorkspaceInspector = function (trigger) {
+  const inspector = document.getElementById('workspace-inspector');
+  if (!inspector) return;
+  setWorkspaceInspectorState(!inspector.classList.contains('is-open'), trigger);
+};
+
+window.closeWorkspaceInspector = function () {
+  setWorkspaceInspectorState(false);
+};
 
 // --- API ---
 async function api(path, opts = {}) {
@@ -696,6 +845,10 @@ function brandLogo(extraClass = '', variant = 'mark') {
 
 function shellModeCue(mode) {
   const cues = {
+    today: {
+      title: 'Today overview',
+      detail: 'Attention, current work, and one useful next action.',
+    },
     chat: {
       title: 'Plain chat',
       detail: 'Questions, drafting, and quick thinking.',
@@ -708,34 +861,66 @@ function shellModeCue(mode) {
       title: 'Code work',
       detail: 'Repos, issues, tests, PRs, and handoffs.',
     },
+    more: {
+      title: 'Workspace administration',
+      detail: 'Settings, operations, security, and recovery tools.',
+    },
   };
-  return cues[mode] || cues.chat;
+  return cues[mode] || cues.more;
+}
+
+function shellNavigationTarget(pageId, currentPage) {
+  if (pageId !== 'project-chat') {
+    return { href: `#/${pageId}`, usesNavigate: true };
+  }
+  if (currentPage !== 'project-chat') return null;
+  const currentHash = window.location.hash || '';
+  if (!parseProjectChatHash(currentHash)) return null;
+  return { href: currentHash, usesNavigate: false };
 }
 
 function showShell(page) {
+  const routeContext = window.NanoWorkspaceShell.resolveRoute(
+    page,
+    hasExplicitActiveMode ? activeMode : undefined,
+  );
+  const displayedMode = routeContext.mode;
   stopPolling();
   currentPage = page;
-  // Derive the active mode from the page being shown (deep links land in the
-  // correct mode). Admin/More pages resolve to null and keep the last mode.
   const NM = window.NanoModes;
-  const ownerMode = NM.resolveMode(page);
-  if (ownerMode) {
-    activeMode = ownerMode;
+  const primaryDisplayedMode = ['chat', 'cowork', 'code'].includes(
+    displayedMode,
+  );
+  if (primaryDisplayedMode) {
+    activeMode = displayedMode;
+    hasExplicitActiveMode = true;
     NM.saveActiveMode(activeMode, window.localStorage);
   }
-  // Mode-scoped nav: only the pages for the active mode (in config order).
   const NM2 = window.NanoModes;
-  const navItems = NM2.navPagesForMode(activeMode).map((id) => ({
+  const primaryModeIds = NM2.primaryModeIds();
+  const navItems = NM2.navPagesForMode(displayedMode).map((id) => ({
     id,
     icon: metaIcon(id),
     label: metaLabel(id),
   }));
+  if (routeContext.isToday) {
+    for (const id of ['chat', 'projects', 'gitcode', 'sessions']) {
+      if (!pages[id] || navItems.some((item) => item.id === id)) continue;
+      navItems.push({ id, icon: metaIcon(id), label: metaLabel(id) });
+    }
+  } else if (pages[page] && !navItems.some((item) => item.id === page)) {
+    navItems.push({
+      id: page,
+      icon: metaIcon(page),
+      label: page === 'dashboard' ? 'Today' : metaLabel(page),
+    });
+  }
 
-  // Inject enabled plugins whose page belongs to the active mode.
+  // Keep plugin registration scoped through the existing mode registry.
   const cachedPlugins = window._pluginsList || [];
   for (const p of cachedPlugins) {
     if (!p.enabled || !p.sidebar) continue;
-    if (NM2.resolveMode(p.sidebar.id) !== activeMode) continue;
+    if (NM2.resolveMode(p.sidebar.id) !== displayedMode) continue;
     if (navItems.some((n) => n.id === p.sidebar.id)) continue;
     navItems.push({
       id: p.sidebar.id,
@@ -747,9 +932,9 @@ function showShell(page) {
   // Role-based sidebar filtering (see isVisibleForRole at module scope).
   const filteredNavItems = navItems.filter((item) => isVisibleForRole(item.id));
 
-  // Chat mode gets a dynamic thread list instead of static page links
+  // Chat keeps its existing dynamic thread deep-link hydration.
   let navHtml;
-  if (activeMode === 'chat' && window.WebChat) {
+  if (displayedMode === 'chat' && window.WebChat) {
     navHtml =
       '<div id="chat-thread-nav">' +
       renderShellLoadingState(
@@ -760,22 +945,34 @@ function showShell(page) {
       '</div>';
   } else {
     navHtml = filteredNavItems
-      .map(
-        (item) =>
-          `<a class="nav-link ${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`,
-      )
+      .map((item) => {
+        const target = shellNavigationTarget(item.id, page);
+        if (!target) return '';
+        const navigateHandler = target.usesNavigate
+          ? ` onclick="navigate('${item.id}'); return false;"`
+          : '';
+        return `<a class="nav-link ${page === item.id ? 'active' : ''}" href="${esc(target.href)}"${navigateHandler}>${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`;
+      })
       .join('');
   }
 
   // Build mobile menu HTML (mode-scoped, flat list)
   const mobileMenuHtml = filteredNavItems
-    .map(
-      (item) =>
-        `<a class="${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span>${item.label}</span></a>`,
-    )
+    .map((item) => {
+      const target = shellNavigationTarget(item.id, page);
+      if (!target) return '';
+      const navigateHandler = target.usesNavigate
+        ? ` onclick="navigate('${item.id}'); return false;"`
+        : '';
+      return `<a class="${page === item.id ? 'active' : ''}" href="${esc(target.href)}"${navigateHandler}>${navIcon(item.icon)}<span>${item.label}</span></a>`;
+    })
     .join('');
   const moreDrawerIds = window.NanoModes.MORE_IDS.filter(
-    (id) => pages[id] && isVisibleForRole(id) && filteredNavItems.every((n) => n.id !== id),
+    (id) =>
+      id !== 'dashboard' &&
+      pages[id] &&
+      isVisibleForRole(id) &&
+      filteredNavItems.every((n) => n.id !== id),
   );
   const moreDrawerHtml = moreDrawerSections(moreDrawerIds)
     .map(
@@ -786,7 +983,7 @@ function showShell(page) {
             ${section.pages
               .map(
                 (id) =>
-                  `<a class="nav-link" onclick="toggleMoreDrawer(); navigate('${id}')">${navIcon(metaIcon(id))}<span class="nav-label">${metaLabel(id)}</span></a>`,
+                  `<a class="nav-link" href="#/${id}" onclick="closeMoreDrawer(); navigate('${id}'); return false;">${navIcon(metaIcon(id))}<span class="nav-label">${metaLabel(id)}</span></a>`,
               )
               .join('')}
           </div>
@@ -794,46 +991,64 @@ function showShell(page) {
       `,
     )
     .join('');
-  const modeCue = shellModeCue(activeMode);
+  const modeCue = shellModeCue(displayedMode);
+  const pageLabel = routeContext.isToday
+    ? 'Today'
+    : page === 'dashboard'
+      ? 'Today'
+      : metaLabel(page);
   const pluginHealthHtml = window._pluginsLoadIssue
     ? `<div class="sidebar-data-health" role="status">${esc(window._pluginsLoadIssue)}</div>`
     : '';
 
   app.innerHTML = `
-    <div class="app">
+    <div class="app focus-stack-shell" data-workspace-mode="${esc(displayedMode)}" data-workspace-section="${esc(routeContext.section)}">
       <a class="skip-link" href="#page-content">Skip to content</a>
-      <div class="more-overlay" onclick="toggleMoreDrawer()" aria-hidden="true"></div>
-      <div class="more-drawer" id="more-drawer" aria-hidden="true" inert>
-        <div class="more-drawer-header"><span>Workspace tools</span><button class="more-close" onclick="toggleMoreDrawer()" aria-label="Close">✕</button></div>
+      <div class="more-overlay" onclick="closeMoreDrawer()" aria-hidden="true"></div>
+      <div class="more-drawer" id="more-drawer" role="dialog" aria-modal="true" aria-labelledby="more-drawer-title" aria-hidden="true" inert>
+        <div class="more-drawer-header"><span id="more-drawer-title">Workspace tools</span><button class="more-close" onclick="closeMoreDrawer()" aria-label="Close workspace tools">✕</button></div>
         <div class="more-drawer-body">
           <div class="more-drawer-route-map" aria-label="Where to configure work">
-            <button type="button" onclick="toggleMoreDrawer(); navigate('settings')"><span>Personal</span><small>Memory, skills, identity</small></button>
-            <button type="button" onclick="toggleMoreDrawer(); navigate('integrations')"><span>Connectors</span><small>MCP, channels, credentials</small></button>
-            <button type="button" onclick="toggleMoreDrawer(); navigate('backup')"><span>Recovery</span><small>Backups, monitoring, audit</small></button>
+            <button type="button" onclick="closeMoreDrawer(); navigate('settings')"><span>Personal</span><small>Memory, skills, identity</small></button>
+            <button type="button" onclick="closeMoreDrawer(); navigate('integrations')"><span>Connectors</span><small>MCP, channels, credentials</small></button>
+            <button type="button" onclick="closeMoreDrawer(); navigate('backup')"><span>Recovery</span><small>Backups, monitoring, audit</small></button>
           </div>
           ${moreDrawerHtml}
         </div>
       </div>
       <div class="mobile-nav">
         <div class="mobile-nav-header">
-          <div class="mobile-brand"><span class="brand-mark">${brandLogo()}</span><div><h1>${esc(botName)}</h1><span>${window._editionShort || 'NanoCrab'}</span></div></div>
+          <button class="mobile-brand${routeContext.isToday ? ' active' : ''}" type="button" onclick="navigate('dashboard')" aria-label="Open Today" aria-current="${routeContext.isToday ? 'page' : 'false'}"><span class="brand-mark">${brandLogo()}</span><span class="mobile-brand-copy"><strong>${esc(botName)}</strong><small>${window._editionShort || 'NanoCrab'}</small></span></button>
           <button class="hamburger" onclick="toggleMobileMenu()" aria-label="Open menu">${navIcon('menu')}</button>
         </div>
         <div class="mobile-menu" id="mobile-menu">
           ${mobileMenuHtml}
           <div class="mobile-section">Account</div>
-          <a onclick="navigate('help')">${navIcon('help')}<span>Help</span></a>
-          <a onclick="logout()">${navIcon('logout')}<span>Logout</span></a>
+          <a href="#/help" onclick="navigate('help'); return false;">${navIcon('help')}<span>Help</span></a>
+          <button type="button" onclick="logout()">${navIcon('logout')}<span>Logout</span></button>
         </div>
       </div>
       <div class="sidebar-overlay" onclick="toggleMobileMenu()"></div>
-      <nav class="sidebar">
-        <div class="sidebar-header"><span class="brand-mark">${brandLogo()}</span><div><h1>${esc(botName)}</h1><span>${window._editionShort || 'NanoCrab'}</span></div></div>
-        <div class="mode-switcher">
-          ${window.NanoModes.MODE_ORDER.map((m) => {
+      <nav class="focus-stack-rail" aria-label="Workspace modes">
+        <button class="focus-stack-home${routeContext.isToday ? ' active' : ''}" type="button" onclick="navigate('dashboard')" aria-label="Open Today" aria-current="${routeContext.isToday ? 'page' : 'false'}">
+          <span class="brand-mark">${brandLogo()}</span>
+          <span>Today</span>
+        </button>
+        <div class="focus-stack-rail-modes">
+          ${primaryModeIds.map((m) => {
             const cfg = window.NanoModes.MODES[m];
-            return `<button class="mode-tab ${activeMode === m ? 'active' : ''}" onclick="setMode('${m}')" type="button" title="${esc(cfg.guidance || '')}">${navIcon(cfg.icon)}<span>${cfg.label}</span></button>`;
+            return `<button class="mode-tab${displayedMode === m ? ' active' : ''}" onclick="setMode('${m}')" type="button" title="${esc(cfg.guidance || '')}" aria-pressed="${displayedMode === m ? 'true' : 'false'}">${navIcon(cfg.icon)}<span>${cfg.label}</span></button>`;
           }).join('')}
+        </div>
+        <button class="focus-stack-more${displayedMode === 'more' ? ' active' : ''}" type="button" onclick="toggleMoreDrawer(this)" aria-controls="more-drawer" aria-expanded="false" aria-pressed="${displayedMode === 'more' ? 'true' : 'false'}">
+          ${navIcon('menu')}
+          <span>More</span>
+        </button>
+      </nav>
+      <nav class="sidebar focus-stack-context" aria-label="${esc(modeCue.title)} context">
+        <div class="focus-stack-context-header">
+          <span>${routeContext.isToday ? 'Overview' : esc(window.NanoModes.MODES[displayedMode]?.label || 'More')}</span>
+          <h1>${esc(pageLabel)}</h1>
         </div>
         <div class="mode-route-cue compact" aria-label="Active focus route cue">
           <span>${esc(modeCue.title)}</span>
@@ -841,38 +1056,58 @@ function showShell(page) {
         </div>
         ${pluginHealthHtml}
         <div class="sidebar-nav">${navHtml}</div>
-        <div class="sidebar-pinned">
-          <a class="nav-link" onclick="toggleMoreDrawer()">${navIcon('menu')}<span class="nav-label">More</span></a>
-        </div>
         <div class="sidebar-footer">
           <div class="sidebar-footer-actions">
             <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme"></button>
-            <a class="nav-link nav-link-icon-only" onclick="navigate('help')" title="Help & Manual">${navIcon('help')}</a>
-            <a class="nav-link nav-link-icon-only" onclick="logout()" title="Logout">${navIcon('logout')}</a>
+            <a class="nav-link nav-link-icon-only" href="#/help" onclick="navigate('help'); return false;" title="Help & Manual">${navIcon('help')}</a>
+            <button type="button" onclick="logout()" class="nav-link nav-link-icon-only" title="Logout">${navIcon('logout')}</button>
           </div>
         </div>
       </nav>
       <div class="sidebar-resize-handle" id="sidebar-resize-handle" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin="${SIDEBAR_WIDTH_MIN}" aria-valuemax="${SIDEBAR_WIDTH_MAX}" aria-valuenow="${SIDEBAR_WIDTH_DEFAULT}" tabindex="0"></div>
-      <main class="main" id="main-content" tabindex="-1">
-        <div class="metrics-bar" id="metrics-bar"></div>
-        <div id="alerts-bar"></div>
+      <main class="main focus-stack-canvas" id="main-content" tabindex="-1">
+        <header class="focus-stack-canvas-header">
+          <div>
+            <span>${esc(window.NanoModes.MODES[displayedMode]?.label || 'Today')}</span>
+            <strong>${esc(pageLabel)}</strong>
+          </div>
+          <button class="focus-stack-inspector-trigger" type="button" onclick="toggleWorkspaceInspector(this)" aria-controls="workspace-inspector" aria-expanded="false" aria-label="Show workspace details">Details</button>
+        </header>
+        <div id="alerts-bar" class="focus-stack-alerts" role="status" aria-live="polite" aria-atomic="true"></div>
         <div id="page-content" tabindex="-1">${renderShellLoadingState()}</div>
       </main>
+      <aside id="workspace-inspector" class="focus-stack-inspector" inert aria-hidden="true">
+        <div class="focus-stack-inspector-head">
+          <div>
+            <span>Workspace details</span>
+            <strong>${esc(pageLabel)}</strong>
+          </div>
+          <button class="focus-stack-inspector-close" type="button" onclick="closeWorkspaceInspector()" aria-label="Close workspace details">${navIcon('chevron')}</button>
+        </div>
+        <section class="focus-stack-inspector-context" aria-label="Current route">
+          <span>${esc(routeContext.section.replace(/-/g, ' '))}</span>
+          <strong>${esc(modeCue.title)}</strong>
+          <p>${esc(modeCue.detail)}</p>
+        </section>
+        <div class="metrics-bar" id="metrics-bar"></div>
+      </aside>
       <div class="bottom-tabs">
         <nav>
-          ${window.NanoModes.MODE_ORDER.map((m) => {
+          ${primaryModeIds.map((m) => {
             const cfg = window.NanoModes.MODES[m];
-            return `<button class="bottom-tab ${activeMode === m ? 'active' : ''}" onclick="setMode('${m}')">${navIcon(cfg.icon, 'tab-icon')}<span>${cfg.label}</span></button>`;
+            return `<button class="bottom-tab${displayedMode === m ? ' active' : ''}" onclick="setMode('${m}')" aria-pressed="${displayedMode === m ? 'true' : 'false'}">${navIcon(cfg.icon, 'tab-icon')}<span>${cfg.label}</span></button>`;
           }).join('')}
-          <button class="bottom-tab" onclick="toggleMoreDrawer()">${navIcon('menu', 'tab-icon')}<span>More</span></button>
+          <button class="bottom-tab${displayedMode === 'more' ? ' active' : ''}" onclick="toggleMoreDrawer(this)" aria-controls="more-drawer" aria-expanded="false" aria-pressed="${displayedMode === 'more' ? 'true' : 'false'}">${navIcon('menu', 'tab-icon')}<span>More</span></button>
         </nav>
       </div>
     </div>`;
   initSidebarResize();
+  initWorkspaceInspector();
+  initMoreDrawer();
   loadMetricsBar();
   loadAlerts();
   // Hydrate chat-mode thread sidebar
-  if (activeMode === 'chat' && window.WebChat) {
+  if (displayedMode === 'chat' && window.WebChat) {
     const navEl = document.getElementById('chat-thread-nav');
     if (navEl) {
       WebChat.loadThreads().then((threads) => {
@@ -887,6 +1122,7 @@ function showShell(page) {
   const routeTabAlias =
     pendingPageTabAlias && pendingPageTabAlias.page === page ? pendingPageTabAlias : null;
   const afterRouteRender = () => {
+    synchronizeMoreDrawerControls();
     if (!routeTabAlias) return;
     activatePageTabAlias(routeTabAlias);
     if (pendingPageTabAlias === routeTabAlias) pendingPageTabAlias = null;
@@ -911,8 +1147,13 @@ function showShell(page) {
 
 window.setMode = function (mode) {
   const NM = window.NanoModes;
-  if (NM.MODE_ORDER.indexOf(mode) === -1) return;
+  if (mode === 'more') {
+    window.toggleMoreDrawer();
+    return;
+  }
+  if (NM.primaryModeIds().indexOf(mode) === -1) return;
   activeMode = mode;
+  hasExplicitActiveMode = true;
   NM.saveActiveMode(mode, window.localStorage);
   // Open the first page of the chosen mode that this role can see.
   const visible = NM.navPagesForMode(mode).filter(isVisibleForRole);
@@ -920,18 +1161,14 @@ window.setMode = function (mode) {
   if (first) navigate(first);
 };
 
-window.toggleMoreDrawer = function () {
+window.toggleMoreDrawer = function (trigger) {
   const drawer = document.getElementById('more-drawer');
-  const overlay = document.querySelector('.more-overlay');
-  if (drawer) {
-    const isOpen = drawer.classList.toggle('open');
-    drawer.toggleAttribute('inert', !isOpen);
-    drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
-  }
-  if (overlay) {
-    const isVisible = overlay.classList.toggle('visible');
-    overlay.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
-  }
+  if (!drawer) return;
+  setMoreDrawerState(!drawer.classList.contains('open'), trigger);
+};
+
+window.closeMoreDrawer = function () {
+  setMoreDrawerState(false);
 };
 
 window.logout = async function () {
@@ -5287,7 +5524,7 @@ async function renderTasks(el) {
 
     <div class="routine-command-card">
       <div class="routine-command-row">
-        <input id="routine-search" class="search-input routine-search" placeholder="What do you want automated?" oninput="filterRoutineCards()">
+        <input id="routine-search" class="search-input routine-search" aria-label="Search routines and scheduled tasks" placeholder="What do you want automated?" oninput="filterRoutineCards()">
         <button class="btn btn-primary" onclick="openRoutineWizard()">Draft routine</button>
       </div>
       <div class="routine-chip-row">
@@ -5416,7 +5653,7 @@ async function renderTasks(el) {
         <div class="card-title">Scheduled work <span class="badge badge-muted routine-count-badge">${tasks.length}</span></div>
         <div class="routine-page-subtitle">Search, run now, pause, resume, or inspect recent history.</div>
       </div>
-      <select class="search-input routine-kind-filter" id="routine-kind-filter" onchange="filterRoutineCards()">
+      <select class="search-input routine-kind-filter" id="routine-kind-filter" onchange="filterRoutineCards()" aria-label="Filter scheduled work by type">
         <option value="">All types</option>
         <option value="briefing">Briefing</option>
         <option value="github">GitHub</option>
@@ -5433,14 +5670,14 @@ async function renderTasks(el) {
       <div class="card-title">Operation reminder</div>
       <form id="operation-schedule-form">
         <div class="grid grid-2">
-          <div class="form-group"><label>Group</label><select id="operation-group">${groups.map((g) => `<option value="${esc(g.folder)}|${esc(g.jid)}">${esc(g.name)}</option>`).join('')}</select></div>
-          <div class="form-group"><label>Kind</label><select id="operation-intent"><option value="orders">Repeat orders</option><option value="reminder">Reminder</option></select></div>
+          <div class="form-group"><label for="operation-group">Group</label><select id="operation-group">${groups.map((g) => `<option value="${esc(g.folder)}|${esc(g.jid)}">${esc(g.name)}</option>`).join('')}</select></div>
+          <div class="form-group"><label for="operation-intent">Kind</label><select id="operation-intent"><option value="orders">Repeat orders</option><option value="reminder">Reminder</option></select></div>
         </div>
         <div class="grid grid-2">
-          <div class="form-group"><label>Title</label><input id="operation-title" placeholder="Night rally orders"></div>
-          <div class="form-group"><label>Schedule</label><div class="routine-operation-schedule"><select id="operation-schedule-type" class="routine-operation-type"><option value="interval">Interval</option><option value="cron">Cron</option></select><input id="operation-schedule-value" placeholder="30m or 0 */2 * * *"></div></div>
+          <div class="form-group"><label for="operation-title">Title</label><input id="operation-title" placeholder="Night rally orders"></div>
+          <div class="form-group"><label for="operation-schedule-type">Schedule</label><div class="routine-operation-schedule"><select id="operation-schedule-type" class="routine-operation-type"><option value="interval">Interval</option><option value="cron">Cron</option></select><input id="operation-schedule-value" aria-label="Schedule value" placeholder="30m or 0 */2 * * *"></div></div>
         </div>
-        <div class="form-group"><label>Orders / Reminder Text</label><textarea id="operation-orders" class="routine-textarea" placeholder="What should the bot repeat or remind the group about?"></textarea></div>
+        <div class="form-group"><label for="operation-orders">Orders / Reminder Text</label><textarea id="operation-orders" class="routine-textarea" placeholder="What should the bot repeat or remind the group about?"></textarea></div>
         <label class="routine-check"><input type="checkbox" id="operation-delivery-approved"> Send scheduled messages to this group</label>
         <button type="submit" class="btn btn-sm btn-primary">Create Operation Schedule</button>
       </form>
@@ -8068,7 +8305,7 @@ function renderReportProductionBrief(reportJobs, briefingSchedules, loadIssues =
       </div>
       <div class="report-production-actions">
         <button type="button" onclick="copyReportProductionBrief()">Copy production brief</button>
-        <button type="button" onclick="navigate('approvals')">Review approvals</button>
+        <button class="report-production-primary" type="button" onclick="navigate('approvals')">Review approvals</button>
         <button type="button" onclick="navigate('artifacts')">Open artifacts</button>
         <button type="button" onclick="navigate('projects')">Use project context</button>
       </div>
@@ -8305,25 +8542,25 @@ async function renderReports(el) {
           </div>
           <form id="report-create-form" class="report-create-form">
             <div class="form-group">
-              <label>Title</label>
+              <label for="report-title">Title</label>
               <input id="report-title" placeholder="Weekly alliance digest">
             </div>
             <div class="form-group">
-              <label>Request</label>
+              <label for="report-request">Request</label>
               <textarea id="report-request" rows="5" placeholder="Summarize recent events, decisions, risks, and next actions" required></textarea>
             </div>
             <div class="report-form-grid">
               <div class="form-group">
-                <label>Source Scopes</label>
+                <label for="report-sources">Source Scopes</label>
                 <input id="report-sources" value="journal, memory">
               </div>
               <div class="form-group">
-                <label>Provider Profile</label>
+                <label for="report-provider-profile">Provider Profile</label>
                 <select id="report-provider-profile">${reportProfileOptions}</select>
               </div>
             </div>
             <div class="form-group">
-              <label>Deliverables Directory</label>
+              <label for="report-dir">Deliverables Directory</label>
               <input id="report-dir" placeholder="store/deliverables">
             </div>
             <div class="report-format-grid" aria-label="Report output formats">
@@ -8351,16 +8588,16 @@ async function renderReports(el) {
         <div class="report-section-panel">
           <div class="card-title">Scheduled Briefings</div>
           <form id="briefing-create-form" class="report-create-form">
-            <div class="form-group"><label>Title</label><input id="briefing-title" placeholder="Daily operations brief" required></div>
+            <div class="form-group"><label for="briefing-title">Title</label><input id="briefing-title" placeholder="Daily operations brief" required></div>
             <div class="report-form-grid">
-              <div class="form-group"><label>Cadence</label><select id="briefing-cadence"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
-              <div class="form-group"><label>Local Time</label><input id="briefing-time" type="time" value="08:30" required></div>
+              <div class="form-group"><label for="briefing-cadence">Cadence</label><select id="briefing-cadence"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
+              <div class="form-group"><label for="briefing-time">Local Time</label><input id="briefing-time" type="time" value="08:30" required></div>
             </div>
             <div class="report-form-grid">
-              <div class="form-group"><label>Target Group</label><select id="briefing-group">${groupList.map((group) => `<option value="${esc(group.folder)}" data-jid="${esc(group.jid)}">${esc(group.name)}</option>`).join('')}</select></div>
-              <div class="form-group"><label>Source Scopes</label><input id="briefing-sources" value="journal, memory"></div>
+              <div class="form-group"><label for="briefing-group">Target Group</label><select id="briefing-group">${groupList.map((group) => `<option value="${esc(group.folder)}" data-jid="${esc(group.jid)}">${esc(group.name)}</option>`).join('')}</select></div>
+              <div class="form-group"><label for="briefing-sources">Source Scopes</label><input id="briefing-sources" value="journal, memory"></div>
             </div>
-            <div class="form-group"><label>Provider Profile</label><select id="briefing-provider-profile">${reportProfileOptions}</select></div>
+            <div class="form-group"><label for="briefing-provider-profile">Provider Profile</label><select id="briefing-provider-profile">${reportProfileOptions}</select></div>
             <div class="report-format-grid" aria-label="Briefing output formats">
               ${['markdown', 'html', 'docx', 'pdf'].map((format) => `<label class="report-format-option"><input type="checkbox" class="briefing-format" value="${format}" ${format === 'markdown' ? 'checked' : ''}> <span>${format.toUpperCase()}</span></label>`).join('')}
             </div>
@@ -12964,7 +13201,7 @@ function renderTerminalAccessState() {
       <div class="terminal-access-actions">
         <button type="button" onclick="navigate('monitoring')">Open Monitoring</button>
         <button type="button" onclick="navigate('devhub')">Open Code</button>
-        <button type="button" onclick="navigate('dashboard')">Dashboard</button>
+        <button type="button" onclick="navigate('dashboard')">Today</button>
       </div>
     </section>`;
 }
@@ -12985,7 +13222,7 @@ function renderTerminalFileTreeState(kind = 'loading') {
       body: 'Mount a repository or open Code to choose a workspace before using the terminal side pane for file handoff.',
       actions: `
         <button type="button" onclick="navigate('devhub')">Open Code</button>
-        <button type="button" onclick="navigate('dashboard')">Dashboard</button>`,
+        <button type="button" onclick="navigate('dashboard')">Today</button>`,
     },
     error: {
       tone: 'is-error',
@@ -13687,7 +13924,7 @@ async function renderEditor(el) {
         'Scanning files and folders for the selected repository.',
         true,
       )}</aside>
-      <main class="editor-main-panel">
+      <section class="editor-main-panel" aria-label="File editor">
         <div class="editor-surface">
           <div id="editor-container" class="editor-container">${renderEditorFileIdleState()}</div>
         </div>
@@ -13696,7 +13933,7 @@ async function renderEditor(el) {
           <span id="editor-path" class="editor-path"></span>
           <span id="editor-msg" class="editor-msg"></span>
         </div>
-      </main>
+      </section>
       <aside class="editor-git-panel" id="editor-git"></aside>
     </section>`;
 
@@ -15278,7 +15515,7 @@ async function renderSecurity(el) {
           <button class="btn btn-sm ${allowlist.enabled ? 'btn-danger' : 'btn-success'}" id="sec-allowlist-toggle">${allowlist.enabled ? 'Disable' : 'Enable'}</button>
         </div>
         <div class="form-group">
-          <label>Allowed IPs (one per line, supports CIDR notation like 192.168.1.0/24)</label>
+          <label for="sec-allowlist-ips">Allowed IPs (one per line, supports CIDR notation like 192.168.1.0/24)</label>
           <textarea id="sec-allowlist-ips" class="security-allowlist-input">${allowlist.ips.join('\n')}</textarea>
         </div>
         <div class="security-inline-actions">
@@ -16873,15 +17110,15 @@ async function renderSessions(el) {
 
     el.innerHTML = `
       <section class="sessions-command-center">
-        <div class="sessions-command-copy">
+        <div class="sessions-command-main">
           <span class="messages-kicker">Agent run history</span>
           <h2>Handoff cockpit</h2>
           <p>See what agents are doing, what needs you, and what can be reused across Copilot, Cowork, Code, and routines.</p>
         </div>
         <div class="sessions-command-stats">
-          <div class="session-stat"><span>Runs</span><strong>${sessions.length}</strong><small>${Object.keys(grouped).length} groups</small></div>
-          <button class="session-stat" onclick="navigate('approvals')"><span>Approvals</span><strong>${approvals.length}</strong><small>needs review</small></button>
-          <button class="session-stat" onclick="navigate('artifacts')"><span>Artifacts</span><strong>${artifactRuns.length}</strong><small>${fileRuns.length} file trails</small></button>
+          <div class="sessions-command-stat"><span>Runs</span><strong>${sessions.length}</strong><small>${Object.keys(grouped).length} groups</small></div>
+          <button type="button" class="sessions-command-stat" onclick="navigate('approvals')"><span>Approvals</span><strong>${approvals.length}</strong><small>needs review</small></button>
+          <button type="button" class="sessions-command-stat" onclick="navigate('artifacts')"><span>Artifacts</span><strong>${artifactRuns.length}</strong><small>${fileRuns.length} file trails</small></button>
         </div>
         <div class="sessions-command-actions">
           <button class="btn btn-sm btn-ghost" onclick="copySessionContinuityBrief()">Copy continuity brief</button>
@@ -16890,7 +17127,7 @@ async function renderSessions(el) {
       ${renderSessionContinuationGuide()}
       <div class="sessions-layout">
         <aside class="sessions-rail">
-          <input id="session-search" class="search-input" placeholder="Search runs..." oninput="filterSessions(window._sessionGroupFilter || 'all')">
+          <input id="session-search" class="search-input" aria-label="Search sessions" placeholder="Search runs..." oninput="filterSessions(window._sessionGroupFilter || 'all')">
           <div class="sessions-filter-card">
             <div class="card-title">Groups</div>
             ${Object.keys(grouped)
@@ -23816,6 +24053,15 @@ window.navigate = (page) => {
 };
 // Parse a #/chat or #/chat/<id> hash into { isChatRoute, threadId }.
 // Returns null when the hash is not a chat thread route.
+function safeDecodeHashComponent(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    if (error instanceof URIError) return null;
+    throw error;
+  }
+}
+
 function parseChatHash(hash) {
   if (!hash) return null;
   // Remove leading '#'
@@ -23825,7 +24071,8 @@ function parseChatHash(hash) {
     const encoded = raw.slice('/chat/'.length);
     // Only treat as a thread route when there is a non-empty id segment
     if (encoded) {
-      const decoded = decodeURIComponent(encoded);
+      const decoded = safeDecodeHashComponent(encoded);
+      if (decoded === null) return null;
       return {
         isChatRoute: true,
         threadId: decoded.startsWith('web:') ? decoded : 'web:' + decoded,
@@ -23841,10 +24088,12 @@ function parseProjectChatHash(hash) {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash;
   const parts = raw.split('/').filter(Boolean);
   if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'chat') {
-    const decodedThreadId = decodeURIComponent(parts[3]);
+    const decodedProjectId = safeDecodeHashComponent(parts[1]);
+    const decodedThreadId = safeDecodeHashComponent(parts[3]);
+    if (decodedProjectId === null || decodedThreadId === null) return null;
     return {
       isProjectChatRoute: true,
-      projectId: decodeURIComponent(parts[1]),
+      projectId: decodedProjectId,
       threadId: decodedThreadId.startsWith('web:')
         ? decodedThreadId
         : 'web:' + decodedThreadId,
@@ -23858,10 +24107,13 @@ function parseProjectFileHash(hash) {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash;
   const parts = raw.split('/').filter(Boolean);
   if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'files') {
+    const decodedProjectId = safeDecodeHashComponent(parts[1]);
+    const decodedFilePath = safeDecodeHashComponent(parts[3]);
+    if (decodedProjectId === null || decodedFilePath === null) return null;
     return {
       isProjectFileRoute: true,
-      projectId: decodeURIComponent(parts[1]),
-      filePath: decodeURIComponent(parts[3]),
+      projectId: decodedProjectId,
+      filePath: decodedFilePath,
     };
   }
   return null;
@@ -23963,10 +24215,8 @@ window.addEventListener('hashchange', () => {
         // Explicit deep link wins; showShell derives the mode from the page.
         showShell(hashPage);
       } else {
-        // No deep link: open the last-used mode's first page.
-        const mode = window.NanoModes.loadActiveMode(window.localStorage);
-        const landing = window.NanoModes.navPagesForMode(mode)[0] || 'chat';
-        navigate(landing);
+        // Empty and invalid startup routes recover to the stable Today surface.
+        navigate('dashboard');
       }
     }
   } else showLogin();

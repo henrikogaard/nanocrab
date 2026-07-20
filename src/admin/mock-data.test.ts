@@ -800,6 +800,54 @@ describe('mock admin data', () => {
     });
   });
 
+  it('serves production-shaped source collections in mock mode', async () => {
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/source-collections`);
+      const collections = (await response.json()) as Array<{
+        id: string;
+        reportJobId: string;
+        status: string;
+        items: Array<{
+          scope: string;
+          connectorId?: string;
+          status: string;
+          failureReason: string | null;
+        }>;
+        ledger: Array<{
+          connectorId?: string;
+          provenance: string[];
+        }>;
+      }>;
+
+      expect(response.status).toBe(200);
+      expect(Array.isArray(collections)).toBe(true);
+      expect(collections[0]).toMatchObject({
+        id: expect.any(String),
+        reportJobId: expect.any(String),
+        status: 'partial',
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            scope: 'connector',
+            connectorId: 'gmail',
+            status: 'completed',
+            failureReason: null,
+          }),
+          expect.objectContaining({
+            scope: 'file',
+            status: 'failed',
+            failureReason: expect.any(String),
+          }),
+        ]),
+        ledger: expect.arrayContaining([
+          expect.objectContaining({
+            connectorId: 'gmail',
+            provenance: expect.arrayContaining([expect.any(String)]),
+          }),
+        ]),
+      });
+    });
+  });
+
   it('serves assistant avatar gallery metadata in mock mode', async () => {
     await withServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/assistant-profile`);

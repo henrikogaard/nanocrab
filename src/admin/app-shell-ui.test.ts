@@ -56,10 +56,17 @@ function loadCommandPalette() {
     addEventListener: () => {},
     focus: () => {},
   };
+  const resultsMock = {
+    innerHTML: '',
+    querySelector: () => null,
+    addEventListener: () => {},
+  };
   const elMock = {
     id: '',
     className: '',
     setAttribute: () => {},
+    toggleAttribute: () => {},
+    classList: { add: () => {}, remove: () => {} },
     addEventListener: () => {},
     appendChild: (child: any) => child,
     innerHTML: '',
@@ -67,11 +74,7 @@ function loadCommandPalette() {
       sel === '.cp-input' || sel === '.cp-results'
         ? sel === '.cp-input'
           ? inputMock
-          : {
-              innerHTML: '',
-              querySelector: () => null,
-              addEventListener: () => {},
-            }
+          : resultsMock
         : null,
     querySelectorAll: () => [],
     closest: (_s: string) => null,
@@ -94,7 +97,10 @@ function loadCommandPalette() {
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(shellNavigationUiPath, 'utf8'), context);
   vm.runInContext(fs.readFileSync(commandPaletteUiPath, 'utf8'), context);
-  return context.window.NanoCommandPalette;
+  return {
+    palette: context.window.NanoCommandPalette,
+    results: resultsMock,
+  };
 }
 
 function loadSharedUi() {
@@ -270,7 +276,7 @@ describe('App shell accessibility UI', () => {
       '<a class="skip-link" href="#page-content">Skip to content</a>',
     );
     expect(source).toContain(
-      '<main class="main" id="main-content" tabindex="-1">',
+      '<main class="main focus-stack-canvas" id="main-content" tabindex="-1">',
     );
     expect(source).not.toContain('Mock dashboard mode: sample data only.');
     expect(source).toContain('window.NanoDataHealth.renderAlerts(alerts');
@@ -292,18 +298,84 @@ describe('App shell accessibility UI', () => {
     expect(source).not.toContain(
       '<div id="page-content" tabindex="-1"><div class="loading">Loading</div></div>',
     );
+    expect(source.match(/<main\b/g)).toHaveLength(1);
+    expect(source).not.toContain('<main class="editor-main-panel">');
+    expect(source).toContain('href="#/help"');
+    expect(source).toContain('<button type="button" onclick="logout()"');
+    expect(source).not.toContain('<a onclick="logout()"');
     expect(source).toContain('</main>');
   });
 
-  it('shows active focus guidance for Chat, Cowork, and Code modes', () => {
+  it('renders one semantic alert surface in the visible canvas, not Inspector', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const canvasStart = source.indexOf('<main class="main focus-stack-canvas"');
+    const canvas = source.slice(
+      canvasStart,
+      source.indexOf('</main>', canvasStart),
+    );
+    const inspectorStart = source.indexOf('<aside id="workspace-inspector"');
+    const inspector = source.slice(
+      inspectorStart,
+      source.indexOf('</aside>', inspectorStart),
+    );
+
+    expect(source.match(/id="alerts-bar"/g)).toHaveLength(1);
+    expect(canvas).toContain(
+      '<div id="alerts-bar" class="focus-stack-alerts" role="status" aria-live="polite" aria-atomic="true"></div>',
+    );
+    expect(inspector).not.toContain('id="alerts-bar"');
+    expect(source.match(/api\('\/system\/alerts'\)/g)).toHaveLength(1);
+    expect(source.match(/\bloadAlerts\(\);/g)).toHaveLength(1);
+  });
+
+  it('derives stable Focus Stack layers and cues from the resolved route', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
 
-    expect(appSource).toContain('id="more-drawer" aria-hidden="true" inert');
+    const showShellStart = appSource.indexOf('function showShell(page)');
+    const showShellEnd = appSource.indexOf(
+      'window.setMode = function (mode)',
+      showShellStart,
+    );
+    const showShellSource = appSource.slice(showShellStart, showShellEnd);
+
+    expect(showShellStart).toBeGreaterThanOrEqual(0);
+    expect(showShellSource).toContain(
+      'window.NanoWorkspaceShell.resolveRoute(',
+    );
+    expect(showShellSource).toContain(
+      'hasExplicitActiveMode ? activeMode : undefined',
+    );
+    expect(showShellSource).toContain(
+      'const displayedMode = routeContext.mode',
+    );
+    expect(showShellSource).toContain(
+      'data-workspace-mode="${esc(displayedMode)}"',
+    );
+    expect(showShellSource).toContain(
+      'data-workspace-section="${esc(routeContext.section)}"',
+    );
+    expect(showShellSource).toContain('class="focus-stack-rail"');
+    expect(showShellSource).toContain('class="sidebar focus-stack-context"');
+    expect(showShellSource).toContain('class="main focus-stack-canvas"');
+    expect(showShellSource).toContain(
+      '<aside id="workspace-inspector" class="focus-stack-inspector" inert aria-hidden="true">',
+    );
+    expect(showShellSource.match(/<main\b/g)).toHaveLength(1);
+    expect(showShellSource).toContain(
+      'const target = shellNavigationTarget(item.id, page)',
+    );
+    expect(showShellSource).toContain('href="${esc(target.href)}"');
+    expect(showShellSource).toContain(
+      'onclick="navigate(\'${item.id}\'); return false;"',
+    );
+    expect(appSource).toContain(
+      'id="more-drawer" role="dialog" aria-modal="true" aria-labelledby="more-drawer-title" aria-hidden="true" inert',
+    );
     expect(appSource).toContain("drawer.toggleAttribute('inert', !isOpen)");
     expect(appSource).toContain('title="${esc(cfg.guidance || \'\')}"');
     expect(appSource).toContain('function shellModeCue(mode)');
-    expect(appSource).toContain('const modeCue = shellModeCue(activeMode)');
+    expect(appSource).toContain('const modeCue = shellModeCue(displayedMode)');
     expect(appSource).toContain('class="mode-route-cue compact"');
     expect(appSource).toContain('Active focus route cue');
     expect(appSource).toContain('SIDEBAR_WIDTH_STORAGE_KEY');
@@ -313,6 +385,8 @@ describe('App shell accessibility UI', () => {
     expect(appSource).toContain('Plain chat');
     expect(appSource).toContain('Project work');
     expect(appSource).toContain('Code work');
+    expect(appSource).toContain('Today overview');
+    expect(appSource).toContain('Workspace administration');
     expect(appSource).toContain('Questions, drafting, and quick thinking.');
     expect(appSource).toContain('Files, artifacts, chats, and approved tools.');
     expect(appSource).toContain('Repos, issues, tests, PRs, and handoffs.');
@@ -322,11 +396,18 @@ describe('App shell accessibility UI', () => {
     expect(styleSource).toContain('.mode-route-cue p');
     expect(styleSource).toContain('--sidebar-width: 280px;');
     expect(styleSource).toContain('width: var(--sidebar-width);');
-    expect(styleSource).toContain('margin-left: var(--sidebar-width);');
-    expect(styleSource).toContain('.sidebar-resize-handle');
     expect(styleSource).toContain(
-      'grid-template-columns: repeat(3, minmax(0, 1fr));',
+      'grid-template-columns: 72px minmax(220px, var(--sidebar-width)) minmax(0, 1fr);',
     );
+    expect(styleSource).toContain(
+      'grid-template-columns: 72px minmax(220px, var(--sidebar-width)) minmax(0, 1fr) 320px;',
+    );
+    expect(styleSource).toContain('.sidebar-resize-handle');
+    expect(styleSource).toContain('.focus-stack-rail');
+    expect(styleSource).toContain('.focus-stack-context');
+    expect(styleSource).toContain('.focus-stack-context button.nav-link');
+    expect(styleSource).toContain('.focus-stack-canvas');
+    expect(styleSource).toContain('.focus-stack-inspector');
     expect(styleSource).toContain('.mode-tab span:not(.nav-icon)');
     expect(styleSource).toContain('.alert-compact');
   });
@@ -350,10 +431,248 @@ describe('App shell accessibility UI', () => {
     expect(modesSource).toContain("'devhub'");
     expect(modesSource).toContain("'autofix'");
     expect(modesSource).toContain("'copilot'");
-    expect(appSource).toContain('<span class="nav-label">More</span>');
+    expect(appSource).toContain('<span>More</span>');
     expect(appSource).not.toContain(
       '<span class="nav-label">Settings</span></a>',
     );
+  });
+
+  it('renders More once per shell surface as a functional non-persistent drawer action', () => {
+    const appSource = fs.readFileSync(appPath, 'utf8');
+    const railStart = appSource.indexOf('<nav class="focus-stack-rail"');
+    const railEnd = appSource.indexOf('</nav>', railStart);
+    const bottomTabsStart = appSource.indexOf('<div class="bottom-tabs">');
+    const bottomTabsEnd = appSource.indexOf('</nav>', bottomTabsStart);
+    const rail = appSource.slice(railStart, railEnd);
+    const bottomTabs = appSource.slice(bottomTabsStart, bottomTabsEnd);
+
+    expect(appSource).toContain('const primaryModeIds = NM2.primaryModeIds();');
+    expect(rail).toContain('${primaryModeIds.map((m) => {');
+    expect(rail).not.toContain('MODE_ORDER.map');
+    expect(rail.match(/<span>More<\/span>/g)).toHaveLength(1);
+    expect(rail.match(/onclick="toggleMoreDrawer\(this\)"/g)).toHaveLength(1);
+    expect(rail).toContain("displayedMode === 'more' ? ' active' : ''");
+    expect(bottomTabs).toContain('${primaryModeIds.map((m) => {');
+    expect(bottomTabs).not.toContain('MODE_ORDER.map');
+    expect(bottomTabs.match(/<span>More<\/span>/g)).toHaveLength(1);
+    expect(
+      bottomTabs.match(/onclick="toggleMoreDrawer\(this\)"/g),
+    ).toHaveLength(1);
+    expect(bottomTabs).toContain("displayedMode === 'more' ? ' active' : ''");
+
+    const specialActionIndex = appSource.indexOf("if (mode === 'more') {");
+    const validationIndex = appSource.indexOf(
+      'if (NM.primaryModeIds().indexOf(mode) === -1) return;',
+    );
+    expect(specialActionIndex).toBeGreaterThanOrEqual(0);
+    expect(specialActionIndex).toBeLessThan(validationIndex);
+    expect(appSource.slice(specialActionIndex, validationIndex)).toContain(
+      'window.toggleMoreDrawer();',
+    );
+    expect(appSource.slice(specialActionIndex, validationIndex)).not.toContain(
+      'saveActiveMode',
+    );
+  });
+
+  it('keeps Today out of persisted modes while selecting deep-linked route owners', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const showShellStart = source.indexOf('function showShell(page)');
+    const showShellEnd = source.indexOf(
+      'window.setMode = function (mode)',
+      showShellStart,
+    );
+    const shell = source.slice(showShellStart, showShellEnd);
+
+    expect(source).toContain('let hasExplicitActiveMode = false');
+    expect(shell).toContain('window.NanoWorkspaceShell.resolveRoute(');
+    expect(shell).toContain('hasExplicitActiveMode ? activeMode : undefined');
+    expect(shell).toContain(
+      "const primaryDisplayedMode = ['chat', 'cowork', 'code'].includes(",
+    );
+    expect(shell).toContain(
+      'NM.saveActiveMode(activeMode, window.localStorage)',
+    );
+    expect(shell).toContain('hasExplicitActiveMode = true');
+    expect(shell).toContain('routeContext.isToday');
+    expect(shell).toContain('onclick="navigate(\'dashboard\')"');
+    expect(shell).toContain('aria-label="Open Today"');
+    expect(shell).toContain(
+      'const navItems = NM2.navPagesForMode(displayedMode)',
+    );
+    expect(shell).toContain("displayedMode === m ? ' active' : ''");
+    expect(shell).not.toContain('shellModeCue(activeMode)');
+  });
+
+  it('applies Today current-page semantics and active styling to both responsive controls', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const style = fs.readFileSync(stylePath, 'utf8');
+
+    expect(source).toContain(
+      "class=\"mobile-brand${routeContext.isToday ? ' active' : ''}\"",
+    );
+    expect(source).toContain(
+      "aria-current=\"${routeContext.isToday ? 'page' : 'false'}\"",
+    );
+    expect(style).toContain('.mobile-brand.active');
+    expect(style).toContain('.mobile-brand.active .brand-mark');
+  });
+
+  it('keeps the inspector inert until opened and restores trigger focus on close', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+
+    expect(source).toContain('let workspaceInspectorTrigger = null');
+    expect(source).toContain('let moreDrawerTrigger = null');
+    expect(source).toContain(
+      'function setWorkspaceInspectorState(isOpen, trigger, options = {})',
+    );
+    expect(source).toContain(
+      'function setMoreDrawerState(isOpen, trigger, options = {})',
+    );
+    expect(source).toContain("inspector.toggleAttribute('inert', !isOpen)");
+    expect(source).toContain(
+      "inspector.setAttribute('aria-hidden', isOpen ? 'false' : 'true')",
+    );
+    expect(source).toContain(
+      "trigger.setAttribute('aria-expanded', String(isOpen))",
+    );
+    expect(source).toContain(
+      "inspector.querySelector('.focus-stack-inspector-close')?.focus()",
+    );
+    expect(source).toContain(
+      'if (options.restoreFocus !== false && returnTarget) returnTarget.focus()',
+    );
+    expect(source).toContain("if (event.key === 'Escape')");
+    expect(source).toContain(
+      'window.toggleWorkspaceInspector = function (trigger)',
+    );
+    expect(source).toContain('window.closeWorkspaceInspector = function ()');
+    expect(source).toContain('aria-controls="workspace-inspector"');
+    expect(source).toContain('aria-label="Show workspace details"');
+    expect(source).toContain('aria-label="Close workspace details"');
+  });
+
+  it('installs one document-level inspector Escape handler across shell rerenders', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const initStart = source.indexOf('function initWorkspaceInspector()');
+    const initEnd = source.indexOf('function initMoreDrawer()', initStart);
+    const initSource = source.slice(initStart, initEnd);
+
+    expect(initSource).toContain('workspaceInspectorEscapeReady');
+    expect(initSource).toContain("document.addEventListener('keydown'");
+    expect(initSource).toContain('event.defaultPrevented');
+    expect(initSource).toContain("event.key !== 'Escape'");
+    expect(initSource).toContain("classList.contains('is-open')");
+    expect(initSource).toContain('setWorkspaceInspectorState(false)');
+    expect(initSource).not.toContain("inspector.addEventListener('keydown'");
+  });
+
+  it('keeps keyboard focus inside the modal More drawer and supports Escape', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const initStart = source.indexOf('function initMoreDrawer()');
+    const initEnd = source.indexOf(
+      'window.toggleWorkspaceInspector',
+      initStart,
+    );
+    const initSource = source.slice(initStart, initEnd);
+
+    expect(initStart).toBeGreaterThanOrEqual(0);
+    expect(initSource).toContain("if (event.key === 'Escape')");
+    expect(initSource).toContain("if (event.key !== 'Tab') return;");
+    expect(initSource).toContain('drawer.querySelectorAll(');
+    expect(initSource).toContain('event.shiftKey');
+    expect(initSource).toContain('last.focus()');
+    expect(initSource).toContain('first.focus()');
+    expect(source).toContain('initMoreDrawer();');
+  });
+
+  it('renders four mobile actions and a fixed inspector across the full collapsed range', () => {
+    const appSource = fs.readFileSync(appPath, 'utf8');
+    const styleSource = fs.readFileSync(stylePath, 'utf8');
+    const bottomTabsStart = appSource.indexOf('<div class="bottom-tabs">');
+    const bottomTabsEnd = appSource.indexOf('</nav>', bottomTabsStart);
+    const bottomTabs = appSource.slice(bottomTabsStart, bottomTabsEnd);
+    const focusMobileStart = styleSource.lastIndexOf(
+      '@media (max-width: 768px)',
+    );
+    const focusMobileEnd = styleSource.indexOf(
+      '\n}\n\n@media',
+      focusMobileStart,
+    );
+    const focusMobile = styleSource.slice(
+      focusMobileStart,
+      focusMobileEnd === -1 ? undefined : focusMobileEnd + 2,
+    );
+
+    expect(bottomTabs).toContain('${primaryModeIds.map((m) => {');
+    expect(bottomTabs.match(/<button class="bottom-tab/g)).toHaveLength(2);
+    expect(bottomTabs).not.toContain('Today</span>');
+    expect(focusMobileStart).toBeGreaterThanOrEqual(0);
+    expect(focusMobile).toContain('.focus-stack-context');
+    expect(focusMobile).toContain('display: none !important;');
+    expect(focusMobile).toContain('.focus-stack-inspector');
+    expect(focusMobile).toContain('position: fixed;');
+    expect(focusMobile).toContain('max-width: 100%;');
+    expect(focusMobile).toContain('inset: auto 0 56px;');
+    expect(styleSource).not.toContain(
+      '@media (max-width: 720px) {\n  .focus-stack-shell',
+    );
+    expect(styleSource).toContain('overflow-x: clip;');
+  });
+
+  it('keeps the modal More header, focused close control, and final tools above mobile chrome', () => {
+    const appSource = fs.readFileSync(appPath, 'utf8');
+    const styleSource = fs.readFileSync(stylePath, 'utf8');
+    const focusMobileStart = styleSource.lastIndexOf(
+      '@media (max-width: 768px)',
+    );
+    const focusMobile = styleSource.slice(focusMobileStart);
+
+    expect(appSource).toContain(
+      'class="more-drawer" id="more-drawer" role="dialog" aria-modal="true" aria-labelledby="more-drawer-title" aria-hidden="true" inert',
+    );
+    expect(appSource).toContain(
+      '<span id="more-drawer-title">Workspace tools</span>',
+    );
+    expect(focusMobile).toContain('.more-overlay');
+    expect(focusMobile).toContain('z-index: 1190;');
+    expect(focusMobile).toContain('.more-drawer');
+    expect(focusMobile).toContain('inset: 0 auto 0 0;');
+    expect(focusMobile).toContain('z-index: 1200;');
+    expect(focusMobile).toContain('height: 100dvh;');
+    expect(focusMobile).toContain('.more-drawer-body');
+    expect(focusMobile).toContain('min-height: 0;');
+    expect(focusMobile).toContain('env(safe-area-inset-bottom, 0px)');
+    expect(styleSource).toContain('.more-close:focus-visible');
+    expect(styleSource).toContain('outline: 2px solid var(--accent);');
+    expect(styleSource).toContain('width: 36px;');
+    expect(styleSource).toContain('height: 36px;');
+    expect(focusMobile).toContain('.more-close');
+    expect(focusMobile).toContain('width: 44px;');
+    expect(focusMobile).toContain('height: 44px;');
+    expect(focusMobile).toContain('.more-drawer-header');
+    expect(focusMobile).toContain('min-height: 60px;');
+  });
+
+  it('keeps the optional inspector from collapsing the canvas at intermediate widths', () => {
+    const styleSource = fs.readFileSync(stylePath, 'utf8');
+    const mediumStart = styleSource.indexOf(
+      '@media (max-width: 1200px) and (min-width: 769px)',
+    );
+    const mediumEnd = styleSource.indexOf(
+      '@media (max-width: 768px)',
+      mediumStart,
+    );
+    const mediumSource = styleSource.slice(mediumStart, mediumEnd);
+
+    expect(mediumStart).toBeGreaterThanOrEqual(0);
+    expect(mediumSource).toContain('.focus-stack-shell.is-inspector-open');
+    expect(mediumSource).toContain(
+      'grid-template-columns: 72px minmax(220px, var(--sidebar-width)) minmax(0, 1fr);',
+    );
+    expect(mediumSource).toContain('.focus-stack-inspector.is-open');
+    expect(mediumSource).toContain('position: fixed;');
+    expect(mediumSource).toContain('right: 0;');
+    expect(mediumSource).toContain('width: 320px;');
   });
 
   it('restores chat thread deep links without double-prefixing legacy web ids', () => {
@@ -471,12 +790,21 @@ describe('App shell accessibility UI', () => {
     const navigation = loadShellNavigation();
 
     expect(navigation.metaLabel('projects')).toBe('Cowork Projects');
+    expect(navigation.metaLabel('dashboard')).toBe('Today');
     expect(navigation.metaIcon('projects')).toBe('agents');
+    expect(navigation.metaLabel('project-chat')).toBe('Project chat');
+    expect(navigation.metaIcon('project-chat')).toBe('chat');
     expect(navigation.metaLabel('unknown-route')).toBe('unknown-route');
     expect(navigation.metaIcon('unknown-route')).toBe('integrations');
+    expect(navigation.PAGE_META['project-chat']).toEqual({
+      label: 'Project chat',
+      icon: 'chat',
+      palette: false,
+    });
     expect(navigation.PAGE_META['session-detail']).toEqual({
       label: 'Session Detail',
       icon: 'sessions',
+      palette: false,
     });
     expect(
       navigation
@@ -587,7 +915,7 @@ describe('App shell accessibility UI', () => {
     }
     expect(shellNavigationSource).toContain('function moreDrawerSections(ids)');
     expect(appSource).toContain(
-      '<div class="more-drawer-header"><span>Workspace tools</span>',
+      '<div class="more-drawer-header"><span id="more-drawer-title">Workspace tools</span>',
     );
     expect(appSource).toContain('more-drawer-route-map');
     expect(appSource).toContain('Where to configure work');
@@ -621,9 +949,7 @@ describe('App shell accessibility UI', () => {
       'utf8',
     );
 
-    expect(shellNavigationSource).toContain(
-      "'session-detail': { label: 'Session Detail', icon: 'sessions' }",
-    );
+    expect(shellNavigationSource).toContain("'session-detail': {");
     expect(source).toContain("'session-detail': 'renderSessionDetail'");
     expect(source).toContain(
       "editor: { page: 'gitcode', container: 'gc-tabs', tab: 'editor' }",
@@ -802,9 +1128,30 @@ describe('App shell accessibility UI', () => {
   });
 
   it('registers NanoCommandPalette with open and close methods', () => {
-    const palette = loadCommandPalette();
+    const { palette } = loadCommandPalette();
     expect(palette).toBeDefined();
     expect(typeof palette.open).toBe('function');
     expect(typeof palette.close).toBe('function');
+  });
+
+  it('only renders palette-visible routes while keeping Today and normal pages', () => {
+    const { palette, results } = loadCommandPalette();
+
+    palette.open();
+
+    expect(results.innerHTML).toContain('data-page="dashboard"');
+    expect(results.innerHTML).toContain('data-page="chat"');
+    expect(results.innerHTML).toContain('data-page="projects"');
+    expect(results.innerHTML).toContain(
+      '<span class="cp-item-label">Today</span>',
+    );
+    expect(results.innerHTML).not.toContain('data-page="project-chat"');
+    expect(results.innerHTML).not.toContain('data-page="session-detail"');
+    expect(results.innerHTML).not.toContain(
+      '<span class="cp-item-label">Project chat</span>',
+    );
+    expect(results.innerHTML).not.toContain(
+      '<span class="cp-item-label">Dashboard</span>',
+    );
   });
 });

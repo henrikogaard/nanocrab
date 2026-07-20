@@ -1,5 +1,12 @@
 // NanoCrab Admin — Source Collections Page
 
+function normalizeSourceCollections(value) {
+  if (!Array.isArray(value)) {
+    throw new Error('Source collection response must be an array');
+  }
+  return value;
+}
+
 function sourceCollectionBadge(status) {
   if (status === 'completed') return 'badge-success';
   if (status === 'collecting' || status === 'pending') return 'badge-warning';
@@ -37,8 +44,9 @@ function sourceLedgerEntry(entry) {
 }
 
 function sourceCollectionRetryButton(collection) {
-  if (collection.status !== 'failed' && collection.status !== 'partial') return '';
-  return `<button class="source-collection-retry" data-id="${esc(collection.id)}">Retry failed sources</button>`;
+  if (collection.status !== 'failed' && collection.status !== 'partial')
+    return '';
+  return `<button type="button" class="btn btn-sm btn-ghost source-collection-retry" data-id="${esc(collection.id)}">Retry failed sources</button>`;
 }
 
 function sourceCollectionCard(collection) {
@@ -69,7 +77,9 @@ function sourceCollectionCard(collection) {
 }
 
 async function retrySourceCollection(id) {
-  const response = await api(`/source-collections/${id}/retry`, { method: 'POST' });
+  const response = await api(`/source-collections/${id}/retry`, {
+    method: 'POST',
+  });
   if (!response.ok) {
     throw new Error(response.error || 'Retry failed');
   }
@@ -79,10 +89,10 @@ async function retrySourceCollection(id) {
 async function renderSourceCollections(el) {
   el.innerHTML = `<div class="page-header"><h2>Source Collections</h2><span class="muted">Inspect source collection records and ledger entries</span></div><div class="source-collections-loading">Loading…</div>`;
   try {
-    const collections = await api('/source-collections');
-    const cards = (collections || [])
-      .map((c) => sourceCollectionCard(c))
-      .join('');
+    const collections = window.NanoSourceCollections.normalize(
+      await api('/source-collections'),
+    );
+    const cards = collections.map((c) => sourceCollectionCard(c)).join('');
     el.innerHTML = `
       <div class="page-header">
         <h2>Source Collections</h2>
@@ -119,4 +129,7 @@ async function renderSourceCollections(el) {
   }
 }
 
+window.NanoSourceCollections = {
+  normalize: normalizeSourceCollections,
+};
 window.renderSourceCollections = renderSourceCollections;

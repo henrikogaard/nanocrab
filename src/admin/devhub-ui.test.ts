@@ -144,11 +144,22 @@ describe('Developer Hub engineering cockpit UI', () => {
 
   it('styles Dev Hub cards and responsive layout', () => {
     const source = fs.readFileSync(stylePath, 'utf8');
+    const laneStyles = source.slice(
+      source.indexOf('.devhub-lane-card {'),
+      source.indexOf('.devhub-stat span {'),
+    );
+    const responsiveLaneStyles = source.slice(
+      source.indexOf('.devhub-lane-card {'),
+    );
 
     expect(source).toContain('.devhub-command-center');
     expect(source).toContain('.devhub-stats');
     expect(source).toContain('.devhub-lane-map');
     expect(source).toContain('.devhub-lane-card');
+    expect(laneStyles).toContain('color: var(--text);');
+    expect(laneStyles).toContain('font: inherit;');
+    expect(laneStyles).toContain('.devhub-lane-card strong');
+    expect(laneStyles).toContain('.devhub-lane-card:focus-visible');
     expect(source).toContain('.devhub-workbench');
     expect(source).toContain('.devhub-repo-card.clean');
     expect(source).toContain('.devhub-repo-card.dirty');
@@ -163,5 +174,8 @@ describe('Developer Hub engineering cockpit UI', () => {
     expect(source).toContain('.devhub-stats,');
     expect(source).toContain('.devhub-lane-map,');
     expect(source).toContain('.devhub-workbench,');
+    expect(responsiveLaneStyles).toMatch(
+      /@media \(max-width: 768px\)[\s\S]*?\.devhub-lane-map\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/,
+    );
   });
 });
