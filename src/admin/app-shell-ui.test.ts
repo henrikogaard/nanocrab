@@ -356,6 +356,50 @@ describe('App shell accessibility UI', () => {
     );
   });
 
+  it('renders More once per shell surface as a functional non-persistent drawer action', () => {
+    const appSource = fs.readFileSync(appPath, 'utf8');
+    const modeSwitcherStart = appSource.indexOf('<div class="mode-switcher">');
+    const modeSwitcherEnd = appSource.indexOf(
+      '<div class="mode-route-cue',
+      modeSwitcherStart,
+    );
+    const desktopMoreStart = appSource.indexOf('<div class="sidebar-pinned">');
+    const desktopMoreEnd = appSource.indexOf(
+      '<div class="sidebar-footer">',
+      desktopMoreStart,
+    );
+    const bottomTabsStart = appSource.indexOf('<div class="bottom-tabs">');
+    const bottomTabsEnd = appSource.indexOf('</nav>', bottomTabsStart);
+    const modeSwitcher = appSource.slice(modeSwitcherStart, modeSwitcherEnd);
+    const desktopMore = appSource.slice(desktopMoreStart, desktopMoreEnd);
+    const bottomTabs = appSource.slice(bottomTabsStart, bottomTabsEnd);
+
+    expect(appSource).toContain('const primaryModeIds = NM2.primaryModeIds();');
+    expect(modeSwitcher).toContain('${primaryModeIds.map((m) => {');
+    expect(modeSwitcher).not.toContain('MODE_ORDER.map');
+    expect(
+      desktopMore.match(/<span class="nav-label">More<\/span>/g),
+    ).toHaveLength(1);
+    expect(desktopMore).toContain('onclick="toggleMoreDrawer()"');
+    expect(bottomTabs).toContain('${primaryModeIds.map((m) => {');
+    expect(bottomTabs).not.toContain('MODE_ORDER.map');
+    expect(bottomTabs.match(/<span>More<\/span>/g)).toHaveLength(1);
+    expect(bottomTabs.match(/onclick="toggleMoreDrawer\(\)"/g)).toHaveLength(1);
+
+    const specialActionIndex = appSource.indexOf("if (mode === 'more') {");
+    const validationIndex = appSource.indexOf(
+      'if (NM.primaryModeIds().indexOf(mode) === -1) return;',
+    );
+    expect(specialActionIndex).toBeGreaterThanOrEqual(0);
+    expect(specialActionIndex).toBeLessThan(validationIndex);
+    expect(appSource.slice(specialActionIndex, validationIndex)).toContain(
+      'window.toggleMoreDrawer();',
+    );
+    expect(appSource.slice(specialActionIndex, validationIndex)).not.toContain(
+      'saveActiveMode',
+    );
+  });
+
   it('restores chat thread deep links without double-prefixing legacy web ids', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const shellNavigationSource = fs.readFileSync(

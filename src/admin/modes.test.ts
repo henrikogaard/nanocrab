@@ -38,6 +38,11 @@ describe('MODES config', () => {
     const all = M().MODE_ORDER.flatMap((m: string) => M().MODES[m].pages);
     expect(new Set(all).size).toBe(all.length);
   });
+
+  it('keeps More stable while exposing only navigable primary modes', () => {
+    expect(M().MODE_ORDER).toContain('more');
+    expect(M().primaryModeIds()).toEqual(['chat', 'cowork', 'code']);
+  });
 });
 
 describe('resolveMode', () => {
@@ -127,6 +132,11 @@ describe('loadActiveMode', () => {
     s.setItem('active_mode', 'garbage');
     expect(M().loadActiveMode(s)).toBe('chat');
   });
+  it('recovers from a previously persisted More drawer action', () => {
+    const s = mkStore();
+    s.setItem('active_mode', 'more');
+    expect(M().loadActiveMode(s)).toBe('chat');
+  });
 });
 
 describe('saveActiveMode', () => {
@@ -138,6 +148,11 @@ describe('saveActiveMode', () => {
   it('rejects an invalid mode without writing', () => {
     const s = mkStore();
     expect(M().saveActiveMode('garbage', s)).toBe(false);
+    expect(s.getItem('active_mode')).toBeNull();
+  });
+  it('does not persist More as an unusable primary active mode', () => {
+    const s = mkStore();
+    expect(M().saveActiveMode('more', s)).toBe(false);
     expect(s.getItem('active_mode')).toBeNull();
   });
 });

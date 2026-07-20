@@ -725,6 +725,7 @@ function showShell(page) {
   }
   // Mode-scoped nav: only the pages for the active mode (in config order).
   const NM2 = window.NanoModes;
+  const primaryModeIds = NM2.primaryModeIds();
   const navItems = NM2.navPagesForMode(activeMode).map((id) => ({
     id,
     icon: metaIcon(id),
@@ -830,7 +831,7 @@ function showShell(page) {
       <nav class="sidebar">
         <div class="sidebar-header"><span class="brand-mark">${brandLogo()}</span><div><h1>${esc(botName)}</h1><span>${window._editionShort || 'NanoCrab'}</span></div></div>
         <div class="mode-switcher">
-          ${window.NanoModes.MODE_ORDER.map((m) => {
+          ${primaryModeIds.map((m) => {
             const cfg = window.NanoModes.MODES[m];
             return `<button class="mode-tab ${activeMode === m ? 'active' : ''}" onclick="setMode('${m}')" type="button" title="${esc(cfg.guidance || '')}">${navIcon(cfg.icon)}<span>${cfg.label}</span></button>`;
           }).join('')}
@@ -860,7 +861,7 @@ function showShell(page) {
       </main>
       <div class="bottom-tabs">
         <nav>
-          ${window.NanoModes.MODE_ORDER.map((m) => {
+          ${primaryModeIds.map((m) => {
             const cfg = window.NanoModes.MODES[m];
             return `<button class="bottom-tab ${activeMode === m ? 'active' : ''}" onclick="setMode('${m}')">${navIcon(cfg.icon, 'tab-icon')}<span>${cfg.label}</span></button>`;
           }).join('')}
@@ -911,7 +912,11 @@ function showShell(page) {
 
 window.setMode = function (mode) {
   const NM = window.NanoModes;
-  if (NM.MODE_ORDER.indexOf(mode) === -1) return;
+  if (mode === 'more') {
+    window.toggleMoreDrawer();
+    return;
+  }
+  if (NM.primaryModeIds().indexOf(mode) === -1) return;
   activeMode = mode;
   NM.saveActiveMode(mode, window.localStorage);
   // Open the first page of the chosen mode that this role can see.

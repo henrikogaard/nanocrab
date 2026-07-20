@@ -87,6 +87,12 @@
     return MODES[modeId] ? MODES[modeId].pages.slice() : [];
   }
 
+  function primaryModeIds() {
+    return MODE_ORDER.filter(
+      (modeId) => MODES[modeId] && MODES[modeId].pages.length > 0,
+    );
+  }
+
   function modeGuidance(modeId) {
     return MODES[modeId] ? MODES[modeId].guidance || '' : '';
   }
@@ -99,11 +105,12 @@
       saved = null;
     }
     if (saved === 'work') return 'cowork';
-    return MODE_ORDER.indexOf(saved) !== -1 ? saved : MODE_ORDER[0];
+    const primaryModes = primaryModeIds();
+    return primaryModes.indexOf(saved) !== -1 ? saved : primaryModes[0];
   }
 
   function saveActiveMode(modeId, storage) {
-    if (MODE_ORDER.indexOf(modeId) === -1) return false;
+    if (primaryModeIds().indexOf(modeId) === -1) return false;
     try {
       if (storage) storage.setItem('active_mode', modeId);
       return true;
@@ -118,6 +125,7 @@
     MORE_IDS,
     resolveMode,
     navPagesForMode,
+    primaryModeIds,
     modeGuidance,
     loadActiveMode,
     saveActiveMode,
