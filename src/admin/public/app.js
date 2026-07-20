@@ -17085,10 +17085,35 @@ function renderSessionLoadingState(kind = 'cockpit') {
     </section>`;
 }
 
+function createSessionRenderGuard(
+  getCurrentElement = () => document.getElementById('page-content'),
+  getCurrentPage = () => currentPage,
+) {
+  let generation = 0;
+  return {
+    begin() {
+      generation += 1;
+      return generation;
+    },
+    isCurrent(token, element, expectedPage) {
+      return (
+        token === generation &&
+        element?.isConnected !== false &&
+        getCurrentElement() === element &&
+        getCurrentPage() === expectedPage
+      );
+    },
+  };
+}
+
+const sessionRenderGuard = createSessionRenderGuard();
+
 async function renderSessions(el) {
+  const renderToken = sessionRenderGuard.begin();
   el.innerHTML = renderSessionLoadingState('cockpit');
   try {
     const sessions = await api('/sessions/cockpit');
+    if (!sessionRenderGuard.isCurrent(renderToken, el, 'sessions')) return;
     if (sessions.length === 0) {
       el.innerHTML = renderSessionsEmptyState();
       return;
@@ -17100,7 +17125,9 @@ async function renderSessions(el) {
       if (!grouped[s.group]) grouped[s.group] = [];
       grouped[s.group].push(s);
     }
-    const approvals = sessions.filter((session) => (session.approvals || 0) > 0);
+    const approvals = sessions.filter(
+      (session) => (session.approvals || 0) > 0,
+    );
     const artifactRuns = sessions.filter(
       (session) => (session.artifacts || []).length,
     );
@@ -17129,19 +17156,19 @@ async function renderSessions(el) {
       <div class="sessions-layout">
         <aside class="sessions-rail">
           <div class="sessions-contextual-column">
-          <input id="session-search" class="search-input" aria-label="Search sessions" placeholder="Search runs..." oninput="filterSessions(window._sessionGroupFilter || 'all')">
+          <input id="session-search" class="search-input" data-session-search aria-label="Search sessions" placeholder="Search runs...">
           <div class="sessions-filter-card">
             <div class="card-title">Groups</div>
             ${Object.keys(grouped)
               .map(
                 (g) => `
-              <button class="sessions-handoff-item session-group-link" data-group="${esc(g)}" onclick="filterSessions('${esc(g)}')">
+              <button type="button" class="sessions-handoff-item session-group-link" data-session-group="${esc(g)}">
                 <span>${esc(g)}</span>
                 <span class="badge badge-muted">${grouped[g].length}</span>
               </button>`,
               )
               .join('')}
-            <button class="sessions-handoff-item session-group-link active" data-group="all" onclick="filterSessions('all')">
+            <button type="button" class="sessions-handoff-item session-group-link active" data-session-group="all">
               <span>All</span>
               <span class="badge badge-muted">${sessions.length}</span>
             </button>
@@ -17167,12 +17194,15 @@ async function renderSessions(el) {
       model: null,
       selectedId: preferred.id,
       summaries: sessions,
+      renderPage: 'sessions',
+      renderToken,
     };
     window._unifiedSessionsState = state;
     renderSessionList(sessions);
     bindUnifiedSessionActions(el, state);
     await refreshUnifiedSessionDetail(state);
   } catch (err) {
+    if (!sessionRenderGuard.isCurrent(renderToken, el, 'sessions')) return;
     el.innerHTML = renderSessionRecoveryState('loadError');
   }
 }
@@ -17186,61 +17216,43 @@ function renderSessionList(sessions) {
       ? renderSessionListEmptyState()
       : sessions
           .map((s) => {
-            const changedFiles = sessionChangedFiles(s);
-            const currentStep = sessionCurrentStep(s);
-            const target = sessionWorkspaceTarget(s);
             if (s.sessionId) window._sessionById[s.sessionId] = s;
-            return `
-        <article class="session-run-card">
-          <button type="button" class="session-run-select" data-session-select="${esc(s.id || s.sessionId)}" aria-pressed="${window._unifiedSessionsState?.selectedId === (s.id || s.sessionId) ? 'true' : 'false'}">
-          <div class="session-run-head">
-            <div>
-              <span class="messages-kicker">${esc(sessionPriorityLabel(s))}</span>
-              <h3>${esc((s.title || s.sessionId || '').slice(0, 48))}${s.title ? '' : '...'}</h3>
-            </div>
-            ${sessionStatusBadge(s)}
-          </div>
-          <div class="session-run-facts">
-            <div><span>Group</span><strong>${esc(s.group)}</strong></div>
-            <div><span>Current step</span><strong>${esc(currentStep)}</strong></div>
-            <div><span>Messages</span><strong>${esc(String(s.messageCount || 0))}</strong></div>
-            <div><span>Handoff</span><strong>${sessionHandoffScore(s)}%</strong></div>
-          </div>
-          </button>
-          <div class="session-file-strip">
-            ${
-              changedFiles.length
-                ? changedFiles
-                    .slice(0, 5)
-                    .map((file) => `<code>${esc(file)}</code>`)
-                    .join('')
-                : '<span>No changed files recorded</span>'
-            }
-          </div>
-          <div class="session-reuse-strip">
-            <div>
-              <span>Reuse path</span>
-              <strong>${esc(target.label)}</strong>
-              <small>Copy a handoff prompt or reopen the workspace that fits this run.</small>
-            </div>
-            <div class="session-reuse-actions">
-              <button class="btn btn-sm btn-ghost" onclick="copySessionHandoff('${esc(s.sessionId)}')">Copy handoff</button>
-              <button class="btn btn-sm btn-ghost" onclick="copySessionReviewPrompt('${esc(s.sessionId)}')">Review prompt</button>
-              <button class="btn btn-sm btn-ghost" onclick="resumeSessionWorkspace('${esc(s.sessionId)}')">Resume in ${esc(target.label)}</button>
-            </div>
-          </div>
-          <div class="session-run-actions">
-            <span>${s.startedAt ? formatTime(s.startedAt) : '-'} / ${s.lastActivity ? timeAgo(s.lastActivity) : '-'}</span>
-            <button type="button" class="btn btn-sm btn-primary" data-session-select="${esc(s.id || s.sessionId)}">View run</button>
-          </div>
-        </article>`;
+            return renderSessionRow(
+              s,
+              window._unifiedSessionsState?.selectedId ===
+                (s.id || s.sessionId),
+            );
           })
           .join('');
 }
 
-function unifiedSessionWarning(failures, partialData) {
+function renderSessionRow(
+  session,
+  selected,
+  dependencies = { esc, formatTime, sessionStatusBadge, timeAgo },
+) {
+  const id = session.id || session.sessionId;
+  const title = session.title || session.sessionId || 'Untitled run';
+  const activity = session.lastActivity
+    ? dependencies.timeAgo(session.lastActivity)
+    : session.startedAt
+      ? dependencies.formatTime(session.startedAt)
+      : 'Time unavailable';
+  return `
+        <button type="button" class="sessions-handoff-item session-run-row" data-session-select="${dependencies.esc(id)}" aria-current="${selected ? 'true' : 'false'}" aria-pressed="${selected ? 'true' : 'false'}">
+          <span class="session-run-row-main">
+            <strong>${dependencies.esc(title.slice(0, 52))}</strong>
+            <small>${dependencies.esc(session.group || 'Unknown group')}</small>
+          </span>
+          <span class="session-run-row-state">
+            ${dependencies.sessionStatusBadge(session)}
+            <small>${dependencies.esc(activity)}</small>
+          </span>
+        </button>`;
+}
+
+function unifiedSessionWarning(failures) {
   const labels = failures.map((failure) => failure.label);
-  if (partialData) labels.push('recorded data');
   const unique = [...new Set(labels)];
   if (!unique.length) return '';
   return `<div class="work-session-partial-warning" role="status"><strong>Partial session data</strong><p>${esc(unique.join(', '))} ${unique.length === 1 ? 'is' : 'are'} unavailable. Available run evidence remains visible.</p></div>`;
@@ -17249,7 +17261,7 @@ function unifiedSessionWarning(failures, partialData) {
 function renderUnifiedSessionCanvas(state) {
   const viewer = state.el.querySelector('#session-viewer');
   if (!viewer || !state.model) return;
-  const warning = unifiedSessionWarning(state.failures || [], state.partialData);
+  const warning = unifiedSessionWarning(state.failures || []);
   let inspector = NanoWorkSession.renderInspector(state.model, state.activeTab);
   if (warning) {
     inspector = inspector.replace(
@@ -17282,7 +17294,10 @@ async function loadUnifiedSessionDetail(state, params) {
       session.id === state.selectedId || session.sessionId === state.selectedId,
   );
   const cockpitId =
-    params.cockpitId || selectedSummary?.id || params.sessionId || state.selectedId;
+    params.cockpitId ||
+    selectedSummary?.id ||
+    params.sessionId ||
+    state.selectedId;
   const requests = await Promise.all([
     captureSessionSurface('summary', api('/sessions/cockpit')),
     captureSessionSurface(
@@ -17322,13 +17337,16 @@ async function loadUnifiedSessionDetail(state, params) {
     cockpit,
     failures: requests.filter((result) => result.error),
     model,
-    partialData: cockpit?.partialData === true,
     structured,
     summary,
   };
 }
 
 async function refreshUnifiedSessionDetail(state) {
+  if (
+    !sessionRenderGuard.isCurrent(state.renderToken, state.el, state.renderPage)
+  )
+    return;
   const summary = state.summaries.find(
     (session) =>
       session.id === state.selectedId || session.sessionId === state.selectedId,
@@ -17344,7 +17362,12 @@ async function refreshUnifiedSessionDetail(state) {
   const viewer = state.el.querySelector('#session-viewer');
   if (viewer) viewer.innerHTML = renderSessionLoadingState('viewer');
   const result = await loadUnifiedSessionDetail(state, params);
-  if (state.loadToken !== loadToken || window._unifiedSessionsState !== state) return;
+  if (
+    state.loadToken !== loadToken ||
+    window._unifiedSessionsState !== state ||
+    !sessionRenderGuard.isCurrent(state.renderToken, state.el, state.renderPage)
+  )
+    return;
   state.model = result.model;
   state.summary = result.summary || summary;
   if (result.summary) {
@@ -17360,7 +17383,6 @@ async function refreshUnifiedSessionDetail(state) {
     renderSessionList(visibleSummaries);
   }
   state.failures = result.failures;
-  state.partialData = result.partialData;
   state.structured = result.structured;
   window._sessionDetailParams = params;
   window._sessionDetailContinuationState = {
@@ -17371,8 +17393,47 @@ async function refreshUnifiedSessionDetail(state) {
   renderUnifiedSessionCanvas(state);
 }
 
+async function performUnifiedSessionMutation(state, action, dependencies) {
+  const session = state.summary;
+  const allowed =
+    session?.source === 'coding-job' &&
+    ((action === 'cancel' && state.model.canCancel) ||
+      (action === 'retry' && state.model.canRetry));
+  if (!allowed) {
+    dependencies.toast('This run cannot be changed from Sessions', 'warning');
+    return false;
+  }
+  try {
+    await dependencies.api(
+      `/agents/coding/jobs/${encodeURIComponent(session.id)}/${action}`,
+      { method: 'POST' },
+    );
+    await dependencies.refresh(state);
+    dependencies.toast(`Session ${action} request accepted`, 'success');
+    return true;
+  } catch (error) {
+    dependencies.toast(
+      error?.message || `Could not ${action} session`,
+      'error',
+    );
+    return false;
+  }
+}
+
 function bindUnifiedSessionActions(root, state) {
-  root.onclick = async function (event) {
+  const delegatedHandler = async function (event) {
+    if (
+      event.type === 'input' &&
+      event.target.matches('[data-session-search]')
+    ) {
+      filterSessions(window._sessionGroupFilter || 'all');
+      return;
+    }
+    const groupButton = event.target.closest('[data-session-group]');
+    if (groupButton && root.contains(groupButton)) {
+      filterSessions(groupButton.dataset.sessionGroup);
+      return;
+    }
     const selection = event.target.closest('[data-session-select]');
     if (selection && root.contains(selection)) {
       state.selectedId = selection.dataset.sessionSelect;
@@ -17420,27 +17481,16 @@ function bindUnifiedSessionActions(root, state) {
       return;
     }
     if (!['cancel', 'retry'].includes(action)) return;
-    const allowed =
-      session?.source === 'coding-job' &&
-      ((action === 'cancel' && state.model.canCancel) ||
-        (action === 'retry' && state.model.canRetry));
-    if (!allowed) {
-      toast('This run cannot be changed from Sessions', 'warning');
-      return;
-    }
     actionButton.disabled = true;
-    try {
-      await api(
-        `/agents/coding/jobs/${encodeURIComponent(session.id)}/${action}`,
-        { method: 'POST' },
-      );
-      await refreshUnifiedSessionDetail(state);
-      toast(`Session ${action} request accepted`, 'success');
-    } catch (error) {
-      toast(error?.message || `Could not ${action} session`, 'error');
-      actionButton.disabled = false;
-    }
+    const succeeded = await performUnifiedSessionMutation(state, action, {
+      api,
+      refresh: refreshUnifiedSessionDetail,
+      toast,
+    });
+    if (!succeeded) actionButton.disabled = false;
   };
+  root.onclick = delegatedHandler;
+  root.oninput = delegatedHandler;
 }
 
 window.copySessionHandoff = async function (sessionId) {
@@ -17450,7 +17500,11 @@ window.copySessionHandoff = async function (sessionId) {
     return;
   }
   const prompt = sessionHandoffPrompt(session);
-  await copyTextWithFallback(prompt, 'Session handoff copied', 'Copy session handoff');
+  await copyTextWithFallback(
+    prompt,
+    'Session handoff copied',
+    'Copy session handoff',
+  );
 };
 
 window.copySessionReviewPrompt = async function (sessionId) {
@@ -17492,19 +17546,24 @@ window.filterSessions = function (group) {
   window._sessionGroupFilter = group;
   document
     .querySelectorAll('.session-group-link')
-    .forEach((el) => el.classList.remove('active'));
-  const active = document.querySelector(
-    `.session-group-link[data-group="${group}"]`,
-  );
-  if (active) active.classList.add('active');
+    .forEach((el) =>
+      el.classList.toggle('active', el.dataset.sessionGroup === group),
+    );
   const filtered =
     group === 'all'
       ? window._allSessions
       : window._allSessions.filter((s) => s.group === group);
-  const query = document.getElementById('session-search')?.value?.toLowerCase() || '';
+  const query =
+    document.getElementById('session-search')?.value?.toLowerCase() || '';
   renderSessionList(
     filtered.filter((s) =>
-      [s.sessionId, s.group, s.title, sessionCurrentStep(s), sessionPriorityLabel(s)]
+      [
+        s.sessionId,
+        s.group,
+        s.title,
+        sessionCurrentStep(s),
+        sessionPriorityLabel(s),
+      ]
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
@@ -17559,7 +17618,9 @@ function sessionDetailContinuationBriefText(state = {}) {
   const stats = state.stats || {};
   const messages = Array.isArray(state.messages) ? state.messages : [];
   const userMessages = messages.filter((message) => message.role === 'user');
-  const assistantMessages = messages.filter((message) => message.role === 'assistant');
+  const assistantMessages = messages.filter(
+    (message) => message.role === 'assistant',
+  );
   const toolMessages = messages.filter(
     (message) =>
       message.toolUse ||
@@ -17580,10 +17641,14 @@ function sessionDetailContinuationBriefText(state = {}) {
     stats.duration ? `Duration: ${formatDuration(stats.duration)}` : null,
     '',
     'Latest user request',
-    lastUser?.content ? truncate(lastUser.content, 1200) : 'No user message found in this transcript.',
+    lastUser?.content
+      ? truncate(lastUser.content, 1200)
+      : 'No user message found in this transcript.',
     '',
     'Latest assistant result',
-    lastAssistant?.content ? truncate(lastAssistant.content, 1600) : 'No assistant result found in this transcript.',
+    lastAssistant?.content
+      ? truncate(lastAssistant.content, 1600)
+      : 'No assistant result found in this transcript.',
     '',
     'Continue in the right workspace',
     '- Copilot: use when this only needs a quick explanation, rewrite, or plain chat follow-up.',
@@ -17602,6 +17667,7 @@ function sessionDetailContinuationBriefText(state = {}) {
 
 /* Session detail page */
 window.renderSessionDetail = async function (el) {
+  const renderToken = sessionRenderGuard.begin();
   const params = window._sessionDetailParams;
   if (!params || !params.group || !params.sessionId) {
     el.innerHTML = renderSessionRecoveryState('missing');
@@ -17635,6 +17701,8 @@ window.renderSessionDetail = async function (el) {
     model: null,
     selectedId: summary.id,
     summaries: [summary],
+    renderPage: 'session-detail',
+    renderToken,
   };
   window._unifiedSessionsState = state;
   bindUnifiedSessionActions(el, state);

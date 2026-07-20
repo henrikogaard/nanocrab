@@ -468,10 +468,10 @@ const containers = [
 
 const cockpitSessions = [
   {
-    id: 'cockpit-running-001',
-    sessionId: 'cockpit-running-001',
+    id: 'code-mock-1',
+    sessionId: 'code-mock-1',
     source: 'coding-job',
-    group: 'main',
+    group: 'henrikogaard/nanocrab',
     provider: 'codex',
     model: 'gpt-5.4',
     status: 'running',
@@ -488,12 +488,12 @@ const cockpitSessions = [
     ],
     currentStep:
       'Parsing transcript metadata and building cockpit session summaries.',
-    filePath: 'cockpit-running-001.jsonl',
+    filePath: '',
   },
   {
-    id: 'cockpit-approval-002',
-    sessionId: 'cockpit-approval-002',
-    source: 'active-container',
+    id: 'transcript:operations:mock-coding-job',
+    sessionId: 'mock-coding-job',
+    source: 'transcript',
     group: 'operations',
     provider: 'claude',
     model: 'claude-sonnet-4-6',
@@ -510,9 +510,9 @@ const cockpitSessions = [
     filePath: 'cockpit-approval-002.jsonl',
   },
   {
-    id: 'cockpit-failed-003',
+    id: 'transcript:scouts:cockpit-failed-003',
     sessionId: 'cockpit-failed-003',
-    source: 'coding-job',
+    source: 'transcript',
     group: 'scouts',
     provider: 'openrouter',
     model: 'openrouter/auto',
@@ -530,9 +530,9 @@ const cockpitSessions = [
     filePath: 'cockpit-failed-003.jsonl',
   },
   {
-    id: 'cockpit-complete-004',
+    id: 'transcript:HenrikOrg%2Fnanocrab:cockpit-complete-004',
     sessionId: 'cockpit-complete-004',
-    source: 'coding-job',
+    source: 'transcript',
     group: 'HenrikOrg/nanocrab',
     provider: 'codex',
     model: 'gpt-5.4',
@@ -549,7 +549,7 @@ const cockpitSessions = [
     filePath: '',
   },
   {
-    id: 'cockpit-interrupted-005',
+    id: 'transcript:main:cockpit-interrupted-005',
     sessionId: 'cockpit-interrupted-005',
     source: 'transcript',
     group: 'main',
@@ -566,7 +566,6 @@ const cockpitSessions = [
     changedFiles: [],
     currentStep: 'Session stopped before a final result was recorded.',
     filePath: 'cockpit-interrupted-005.jsonl',
-    partialData: true,
   },
 ];
 
@@ -2151,7 +2150,7 @@ function cockpitArtifacts(
   }));
 
   const generatedArtifacts: Record<string, JsonValue[]> = {
-    'cockpit-running-001': [
+    'code-mock-1': [
       {
         id: 'cockpit-running-001-summary',
         name: 'cockpit-summary.md',
@@ -2162,7 +2161,7 @@ function cockpitArtifacts(
         summary: 'Live run summary with provider, model, and latest step.',
       },
     ],
-    'cockpit-approval-002': [
+    'mock-coding-job': [
       {
         id: 'cockpit-approval-002-preview',
         name: 'nightfall-orders.preview.md',
@@ -2206,7 +2205,10 @@ function cockpitArtifacts(
     ],
   };
 
-  return [...changedFileArtifacts, ...(generatedArtifacts[id] || [])];
+  return [
+    ...changedFileArtifacts,
+    ...(generatedArtifacts[session.sessionId] || []),
+  ];
 }
 
 function cockpitTimeline(
@@ -2232,7 +2234,7 @@ function cockpitTimeline(
   ];
 
   const specific: Record<string, JsonValue[]> = {
-    'cockpit-running-001': [
+    'code-mock-1': [
       {
         id: 'cockpit-running-001-tool',
         timestamp: iso(10),
@@ -2250,7 +2252,7 @@ function cockpitTimeline(
           'Wrote a live cockpit summary artifact with current run metrics.',
       },
     ],
-    'cockpit-approval-002': [
+    'mock-coding-job': [
       {
         id: 'cockpit-approval-002-diff',
         timestamp: iso(22),
@@ -2308,7 +2310,7 @@ function cockpitTimeline(
 
   return [
     ...common,
-    ...(specific[id] || []),
+    ...(specific[session.sessionId] || []),
     {
       id: `${id}-step`,
       timestamp: session.lastEventAt,
@@ -2320,14 +2322,14 @@ function cockpitTimeline(
 }
 
 function cockpitApprovals(
-  id: string,
+  _id: string,
   session: (typeof cockpitSessions)[number],
 ): JsonValue[] {
   if (session.approvalCount === 0) return [];
 
   const status = session.status === 'waiting_approval' ? 'pending' : 'approved';
   const fixtures: Record<string, JsonValue[]> = {
-    'cockpit-approval-002': [
+    'mock-coding-job': [
       {
         id: 'cockpit-approval-002-file-approval',
         title: 'Approve operation orders diff',
@@ -2370,7 +2372,7 @@ function cockpitApprovals(
     ],
   };
 
-  return fixtures[id] || [];
+  return fixtures[session.sessionId] || [];
 }
 
 function cockpitDeliverables(
@@ -2378,13 +2380,13 @@ function cockpitDeliverables(
   _session: (typeof cockpitSessions)[number],
 ): JsonValue[] {
   const fixtures: Record<string, JsonValue[]> = {
-    'cockpit-running-001': [
+    'code-mock-1': [
       {
         id: 'cockpit-running-001-deliverable-summary',
         title: 'Live cockpit summary',
         format: 'markdown',
         path: 'data/runtime/cockpit/cockpit-running-001/summary.md',
-        sourceType: 'transcript',
+        sourceType: 'coding-job',
         sourceId: id,
         status: 'drafting',
         createdAt: iso(5),
@@ -2392,7 +2394,7 @@ function cockpitDeliverables(
         summary: 'Operational summary artifact still being updated by the run.',
       },
     ],
-    'cockpit-approval-002': [
+    'mock-coding-job': [
       {
         id: 'cockpit-approval-002-deliverable-preview',
         title: 'Nightfall orders preview',
@@ -2426,7 +2428,7 @@ function cockpitDeliverables(
         title: 'Implementation pull request',
         format: 'github-pr',
         path: 'https://github.com/henrikogaard/nanocrab/pull/42',
-        sourceType: 'coding-job',
+        sourceType: 'transcript',
         sourceId: id,
         status: 'ready',
         createdAt: iso(296),
@@ -2439,7 +2441,7 @@ function cockpitDeliverables(
         title: 'Test summary',
         format: 'text',
         path: 'data/runtime/cockpit/cockpit-complete-004/test-summary.txt',
-        sourceType: 'coding-job',
+        sourceType: 'transcript',
         sourceId: id,
         status: 'ready',
         createdAt: iso(300),
@@ -2449,12 +2451,12 @@ function cockpitDeliverables(
     ],
   };
 
-  return fixtures[id] || [];
+  return fixtures[_session.sessionId] || [];
 }
 
 function cockpitStream(id: string): JsonValue {
   const fixtures: Record<string, JsonValue[]> = {
-    'cockpit-running-001': [
+    'code-mock-1': [
       {
         id: 'tc-read-transcripts',
         type: 'tool_call',
@@ -2478,7 +2480,7 @@ function cockpitStream(id: string): JsonValue {
         pct: 68,
       },
     ],
-    'cockpit-approval-002': [
+    'mock-coding-job': [
       {
         id: 'tc-write-orders',
         type: 'tool_call',
@@ -2539,7 +2541,11 @@ function cockpitStream(id: string): JsonValue {
     ],
   };
 
-  return { sessionId: id, events: fixtures[id] || [] };
+  const session = cockpitSessions.find((item) => item.id === id);
+  return {
+    sessionId: id,
+    events: session ? fixtures[session.sessionId] || [] : [],
+  };
 }
 
 function cockpitDetail(id: string): JsonValue | undefined {

@@ -14214,6 +14214,31 @@ button.sessions-command-stat:active {
   -webkit-line-clamp: 2;
 }
 
+.session-run-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.session-run-row-main,
+.session-run-row-state {
+  min-width: 0;
+}
+
+.session-run-row-state {
+  text-align: right;
+}
+
+.session-run-row[aria-current='true'] {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+.session-run-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .sessions-main {
   display: grid;
   gap: 12px;
@@ -22383,6 +22408,14 @@ button.sessions-command-stat:active {
 
   .work-session-tabs button {
     scroll-snap-align: start;
+  }
+
+  .session-run-row {
+    grid-template-columns: 1fr;
+  }
+
+  .session-run-row-state {
+    text-align: left;
   }
 }
 

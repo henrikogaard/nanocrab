@@ -4,6 +4,16 @@ import path from 'path';
 
 const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
+const agentRoutesPath = path.join(process.cwd(), 'src/admin/routes/agents.ts');
+
+function sourceBetween(source: string, start: string, end: string): string {
+  const startIndex = source.indexOf(start);
+  const endIndex = source.indexOf(end, startIndex);
+  if (startIndex < 0 || endIndex < 0) {
+    throw new Error(`Could not extract ${start} through ${end}`);
+  }
+  return source.slice(startIndex, endIndex);
+}
 
 describe('Sessions handoff cockpit UI', () => {
   it('frames sessions as reusable agent run history', () => {
@@ -41,12 +51,10 @@ describe('Sessions handoff cockpit UI', () => {
       'Old transcripts are useful only when they land in the right workspace',
     );
     expect(source).toContain('sessionHandoffPrompt');
-    expect(source).toContain('sessionReviewPrompt');
     expect(source).toContain('sessionContinuityBriefText');
     expect(source).toContain('sessions-handoff-list');
-    expect(source).toContain('session-run-facts');
-    expect(source).toContain('session-file-strip');
-    expect(source).toContain('session-reuse-strip');
+    expect(source).toContain('NanoWorkSession.renderRunStrip');
+    expect(source).toContain('NanoWorkSession.renderInspector');
     expect(source).toContain('Copy continuity brief');
     expect(source).toContain('window._sessionContinuityBrief');
     expect(source).toContain('window.copySessionContinuityBrief');
@@ -66,16 +74,7 @@ describe('Sessions handoff cockpit UI', () => {
     expect(source).toContain('Continue repository work');
     expect(source).toContain('Review external actions');
     expect(source).toContain('Copy handoff');
-    expect(source).toContain('Review prompt');
-    expect(source).toContain('Resume in');
-    expect(source).toContain('window.copySessionHandoff');
-    expect(source).toContain('window.copySessionReviewPrompt');
-    expect(source).toContain('window.resumeSessionWorkspace');
     expect(source).toContain('Use the session transcript as context');
-    expect(source).toContain(
-      'Review this NanoCrab agent run before continuing or closing it.',
-    );
-    expect(source).toContain('Recommended workspace: ${target.label}');
     expect(source).toContain(
       'State what is complete, what is blocked, and what still needs a human decision.',
     );
@@ -85,8 +84,6 @@ describe('Sessions handoff cockpit UI', () => {
     expect(source).toContain(
       'If external writes are involved, verify the approval record before sending, publishing, scheduling, posting webhooks, or changing repositories.',
     );
-    expect(source).toContain('Session review prompt copied');
-    expect(source).toContain('Copy session review prompt');
     expect(source).toContain('sessionDetailContinuationBriefText');
     expect(source).toContain('_sessionDetailContinuationState');
     expect(source).toContain('copySessionDetailContinuationBrief');
@@ -104,7 +101,7 @@ describe('Sessions handoff cockpit UI', () => {
     const source = fs.readFileSync(appPath, 'utf8');
 
     expect(source).toContain(
-      'id="session-search" class="search-input" aria-label="Search sessions"',
+      'id="session-search" class="search-input" data-session-search aria-label="Search sessions"',
     );
     expect(source).toContain('window._sessionGroupFilter');
     expect(source).toContain('filterSessions');
@@ -154,6 +151,310 @@ describe('Sessions handoff cockpit UI', () => {
     expect(source).toContain("action === 'review_approvals'");
     expect(source).toContain("action === 'handoff'");
     expect(source).toContain('await refreshUnifiedSessionDetail');
+  });
+
+  it('invalidates older and detached session renders before they can commit', async () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const guardSource = sourceBetween(
+      source,
+      'function createSessionRenderGuard',
+      'const sessionRenderGuard',
+    );
+    const createGuard = new Function(
+      `${guardSource}; return createSessionRenderGuard;`,
+    )() as (
+      currentElement: () => unknown,
+      currentPage: () => string,
+    ) => {
+      begin(): number;
+      isCurrent(
+        token: number,
+        element: { isConnected: boolean },
+        expectedPage: string,
+      ): boolean;
+    };
+    const currentElement = { isConnected: true };
+    const detachedElement = { isConnected: false };
+    let activeElement: unknown = currentElement;
+    let activePage = 'sessions';
+    const guard = createGuard(
+      () => activeElement,
+      () => activePage,
+    );
+    const first = guard.begin();
+    const second = guard.begin();
+
+    expect(guard.isCurrent(first, currentElement, 'sessions')).toBe(false);
+    expect(guard.isCurrent(second, detachedElement, 'sessions')).toBe(false);
+    expect(
+      ((activePage = 'chat'),
+      guard.isCurrent(second, currentElement, 'sessions')),
+    ).toBe(false);
+    expect(
+      ((activePage = 'sessions'),
+      (activeElement = currentElement),
+      guard.isCurrent(second, currentElement, 'sessions')),
+    ).toBe(true);
+
+    const overlappingGuard = createGuard(
+      () => activeElement,
+      () => activePage,
+    );
+    let resolveFirst!: (value: string[]) => void;
+    let resolveSecond!: (value: string[]) => void;
+    const firstList = new Promise<string[]>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const secondList = new Promise<string[]>((resolve) => {
+      resolveSecond = resolve;
+    });
+    const writes: string[] = [];
+    const hydrate = async (request: Promise<string[]>, token: number) => {
+      const sessions = await request;
+      if (!overlappingGuard.isCurrent(token, currentElement, 'sessions'))
+        return;
+      writes.push(
+        `globals:${sessions[0]}`,
+        `dom:${sessions[0]}`,
+        `detail:${sessions[0]}`,
+      );
+    };
+    const firstHydration = hydrate(firstList, overlappingGuard.begin());
+    const secondHydration = hydrate(secondList, overlappingGuard.begin());
+    resolveSecond(['new']);
+    await secondHydration;
+    resolveFirst(['old']);
+    await firstHydration;
+    expect(writes).toEqual(['globals:new', 'dom:new', 'detail:new']);
+
+    const renderSource = sourceBetween(
+      source,
+      'async function renderSessions',
+      'function renderSessionList',
+    );
+    expect(renderSource).toContain(
+      'const renderToken = sessionRenderGuard.begin()',
+    );
+    expect(renderSource).toContain(
+      "sessionRenderGuard.isCurrent(renderToken, el, 'sessions')",
+    );
+    expect(renderSource.indexOf('sessionRenderGuard.isCurrent')).toBeLessThan(
+      renderSource.indexOf('window._allSessions = sessions'),
+    );
+  });
+
+  it('performs verified coding-job mutations without optimistic success', async () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const mutationSource = sourceBetween(
+      source,
+      'async function performUnifiedSessionMutation',
+      'function bindUnifiedSessionActions',
+    );
+    const performMutation = new Function(
+      `${mutationSource}; return performUnifiedSessionMutation;`,
+    )() as (
+      state: {
+        model: { canCancel: boolean; canRetry: boolean; status: string };
+        summary: { id: string; source: string };
+      },
+      action: 'cancel' | 'retry',
+      dependencies: {
+        api(path: string, options: unknown): Promise<unknown>;
+        refresh(state: unknown): Promise<void>;
+        toast(message: string, type: string): void;
+      },
+    ) => Promise<boolean>;
+    const state = {
+      model: { canCancel: true, canRetry: false, status: 'running' },
+      summary: { id: 'code-mock-1', source: 'coding-job' },
+    };
+    const calls: Array<{ path: string; options: unknown }> = [];
+    let refreshes = 0;
+    const notices: Array<{ message: string; type: string }> = [];
+
+    const succeeded = await performMutation(state, 'cancel', {
+      api: async (path: string, options: unknown) => {
+        calls.push({ path, options });
+        return { ok: true };
+      },
+      refresh: async () => {
+        refreshes += 1;
+      },
+      toast: (message: string, type: string) => notices.push({ message, type }),
+    });
+
+    expect(succeeded).toBe(true);
+    expect(calls).toEqual([
+      {
+        path: '/agents/coding/jobs/code-mock-1/cancel',
+        options: { method: 'POST' },
+      },
+    ]);
+    expect(refreshes).toBe(1);
+    expect(notices.at(-1)?.type).toBe('success');
+
+    calls.length = 0;
+    refreshes = 0;
+    notices.length = 0;
+    const snapshot = JSON.stringify(state);
+    const failed = await performMutation(state, 'cancel', {
+      api: async () => {
+        throw new Error('rejected');
+      },
+      refresh: async () => {
+        refreshes += 1;
+      },
+      toast: (message: string, type: string) => notices.push({ message, type }),
+    });
+
+    expect(failed).toBe(false);
+    expect(refreshes).toBe(0);
+    expect(JSON.stringify(state)).toBe(snapshot);
+    expect(notices).toEqual([{ message: 'rejected', type: 'error' }]);
+
+    let unsupportedCalls = 0;
+    const unsupported = await performMutation(
+      {
+        model: { canCancel: false, canRetry: true, status: 'failed' },
+        summary: {
+          id: 'transcript:scouts:failed-run',
+          source: 'transcript',
+        },
+      },
+      'retry',
+      {
+        api: async () => {
+          unsupportedCalls += 1;
+          return { ok: true };
+        },
+        refresh: async () => {},
+        toast: (message: string, type: string) =>
+          notices.push({ message, type }),
+      },
+    );
+    expect(unsupported).toBe(false);
+    expect(unsupportedCalls).toBe(0);
+
+    const routeSource = fs.readFileSync(agentRoutesPath, 'utf8');
+    expect(routeSource).toContain("router.post('/coding/jobs/:id/cancel'");
+    expect(routeSource).toContain("router.post('/coding/jobs/:id/retry'");
+    expect(source).toContain("if (summary?.source !== 'coding-job')");
+  });
+
+  it('renders compact safe contextual rows without interpolated inline handlers', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const style = fs.readFileSync(stylePath, 'utf8');
+    const listSource = sourceBetween(
+      source,
+      'function renderSessionList(sessions)',
+      'function unifiedSessionWarning',
+    );
+
+    expect(listSource).toContain(
+      'class="sessions-handoff-item session-run-row"',
+    );
+    expect(listSource).toContain('data-session-select="${dependencies.esc(');
+    expect(listSource).toContain(
+      "aria-current=\"${selected ? 'true' : 'false'}\"",
+    );
+    expect(listSource).not.toContain('session-run-card');
+    expect(listSource).not.toContain('session-run-facts');
+    expect(listSource).not.toContain('session-file-strip');
+    expect(listSource).not.toContain('session-reuse-strip');
+    expect(listSource).not.toContain('onclick=');
+    expect(source).toContain('data-session-group="${esc(g)}"');
+    expect(source).not.toContain('onclick="filterSessions(\'${esc(g)}\')"');
+    expect(source).not.toContain('onclick="copySessionHandoff(\'${esc(');
+    expect(source).not.toContain('onclick="copySessionReviewPrompt(\'${esc(');
+    expect(source).not.toContain('onclick="resumeSessionWorkspace(\'${esc(');
+    expect(style).toContain('.session-run-row:focus-visible');
+    expect(style).toContain(".session-run-row[aria-current='true']");
+    const narrowRows = style.slice(
+      style.indexOf('@media (max-width: 480px) {\n  .work-session-run-strip'),
+      style.indexOf('@media (max-width: 480px) {\n  .login-card'),
+    );
+    expect(narrowRows).toContain(
+      '.session-run-row {\n    grid-template-columns: 1fr;',
+    );
+
+    const rowSource = sourceBetween(
+      source,
+      'function renderSessionRow',
+      'function unifiedSessionWarning',
+    );
+    const renderRow = new Function(
+      `${rowSource}; return renderSessionRow;`,
+    )() as (
+      session: Record<string, unknown>,
+      selected: boolean,
+      dependencies: {
+        esc(value: unknown): string;
+        formatTime(value: unknown): string;
+        sessionStatusBadge(session: unknown): string;
+        timeAgo(value: unknown): string;
+      },
+    ) => string;
+    const escape = (value: unknown) =>
+      String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    const hostile = `group'"><img src=x onerror=alert(1)>`;
+    const html = renderRow(
+      {
+        id: hostile,
+        sessionId: hostile,
+        group: hostile,
+        title: hostile,
+        status: 'running',
+      },
+      true,
+      {
+        esc: escape,
+        formatTime: () => 'now',
+        sessionStatusBadge: () => '<span class="badge">Running</span>',
+        timeAgo: () => 'now',
+      },
+    );
+    expect(html).toContain(`data-session-select="${escape(hostile)}"`);
+    expect(html).not.toContain('<img');
+    expect(html).toContain('aria-current="true"');
+  });
+
+  it('models partial data as a rejected surface request', async () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const captureSource = sourceBetween(
+      source,
+      'async function captureSessionSurface',
+      'async function loadUnifiedSessionDetail',
+    );
+    const capture = new Function(
+      `${captureSource}; return captureSessionSurface;`,
+    )() as (
+      label: string,
+      request: Promise<unknown>,
+    ) => Promise<{ data: unknown; error: unknown; label: string }>;
+
+    const available = await capture(
+      'summary',
+      Promise.resolve([{ id: 'one' }]),
+    );
+    const unavailable = await capture(
+      'stream',
+      Promise.reject(new Error('stream unavailable')),
+    );
+
+    expect(available).toEqual({
+      data: [{ id: 'one' }],
+      error: null,
+      label: 'summary',
+    });
+    expect(unavailable.data).toBeNull();
+    expect(unavailable.label).toBe('stream');
+    expect(unavailable.error).toBeInstanceOf(Error);
+    expect(source).not.toContain('partialData');
   });
 
   it('keeps mobile run, group, approval, and artifact summaries as separate nodes', () => {
