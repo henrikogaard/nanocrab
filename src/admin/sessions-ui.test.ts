@@ -473,6 +473,50 @@ describe('Sessions handoff cockpit UI', () => {
     expect(commandCenter).toContain('<span>Artifacts</span>');
   });
 
+  it('sums real cockpit attention counts and fails malformed values closed', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const totalsSource = sourceBetween(
+      source,
+      'function sessionAttentionTotals',
+      'async function renderSessions',
+    );
+    const totals = new Function(
+      `${totalsSource}; return sessionAttentionTotals;`,
+    )() as (sessions: Array<Record<string, unknown>>) => {
+      approvals: number;
+      artifacts: number;
+    };
+
+    expect(
+      totals([
+        { approvalCount: 2, artifactCount: 3 },
+        { approvalCount: 1, artifactCount: 4 },
+        { approvalCount: 0, artifactCount: 0 },
+      ]),
+    ).toEqual({ approvals: 3, artifacts: 7 });
+    expect(
+      totals([
+        { approvalCount: -1, artifactCount: -2 },
+        { approvalCount: Number.NaN, artifactCount: Number.POSITIVE_INFINITY },
+        { approvalCount: '8', artifactCount: '9' },
+        { approvalCount: null, artifactCount: undefined },
+      ]),
+    ).toEqual({ approvals: 0, artifacts: 0 });
+
+    const renderSource = sourceBetween(
+      source,
+      'async function renderSessions',
+      'function renderSessionList',
+    );
+    expect(renderSource).toContain(
+      'const attention = sessionAttentionTotals(sessions)',
+    );
+    expect(renderSource).toContain('<strong>${attention.approvals}</strong>');
+    expect(renderSource).toContain('<strong>${attention.artifacts}</strong>');
+    expect(renderSource).not.toContain('session.approvals ||');
+    expect(renderSource).not.toContain('session.artifacts ||');
+  });
+
   it('uses class-based session viewer and transcript detail chrome', () => {
     const source = fs.readFileSync(appPath, 'utf8');
 

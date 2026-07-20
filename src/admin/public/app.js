@@ -17108,6 +17108,20 @@ function createSessionRenderGuard(
 
 const sessionRenderGuard = createSessionRenderGuard();
 
+function sessionAttentionTotals(sessions) {
+  const count = (value) =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0
+      ? value
+      : 0;
+  return sessions.reduce(
+    (totals, session) => ({
+      approvals: totals.approvals + count(session.approvalCount),
+      artifacts: totals.artifacts + count(session.artifactCount),
+    }),
+    { approvals: 0, artifacts: 0 },
+  );
+}
+
 async function renderSessions(el) {
   const renderToken = sessionRenderGuard.begin();
   el.innerHTML = renderSessionLoadingState('cockpit');
@@ -17125,12 +17139,7 @@ async function renderSessions(el) {
       if (!grouped[s.group]) grouped[s.group] = [];
       grouped[s.group].push(s);
     }
-    const approvals = sessions.filter(
-      (session) => (session.approvals || 0) > 0,
-    );
-    const artifactRuns = sessions.filter(
-      (session) => (session.artifacts || []).length,
-    );
+    const attention = sessionAttentionTotals(sessions);
     const fileRuns = sessions.filter(
       (session) => sessionChangedFiles(session).length,
     );
@@ -17145,8 +17154,8 @@ async function renderSessions(el) {
         <div class="sessions-command-stats">
           <div class="sessions-command-stat"><span>Runs</span><strong>${sessions.length}</strong><small>recorded sessions</small></div>
           <div class="sessions-command-stat"><span>Groups</span><strong>${Object.keys(grouped).length}</strong><small>active contexts</small></div>
-          <button type="button" class="sessions-command-stat" onclick="navigate('approvals')"><span>Approvals</span><strong>${approvals.length}</strong><small>needs review</small></button>
-          <button type="button" class="sessions-command-stat" onclick="navigate('artifacts')"><span>Artifacts</span><strong>${artifactRuns.length}</strong><small>${fileRuns.length} file trails</small></button>
+          <button type="button" class="sessions-command-stat" onclick="navigate('approvals')"><span>Approvals</span><strong>${attention.approvals}</strong><small>needs review</small></button>
+          <button type="button" class="sessions-command-stat" onclick="navigate('artifacts')"><span>Artifacts</span><strong>${attention.artifacts}</strong><small>${fileRuns.length} file trails</small></button>
         </div>
         <div class="sessions-command-actions">
           <button class="btn btn-sm btn-ghost" onclick="copySessionContinuityBrief()">Copy continuity brief</button>
