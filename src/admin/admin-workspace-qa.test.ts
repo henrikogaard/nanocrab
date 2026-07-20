@@ -126,6 +126,34 @@ describe('Focus Stack rendered QA contract', () => {
     expect(source).not.toContain('window.eval');
   });
 
+  it('keeps the synthetic terminal capability in runtime memory while proving the reconnect attach payload', () => {
+    const source = qaScriptSource();
+
+    for (const contractMarker of [
+      'function createSyntheticTerminalCapability',
+      'async function deliverMockWebSocketMessage',
+      "type: 'terminal_session'",
+      'async function inspectTerminalAttachPayload',
+      '__qaWebSocketSends',
+      "type === 'terminal_attach'",
+      'payload?.sessionToken === capability',
+      'async function assertSyntheticCapabilityPrivate',
+      'window.localStorage',
+      'window.sessionStorage',
+      'document.documentElement.textContent',
+      'window.__qaWebSocketSends = []',
+    ]) {
+      expect(source).toContain(contractMarker);
+    }
+
+    expect(source).not.toContain(
+      "localStorage.setItem('terminal_session_capability'",
+    );
+    expect(source).not.toContain(
+      "sessionStorage.setItem('terminal_session_capability'",
+    );
+  });
+
   it('records the route, landmark, overflow, accessibility, selection, layout, error, interaction, screenshot, and summary evidence', () => {
     const source = qaScriptSource();
 

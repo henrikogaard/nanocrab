@@ -1229,6 +1229,10 @@ async function waitForMockWebSocket(page) {
   );
 }
 
+function createSyntheticTerminalCapability() {
+  return `qa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 async function deliverMockWebSocketMessage(page, message) {
   await page.evaluate((event) => {
     const socket = [...window.__qaWebSockets]
@@ -1242,6 +1246,40 @@ async function deliverMockWebSocketMessage(page, message) {
       new MessageEvent('message', { data: JSON.stringify(event) }),
     );
   }, message);
+}
+
+async function assertSyntheticCapabilityPrivate(page, capability) {
+  return page.evaluate((value) => {
+    const storageContains = (storage) =>
+      Object.keys(storage).some((key) => storage.getItem(key)?.includes(value));
+    return {
+      rendered: document.documentElement.textContent?.includes(value) || false,
+      persisted:
+        storageContains(window.localStorage) || storageContains(window.sessionStorage),
+    };
+  }, capability);
+}
+
+async function inspectTerminalAttachPayload(page, sessionId, capability) {
+  return page.evaluate(({ sessionId, capability }) => {
+    const payload = [...window.__qaWebSocketSends]
+      .reverse()
+      .map((entry) => {
+        try {
+          return JSON.parse(entry);
+        } catch {
+          return null;
+        }
+      })
+      .find((entry) => entry && entry.type === 'terminal_attach');
+    const evidence = {
+      attachFound: Boolean(payload),
+      sessionIdMatches: payload?.sessionId === sessionId,
+      capabilityMatches: payload?.sessionToken === capability,
+    };
+    window.__qaWebSocketSends = [];
+    return evidence;
+  }, { sessionId, capability });
 }
 
 async function invokeMockWebSocketCallback(page, callback) {
@@ -1478,6 +1516,22 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
   });
   await page.waitForSelector('#terminal-container .xterm');
   await waitForMockWebSocket(page);
+  const capability = createSyntheticTerminalCapability();
+  await deliverMockWebSocketMessage(page, {
+    type: 'terminal_session',
+    sessionId,
+    data: { sessionToken: capability },
+  });
+  const capabilityPrivacy = await assertSyntheticCapabilityPrivate(
+    page,
+    capability,
+  );
+  if (capabilityPrivacy.rendered || capabilityPrivacy.persisted) {
+    errors.push('Synthetic terminal capability escaped runtime memory');
+  }
+  await page.evaluate(() => {
+    window.__qaWebSocketSends = [];
+  });
   await deliverMockWebSocketMessage(page, {
     type: 'terminal_lifecycle',
     sessionId,
@@ -1497,26 +1551,16 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
   if (outputEvidence.state !== 'ready') {
     errors.push('Terminal output changed lifecycle state without a typed event');
   }
-  await deliverMockWebSocketMessage(page, {
-    type: 'terminal_lifecycle',
-    sessionId,
-    data: { state: 'unavailable' },
-  });
-  await recordState({
-    kind: 'unavailable',
-    expectedStatus: 'failed',
-    isReadOnly: false,
-  });
-  await deliverMockWebSocketMessage(page, {
-    type: 'terminal_lifecycle',
-    sessionId,
-    data: { state: 'ready' },
-  });
   await invokeMockWebSocketCallback(page, 'onclose');
   const closeEvidence = await terminalStateEvidence(page);
   if (closeEvidence.state !== 'unavailable') {
     errors.push('Terminal close did not expose unavailable transport state');
   }
+  await recordState({
+    kind: 'unavailable',
+    expectedStatus: 'failed',
+    isReadOnly: false,
+  });
   const socketCountBeforeReconnect = await page.evaluate(
     () => window.__qaWebSockets.length,
   );
@@ -1531,8 +1575,36 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
     socketCountBeforeReconnect,
   );
   await invokeMockWebSocketCallback(page, 'onopen');
+  const attachPayload = await inspectTerminalAttachPayload(
+    page,
+    sessionId,
+    capability,
+  );
+  if (!attachPayload.attachFound) {
+    errors.push('Reconnect did not send a terminal_attach payload');
+  }
+  if (!attachPayload.sessionIdMatches) {
+    errors.push('Reconnect terminal_attach used a different session id');
+  }
+  if (!attachPayload.capabilityMatches) {
+    errors.push('Reconnect terminal_attach did not use the in-memory capability');
+  }
+  const currentSessionId = await page.locator('#terminal-session-id').inputValue();
+  if (currentSessionId !== sessionId) {
+    errors.push('Reconnect changed the visible terminal session id');
+  }
   await recordState({
     kind: 'reconnecting',
+    expectedStatus: 'running',
+    isReadOnly: false,
+  });
+  await deliverMockWebSocketMessage(page, {
+    type: 'terminal_lifecycle',
+    sessionId,
+    data: { state: 'ready' },
+  });
+  await recordState({
+    kind: 'ready',
     expectedStatus: 'running',
     isReadOnly: false,
   });
@@ -1546,7 +1618,15 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
     expectedStatus: 'interrupted',
     isReadOnly: true,
   });
-  return { sessionId, states, outputEvidence, closeEvidence, errors };
+  return {
+    sessionId,
+    states,
+    outputEvidence,
+    closeEvidence,
+    attachPayload,
+    capabilityPrivacy,
+    errors,
+  };
 }
 
 async function runTargetedFlowCase(browser, viewport, screenshots) {
@@ -1557,6 +1637,7 @@ async function runTargetedFlowCase(browser, viewport, screenshots) {
   await context.addInitScript(() => {
     const NativeWebSocket = window.WebSocket;
     window.__qaWebSockets = [];
+    window.__qaWebSocketSends = [];
     class CapturedWebSocket extends NativeWebSocket {
       constructor(...args) {
         super(...args);
@@ -1592,6 +1673,11 @@ async function runTargetedFlowCase(browser, viewport, screenshots) {
         super.onclose = (event) => {
           this.__qaDeferredCloseEvent = event;
         };
+      }
+
+      send(payload) {
+        window.__qaWebSocketSends.push(String(payload));
+        return super.send(payload);
       }
     }
     window.WebSocket = CapturedWebSocket;

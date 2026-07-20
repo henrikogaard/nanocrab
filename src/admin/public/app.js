@@ -347,6 +347,7 @@ function stopPolling() {
   if (activeTerminal && activeTerminal.attachTimer) {
     clearInterval(activeTerminal.attachTimer);
   }
+  clearTerminalReconnectCapability();
   activeTerminal = null;
   setWsMessageSubscriber('web-chat-thread', null);
   setWsMessageSubscriber('group-chat', null);
@@ -402,12 +403,7 @@ function connectWs() {
     if (activeTerminal) {
       setTerminalSessionState('reconnecting', activeTerminal.sessionId);
     }
-    const savedSessionId = localStorage.getItem('terminal_session_id');
-    if (savedSessionId) {
-      ws.send(
-        JSON.stringify({ type: 'terminal_attach', sessionId: savedSessionId }),
-      );
-    }
+    sendTerminalAttach(activeTerminalId());
   };
   ws.onmessage = (e) => {
     let message;
@@ -442,6 +438,24 @@ function activeTerminalId() {
   return activeTerminal && activeTerminal.sessionId
     ? activeTerminal.sessionId
     : '';
+}
+
+function clearTerminalReconnectCapability() {
+  if (activeTerminal) activeTerminal.reconnectCapability = '';
+}
+
+function sendTerminalAttach(sessionId) {
+  if (!sessionId || ws?.readyState !== 1) return false;
+  const message = { type: 'terminal_attach', sessionId };
+  if (
+    activeTerminal?.sessionId === sessionId &&
+    typeof activeTerminal.reconnectCapability === 'string' &&
+    activeTerminal.reconnectCapability
+  ) {
+    message.sessionToken = activeTerminal.reconnectCapability;
+  }
+  ws.send(JSON.stringify(message));
+  return true;
 }
 
 const PAGE_ALIASES = {
@@ -492,11 +506,26 @@ function activatePageTabAlias(alias) {
 
 let handleWsMessage = function (msg) {
   if (
+    msg.type === 'terminal_session' &&
+    activeTerminal &&
+    msg.sessionId === activeTerminal.sessionId
+  ) {
+    const reconnectCapability = msg.data?.sessionToken;
+    clearTerminalReconnectCapability();
+    if (typeof reconnectCapability === 'string' && reconnectCapability) {
+      activeTerminal.reconnectCapability = reconnectCapability;
+    }
+    return;
+  }
+  if (
     msg.type === 'terminal_attach_result' &&
     activeTerminal &&
     msg.sessionId === activeTerminal.sessionId
   ) {
     activeTerminal.readOnly = msg.data.status === 'historical';
+    if (msg.data.status === 'historical') {
+      clearTerminalReconnectCapability();
+    }
     if (msg.data.status === 'not-found') {
       setTerminalSessionState('reconnecting', msg.sessionId);
     }
@@ -512,6 +541,15 @@ let handleWsMessage = function (msg) {
     activeTerminal &&
     msg.sessionId === activeTerminal.sessionId
   ) {
+    if (
+      msg.data.state === 'historical' ||
+      msg.data.state === 'ended' ||
+      msg.data.state === 'exited' ||
+      msg.data.state === 'idle-timeout' ||
+      msg.data.state === 'unavailable'
+    ) {
+      clearTerminalReconnectCapability();
+    }
     if (msg.data.state === 'ready') {
       activeTerminal.readOnly = false;
       setTerminalSessionState('ready', msg.sessionId);
@@ -13289,7 +13327,13 @@ async function renderTerminal(el) {
 
   const sessionId = document.getElementById('terminal-session-id').value;
   localStorage.setItem('terminal_session_id', sessionId);
-  activeTerminal = { sessionId, term, transcript: '', readOnly: false };
+  activeTerminal = {
+    sessionId,
+    term,
+    transcript: '',
+    readOnly: false,
+    reconnectCapability: '',
+  };
   window._terminalOperatorState = {
     ...(window._terminalOperatorState || {}),
     sessionId,
@@ -13306,12 +13350,7 @@ async function renderTerminal(el) {
       activeTerminal.attachTimer = null;
     }
     if (ws?.readyState === 1) {
-      ws.send(
-        JSON.stringify({
-          type: 'terminal_attach',
-          sessionId: currentSessionId,
-        }),
-      );
+      sendTerminalAttach(currentSessionId);
       return;
     }
     term.write('Connecting...\r\n');
@@ -13324,12 +13363,7 @@ async function renderTerminal(el) {
         if (activeTerminal) activeTerminal.attachTimer = null;
         const currentSessionId = activeTerminalId();
         if (!currentSessionId) return;
-        ws.send(
-          JSON.stringify({
-            type: 'terminal_attach',
-            sessionId: currentSessionId,
-          }),
-        );
+        sendTerminalAttach(currentSessionId);
       } else if (attempts > 20) {
         clearInterval(check);
         if (activeTerminal) activeTerminal.attachTimer = null;
@@ -13699,6 +13733,7 @@ window.spawnNewTerminal = function () {
     window._terminalOperatorState.sessionId = newId;
     window._terminalOperatorState.transcript = '';
   }
+  clearTerminalReconnectCapability();
   if (activeTerminal && activeTerminal.term) {
     activeTerminal.term.dispose();
     activeTerminal = null;
@@ -13749,6 +13784,7 @@ window.loadTerminalSessions = async function () {
 };
 
 window.loadTerminalSession = function (sessionId) {
+  clearTerminalReconnectCapability();
   const input = document.getElementById('terminal-session-id');
   if (input) input.value = sessionId;
   localStorage.setItem('terminal_session_id', sessionId);
@@ -13790,6 +13826,9 @@ window.reconnectTerminal = function () {
   const input = document.getElementById('terminal-session-id');
   const sessionId = input?.value;
   if (!sessionId || !activeTerminal) return;
+  if (sessionId !== activeTerminal.sessionId) {
+    clearTerminalReconnectCapability();
+  }
   setTerminalSessionState('reconnecting', sessionId);
   localStorage.setItem('terminal_session_id', sessionId);
   if (activeTerminal.term) {
