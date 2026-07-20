@@ -27,7 +27,10 @@ describe('Today workspace overview UI', () => {
     expect(source).toContain('dash-focus-paths');
     expect(source).toContain('<details class="dash-focus-paths">');
     expect(source).toContain('dash-more-strip');
-    expect(source).toContain('toggleMoreDrawer()');
+    expect(source).toContain('toggleMoreDrawer(this)');
+    expect(source).not.toContain('toggleMoreDrawer()');
+    expect(source.match(/aria-controls="more-drawer"/g)).toHaveLength(2);
+    expect(source.match(/aria-expanded="false"/g)).toHaveLength(2);
     expect(source).toContain("navigate('chat')");
     expect(source).toContain("navigate('projects')");
     expect(source).toContain("navigate('gitcode')");
@@ -101,7 +104,7 @@ describe('Today workspace overview UI', () => {
     );
     expect(source).toContain('Review workspace data confidence');
     expect(source).toContain('Today feed${loadIssues.length === 1 ?');
-    expect(source).toContain('toggleMoreDrawer()');
+    expect(source).toContain("? 'toggleMoreDrawer(this)'");
     expect(source).toContain('Open More');
     expect(source).toContain('dash-data-health is-warning');
     expect(source).toContain('dash-data-health is-ready');

@@ -679,10 +679,14 @@ async function renderDashboard(el) {
       const dailyBriefAction = nextBest
         ? nextBest.action
         : loadIssues.length > 0
-          ? 'toggleMoreDrawer()'
+          ? 'toggleMoreDrawer(this)'
         : projects.length > 0
           ? "navigate('projects')"
           : "navigate('chat')";
+      const dailyBriefActionAria =
+        dailyBriefAction === 'toggleMoreDrawer(this)'
+          ? ' aria-controls="more-drawer" aria-expanded="false"'
+          : '';
       const dailyBriefActionLabel = nextBest
         ? nextBest.actionLabel || 'Open'
         : loadIssues.length > 0
@@ -814,7 +818,7 @@ async function renderDashboard(el) {
               <h3>${esc(dailyBriefTitle)}</h3>
               <p>${esc(truncate(dailyBriefDetail, 180))}</p>
             </div>
-            <button class="btn btn-primary dash-next-primary" onclick="${dailyBriefAction}">${esc(dailyBriefActionLabel)}</button>
+            <button class="btn btn-primary dash-next-primary" onclick="${dailyBriefAction}"${dailyBriefActionAria}>${esc(dailyBriefActionLabel)}</button>
           </section>
 
           <section class="dash-attention-list" aria-label="Attention items">
@@ -847,7 +851,7 @@ async function renderDashboard(el) {
               <strong>Settings, channels, approvals, monitoring, memory, credentials, and recovery stay out of the main path.</strong>
               <p>${esc(moreStatusCopy)}</p>
             </div>
-            <button class="btn btn-ghost" onclick="toggleMoreDrawer()">Open More</button>
+            <button class="btn btn-ghost" onclick="toggleMoreDrawer(this)" aria-controls="more-drawer" aria-expanded="false">Open More</button>
           </section>
         </div>`;
 

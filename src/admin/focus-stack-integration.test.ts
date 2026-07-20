@@ -8,6 +8,7 @@ const scriptPaths = [
   path.join(publicRoot, 'modes.js'),
   path.join(publicRoot, 'ui/shell-navigation.js'),
   path.join(publicRoot, 'ui/workspace-shell.js'),
+  path.join(publicRoot, 'pages/dashboard.js'),
   path.join(publicRoot, 'app.js'),
 ];
 
@@ -56,6 +57,7 @@ class FakeElement {
   readonly listeners = new Map<string, Array<(event: FakeEvent) => void>>();
   readonly style = { setProperty: () => {} };
   focusCount = 0;
+  textContent = '';
   private html = '';
 
   constructor(
@@ -82,6 +84,7 @@ class FakeElement {
   set innerHTML(value: string) {
     this.html = String(value);
     if (this.id === 'app') this.ownerDocument.mountShell(this.html);
+    if (this.id === 'page-content') this.ownerDocument.mountPage(this.html);
   }
 
   setAttribute(name: string, value: string) {
@@ -263,17 +266,47 @@ class FakeDocument {
       tagForClass('focus-stack-inspector-close'),
     );
   }
+
+  mountPage(html: string) {
+    this.elements.splice(
+      1,
+      this.elements.length - 1,
+      ...this.elements
+        .slice(1)
+        .filter((element) => element.dataset.pageMount !== 'true'),
+    );
+    const buttonPattern = /<button\b[^>]*>Open More<\/button>/g;
+    for (const buttonTag of html.match(buttonPattern) || []) {
+      const attr = (name: string) =>
+        buttonTag.match(new RegExp(`${name}="([^"]*)"`))?.[1] || '';
+      const button = new FakeElement(this, 'BUTTON', '', attr('class'));
+      button.dataset.pageMount = 'true';
+      button.textContent = 'Open More';
+      for (const name of ['onclick', 'aria-controls', 'aria-expanded']) {
+        const value = attr(name);
+        if (value) button.setAttribute(name, value);
+      }
+      this.elements.push(button);
+    }
+  }
 }
 
 type ShellHarness = {
   app: FakeElement;
   document: FakeDocument;
   showShell(pageId: string): void;
+  parseProjectChatHash(hash: string): {
+    isProjectChatRoute: boolean;
+    projectId: string;
+    threadId: string;
+  } | null;
   toggleInspector(trigger?: FakeElement): void;
   toggleMore(trigger?: FakeElement): void;
+  activateInlineMore(trigger: FakeElement): void;
+  closeMore(): void;
 };
 
-function loadShellHarness(): ShellHarness {
+function loadShellHarness(initialHash = ''): ShellHarness {
   const document = new FakeDocument();
   const storageValues = new Map<string, string>();
   const storage = {
@@ -281,14 +314,42 @@ function loadShellHarness(): ShellHarness {
     setItem: (key: string, value: string) => storageValues.set(key, value),
     removeItem: (key: string) => storageValues.delete(key),
   };
+  const response = (data: unknown, ok = true) => ({
+    status: ok ? 200 : 503,
+    ok,
+    headers: { get: () => null },
+    json: async () => data,
+  });
+  const fetchMock = (input: unknown) => {
+    const url = String(input);
+    if (url === '/api/auth/check') return new Promise(() => {});
+    if (url === '/api/sessions/cockpit') {
+      return Promise.resolve(response({ error: 'unavailable' }, false));
+    }
+    if (url === '/api/system/dashboard') {
+      return Promise.resolve(
+        response({
+          channels: [],
+          containers: [],
+          groups: [],
+          messages: [],
+          daily: [],
+        }),
+      );
+    }
+    if (url === '/api/projects') {
+      return Promise.resolve(response({ projects: [] }));
+    }
+    return Promise.resolve(response([]));
+  };
   const context: Record<string, unknown> = {
     console,
     document,
-    location: { hash: '', protocol: 'http:', host: 'localhost' },
+    location: { hash: initialHash, protocol: 'http:', host: 'localhost' },
     navigator: {},
     localStorage: storage,
     sessionStorage: storage,
-    fetch: () => new Promise(() => {}),
+    fetch: fetchMock,
     setInterval: () => 1,
     clearInterval: () => {},
     setTimeout: () => 1,
@@ -330,14 +391,26 @@ function loadShellHarness(): ShellHarness {
     vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context);
   }
 
+  const toggleMore = context.toggleMoreDrawer as (
+    trigger?: FakeElement,
+  ) => void;
   return {
     app: document.app,
     document,
     showShell: context.showShell as (pageId: string) => void,
+    parseProjectChatHash:
+      context.parseProjectChatHash as ShellHarness['parseProjectChatHash'],
     toggleInspector: context.toggleWorkspaceInspector as (
       trigger?: FakeElement,
     ) => void,
-    toggleMore: context.toggleMoreDrawer as (trigger?: FakeElement) => void,
+    toggleMore,
+    activateInlineMore: (trigger) => {
+      const handler = trigger.getAttribute('onclick');
+      if (handler === 'toggleMoreDrawer(this)') toggleMore(trigger);
+      else if (handler === 'toggleMoreDrawer()') toggleMore();
+      else throw new Error(`Unexpected inline More handler: ${handler}`);
+    },
+    closeMore: context.closeMoreDrawer as () => void,
   };
 }
 
@@ -347,8 +420,9 @@ function markupSection(markup: string, start: string, end: string) {
 }
 
 describe('Focus Stack executable shell integration', () => {
-  it('renders project chat in Cowork with route data and stable mode actions', () => {
-    const harness = loadShellHarness();
+  it('preserves the exact durable project chat hash in its active Cowork link', () => {
+    const durableHash = '#/projects/project%2Fdelta/chat/web%3Athread-17';
+    const harness = loadShellHarness(durableHash);
 
     harness.showShell('project-chat');
 
@@ -364,14 +438,39 @@ describe('Focus Stack executable shell integration', () => {
       '<div class="bottom-tabs">',
       '</nav>',
     );
+    const mobileMenuMarkup = markupSection(
+      harness.app.innerHTML,
+      '<div class="mobile-menu"',
+      '<div class="mobile-section">',
+    );
+    const contextMarkup = markupSection(
+      harness.app.innerHTML,
+      '<nav class="sidebar focus-stack-context"',
+      '</nav>',
+    );
 
     expect(shell?.dataset.workspaceMode).toBe('cowork');
     expect(shell?.dataset.workspaceSection).toBe('conversation');
     expect(context?.getAttribute('aria-label')).toBe('Project work context');
-    expect(harness.app.innerHTML).toContain('href="#/project-chat"');
+    expect(mobileMenuMarkup).toContain(`href="${durableHash}"`);
+    expect(contextMarkup).toContain(`href="${durableHash}"`);
+    expect(harness.app.innerHTML).not.toContain('href="#/project-chat"');
+    expect(harness.app.innerHTML).not.toContain("navigate('project-chat')");
+    const parsed = harness.parseProjectChatHash(durableHash);
+    expect(parsed?.projectId).toBe('project/delta');
+    expect(parsed?.threadId).toBe('web:thread-17');
     expect(railMarkup.match(/<span>More<\/span>/g)).toHaveLength(1);
     expect(mobileMarkup.match(/<button class="bottom-tab/g)).toHaveLength(4);
     expect(mobileMarkup.match(/<span>More<\/span>/g)).toHaveLength(1);
+  });
+
+  it('omits a synthetic project chat link when no durable nested hash exists', () => {
+    const harness = loadShellHarness();
+
+    harness.showShell('project-chat');
+
+    expect(harness.app.innerHTML).not.toContain('href="#/project-chat"');
+    expect(harness.app.innerHTML).not.toContain("navigate('project-chat')");
   });
 
   it('keeps inspector and More mutually exclusive with deterministic focus return', () => {
@@ -436,5 +535,48 @@ describe('Focus Stack executable shell integration', () => {
     expect(inspector.classList.contains('is-open')).toBe(false);
     expect(inspector.hasAttribute('inert')).toBe(true);
     expect(harness.document.activeElement).toBe(inspectorTrigger);
+  });
+
+  it('restores focus and synchronizes ARIA for both Today inline More actions', async () => {
+    const harness = loadShellHarness();
+    harness.showShell('dashboard');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const todayMoreButtons = harness.document.elements.filter(
+      (element) => element.textContent === 'Open More',
+    );
+    const todayMore = todayMoreButtons[0];
+    const inspector = harness.document.getElementById('workspace-inspector')!;
+    const drawer = harness.document.getElementById('more-drawer')!;
+    const inspectorTrigger = harness.document.querySelector(
+      '.focus-stack-inspector-trigger',
+    )!;
+    const moreClose = harness.document.querySelector('.more-close')!;
+
+    expect(todayMoreButtons).toHaveLength(2);
+    harness.toggleInspector(inspectorTrigger);
+    todayMore.focus();
+    harness.activateInlineMore(todayMore);
+
+    expect(inspector.classList.contains('is-open')).toBe(false);
+    expect(inspector.hasAttribute('inert')).toBe(true);
+    expect(inspectorTrigger.getAttribute('aria-expanded')).toBe('false');
+    expect(drawer.classList.contains('open')).toBe(true);
+    expect(drawer.hasAttribute('inert')).toBe(false);
+    expect(harness.document.activeElement).toBe(moreClose);
+    for (const button of todayMoreButtons) {
+      expect(button.getAttribute('aria-expanded')).toBe('true');
+    }
+
+    harness.closeMore();
+
+    expect(drawer.classList.contains('open')).toBe(false);
+    expect(drawer.hasAttribute('inert')).toBe(true);
+    expect(harness.document.activeElement).toBe(todayMore);
+    for (const button of todayMoreButtons) {
+      expect(button.getAttribute('onclick')).toBe('toggleMoreDrawer(this)');
+      expect(button.getAttribute('aria-controls')).toBe('more-drawer');
+      expect(button.getAttribute('aria-expanded')).toBe('false');
+    }
   });
 });

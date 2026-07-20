@@ -391,6 +391,27 @@ describe('Terminal operator console UI', () => {
     expect(styles).toContain('.terminal-access-actions button:focus-visible');
   });
 
+  it('labels terminal recovery links to the dashboard route as Today', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const terminalStateStart = source.indexOf(
+      'function renderTerminalAccessState',
+    );
+    const terminalStateEnd = source.indexOf(
+      'async function loadTerminalFileTree',
+      terminalStateStart,
+    );
+    const terminalStates = source.slice(terminalStateStart, terminalStateEnd);
+
+    expect(
+      terminalStates.match(
+        /onclick="navigate\('dashboard'\)">Today<\/button>/g,
+      ) || [],
+    ).toHaveLength(2);
+    expect(terminalStates).not.toContain(
+      'onclick="navigate(\'dashboard\')">Dashboard</button>',
+    );
+  });
+
   it('uses class-based terminal search feedback states', () => {
     const source = fs.readFileSync(appPath, 'utf8');
     const searchBlock = source.slice(

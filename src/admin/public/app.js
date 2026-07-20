@@ -810,6 +810,16 @@ function shellModeCue(mode) {
   return cues[mode] || cues.more;
 }
 
+function shellNavigationTarget(pageId, currentPage) {
+  if (pageId !== 'project-chat') {
+    return { href: `#/${pageId}`, usesNavigate: true };
+  }
+  if (currentPage !== 'project-chat') return null;
+  const currentHash = window.location.hash || '';
+  if (!parseProjectChatHash(currentHash)) return null;
+  return { href: currentHash, usesNavigate: false };
+}
+
 function showShell(page) {
   const routeContext = window.NanoWorkspaceShell.resolveRoute(page, activeMode);
   const displayedMode = routeContext.mode;
@@ -872,19 +882,27 @@ function showShell(page) {
       '</div>';
   } else {
     navHtml = filteredNavItems
-      .map(
-        (item) =>
-          `<a class="nav-link ${page === item.id ? 'active' : ''}" href="#/${item.id}" onclick="navigate('${item.id}'); return false;">${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`,
-      )
+      .map((item) => {
+        const target = shellNavigationTarget(item.id, page);
+        if (!target) return '';
+        const navigateHandler = target.usesNavigate
+          ? ` onclick="navigate('${item.id}'); return false;"`
+          : '';
+        return `<a class="nav-link ${page === item.id ? 'active' : ''}" href="${esc(target.href)}"${navigateHandler}>${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`;
+      })
       .join('');
   }
 
   // Build mobile menu HTML (mode-scoped, flat list)
   const mobileMenuHtml = filteredNavItems
-    .map(
-      (item) =>
-        `<a class="${page === item.id ? 'active' : ''}" href="#/${item.id}" onclick="navigate('${item.id}'); return false;">${navIcon(item.icon)}<span>${item.label}</span></a>`,
-    )
+    .map((item) => {
+      const target = shellNavigationTarget(item.id, page);
+      if (!target) return '';
+      const navigateHandler = target.usesNavigate
+        ? ` onclick="navigate('${item.id}'); return false;"`
+        : '';
+      return `<a class="${page === item.id ? 'active' : ''}" href="${esc(target.href)}"${navigateHandler}>${navIcon(item.icon)}<span>${item.label}</span></a>`;
+    })
     .join('');
   const moreDrawerIds = window.NanoModes.MORE_IDS.filter(
     (id) =>
@@ -13117,7 +13135,7 @@ function renderTerminalAccessState() {
       <div class="terminal-access-actions">
         <button type="button" onclick="navigate('monitoring')">Open Monitoring</button>
         <button type="button" onclick="navigate('devhub')">Open Code</button>
-        <button type="button" onclick="navigate('dashboard')">Dashboard</button>
+        <button type="button" onclick="navigate('dashboard')">Today</button>
       </div>
     </section>`;
 }
@@ -13138,7 +13156,7 @@ function renderTerminalFileTreeState(kind = 'loading') {
       body: 'Mount a repository or open Code to choose a workspace before using the terminal side pane for file handoff.',
       actions: `
         <button type="button" onclick="navigate('devhub')">Open Code</button>
-        <button type="button" onclick="navigate('dashboard')">Dashboard</button>`,
+        <button type="button" onclick="navigate('dashboard')">Today</button>`,
     },
     error: {
       tone: 'is-error',

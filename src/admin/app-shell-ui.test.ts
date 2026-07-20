@@ -336,7 +336,10 @@ describe('App shell accessibility UI', () => {
       '<aside id="workspace-inspector" class="focus-stack-inspector" inert aria-hidden="true">',
     );
     expect(showShellSource.match(/<main\b/g)).toHaveLength(1);
-    expect(showShellSource).toContain('href="#/${item.id}"');
+    expect(showShellSource).toContain(
+      'const target = shellNavigationTarget(item.id, page)',
+    );
+    expect(showShellSource).toContain('href="${esc(target.href)}"');
     expect(showShellSource).toContain(
       'onclick="navigate(\'${item.id}\'); return false;"',
     );
