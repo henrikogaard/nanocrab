@@ -25,8 +25,14 @@
       guidance: 'Repositories, Copilot, tests, PRs, and handoffs.',
       pages: ['gitcode'],
     },
+    more: {
+      id: 'more',
+      label: 'More',
+      icon: 'integrations',
+      pages: [],
+    },
   };
-  const MODE_ORDER = ['chat', 'cowork', 'code'];
+  const MODE_ORDER = ['chat', 'cowork', 'code', 'more'];
   const HIDDEN_PAGE_MODES = {
     'project-chat': 'cowork',
   };
@@ -82,7 +88,7 @@
   }
 
   function modeGuidance(modeId) {
-    return MODES[modeId] ? MODES[modeId].guidance : '';
+    return MODES[modeId] ? MODES[modeId].guidance || '' : '';
   }
 
   function loadActiveMode(storage) {
@@ -106,7 +112,16 @@
     }
   }
 
-  const NanoModes = { MODES, MODE_ORDER, MORE_IDS, resolveMode, navPagesForMode, modeGuidance, loadActiveMode, saveActiveMode };
+  const NanoModes = {
+    MODES,
+    MODE_ORDER,
+    MORE_IDS,
+    resolveMode,
+    navPagesForMode,
+    modeGuidance,
+    loadActiveMode,
+    saveActiveMode,
+  };
   const g = typeof globalThis !== 'undefined' ? globalThis : window;
   g.NanoModes = NanoModes;
 })();

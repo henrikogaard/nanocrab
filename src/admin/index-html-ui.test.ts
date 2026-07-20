@@ -6,6 +6,20 @@ const htmlPath = path.join(process.cwd(), 'src/admin/public/index.html');
 const manifestPath = path.join(process.cwd(), 'src/admin/public/manifest.json');
 
 describe('Admin HTML entry metadata', () => {
+  it('loads route context after shell navigation and before the app coordinator', () => {
+    const source = fs.readFileSync(htmlPath, 'utf8');
+    const navigationIndex = source.indexOf('/ui/shell-navigation.js');
+    const workspaceShellIndex = source.indexOf('/ui/workspace-shell.js');
+    const appIndex = source.indexOf('/app.js');
+
+    expect(navigationIndex).toBeGreaterThanOrEqual(0);
+    expect(workspaceShellIndex).toBeGreaterThan(navigationIndex);
+    expect(workspaceShellIndex).toBeLessThan(appIndex);
+    expect(source).toContain(
+      '<script defer src="/ui/workspace-shell.js?v=2.0.0-rc.8"></script>',
+    );
+  });
+
   it('describes NanoCrab as the Copilot, Cowork, Code workspace', () => {
     const source = fs.readFileSync(htmlPath, 'utf8');
 

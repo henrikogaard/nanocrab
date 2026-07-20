@@ -10,20 +10,27 @@ beforeAll(async () => {
 const M = () => (globalThis as any).NanoModes;
 
 describe('MODES config', () => {
-  it('exposes three modes in order', () => {
-    expect(M().MODE_ORDER).toEqual(['chat', 'cowork', 'code']);
+  it('exposes four stable modes in order', () => {
+    expect(M().MODE_ORDER).toEqual(['chat', 'cowork', 'code', 'more']);
   });
 
   it('labels the top-level focus modes', () => {
     expect(M().MODES.chat.label).toBe('Chat');
     expect(M().MODES.cowork.label).toBe('Cowork');
     expect(M().MODES.code.label).toBe('Code');
+    expect(M().MODES.more).toEqual({
+      id: 'more',
+      label: 'More',
+      icon: 'integrations',
+      pages: [],
+    });
   });
 
   it('describes when to use each focus mode', () => {
     expect(M().modeGuidance('chat')).toContain('Plain chat');
     expect(M().modeGuidance('cowork')).toContain('Projects, files');
     expect(M().modeGuidance('code')).toContain('Repos');
+    expect(M().modeGuidance('more')).toBe('');
     expect(M().modeGuidance('unknown')).toBe('');
   });
 
