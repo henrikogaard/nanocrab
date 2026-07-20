@@ -186,6 +186,15 @@ describe('terminal websocket authorization', () => {
       sessionId: 'alice-history',
       data: { status: 'historical', readOnly: true },
     });
+    expect(messages).toContainEqual({
+      type: 'terminal_lifecycle',
+      sessionId: 'alice-history',
+      data: {
+        state: 'historical',
+        readOnly: true,
+        reason: 'session-ended',
+      },
+    });
     expect(JSON.stringify(messages)).toContain('private transcript');
   });
 
@@ -224,6 +233,11 @@ describe('terminal websocket authorization', () => {
       type: 'terminal_attach_result',
       sessionId: 'active-capability',
       data: { status: 'active', readOnly: false },
+    });
+    expect(allowed).toContainEqual({
+      type: 'terminal_lifecycle',
+      sessionId: 'active-capability',
+      data: { state: 'ready', readOnly: false },
     });
   });
 });

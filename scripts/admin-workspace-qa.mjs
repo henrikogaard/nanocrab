@@ -1219,6 +1219,76 @@ function stateScreenshotPath(viewport, name) {
   return path.join(screenshotRoot, `${viewport.name}-${name}.png`);
 }
 
+async function waitForMockWebSocket(page) {
+  await page.waitForFunction(
+    () =>
+      Array.isArray(window.__qaWebSockets) &&
+      window.__qaWebSockets.some(
+        (socket) => typeof socket?.__qaOnMessage === 'function',
+      ),
+  );
+}
+
+async function deliverMockWebSocketMessage(page, message) {
+  await page.evaluate((event) => {
+    const socket = [...window.__qaWebSockets]
+      .reverse()
+      .find((candidate) => typeof candidate.__qaOnMessage === 'function');
+    if (!socket) {
+      throw new Error('Mock WebSocket onmessage handler is unavailable');
+    }
+    socket.__qaOnMessage.call(
+      socket,
+      new MessageEvent('message', { data: JSON.stringify(event) }),
+    );
+  }, message);
+}
+
+async function invokeMockWebSocketCallback(page, callback) {
+  await page.evaluate((name) => {
+    const socket = [...window.__qaWebSockets]
+      .reverse()
+      .find((candidate) => typeof candidate.__qaOnMessage === 'function');
+    if (!socket) {
+      throw new Error('Mock WebSocket is unavailable');
+    }
+    const handler =
+      name === 'onclose' ? socket.__qaOnClose : socket.__qaOnOpen;
+    if (typeof handler !== 'function') {
+      throw new Error(`Mock WebSocket ${name} handler is unavailable`);
+    }
+    const event =
+      name === 'onclose'
+        ? new CloseEvent('close', { code: 1006, reason: 'QA transport loss' })
+        : new Event('open');
+    handler.call(socket, event);
+  }, callback);
+}
+
+async function captureVisibleScreenshot(page, selector, screenshotPath) {
+  const target = page.locator(selector);
+  await target.scrollIntoViewIfNeeded();
+  const geometry = await target.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    return {
+      withinViewport:
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < window.innerHeight &&
+        rect.left < window.innerWidth &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden',
+    };
+  });
+  if (!geometry.withinViewport) {
+    throw new Error(`${selector} is not visibly within the viewport`);
+  }
+  await page.screenshot({ path: screenshotPath });
+}
+
 async function exerciseChatRunFlow(page, viewport, screenshots) {
   const errors = [];
   const screenshotPath = stateScreenshotPath(
@@ -1230,6 +1300,7 @@ async function exerciseChatRunFlow(page, viewport, screenshots) {
   });
   await page.waitForSelector('#chat-msg-input');
   await page.locator('#thread-run-strip').waitFor({ state: 'attached' });
+  await waitForMockWebSocket(page);
 
   const before = await page.evaluate(() => ({
     runStripCount: document.querySelectorAll(
@@ -1242,20 +1313,17 @@ async function exerciseChatRunFlow(page, viewport, screenshots) {
   if (before.runStripCount !== 0 || before.progressVisible) {
     errors.push('Chat exposed run progress before scoped work started');
   }
-  await page.screenshot({ path: screenshotPath });
+  await captureVisibleScreenshot(page, '#chat-msg-input', screenshotPath);
   screenshots.push(evidencePath(screenshotPath));
 
-  await page.evaluate(
-    (event) => window.WebChat.processRunEvent(event, 'web:mock-1'),
-    {
-      type: 'task_progress',
-      data: {
-        groupJid: 'web:mock-1',
-        message: 'Scoped QA progress',
-        pct: 42,
-      },
+  await deliverMockWebSocketMessage(page, {
+    type: 'task_progress',
+    data: {
+      groupJid: 'web:mock-1',
+      message: 'Scoped QA progress',
+      pct: 42,
     },
-  );
+  });
   await page.waitForSelector('#thread-run-strip .work-session-run-strip');
   const active = await page.evaluate(() => {
     const runStrip = document.querySelector(
@@ -1284,7 +1352,11 @@ async function exerciseChatRunFlow(page, viewport, screenshots) {
     viewport,
     'chat-run-progress-active',
   );
-  await page.screenshot({ path: activeScreenshotPath });
+  await captureVisibleScreenshot(
+    page,
+    '#thread-run-strip .work-session-run-strip',
+    activeScreenshotPath,
+  );
   screenshots.push(evidencePath(activeScreenshotPath));
 
   return {
@@ -1351,53 +1423,16 @@ async function terminalStateEvidence(page) {
   });
 }
 
-async function setTerminalQaState(page, kind, sessionId) {
-  await page.evaluate(
-    ([state, id]) => {
-      window.eval(
-        `setTerminalSessionState(${JSON.stringify(state)}, ${JSON.stringify(id)})`,
-      );
-    },
-    [kind, sessionId],
-  );
-}
-
 async function exerciseTerminalSessionStates(page, viewport, screenshots) {
   const errors = [];
-  await page.goto(`${baseUrl}/#/devhub`, { waitUntil: 'domcontentloaded' });
+  await page.evaluate(() => {
+    window.location.hash = '#/devhub';
+  });
   await page.locator('#dev-tabs .tab[data-tab-id="terminal"]').click();
   await page.waitForSelector('#terminal-session-state .work-session-run-strip');
   const sessionId = await page.locator('#terminal-session-id').inputValue();
-  const expectedStates = [
-    {
-      kind: 'loading',
-      expectedStatus: 'running',
-      isReadOnly: false,
-    },
-    {
-      kind: 'ready',
-      expectedStatus: 'running',
-      isReadOnly: false,
-    },
-    {
-      kind: 'reconnecting',
-      expectedStatus: 'running',
-      isReadOnly: false,
-    },
-    {
-      kind: 'unavailable',
-      expectedStatus: 'failed',
-      isReadOnly: false,
-    },
-    {
-      kind: 'interrupted',
-      expectedStatus: 'interrupted',
-      isReadOnly: true,
-    },
-  ];
   const states = [];
-  for (const expected of expectedStates) {
-    await setTerminalQaState(page, expected.kind, sessionId);
+  const recordState = async (expected) => {
     await page.waitForFunction(
       (kind) =>
         document
@@ -1423,21 +1458,143 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
       viewport,
       `terminal-session-${expected.kind}`,
     );
-    await page.screenshot({ path: screenshotPath });
+    await captureVisibleScreenshot(
+      page,
+      '#terminal-session-state .work-session-run-strip',
+      screenshotPath,
+    );
     screenshots.push(evidencePath(screenshotPath));
     states.push({
       ...expected,
       evidence,
       screenshotPath: evidencePath(screenshotPath),
     });
+  };
+
+  await recordState({
+    kind: 'loading',
+    expectedStatus: 'running',
+    isReadOnly: false,
+  });
+  await page.waitForSelector('#terminal-container .xterm');
+  await waitForMockWebSocket(page);
+  await deliverMockWebSocketMessage(page, {
+    type: 'terminal_lifecycle',
+    sessionId,
+    data: { state: 'ready' },
+  });
+  await recordState({
+    kind: 'ready',
+    expectedStatus: 'running',
+    isReadOnly: false,
+  });
+  await deliverMockWebSocketMessage(page, {
+    type: 'terminal_output',
+    sessionId,
+    data: '[Process exited]',
+  });
+  const outputEvidence = await terminalStateEvidence(page);
+  if (outputEvidence.state !== 'ready') {
+    errors.push('Terminal output changed lifecycle state without a typed event');
   }
-  return { sessionId, states, errors };
+  await deliverMockWebSocketMessage(page, {
+    type: 'terminal_lifecycle',
+    sessionId,
+    data: { state: 'unavailable' },
+  });
+  await recordState({
+    kind: 'unavailable',
+    expectedStatus: 'failed',
+    isReadOnly: false,
+  });
+  await deliverMockWebSocketMessage(page, {
+    type: 'terminal_lifecycle',
+    sessionId,
+    data: { state: 'ready' },
+  });
+  await invokeMockWebSocketCallback(page, 'onclose');
+  const closeEvidence = await terminalStateEvidence(page);
+  if (closeEvidence.state !== 'unavailable') {
+    errors.push('Terminal close did not expose unavailable transport state');
+  }
+  const socketCountBeforeReconnect = await page.evaluate(
+    () => window.__qaWebSockets.length,
+  );
+  await page
+    .locator('[onclick="reconnectTerminal()"]')
+    .click();
+  await page.waitForFunction(
+    (previousCount) =>
+      window.__qaWebSockets.length > previousCount &&
+      window.__qaWebSockets.at(-1)?.readyState === WebSocket.OPEN &&
+      typeof window.__qaWebSockets.at(-1)?.__qaOnOpen === 'function',
+    socketCountBeforeReconnect,
+  );
+  await invokeMockWebSocketCallback(page, 'onopen');
+  await recordState({
+    kind: 'reconnecting',
+    expectedStatus: 'running',
+    isReadOnly: false,
+  });
+  await deliverMockWebSocketMessage(page, {
+    type: 'terminal_lifecycle',
+    sessionId,
+    data: { state: 'exited' },
+  });
+  await recordState({
+    kind: 'interrupted',
+    expectedStatus: 'interrupted',
+    isReadOnly: true,
+  });
+  return { sessionId, states, outputEvidence, closeEvidence, errors };
 }
 
 async function runTargetedFlowCase(browser, viewport, screenshots) {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
     reducedMotion: 'reduce',
+  });
+  await context.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+    window.__qaWebSockets = [];
+    class CapturedWebSocket extends NativeWebSocket {
+      constructor(...args) {
+        super(...args);
+        window.__qaWebSockets.push(this);
+      }
+
+      get onopen() {
+        return this.__qaOnOpen;
+      }
+
+      set onopen(handler) {
+        this.__qaOnOpen = handler;
+        super.onopen = (event) => {
+          this.__qaDeferredOpenEvent = event;
+        };
+      }
+
+      get onmessage() {
+        return this.__qaOnMessage;
+      }
+
+      set onmessage(handler) {
+        this.__qaOnMessage = handler;
+        super.onmessage = handler;
+      }
+
+      get onclose() {
+        return this.__qaOnClose;
+      }
+
+      set onclose(handler) {
+        this.__qaOnClose = handler;
+        super.onclose = (event) => {
+          this.__qaDeferredCloseEvent = event;
+        };
+      }
+    }
+    window.WebSocket = CapturedWebSocket;
   });
   const page = await context.newPage();
   const pageErrors = [];

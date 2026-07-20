@@ -296,7 +296,7 @@ Goal: give agents a durable research/reporting workflow without making the core 
   - DONE: responsive split panes pair terminal/files with chat/diff/logs/search, persist the selected tabs and divider position, and support arrow-key tab navigation.
   - DONE: copyable terminal transcript
   - DONE: searchable transcript
-  - DONE: shared work-session vocabulary in Chat and Terminal, with Chat state driven only by live thread-scoped lifecycle evidence and explicit loading, ready, reconnecting, unavailable, and interrupted/read-only terminal states.
+  - DONE: shared work-session vocabulary in Chat and Terminal, with Chat state driven only by live thread-scoped lifecycle evidence and Terminal state driven by typed ready, exited, idle-timeout, historical, and unavailable events rather than transcript text.
   - DONE: explicit consumed Chat promotion briefs in the existing Cowork projects or Code workspace; plain messages are never moved automatically.
   - provider/model selector per chat/task
   - tool-call timeline
@@ -341,7 +341,7 @@ These rules are non-negotiable:
 1. **Provider Router v1** - DONE
    - Add provider registry, capability probes, routing profiles, and provider/model selection on tasks and workflows.
 2. **Better Web Chat/Terminal v1** - DONE
-   - Shared session monitoring, explicit Chat handoffs, and truthful terminal lifecycle states are wired across the dashboard.
+   - Shared session monitoring, explicit Chat handoffs, and typed terminal lifecycle states are wired across the dashboard.
 3. **Memory v1** - DONE
    - Structured memory DB, review queue, and generated `MEMORY.md`.
 4. **Journal v1** - DONE

@@ -104,6 +104,28 @@ describe('Focus Stack rendered QA contract', () => {
     expect(source).toContain('await exerciseTerminalSessionStates(');
   });
 
+  it('drives targeted Chat and Terminal evidence through the captured mock WebSocket callbacks', () => {
+    const source = qaScriptSource();
+
+    for (const contractMarker of [
+      '__qaWebSockets',
+      'async function deliverMockWebSocketMessage',
+      'socket.__qaOnMessage',
+      'terminal_lifecycle',
+      "'[Process exited]'",
+      'socket.__qaOnClose',
+      'socket.__qaOnOpen',
+      'scrollIntoViewIfNeeded',
+      'withinViewport',
+    ]) {
+      expect(source).toContain(contractMarker);
+    }
+
+    expect(source).not.toContain('WebChat.processRunEvent');
+    expect(source).not.toContain('setTerminalSessionState');
+    expect(source).not.toContain('window.eval');
+  });
+
   it('records the route, landmark, overflow, accessibility, selection, layout, error, interaction, screenshot, and summary evidence', () => {
     const source = qaScriptSource();
 

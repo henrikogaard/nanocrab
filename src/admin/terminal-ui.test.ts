@@ -30,7 +30,12 @@ describe('Terminal operator console UI', () => {
     expect(source).toContain("setTerminalSessionState('unavailable'");
     expect(source).toContain("setTerminalSessionState('reconnecting'");
     expect(source).not.toContain('data-work-session-action="resume"');
-    expect(source).toContain('function terminalOutputEndedProcess(data)');
+    expect(source).not.toContain('function terminalOutputEndedProcess(data)');
+    expect(source).toContain("msg.type === 'terminal_lifecycle'");
+    expect(source).toContain("msg.data.state === 'ready'");
+    expect(source).toContain("msg.data.state === 'exited'");
+    expect(source).toContain("msg.data.state === 'idle-timeout'");
+    expect(source).toContain("msg.data.state === 'unavailable'");
     expect(source).toContain("setTerminalSessionState('interrupted'");
     expect(source).toContain('activeTerminal.readOnly = true');
     expect(source).toContain(
@@ -103,10 +108,8 @@ describe('Terminal operator console UI', () => {
     expect(other).toHaveBeenCalledTimes(2);
   });
 
-  it('terminalizes process-exit output and never relabels it ready', () => {
+  it('treats sentinel-like output as data and terminalizes only typed lifecycle', () => {
     const source = fs.readFileSync(appPath, 'utf8');
-    const helperStart = source.indexOf('function terminalOutputEndedProcess');
-    const helperEnd = source.indexOf('\n}\n', helperStart) + 3;
     const handlerStart = source.indexOf('let handleWsMessage = function (msg)');
     const handlerEnd = source.indexOf(
       '\n};\n\nfunction bindChatApprovalActions',
@@ -126,10 +129,7 @@ describe('Terminal operator console UI', () => {
       setTerminalSessionState,
       ws: { readyState: 1, send: vi.fn() },
     } as Record<string, unknown>;
-    vm.runInNewContext(
-      source.slice(helperStart, helperEnd) + '\n' + handlerSource,
-      context,
-    );
+    vm.runInNewContext(handlerSource, context);
 
     (context.handleWsMessage as (message: unknown) => void)({
       type: 'terminal_output',
@@ -138,14 +138,21 @@ describe('Terminal operator console UI', () => {
     });
 
     expect((context.activeTerminal as { readOnly: boolean }).readOnly).toBe(
+      false,
+    );
+    expect(setTerminalSessionState).not.toHaveBeenCalled();
+
+    (context.handleWsMessage as (message: unknown) => void)({
+      type: 'terminal_lifecycle',
+      sessionId: 'live-session',
+      data: { state: 'exited', readOnly: true, reason: 'process-exit' },
+    });
+
+    expect((context.activeTerminal as { readOnly: boolean }).readOnly).toBe(
       true,
     );
     expect(setTerminalSessionState).toHaveBeenCalledWith(
       'interrupted',
-      'live-session',
-    );
-    expect(setTerminalSessionState).not.toHaveBeenCalledWith(
-      'ready',
       'live-session',
     );
   });

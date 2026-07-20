@@ -444,15 +444,6 @@ function activeTerminalId() {
     : '';
 }
 
-function terminalOutputEndedProcess(data) {
-  const output = String(data || '');
-  return (
-    output.includes('[Process exited]') ||
-    output.includes('[Session ended — read-only view.') ||
-    output.includes('[Session timed out after')
-  );
-}
-
 const PAGE_ALIASES = {
   terminal: 'devhub',
   developer: 'devhub',
@@ -506,11 +497,7 @@ let handleWsMessage = function (msg) {
     msg.sessionId === activeTerminal.sessionId
   ) {
     activeTerminal.readOnly = msg.data.status === 'historical';
-    if (msg.data.status === 'active') {
-      setTerminalSessionState('ready', msg.sessionId);
-    } else if (msg.data.status === 'historical') {
-      setTerminalSessionState('interrupted', msg.sessionId);
-    } else if (msg.data.status === 'not-found') {
+    if (msg.data.status === 'not-found') {
       setTerminalSessionState('reconnecting', msg.sessionId);
     }
     if (msg.data.status === 'not-found' && ws?.readyState === 1) {
@@ -521,11 +508,31 @@ let handleWsMessage = function (msg) {
     return;
   }
   if (
+    msg.type === 'terminal_lifecycle' &&
+    activeTerminal &&
+    msg.sessionId === activeTerminal.sessionId
+  ) {
+    if (msg.data.state === 'ready') {
+      activeTerminal.readOnly = false;
+      setTerminalSessionState('ready', msg.sessionId);
+    } else if (
+      msg.data.state === 'historical' ||
+      msg.data.state === 'exited' ||
+      msg.data.state === 'idle-timeout'
+    ) {
+      activeTerminal.readOnly = true;
+      setTerminalSessionState('interrupted', msg.sessionId);
+    } else if (msg.data.state === 'unavailable') {
+      activeTerminal.readOnly = true;
+      setTerminalSessionState('unavailable', msg.sessionId);
+    }
+    return;
+  }
+  if (
     msg.type === 'terminal_denied' &&
     activeTerminal &&
     msg.sessionId === activeTerminal.sessionId
   ) {
-    setTerminalSessionState('unavailable', msg.sessionId);
     activeTerminal.term.write(
       `\r\n[Permission denied: ${msg.data.reason || 'terminal operation denied'}]\r\n`,
     );
@@ -540,12 +547,6 @@ let handleWsMessage = function (msg) {
     activeTerminal.term.write(msg.data.replace(/\n/g, '\r\n'));
     activeTerminal.transcript =
       (activeTerminal.transcript || '') + String(msg.data || '');
-    if (terminalOutputEndedProcess(msg.data)) {
-      activeTerminal.readOnly = true;
-      setTerminalSessionState('interrupted', msg.sessionId);
-    } else if (!activeTerminal.readOnly) {
-      setTerminalSessionState('ready', msg.sessionId);
-    }
     return;
   }
   // Browser notifications for new messages
