@@ -289,6 +289,88 @@ describe('NanoWorkSession surface merging', () => {
     });
   });
 
+  it('collapses an exact route fallback copy even when its type is relabeled', () => {
+    const session = loadWorkSession().normalize(
+      {},
+      {
+        timeline: [
+          {
+            id: 'session-tests',
+            timestamp: '2026-07-20T10:03:00.000Z',
+            type: 'test',
+            title: 'Focused tests passed',
+            detail: 'Route tests passed.',
+          },
+        ],
+      },
+      {},
+      {
+        events: [
+          {
+            id: 'session-tests',
+            type: 'progress',
+            groupJid: 'main',
+            timestamp: '2026-07-20T10:03:00.000Z',
+            title: 'Focused tests passed',
+            detail: 'Route tests passed.',
+            status: 'completed',
+          },
+        ],
+      },
+    );
+
+    expect(session.timeline).toHaveLength(1);
+    expect(session.timeline[0]).toMatchObject({
+      id: 'session-tests',
+      type: 'test',
+      title: 'Focused tests passed',
+      detail: 'Route tests passed.',
+    });
+  });
+
+  it('preserves same-ID cross-surface events with distinct content or time', () => {
+    const adapter = loadWorkSession();
+    const cockpitEvent = {
+      id: 'shared-progress',
+      timestamp: '2026-07-20T10:03:00.000Z',
+      type: 'test',
+      title: 'Focused tests passed',
+      detail: 'Route tests passed.',
+    };
+
+    const distinctContent = adapter.normalize(
+      {},
+      { timeline: [cockpitEvent] },
+      {},
+      {
+        events: [
+          {
+            ...cockpitEvent,
+            type: 'progress',
+            detail: 'A different test payload.',
+          },
+        ],
+      },
+    );
+    const distinctTime = adapter.normalize(
+      {},
+      { timeline: [cockpitEvent] },
+      {},
+      {
+        events: [
+          {
+            ...cockpitEvent,
+            type: 'progress',
+            timestamp: '2026-07-20T10:04:00.000Z',
+          },
+        ],
+      },
+    );
+
+    expect(distinctContent.timeline).toHaveLength(2);
+    expect(distinctTime.timeline).toHaveLength(2);
+  });
+
   it('derives progress from the latest chronologically valid numeric progress event', () => {
     const session = loadWorkSession().normalize({}, {}, {}, [
       {

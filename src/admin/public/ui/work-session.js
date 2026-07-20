@@ -66,6 +66,25 @@
     return Number.isFinite(parsed) ? parsed : null;
   }
 
+  function exactEventContentIdentity(stableId, event) {
+    if (
+      !stableId ||
+      (typeof event.timestamp !== 'string' &&
+        typeof event.timestamp !== 'number') ||
+      typeof event.title !== 'string' ||
+      typeof event.detail !== 'string'
+    ) {
+      return '';
+    }
+    return JSON.stringify([
+      stableId,
+      typeof event.timestamp,
+      event.timestamp,
+      event.title,
+      event.detail,
+    ]);
+  }
+
   function normalizedTimeline(cockpit, streamEvents) {
     var stream = Array.isArray(streamEvents)
       ? streamEvents
@@ -73,13 +92,29 @@
     var candidates = [];
 
     if (Array.isArray(cockpit.timeline)) {
-      candidates = candidates.concat(cockpit.timeline);
+      cockpit.timeline.forEach(function (event) {
+        candidates.push({ event: event, source: 'cockpit' });
+      });
     }
-    if (Array.isArray(stream)) candidates = candidates.concat(stream);
+    if (Array.isArray(stream)) {
+      stream.forEach(function (event) {
+        candidates.push({ event: event, source: 'stream' });
+      });
+    }
 
     var seenIdentities = new Map();
+    var seenContentIdentities = new Map();
     var accepted = [];
-    candidates.forEach(function (candidate, order) {
+    function rememberContentIdentity(identity, index) {
+      if (!identity) return;
+      var indexes = seenContentIdentities.get(identity) || [];
+      if (indexes.indexOf(index) === -1) indexes.push(index);
+      seenContentIdentities.set(identity, indexes);
+    }
+
+    candidates.forEach(function (candidateEntry, order) {
+      var candidate = candidateEntry.event;
+      var source = candidateEntry.source;
       if (!isRecord(candidate)) return;
       var time = timestampValue(candidate.timestamp);
       if (time === null) return;
@@ -95,9 +130,12 @@
             : '';
       var eventType = candidate.type.trim().toLowerCase();
       var identity = stableId ? JSON.stringify([stableId, eventType]) : '';
+      var contentIdentity = exactEventContentIdentity(stableId, candidate);
       var item = {
+        contentIdentity: contentIdentity,
         event: cloneValue(candidate),
         order: order,
+        source: source,
         time: time,
       };
       // Stable ID and lifecycle type identify one logical event. This keeps a
@@ -107,10 +145,27 @@
         var existingIndex = seenIdentities.get(identity);
         if (time >= accepted[existingIndex].time) {
           accepted[existingIndex] = item;
+          rememberContentIdentity(contentIdentity, existingIndex);
         }
         return;
       }
+
+      // The sessions fallback endpoint copies timestamp/title/detail exactly
+      // but can relabel the event type. Collapse that representation only when
+      // the matching payload came from the other surface.
+      var contentIndexes = seenContentIdentities.get(contentIdentity) || [];
+      var isCrossSurfaceCopy = contentIndexes.some(function (index) {
+        var existing = accepted[index];
+        return (
+          existing &&
+          existing.contentIdentity === contentIdentity &&
+          existing.source !== source
+        );
+      });
+      if (contentIdentity && isCrossSurfaceCopy) return;
+
       if (identity) seenIdentities.set(identity, accepted.length);
+      rememberContentIdentity(contentIdentity, accepted.length);
       accepted.push(item);
     });
 
