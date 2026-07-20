@@ -7,6 +7,31 @@ const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
 
 describe('Terminal operator console UI', () => {
+  it('maps live terminal connectivity into shared work-session states', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+
+    expect(source).toContain(
+      'function terminalSessionViewModel(kind, sessionId)',
+    );
+    expect(source).toContain('window.NanoWorkSession.normalize(');
+    expect(source).toContain(
+      'function renderTerminalSessionState(kind, sessionId)',
+    );
+    expect(source).toContain('id="terminal-session-state"');
+    expect(source).toContain('Loading terminal session');
+    expect(source).toContain('Terminal ready');
+    expect(source).toContain('Interrupted session · transcript only');
+    expect(source).toContain('Terminal unavailable');
+    expect(source).toContain('Reconnecting terminal');
+    expect(source).toContain("isReadOnly: kind === 'interrupted'");
+    expect(source).toContain('canResume: false');
+    expect(source).toContain("setTerminalSessionState('ready'");
+    expect(source).toContain("setTerminalSessionState('interrupted'");
+    expect(source).toContain("setTerminalSessionState('unavailable'");
+    expect(source).toContain("setTerminalSessionState('reconnecting'");
+    expect(source).not.toContain('data-work-session-action="resume"');
+  });
+
   it('frames terminal as an owner-only operator console', () => {
     const source = fs.readFileSync(appPath, 'utf8');
 
@@ -213,6 +238,7 @@ describe('Terminal operator console UI', () => {
       .replace('let handleWsMessage =', 'globalThis.handleWsMessage =');
     const send = vi.fn();
     const context = {
+      setTerminalSessionState: vi.fn(),
       activeTerminal: {
         sessionId: 'historical-session',
         readOnly: false,
@@ -246,6 +272,7 @@ describe('Terminal operator console UI', () => {
       .replace('let handleWsMessage =', 'globalThis.handleWsMessage =');
     const send = vi.fn();
     const context = {
+      setTerminalSessionState: vi.fn(),
       activeTerminal: {
         sessionId: 'fresh-session',
         readOnly: false,

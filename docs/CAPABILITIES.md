@@ -33,12 +33,28 @@ Chat/Cowork/Code/More bottom bar. The inspector becomes a bottom sheet. More is
 a mutually exclusive tool drawer at every size; opening it closes the inspector
 and closing either layer restores focus to its trigger.
 
+## Unified Work Sessions
+
+The Sessions cockpit (`#/sessions`) normalizes Chat, Cowork, Code, routine, and
+terminal work into the same status, progress, timeline, tool-call, file,
+proposal, approval, and artifact vocabulary. Chat shows the shared run strip
+only while an agent run is active. **Promote to Cowork** and **Promote to Code**
+are explicit handoffs: they remember the selected destination and navigate to
+the existing Cowork projects or Code workspace without moving or copying plain
+messages automatically.
+
+The Terminal tab maps WebSocket state into the same run strip with explicit
+loading, ready, reconnecting, unavailable, and interrupted states. A transcript
+recovered after restart is read-only and never presents Resume as though the
+shell process still exists.
+
 ## Capability Matrix
 
 | Capability                                | UI route                                          | Backend/API                                                                                               | Command or MCP path                                                                                                 | Status                                                            |
 | ----------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | Today overview                            | `#/dashboard`                                     | Dashboard metrics, alerts, and current-work APIs                                                          | Dashboard home action                                                                                               | Ready                                                             |
 | Chat                                      | `#/chat`                                          | `/api/threads`, `/api/chat`, web channel runtime                                                          | Dashboard chat thread composer                                                                                      | Ready                                                             |
+| Unified work sessions                     | `#/sessions`, Chat run strip, Terminal tab        | `/api/sessions`, `/api/sessions/cockpit`, session streams, terminal WebSocket                             | Explicit Chat-to-Cowork/Code handoff; shared session inspector                                                      | Ready                                                             |
 | Cowork projects                           | `#/projects`                                      | `/api/projects`, project files, context, runs, approvals                                                  | Channel workspace-intent prompts can resolve Cowork projects                                                        | Ready                                                             |
 | Git & Code workspace                      | `#/gitcode`                                       | `/api/files/repos`, `/api/dev/git/*`, `/api/dev/test/*`, `/api/dev/snippets`, `/api/dev/review-rules`     | Main group `/code ...` commands and coding-job MCP tools                                                            | Ready                                                             |
 | GitHub Autofix                            | `#/autofix`                                       | `/api/autofix/*`, GitHub webhook route                                                                    | GitHub issue label or dashboard workbench                                                                           | Ready                                                             |
@@ -89,10 +105,10 @@ nodes, voice/media workflows, and plugin ecosystem scale.
 
 ## Known Product Gaps
 
-| Gap                         | Current status                                                                                     | Preferred next move                                                                                                            |
-| --------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Focus Stack follow-on depth | Slice 1 provides Today, stable modes, route context, the layered shell, and responsive navigation. | Deliver unified-session, knowledge-production, and personal-operations slices separately; they are not part of the foundation. |
-| Documentation drift         | README, User Guide, roadmap, and Help exist but can fall out of sync.                              | Keep this file current whenever a feature gains or loses a route, command, or MCP path.                                        |
-| Channel breadth             | WhatsApp, Telegram, Signal, Slack, Discord, and web threads are supported.                         | Add voice/media-specific workflows only when they have concrete operator demand.                                               |
-| Native/mobile control nodes | Not a core NanoCrab surface today.                                                                 | Treat as plugin or companion app work, not core runtime expansion.                                                             |
-| Autonomous learning loop    | Skills and memories are governed and review-first.                                                 | Add "learn from this run" prompts that create reviewable memory or skill proposals.                                            |
+| Gap                         | Current status                                                                                                       | Preferred next move                                                                     |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Focus Stack follow-on depth | Slice 1 provides the shell and Slice 2 provides unified work-session monitoring and explicit Chat/Terminal handoffs. | Deliver knowledge-production and personal-operations slices separately.                 |
+| Documentation drift         | README, User Guide, roadmap, and Help exist but can fall out of sync.                                                | Keep this file current whenever a feature gains or loses a route, command, or MCP path. |
+| Channel breadth             | WhatsApp, Telegram, Signal, Slack, Discord, and web threads are supported.                                           | Add voice/media-specific workflows only when they have concrete operator demand.        |
+| Native/mobile control nodes | Not a core NanoCrab surface today.                                                                                   | Treat as plugin or companion app work, not core runtime expansion.                      |
+| Autonomous learning loop    | Skills and memories are governed and review-first.                                                                   | Add "learn from this run" prompts that create reviewable memory or skill proposals.     |

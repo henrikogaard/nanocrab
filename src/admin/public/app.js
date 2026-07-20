@@ -381,6 +381,9 @@ function connectWs() {
   ws = new WebSocket(url);
   ws.onopen = () => {
     console.log('WS connected');
+    if (activeTerminal) {
+      setTerminalSessionState('reconnecting', activeTerminal.sessionId);
+    }
     const savedSessionId = localStorage.getItem('terminal_session_id');
     if (savedSessionId) {
       ws.send(
@@ -396,6 +399,9 @@ function connectWs() {
   ws.onclose = (e) => {
     console.log('WS closed:', e.code, e.reason);
     ws = null;
+    if (activeTerminal) {
+      setTerminalSessionState('unavailable', activeTerminal.sessionId);
+    }
     if (!window._mockMode) {
       wsReconnectTimer = setTimeout(connectWs, 5000);
     }
@@ -460,6 +466,13 @@ let handleWsMessage = function (msg) {
     msg.sessionId === activeTerminal.sessionId
   ) {
     activeTerminal.readOnly = msg.data.status === 'historical';
+    if (msg.data.status === 'active') {
+      setTerminalSessionState('ready', msg.sessionId);
+    } else if (msg.data.status === 'historical') {
+      setTerminalSessionState('interrupted', msg.sessionId);
+    } else if (msg.data.status === 'not-found') {
+      setTerminalSessionState('reconnecting', msg.sessionId);
+    }
     if (msg.data.status === 'not-found' && ws?.readyState === 1) {
       ws.send(
         JSON.stringify({ type: 'terminal_spawn', data: msg.sessionId }),
@@ -472,6 +485,7 @@ let handleWsMessage = function (msg) {
     activeTerminal &&
     msg.sessionId === activeTerminal.sessionId
   ) {
+    setTerminalSessionState('unavailable', msg.sessionId);
     activeTerminal.term.write(
       `\r\n[Permission denied: ${msg.data.reason || 'terminal operation denied'}]\r\n`,
     );
@@ -486,6 +500,9 @@ let handleWsMessage = function (msg) {
     activeTerminal.term.write(msg.data.replace(/\n/g, '\r\n'));
     activeTerminal.transcript =
       (activeTerminal.transcript || '') + String(msg.data || '');
+    if (!activeTerminal.readOnly) {
+      setTerminalSessionState('ready', msg.sessionId);
+    }
     return;
   }
   // Browser notifications for new messages
@@ -12927,6 +12944,47 @@ function terminalHandoffPromptText(state) {
   ].join('\n');
 }
 
+function terminalSessionViewModel(kind, sessionId) {
+  const states = {
+    loading: { status: 'running', step: 'Loading terminal session' },
+    ready: { status: 'running', step: 'Terminal ready' },
+    interrupted: {
+      status: 'interrupted',
+      step: 'Interrupted session · transcript only',
+    },
+    unavailable: { status: 'failed', step: 'Terminal unavailable' },
+    reconnecting: { status: 'running', step: 'Reconnecting terminal' },
+  };
+  const state = states[kind] || states.unavailable;
+  const model = window.NanoWorkSession.normalize({
+    id: 'terminal:' + (sessionId || 'pending'),
+    status: state.status,
+    currentStep: state.step,
+    isReadOnly: kind === 'interrupted',
+    canCancel: false,
+    canResume: false,
+    canRetry: false,
+  });
+  model.isReadOnly = kind === 'interrupted';
+  model.canCancel = false;
+  model.canResume = false;
+  model.canRetry = false;
+  return model;
+}
+
+function renderTerminalSessionState(kind, sessionId) {
+  return window.NanoWorkSession.renderRunStrip(
+    terminalSessionViewModel(kind, sessionId),
+  );
+}
+
+function setTerminalSessionState(kind, sessionId) {
+  const container = document.getElementById('terminal-session-state');
+  if (!container) return;
+  container.dataset.terminalState = kind;
+  container.innerHTML = renderTerminalSessionState(kind, sessionId);
+}
+
 async function renderTerminal(el) {
   if ((window._userRole || 'owner') !== 'owner') {
     el.innerHTML = renderTerminalAccessState();
@@ -13007,6 +13065,7 @@ async function renderTerminal(el) {
           </div>
           <div class="pane-content" id="pane-left-content">
             <div class="tab-content active" id="left-terminal">
+              <div id="terminal-session-state" data-terminal-state="loading">${renderTerminalSessionState('loading', localStorage.getItem('terminal_session_id') || '')}</div>
               <div id="terminal-container" class="terminal-xterm-container"></div>
             </div>
             <div class="tab-content is-hidden" id="left-files">
@@ -13169,6 +13228,7 @@ async function renderTerminal(el) {
         ws.send(JSON.stringify({ type: 'terminal_attach', sessionId }));
       } else if (attempts > 20) {
         clearInterval(check);
+        setTerminalSessionState('unavailable', sessionId);
         term.write('\r\nFailed to connect. Check WebSocket.\r\n');
       }
     }, 500);
@@ -13617,6 +13677,7 @@ window.reconnectTerminal = function () {
   const input = document.getElementById('terminal-session-id');
   const sessionId = input?.value;
   if (!sessionId || !activeTerminal) return;
+  setTerminalSessionState('reconnecting', sessionId);
   localStorage.setItem('terminal_session_id', sessionId);
   if (activeTerminal.term) {
     activeTerminal.sessionId = sessionId;

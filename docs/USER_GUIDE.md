@@ -63,6 +63,27 @@ menu for route navigation, and **Details** for the bottom-sheet inspector. The
 page remains the only main landmark and scrolls vertically without horizontal
 overflow.
 
+### Following active work
+
+Open **Sessions** to monitor Chat, Cowork, Code, routine, and terminal work in a
+single cockpit. Select a run to see its shared status/progress strip and inspect
+the timeline, tools, changed files, proposals, approvals, and artifacts. The
+same vocabulary is reused on the originating surfaces, so status does not
+change meaning when you move between workspaces.
+
+In a Chat thread, the run strip appears only while an agent run is active. Use
+**Promote to Cowork** when the next step needs an existing project, files,
+approved MCP tools, or durable artifacts. Use **Promote to Code** when it needs
+a repository, diff, tests, or PR handoff. Promotion records the destination and
+opens the existing workspace; it does not automatically move or copy the plain
+chat messages.
+
+In **Code -> Terminal**, the strip below the Terminal tab reports loading,
+ready, reconnecting, unavailable, or interrupted. An interrupted transcript
+recovered after a NanoCrab restart is read-only. Start a new terminal session
+to continue; a Resume action is intentionally not shown because the old shell
+process no longer exists.
+
 ### Capability overview
 
 See [CAPABILITIES.md](CAPABILITIES.md) for the current feature matrix, including

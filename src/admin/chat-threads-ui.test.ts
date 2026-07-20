@@ -9,6 +9,24 @@ const scriptPath = path.join(
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
 
 describe('WebChat new conversation start surface', () => {
+  it('shows shared run state only for active work and keeps promotions explicit', () => {
+    const source = fs.readFileSync(scriptPath, 'utf8');
+
+    expect(source).toContain('function renderActiveChatRun(session)');
+    expect(source).toContain('window.NanoWorkSession.renderRunStrip(session)');
+    expect(source).toContain('id="thread-run-strip"');
+    expect(source).toContain("status: 'running'");
+    expect(source).toContain('function isActiveChatRun(session)');
+    expect(source).toContain('data-webchat-action="promote-thread"');
+    expect(source).toContain('data-promotion-destination="cowork"');
+    expect(source).toContain('data-promotion-destination="code"');
+    expect(source).toContain("sessionStorage.setItem('work_session_promotion'");
+    expect(source).toContain("navigate('projects')");
+    expect(source).toContain("navigate('gitcode')");
+    expect(source).not.toContain('onclick="promote');
+    expect(source).not.toContain("api('/threads/promote'");
+  });
+
   it('creates plain chat threads from the configured model picker, not agent templates', () => {
     const source = fs.readFileSync(scriptPath, 'utf8');
 
