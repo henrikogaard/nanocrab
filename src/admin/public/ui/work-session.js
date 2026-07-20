@@ -1,12 +1,12 @@
 (function () {
-  var supportedStatuses = {
-    running: true,
-    waiting_approval: true,
-    failed: true,
-    completed: true,
-    cancelled: true,
-    interrupted: true,
-  };
+  var supportedStatuses = new Set([
+    'running',
+    'waiting_approval',
+    'failed',
+    'completed',
+    'cancelled',
+    'interrupted',
+  ]);
 
   function isRecord(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -22,7 +22,12 @@
 
     var copy = {};
     Object.keys(value).forEach(function (key) {
-      copy[key] = cloneValue(value[key]);
+      Object.defineProperty(copy, key, {
+        configurable: true,
+        enumerable: true,
+        value: cloneValue(value[key]),
+        writable: true,
+      });
     });
     return copy;
   }
@@ -51,7 +56,7 @@
   function normalizeStatus(value) {
     if (typeof value !== 'string') return 'unknown';
     var status = value.trim().toLowerCase();
-    return supportedStatuses[status] ? status : 'unknown';
+    return supportedStatuses.has(status) ? status : 'unknown';
   }
 
   function timestampValue(value) {
@@ -72,7 +77,7 @@
     }
     if (Array.isArray(stream)) candidates = candidates.concat(stream);
 
-    var seenIds = Object.create(null);
+    var seenIdentities = new Map();
     var accepted = [];
     candidates.forEach(function (candidate, order) {
       if (!isRecord(candidate)) return;
@@ -84,25 +89,28 @@
 
       var stableId =
         typeof candidate.id === 'string' && candidate.id.trim()
-          ? candidate.id
+          ? candidate.id.trim()
           : typeof candidate.id === 'number' && Number.isFinite(candidate.id)
             ? String(candidate.id)
             : '';
+      var eventType = candidate.type.trim().toLowerCase();
+      var identity = stableId ? JSON.stringify([stableId, eventType]) : '';
       var item = {
         event: cloneValue(candidate),
         order: order,
         time: time,
       };
-      // For a stable ID, keep the newest representation. A later source wins
-      // an exact timestamp tie, so stream updates can refresh cockpit events.
-      if (stableId && seenIds[stableId] !== undefined) {
-        var existingIndex = seenIds[stableId];
+      // Stable ID and lifecycle type identify one logical event. This keeps a
+      // tool call and its result distinct even when producers reuse the ID.
+      // Within one identity, newest wins; stream wins an exact timestamp tie.
+      if (identity && seenIdentities.has(identity)) {
+        var existingIndex = seenIdentities.get(identity);
         if (time >= accepted[existingIndex].time) {
           accepted[existingIndex] = item;
         }
         return;
       }
-      if (stableId) seenIds[stableId] = accepted.length;
+      if (identity) seenIdentities.set(identity, accepted.length);
       accepted.push(item);
     });
 

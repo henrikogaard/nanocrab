@@ -71,6 +71,20 @@ describe('NanoWorkSession status and action normalization', () => {
     },
   );
 
+  it('maps every Object prototype key and the prototype magic key to unknown', () => {
+    const adapter = loadWorkSession();
+    const prototypeKeys = [
+      ...Object.getOwnPropertyNames(Object.prototype),
+      'prototype',
+    ];
+
+    expect(
+      [...new Set(prototypeKeys)].map((status) =>
+        adapter.normalizeStatus(status),
+      ),
+    ).toEqual([...new Set(prototypeKeys)].map(() => 'unknown'));
+  });
+
   it.each([
     ['running', true, false, true, false, 'resume'],
     ['waiting_approval', true, false, false, false, 'review_approvals'],
@@ -199,7 +213,7 @@ describe('NanoWorkSession surface merging', () => {
           {
             id: 'shared',
             timestamp: '2026-07-20T10:03:00.000Z',
-            type: 'tool_result',
+            type: 'tool_call',
             title: 'Duplicate stream copy',
           },
         ],
@@ -214,6 +228,65 @@ describe('NanoWorkSession surface merging', () => {
       'shared',
     ]);
     expect(session.timeline.at(-1)?.title).toBe('Duplicate stream copy');
+  });
+
+  it('preserves producer-shaped tool call and result events that share an ID', () => {
+    const session = loadWorkSession().normalize(
+      {},
+      {
+        timeline: [
+          {
+            id: 'tc-stream-1',
+            type: 'tool_call',
+            timestamp: '2026-06-01T12:00:00.000Z',
+            title: 'read_file',
+            detail: 'stale cockpit input',
+            status: 'running',
+          },
+        ],
+      },
+      {},
+      {
+        events: [
+          {
+            id: 'tc-stream-1',
+            type: 'tool_call',
+            groupJid: 'main',
+            timestamp: '2026-06-01T12:00:00.000Z',
+            title: 'read_file',
+            detail: '{"path":"README.md"}',
+            status: 'running',
+            toolName: 'read_file',
+          },
+          {
+            id: 'tc-stream-1',
+            type: 'tool_result',
+            groupJid: 'main',
+            timestamp: '2026-06-01T12:00:00.200Z',
+            title: 'Result tc-stream-1',
+            detail: 'ok',
+            status: 'completed',
+            duration: '0.2',
+          },
+        ],
+      },
+    );
+
+    expect(session.timeline).toHaveLength(2);
+    expect(session.timeline.map((event) => event.type)).toEqual([
+      'tool_call',
+      'tool_result',
+    ]);
+    expect(session.timeline[0]).toMatchObject({
+      id: 'tc-stream-1',
+      detail: '{"path":"README.md"}',
+      toolName: 'read_file',
+    });
+    expect(session.timeline[1]).toMatchObject({
+      id: 'tc-stream-1',
+      detail: 'ok',
+      duration: '0.2',
+    });
   });
 
   it('derives progress from the latest chronologically valid numeric progress event', () => {
@@ -412,5 +485,51 @@ describe('NanoWorkSession surface merging', () => {
     session.changedFiles.push('src/changed.ts');
 
     expect({ summary, cockpit, structured, stream }).toEqual(before);
+  });
+
+  it('clones prototype magic keys as plain data without inherited payloads', () => {
+    const payload = JSON.parse(
+      '{"safeLabel":"renderer-visible","__proto__":{"inheritedPayload":"must-not-inherit"},"constructor":{"prototype":{"constructorPayload":"plain-data"}},"prototype":{"prototypePayload":"plain-data"},"nested":{"safe":true,"__proto__":{"nestedInheritedPayload":"must-not-inherit"}}}',
+    ) as Record<string, unknown>;
+    const objectPrototypeKeys = Object.getOwnPropertyNames(Object.prototype);
+
+    const session = loadWorkSession().normalize({}, { artifacts: [payload] });
+    const artifact = session.artifacts[0];
+    const nested = artifact.nested as Record<string, unknown>;
+
+    expect(Object.getPrototypeOf(artifact)).not.toBeNull();
+    expect(Object.getPrototypeOf(nested)).not.toBeNull();
+    expect(artifact.safeLabel).toBe('renderer-visible');
+    expect(String(artifact)).toBe('[object Object]');
+    expect(String(nested)).toBe('[object Object]');
+    expect(artifact.inheritedPayload).toBeUndefined();
+    expect(nested.nestedInheritedPayload).toBeUndefined();
+    expect(
+      ['__proto__', 'constructor', 'prototype'].every((key) =>
+        Object.prototype.hasOwnProperty.call(artifact, key),
+      ),
+    ).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(nested, '__proto__')).toBe(
+      true,
+    );
+    expect(JSON.parse(JSON.stringify(artifact))).toEqual(payload);
+    expect(Object.getOwnPropertyNames(Object.getPrototypeOf(artifact))).toEqual(
+      objectPrototypeKeys,
+    );
+    expect(Object.getOwnPropertyNames(Object.prototype)).toEqual(
+      objectPrototypeKeys,
+    );
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        Object.prototype,
+        'inheritedPayload',
+      ),
+    ).toBe(false);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        Object.prototype,
+        'nestedInheritedPayload',
+      ),
+    ).toBe(false);
   });
 });
