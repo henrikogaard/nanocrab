@@ -229,6 +229,7 @@ function initWorkspaceInspector() {
   document.addEventListener('keydown', (event) => {
     const inspector = document.getElementById('workspace-inspector');
     if (
+      event.defaultPrevented ||
       event.key !== 'Escape' ||
       !inspector?.classList.contains('is-open')
     ) {

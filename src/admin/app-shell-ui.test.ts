@@ -536,6 +536,7 @@ describe('App shell accessibility UI', () => {
 
     expect(initSource).toContain('workspaceInspectorEscapeReady');
     expect(initSource).toContain("document.addEventListener('keydown'");
+    expect(initSource).toContain('event.defaultPrevented');
     expect(initSource).toContain("event.key !== 'Escape'");
     expect(initSource).toContain("classList.contains('is-open')");
     expect(initSource).toContain('setWorkspaceInspectorState(false)');

@@ -7,6 +7,7 @@ const publicRoot = path.join(process.cwd(), 'src/admin/public');
 const scriptPaths = [
   path.join(publicRoot, 'modes.js'),
   path.join(publicRoot, 'ui/shell-navigation.js'),
+  path.join(publicRoot, 'ui/command-palette.js'),
   path.join(publicRoot, 'ui/workspace-shell.js'),
   path.join(publicRoot, 'pages/dashboard.js'),
   path.join(publicRoot, 'app.js'),
@@ -14,6 +15,7 @@ const scriptPaths = [
 
 type FakeEvent = {
   key?: string;
+  defaultPrevented?: boolean;
   preventDefault(): void;
 };
 
@@ -58,6 +60,7 @@ class FakeElement {
   readonly style = { setProperty: () => {} };
   focusCount = 0;
   textContent = '';
+  value = '';
   private html = '';
 
   constructor(
@@ -121,6 +124,11 @@ class FakeElement {
     this.ownerDocument.activeElement = this;
   }
 
+  appendChild(child: FakeElement) {
+    this.ownerDocument.appendElement(child);
+    return child;
+  }
+
   querySelector(selector: string) {
     return this.ownerDocument.queryWithin(this, selector);
   }
@@ -153,6 +161,7 @@ class FakeDocument {
   activeElement: FakeElement = this.body;
   cookie = '';
   hidden = false;
+  readyState = 'complete';
 
   getElementById(id: string) {
     return this.elements.find((element) => element.id === id) || null;
@@ -191,6 +200,15 @@ class FakeDocument {
     return new FakeElement(this, tagName.toUpperCase());
   }
 
+  appendElement(element: FakeElement) {
+    if (!this.elements.includes(element)) this.elements.push(element);
+    if (element.id !== 'nc-command-palette') return;
+    this.elements.push(
+      new FakeElement(this, 'INPUT', '', 'cp-input'),
+      new FakeElement(this, 'DIV', '', 'cp-results'),
+    );
+  }
+
   addEventListener(type: string, listener: (event: FakeEvent) => void) {
     const listeners = this.listeners.get(type) || [];
     listeners.push(listener);
@@ -215,11 +233,28 @@ class FakeDocument {
     if (parent.id === 'more-drawer' && selector === '.more-close') {
       return this.querySelector(selector);
     }
+    if (
+      parent.id === 'nc-command-palette' &&
+      (selector === '.cp-input' || selector === '.cp-results')
+    ) {
+      return this.querySelector(selector);
+    }
     return null;
   }
 
   mountShell(html: string) {
-    this.elements.splice(1);
+    this.elements.splice(
+      1,
+      this.elements.length - 1,
+      ...this.elements
+        .slice(1)
+        .filter(
+          (element) =>
+            element.id === 'nc-command-palette' ||
+            element.classList.contains('cp-input') ||
+            element.classList.contains('cp-results'),
+        ),
+    );
     const attr = (tag: string, name: string) =>
       tag.match(new RegExp(`${name}="([^"]*)"`))?.[1] || '';
     const tagForClass = (className: string) =>
@@ -317,6 +352,7 @@ type ShellHarness = {
   toggleMore(trigger?: FakeElement): void;
   activateInlineMore(trigger: FakeElement): void;
   closeMore(): void;
+  palette: { open(): void; close(): void };
 };
 
 function loadShellHarness(initialHash = '', persistedMode = ''): ShellHarness {
@@ -425,6 +461,7 @@ function loadShellHarness(initialHash = '', persistedMode = ''): ShellHarness {
       else throw new Error(`Unexpected inline More handler: ${handler}`);
     },
     closeMore: context.closeMoreDrawer as () => void,
+    palette: context.NanoCommandPalette as ShellHarness['palette'],
   };
 }
 
@@ -458,6 +495,63 @@ describe('Focus Stack executable shell integration', () => {
     expect(listenerCount).toBeGreaterThan(0);
     harness.showShell('reports');
     expect(harness.document.listenerCount('keydown')).toBe(listenerCount);
+  });
+
+  it('dismisses the command palette before its underlying inspector on layered Escape', () => {
+    const harness = loadShellHarness('#/reports');
+    harness.showShell('reports');
+    const trigger = harness.document.querySelector(
+      '.focus-stack-inspector-trigger',
+    )!;
+    const inspector = harness.document.getElementById('workspace-inspector')!;
+    const inspectorClose = harness.document.querySelector(
+      '.focus-stack-inspector-close',
+    )!;
+    const paletteOverlay =
+      harness.document.getElementById('nc-command-palette')!;
+    const paletteInput = harness.document.querySelector('.cp-input')!;
+
+    harness.toggleInspector(trigger);
+    harness.palette.open();
+    expect(harness.document.activeElement).toBe(paletteInput);
+
+    let palettePrevented = false;
+    const firstEscape: FakeEvent = {
+      key: 'Escape',
+      get defaultPrevented() {
+        return palettePrevented;
+      },
+      preventDefault() {
+        palettePrevented = true;
+      },
+    };
+    paletteInput.dispatch('keydown', firstEscape);
+    harness.document.dispatch('keydown', firstEscape);
+
+    expect(palettePrevented).toBe(true);
+    expect(paletteOverlay.classList.contains('cp-visible')).toBe(false);
+    expect(paletteOverlay.getAttribute('aria-hidden')).toBe('true');
+    expect(inspector.classList.contains('is-open')).toBe(true);
+    expect(inspector.hasAttribute('inert')).toBe(false);
+    expect(inspector.getAttribute('aria-hidden')).toBe('false');
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(harness.document.activeElement).toBe(inspectorClose);
+
+    let inspectorPrevented = false;
+    harness.document.dispatch('keydown', {
+      key: 'Escape',
+      defaultPrevented: false,
+      preventDefault() {
+        inspectorPrevented = true;
+      },
+    });
+
+    expect(inspectorPrevented).toBe(true);
+    expect(inspector.classList.contains('is-open')).toBe(false);
+    expect(inspector.hasAttribute('inert')).toBe(true);
+    expect(inspector.getAttribute('aria-hidden')).toBe('true');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(harness.document.activeElement).toBe(trigger);
   });
 
   it('uses Code for a direct Sessions route without a persisted mode', () => {
