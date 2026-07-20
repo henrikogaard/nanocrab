@@ -1,6 +1,6 @@
 # Focus Stack Foundation Design QA
 
-Date: 2026-07-20  
+Date: 2026-07-20
 Scope: issue #158, Slice 1 shell foundation and audited route polish
 
 ## Review gate
