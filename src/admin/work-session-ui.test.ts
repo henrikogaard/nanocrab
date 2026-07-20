@@ -7,6 +7,7 @@ const workSessionPath = path.join(
   process.cwd(),
   'src/admin/public/ui/work-session.js',
 );
+const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
 
 type WorkSessionViewModel = {
   id: string;
@@ -38,6 +39,12 @@ type WorkSessionAdapter = {
   ): WorkSessionViewModel;
   normalizeStatus(value: unknown): string;
   nextAction(session: Partial<WorkSessionViewModel>): string | null;
+  renderRunStrip(session: Partial<WorkSessionViewModel>): string;
+  renderTimeline(session: Partial<WorkSessionViewModel>): string;
+  renderInspector(
+    session: Partial<WorkSessionViewModel>,
+    activeTab?: string,
+  ): string;
 };
 
 function loadWorkSession(): WorkSessionAdapter {
@@ -613,5 +620,190 @@ describe('NanoWorkSession surface merging', () => {
         'nestedInheritedPayload',
       ),
     ).toBe(false);
+  });
+});
+
+describe('NanoWorkSession shared views', () => {
+  const session: WorkSessionViewModel = {
+    id: 'session-42',
+    group: 'main',
+    mode: 'code',
+    status: 'waiting_approval',
+    currentStep: 'Review the proposed patch',
+    startedAt: '2026-07-20T10:00:00.000Z',
+    updatedAt: '2026-07-20T10:04:00.000Z',
+    progressPct: 64,
+    timeline: [
+      {
+        id: 'event-1',
+        type: 'progress',
+        timestamp: '2026-07-20T10:04:00.000Z',
+        title: 'Patch ready',
+        detail: 'Waiting for review',
+      },
+    ],
+    toolCalls: [{ id: 'tool-1', name: 'apply_patch' }],
+    changedFiles: ['src/admin/public/ui/work-session.js'],
+    artifacts: [{ id: 'artifact-1', title: 'Review report' }],
+    proposals: [{ id: 'proposal-1', title: 'Update the session shell' }],
+    approvals: [
+      { id: 'approval-1', status: 'pending', title: 'Apply the patch' },
+      { id: 'approval-2', status: 'approved', title: 'Run focused tests' },
+    ],
+    canCancel: true,
+    canRetry: false,
+    canResume: false,
+    isReadOnly: false,
+  };
+
+  it('renders a live run strip with readable status, progress, counters, and allowed actions', () => {
+    const html = loadWorkSession().renderRunStrip(session);
+
+    expect(html).toContain('class="work-session-run-strip"');
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain('Waiting for approval');
+    expect(html).toContain('Review the proposed patch');
+    expect(html).toContain('<progress');
+    expect(html).toContain('value="64"');
+    expect(html).toContain('64%');
+    expect(html).toContain('class="work-session-counter"');
+    expect(html).toContain('Pending approvals');
+    expect(html).toContain('<strong>1</strong>');
+    expect(html).toContain('data-work-session-action="review_approvals"');
+    expect(html).toContain('data-work-session-action="cancel"');
+    expect(html).toContain('data-session-id="session-42"');
+    expect(html).not.toContain('data-work-session-action="retry"');
+  });
+
+  it('does not render Cancel or Retry when the session capabilities disallow them', () => {
+    const html = loadWorkSession().renderRunStrip({
+      ...session,
+      status: 'completed',
+      canCancel: false,
+      canRetry: false,
+      canResume: true,
+    });
+
+    expect(html).toContain('data-work-session-action="resume"');
+    expect(html).not.toContain('data-work-session-action="cancel"');
+    expect(html).not.toContain('data-work-session-action="retry"');
+  });
+
+  it('renders an ordered timeline and escapes producer-controlled content', () => {
+    const html = loadWorkSession().renderTimeline({
+      ...session,
+      timeline: [
+        ...session.timeline,
+        {
+          type: 'tool_result',
+          timestamp: '2026-07-20T10:05:00.000Z',
+          title: '<img src=x onerror=alert(1)>',
+          detail: 'Result & evidence',
+        },
+      ],
+    });
+
+    expect(html).toContain('<ol class="work-session-timeline"');
+    expect(html).toContain('Patch ready');
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(html).toContain('Result &amp; evidence');
+    expect(html).not.toContain('<img src=x');
+  });
+
+  it('treats a timeline with only malformed entries as explicitly empty', () => {
+    const html = loadWorkSession().renderTimeline({
+      ...session,
+      timeline: [null, 'not-an-event'] as unknown as Array<
+        Record<string, unknown>
+      >,
+    });
+
+    expect(html).toContain('<ol class="work-session-timeline"');
+    expect(html).toContain('No timeline recorded');
+  });
+
+  it('renders exactly the seven inspector tabs with dialog and tab semantics', () => {
+    const html = loadWorkSession().renderInspector(session, 'approvals');
+
+    expect(html).toContain('class="work-session-inspector"');
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('aria-modal="true"');
+    expect(html).toContain('tabindex="-1"');
+    expect(html).toContain('role="tablist"');
+    expect((html.match(/role="tab"/g) || []).length).toBe(7);
+    expect((html.match(/data-work-session-tab=/g) || []).length).toBe(7);
+    expect(html).toContain('data-work-session-tab="approvals"');
+    expect(html).toContain('aria-selected="true"');
+    expect(html).toContain('role="tabpanel"');
+    expect(html).toContain('id="work-session-session-42-approvals-tab"');
+    expect(html).toContain(
+      'aria-labelledby="work-session-session-42-approvals-tab"',
+    );
+    expect(html).toContain('Pending approvals');
+    expect(html).toContain('<strong>1</strong>');
+    expect(html).toContain('Apply the patch');
+  });
+
+  it.each([
+    ['timeline', 'No timeline recorded'],
+    ['tools', 'No tool calls recorded'],
+    ['files', 'No files recorded'],
+    ['proposals', 'No proposals recorded'],
+    ['approvals', 'No approvals recorded'],
+    ['artifacts', 'No artifacts recorded'],
+  ])('renders an explicit empty state for the %s tab', (tab, message) => {
+    const html = loadWorkSession().renderInspector(
+      {
+        ...session,
+        timeline: [],
+        toolCalls: [],
+        changedFiles: [],
+        proposals: [],
+        approvals: [],
+        artifacts: [],
+      },
+      tab,
+    );
+
+    expect(html).toContain(message);
+  });
+
+  it('falls back to Overview for an unsupported tab and escapes session IDs in actions', () => {
+    const adapter = loadWorkSession();
+    const inspector = adapter.renderInspector(session, 'constructor');
+    const strip = adapter.renderRunStrip({
+      ...session,
+      id: 'session-42" onmouseover="alert(1)',
+    });
+
+    expect(inspector).toContain('data-work-session-tab="overview"');
+    expect(inspector).toContain('aria-selected="true"');
+    expect(inspector).toContain('Session overview');
+    expect(strip).toContain(
+      'data-session-id="session-42&quot; onmouseover=&quot;alert(1)"',
+    );
+    expect(strip).not.toContain('data-session-id="session-42" onmouseover=');
+  });
+
+  it('defines token-based responsive run-strip and inspector layouts for a 390px viewport', () => {
+    const style = fs.readFileSync(stylePath, 'utf8');
+    const responsiveStart = style.indexOf(
+      '@media (max-width: 480px) {\n  .work-session-run-strip',
+    );
+    const responsive = style.slice(responsiveStart);
+
+    expect(style).toContain('.work-session-run-strip');
+    expect(style).toContain('.work-session-counter');
+    expect(style).toContain('.work-session-inspector');
+    expect(style).toContain('.work-session-tabs');
+    expect(style).toContain('background: var(--surface)');
+    expect(style).toContain('border: 1px solid var(--border)');
+    expect(responsiveStart).toBeGreaterThan(-1);
+    expect(responsive).toContain('grid-template-columns: 1fr');
+    expect(responsive).toContain('.work-session-run-status');
+    expect(responsive).toContain('.work-session-actions');
+    expect(responsive).toContain('position: fixed');
+    expect(responsive).toContain('inset: auto 0 0');
+    expect(responsive).toContain('overflow-x: auto');
   });
 });

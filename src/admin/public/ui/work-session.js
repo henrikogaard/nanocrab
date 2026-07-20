@@ -386,9 +386,391 @@
     };
   }
 
+  function esc(value) {
+    return String(value === undefined || value === null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function statusLabel(status) {
+    var labels = {
+      running: 'Running',
+      waiting_approval: 'Waiting for approval',
+      failed: 'Failed',
+      completed: 'Completed',
+      cancelled: 'Cancelled',
+      interrupted: 'Interrupted',
+      unknown: 'Status unknown',
+    };
+    return labels[normalizeStatus(status)];
+  }
+
+  function pendingApprovalCount(session) {
+    var approvals = Array.isArray(session.approvals) ? session.approvals : [];
+    return approvals.filter(function (approval) {
+      return (
+        isRecord(approval) &&
+        typeof approval.status === 'string' &&
+        approval.status.trim().toLowerCase() === 'pending'
+      );
+    }).length;
+  }
+
+  function actionButton(action, session) {
+    if (!action.visible) return '';
+    return (
+      '<button type="button" class="btn ' +
+      (action.primary ? 'btn-primary' : 'btn-ghost') +
+      '" data-work-session-action="' +
+      esc(action.id) +
+      '" data-session-id="' +
+      esc(session.id) +
+      '">' +
+      esc(action.label) +
+      '</button>'
+    );
+  }
+
+  function sessionActions(session) {
+    var primaryAction = nextAction(session);
+    return [
+      {
+        id: 'review_approvals',
+        label: 'Review approvals',
+        visible: normalizeStatus(session.status) === 'waiting_approval',
+      },
+      {
+        id: 'resume',
+        label: 'Resume',
+        visible: session.canResume === true,
+      },
+      {
+        id: 'retry',
+        label: 'Retry',
+        visible: session.canRetry === true,
+      },
+      {
+        id: 'cancel',
+        label: 'Cancel',
+        visible: session.canCancel === true,
+      },
+    ].map(function (action) {
+      action.primary = action.id === primaryAction;
+      return action;
+    });
+  }
+
+  function counter(label, value) {
+    return (
+      '<div class="work-session-counter"><span>' +
+      esc(label) +
+      '</span><strong>' +
+      esc(value) +
+      '</strong></div>'
+    );
+  }
+
+  function renderRunStrip(session) {
+    var model = asRecord(session);
+    var progress =
+      typeof model.progressPct === 'number' &&
+      Number.isFinite(model.progressPct)
+        ? Math.min(100, Math.max(0, model.progressPct))
+        : null;
+    var progressText = progress === null ? 'Not reported' : progress + '%';
+    var progressElement =
+      progress === null
+        ? '<span class="work-session-progress-empty">Not reported</span>'
+        : '<progress max="100" value="' +
+          esc(progress) +
+          '" aria-label="Session progress: ' +
+          esc(progressText) +
+          '"></progress>';
+    var actions = sessionActions(model)
+      .map(function (action) {
+        return actionButton(action, model);
+      })
+      .join('');
+
+    return (
+      '<section class="work-session-run-strip" aria-live="polite" aria-atomic="true" data-session-status="' +
+      esc(normalizeStatus(model.status)) +
+      '">' +
+      '<div class="work-session-run-status"><span>Status</span><strong>' +
+      esc(statusLabel(model.status)) +
+      '</strong><p>' +
+      esc(model.currentStep || 'No current step reported') +
+      '</p></div>' +
+      '<div class="work-session-progress"><span>Progress</span><strong>' +
+      esc(progressText) +
+      '</strong>' +
+      progressElement +
+      '</div>' +
+      '<div class="work-session-counters">' +
+      counter(
+        'Events',
+        Array.isArray(model.timeline) ? model.timeline.length : 0,
+      ) +
+      counter(
+        'Tool calls',
+        Array.isArray(model.toolCalls) ? model.toolCalls.length : 0,
+      ) +
+      counter('Pending approvals', pendingApprovalCount(model)) +
+      '</div>' +
+      (actions
+        ? '<div class="work-session-actions">' + actions + '</div>'
+        : '') +
+      '</section>'
+    );
+  }
+
+  function eventLabel(event) {
+    return stringValue(
+      firstValue([event.title, event.name, event.label, event.type]),
+    );
+  }
+
+  function eventDetail(event) {
+    return stringValue(firstValue([event.detail, event.message, event.status]));
+  }
+
+  function renderTimeline(session) {
+    var model = asRecord(session);
+    var timeline = Array.isArray(model.timeline)
+      ? model.timeline.filter(isRecord)
+      : [];
+    if (timeline.length === 0) {
+      return '<ol class="work-session-timeline"><li class="work-session-empty">No timeline recorded</li></ol>';
+    }
+    return (
+      '<ol class="work-session-timeline">' +
+      timeline
+        .map(function (event) {
+          var detail = eventDetail(event);
+          var timestamp = stringValue(event.timestamp);
+          return (
+            '<li class="work-session-timeline-event" data-event-type="' +
+            esc(stringValue(event.type).toLowerCase()) +
+            '"><div class="work-session-timeline-marker" aria-hidden="true"></div>' +
+            '<div class="work-session-timeline-copy"><div class="work-session-timeline-head"><strong>' +
+            esc(eventLabel(event) || 'Session event') +
+            '</strong>' +
+            (timestamp
+              ? '<time datetime="' +
+                esc(timestamp) +
+                '">' +
+                esc(timestamp) +
+                '</time>'
+              : '') +
+            '</div>' +
+            (detail ? '<p>' + esc(detail) + '</p>' : '') +
+            '</div></li>'
+          );
+        })
+        .join('') +
+      '</ol>'
+    );
+  }
+
+  function recordList(items, emptyMessage, className) {
+    var records = Array.isArray(items) ? items.filter(isRecord) : [];
+    if (records.length === 0) {
+      return '<div class="work-session-empty">' + esc(emptyMessage) + '</div>';
+    }
+    return (
+      '<ul class="work-session-records ' +
+      esc(className) +
+      '">' +
+      records
+        .map(function (record) {
+          var label = stringValue(
+            firstValue([
+              record.title,
+              record.name,
+              record.label,
+              record.path,
+              record.id,
+              record.type,
+            ]),
+          );
+          var detail = eventDetail(record);
+          return (
+            '<li><strong>' +
+            esc(label || 'Recorded item') +
+            '</strong>' +
+            (detail ? '<span>' + esc(detail) + '</span>' : '') +
+            '</li>'
+          );
+        })
+        .join('') +
+      '</ul>'
+    );
+  }
+
+  function fileList(files) {
+    var entries = Array.isArray(files)
+      ? files.filter(function (file) {
+          return typeof file === 'string' && file.trim() !== '';
+        })
+      : [];
+    if (entries.length === 0) {
+      return '<div class="work-session-empty">No files recorded</div>';
+    }
+    return (
+      '<ul class="work-session-records work-session-files">' +
+      entries
+        .map(function (file) {
+          return '<li><code>' + esc(file) + '</code></li>';
+        })
+        .join('') +
+      '</ul>'
+    );
+  }
+
+  var inspectorTabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'timeline', label: 'Timeline' },
+    { id: 'tools', label: 'Tools' },
+    { id: 'files', label: 'Files' },
+    { id: 'proposals', label: 'Proposals' },
+    { id: 'approvals', label: 'Approvals' },
+    { id: 'artifacts', label: 'Artifacts' },
+  ];
+
+  function validInspectorTab(value) {
+    if (typeof value !== 'string') return 'overview';
+    var tab = value.trim().toLowerCase();
+    return inspectorTabs.some(function (candidate) {
+      return candidate.id === tab;
+    })
+      ? tab
+      : 'overview';
+  }
+
+  function inspectorPanel(session, activeTab) {
+    if (activeTab === 'timeline') return renderTimeline(session);
+    if (activeTab === 'tools') {
+      return recordList(
+        session.toolCalls,
+        'No tool calls recorded',
+        'work-session-tools',
+      );
+    }
+    if (activeTab === 'files') return fileList(session.changedFiles);
+    if (activeTab === 'proposals') {
+      return recordList(
+        session.proposals,
+        'No proposals recorded',
+        'work-session-proposals',
+      );
+    }
+    if (activeTab === 'approvals') {
+      return (
+        '<div class="work-session-panel-summary">' +
+        counter('Pending approvals', pendingApprovalCount(session)) +
+        '</div>' +
+        recordList(
+          session.approvals,
+          'No approvals recorded',
+          'work-session-approvals',
+        )
+      );
+    }
+    if (activeTab === 'artifacts') {
+      return recordList(
+        session.artifacts,
+        'No artifacts recorded',
+        'work-session-artifacts',
+      );
+    }
+    return (
+      '<div class="work-session-overview"><h3>Session overview</h3>' +
+      '<div class="work-session-overview-grid">' +
+      counter('Status', statusLabel(session.status)) +
+      counter('Pending approvals', pendingApprovalCount(session)) +
+      counter(
+        'Changed files',
+        Array.isArray(session.changedFiles) ? session.changedFiles.length : 0,
+      ) +
+      counter(
+        'Artifacts',
+        Array.isArray(session.artifacts) ? session.artifacts.length : 0,
+      ) +
+      '</div>' +
+      (session.currentStep
+        ? '<p class="work-session-current-step">' +
+          esc(session.currentStep) +
+          '</p>'
+        : '<div class="work-session-empty">No current step recorded</div>') +
+      '</div>'
+    );
+  }
+
+  function renderInspector(session, activeTab) {
+    var model = asRecord(session);
+    var selectedTab = validInspectorTab(activeTab);
+    var token = stringValue(model.id)
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    if (!token) token = 'session';
+    var titleId = 'work-session-' + token + '-title';
+    var panelId = 'work-session-' + token + '-panel';
+    var selectedTabId = 'work-session-' + token + '-' + selectedTab + '-tab';
+
+    return (
+      '<aside class="work-session-inspector" role="dialog" aria-modal="true" aria-labelledby="' +
+      esc(titleId) +
+      '" tabindex="-1">' +
+      '<header class="work-session-inspector-head"><div><span>Work session</span><h2 id="' +
+      esc(titleId) +
+      '">' +
+      esc(model.group || model.id || 'Session details') +
+      '</h2></div><strong class="work-session-status">' +
+      esc(statusLabel(model.status)) +
+      '</strong></header>' +
+      '<div class="work-session-tabs" role="tablist" aria-label="Session details">' +
+      inspectorTabs
+        .map(function (tab) {
+          var selected = tab.id === selectedTab;
+          return (
+            '<button type="button" id="work-session-' +
+            esc(token) +
+            '-' +
+            tab.id +
+            '-tab" role="tab" data-work-session-tab="' +
+            tab.id +
+            '" aria-selected="' +
+            (selected ? 'true' : 'false') +
+            '" aria-controls="' +
+            esc(panelId) +
+            '" tabindex="' +
+            (selected ? '0' : '-1') +
+            '">' +
+            esc(tab.label) +
+            '</button>'
+          );
+        })
+        .join('') +
+      '</div>' +
+      '<div id="' +
+      esc(panelId) +
+      '" class="work-session-panel" role="tabpanel" aria-labelledby="' +
+      esc(selectedTabId) +
+      '" tabindex="0">' +
+      inspectorPanel(model, selectedTab) +
+      '</div></aside>'
+    );
+  }
+
   window.NanoWorkSession = {
     normalize: normalize,
     normalizeStatus: normalizeStatus,
     nextAction: nextAction,
+    renderRunStrip: renderRunStrip,
+    renderTimeline: renderTimeline,
+    renderInspector: renderInspector,
   };
 })();
