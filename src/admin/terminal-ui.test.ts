@@ -58,8 +58,11 @@ describe('Terminal operator console UI', () => {
     );
 
     expect(source).toContain('function activeTerminalId()');
-    expect(initBlock).toContain('const currentSessionId = activeTerminalId()');
-    expect(initBlock).toContain('sendTerminalAttach(currentSessionId)');
+    expect(initBlock).toContain('requestTerminalAttach()');
+    expect(attachHelper).toContain(
+      'const requestedSessionId = activeTerminalId()',
+    );
+    expect(attachHelper).toContain('sendTerminalAttach(requestedSessionId)');
     expect(attachHelper).toContain("type: 'terminal_attach'");
     expect(attachHelper).toContain('sessionId');
     expect(initBlock).toContain("type: 'terminal_input'");
@@ -259,6 +262,71 @@ describe('Terminal operator console UI', () => {
       sessionId: 'term-other',
     });
     expect(activeTerminal.reconnectCapability).toBe('');
+  });
+
+  it('emits exactly one attach for initial open, socket reconnect, and each manual reconnect', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+
+    expect(source).toContain('function handleTerminalSocketOpen()');
+    expect(source).toContain('function requestTerminalAttach()');
+
+    const helpersStart = source.indexOf('function activeTerminalId()');
+    const helpersEnd = source.indexOf('\nconst PAGE_ALIASES', helpersStart);
+    const send = vi.fn();
+    const connectWs = vi.fn();
+    const pendingTimers: Array<() => void> = [];
+    const activeTerminal = {
+      sessionId: 'term-current',
+      reconnectCapability: 'current-capability',
+      transcript: '',
+      readOnly: false,
+      attachTimer: null,
+      term: { write: vi.fn() },
+    };
+    const context = {
+      activeTerminal,
+      ws: { readyState: 0, send },
+      connectWs,
+      setTerminalSessionState: vi.fn(),
+      setTimeout: (callback: () => void) => {
+        pendingTimers.push(callback);
+        return pendingTimers.length;
+      },
+      clearTimeout: vi.fn(),
+    } as Record<string, unknown>;
+    vm.runInNewContext(
+      'let activeTerminal = globalThis.activeTerminal;\n' +
+        source.slice(helpersStart, helpersEnd) +
+        '\n;globalThis.requestAttach = requestTerminalAttach;' +
+        '\n;globalThis.socketOpened = handleTerminalSocketOpen;',
+      context,
+    );
+    const requestAttach = context.requestAttach as () => boolean;
+    const socketOpened = context.socketOpened as () => void;
+
+    requestAttach();
+    expect(connectWs).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+    (context.ws as { readyState: number }).readyState = 1;
+    socketOpened();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(send.mock.calls[0][0])).toEqual({
+      type: 'terminal_attach',
+      sessionId: 'term-current',
+      sessionToken: 'current-capability',
+    });
+    pendingTimers[0]();
+    expect(send).toHaveBeenCalledTimes(1);
+
+    (context.ws as { readyState: number }).readyState = 0;
+    socketOpened();
+    (context.ws as { readyState: number }).readyState = 1;
+    socketOpened();
+    expect(send).toHaveBeenCalledTimes(2);
+
+    requestAttach();
+    requestAttach();
+    expect(send).toHaveBeenCalledTimes(4);
   });
 
   it('never leaks a reconnect capability across session selection, history, or teardown', () => {
@@ -549,9 +617,9 @@ describe('Terminal operator console UI', () => {
       source.indexOf('term.onData'),
     );
 
-    expect(connectBlock).toContain('sendTerminalAttach(activeTerminalId())');
+    expect(connectBlock).toContain('handleTerminalSocketOpen()');
     expect(connectBlock).not.toContain("type: 'terminal_spawn'");
-    expect(initBlock).toContain('sendTerminalAttach(currentSessionId)');
+    expect(initBlock).toContain('requestTerminalAttach()');
     expect(initBlock).not.toContain("type: 'terminal_spawn'");
     expect(source).toContain("msg.type === 'terminal_attach_result'");
     expect(source).toContain("msg.data.status === 'not-found'");

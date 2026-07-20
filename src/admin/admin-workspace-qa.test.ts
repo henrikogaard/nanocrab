@@ -133,10 +133,10 @@ describe('Focus Stack rendered QA contract', () => {
       'function createSyntheticTerminalCapability',
       'async function deliverMockWebSocketMessage',
       "type: 'terminal_session'",
-      'async function inspectTerminalAttachPayload',
+      'async function inspectTerminalAttachFrameWindow',
       '__qaWebSocketSends',
       "type === 'terminal_attach'",
-      'payload?.sessionToken === capability',
+      'payload.sessionToken === capability',
       'async function assertSyntheticCapabilityPrivate',
       'window.localStorage',
       'window.sessionStorage',
@@ -152,6 +152,29 @@ describe('Focus Stack rendered QA contract', () => {
     expect(source).not.toContain(
       "sessionStorage.setItem('terminal_session_capability'",
     );
+  });
+
+  it('counts bounded initial and reconnect terminal-attach frame windows without selecting a latest frame', () => {
+    const source = qaScriptSource();
+
+    for (const contractMarker of [
+      'async function capturedOutboundFrameCount',
+      'async function inspectTerminalAttachFrameWindow',
+      'slice(frameStart)',
+      'attachCount',
+      'initialAttach',
+      'reconnectAttach',
+      'initialAttach.attachCount !== 1',
+      'reconnectAttach.attachCount !== 1',
+      'initialAttach.sessionIdsMatch',
+      'reconnectAttach.sessionIdsMatch',
+      'reconnectAttach.capabilitiesMatch',
+    ]) {
+      expect(source).toContain(contractMarker);
+    }
+
+    expect(source).not.toContain('.reverse()\n      .map((entry) =>');
+    expect(source).not.toContain('.find((entry) => entry && entry.type');
   });
 
   it('records the route, landmark, overflow, accessibility, selection, layout, error, interaction, screenshot, and summary evidence', () => {

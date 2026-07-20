@@ -345,7 +345,7 @@ function stopPolling() {
   pollTimers.forEach((t) => clearInterval(t));
   pollTimers = [];
   if (activeTerminal && activeTerminal.attachTimer) {
-    clearInterval(activeTerminal.attachTimer);
+    clearTimeout(activeTerminal.attachTimer);
   }
   clearTerminalReconnectCapability();
   activeTerminal = null;
@@ -400,10 +400,7 @@ function connectWs() {
   ws = new WebSocket(url);
   ws.onopen = () => {
     console.log('WS connected');
-    if (activeTerminal) {
-      setTerminalSessionState('reconnecting', activeTerminal.sessionId);
-    }
-    sendTerminalAttach(activeTerminalId());
+    handleTerminalSocketOpen();
   };
   ws.onmessage = (e) => {
     let message;
@@ -455,6 +452,45 @@ function sendTerminalAttach(sessionId) {
     message.sessionToken = activeTerminal.reconnectCapability;
   }
   ws.send(JSON.stringify(message));
+  return true;
+}
+
+function handleTerminalSocketOpen() {
+  if (!activeTerminal) return false;
+  if (activeTerminal.attachTimer) {
+    clearTimeout(activeTerminal.attachTimer);
+    activeTerminal.attachTimer = null;
+  }
+  setTerminalSessionState('reconnecting', activeTerminal.sessionId);
+  return sendTerminalAttach(activeTerminalId());
+}
+
+function requestTerminalAttach() {
+  const requestedSessionId = activeTerminalId();
+  if (!requestedSessionId || !activeTerminal) return false;
+  if (activeTerminal.attachTimer) {
+    clearTimeout(activeTerminal.attachTimer);
+    activeTerminal.attachTimer = null;
+  }
+  if (ws?.readyState === 1) {
+    return sendTerminalAttach(requestedSessionId);
+  }
+  activeTerminal.term?.write('Connecting...\r\n');
+  connectWs();
+  const attachTimer = setTimeout(() => {
+    if (!activeTerminal || activeTerminal.sessionId !== requestedSessionId) {
+      return;
+    }
+    activeTerminal.attachTimer = null;
+    if (ws?.readyState === 1) return;
+    setTerminalSessionState('unavailable', requestedSessionId);
+    activeTerminal.term?.write(
+      '\r\nFailed to connect. Check WebSocket.\r\n',
+    );
+  }, 10500);
+  if (activeTerminal?.sessionId === requestedSessionId) {
+    activeTerminal.attachTimer = attachTimer;
+  }
   return true;
 }
 
@@ -13343,35 +13379,7 @@ async function renderTerminal(el) {
 
   // Spawn or attach terminal session
   const initTerminal = () => {
-    const currentSessionId = activeTerminalId();
-    if (!currentSessionId) return;
-    if (activeTerminal.attachTimer) {
-      clearInterval(activeTerminal.attachTimer);
-      activeTerminal.attachTimer = null;
-    }
-    if (ws?.readyState === 1) {
-      sendTerminalAttach(currentSessionId);
-      return;
-    }
-    term.write('Connecting...\r\n');
-    connectWs();
-    let attempts = 0;
-    const check = setInterval(() => {
-      attempts++;
-      if (ws?.readyState === 1) {
-        clearInterval(check);
-        if (activeTerminal) activeTerminal.attachTimer = null;
-        const currentSessionId = activeTerminalId();
-        if (!currentSessionId) return;
-        sendTerminalAttach(currentSessionId);
-      } else if (attempts > 20) {
-        clearInterval(check);
-        if (activeTerminal) activeTerminal.attachTimer = null;
-        setTerminalSessionState('unavailable', activeTerminalId());
-        term.write('\r\nFailed to connect. Check WebSocket.\r\n');
-      }
-    }, 500);
-    activeTerminal.attachTimer = check;
+    requestTerminalAttach();
   };
   window._spawnTerminalSession = initTerminal;
   initTerminal();

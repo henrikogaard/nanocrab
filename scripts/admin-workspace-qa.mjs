@@ -1260,26 +1260,45 @@ async function assertSyntheticCapabilityPrivate(page, capability) {
   }, capability);
 }
 
-async function inspectTerminalAttachPayload(page, sessionId, capability) {
-  return page.evaluate(({ sessionId, capability }) => {
-    const payload = [...window.__qaWebSocketSends]
-      .reverse()
-      .map((entry) => {
-        try {
-          return JSON.parse(entry);
-        } catch {
-          return null;
+async function capturedOutboundFrameCount(page) {
+  return page.evaluate(() => window.__qaWebSocketSends.length);
+}
+
+async function inspectTerminalAttachFrameWindow(
+  page,
+  frameStart,
+  sessionId,
+  capability = null,
+) {
+  return page.evaluate(({ frameStart, sessionId, capability }) => {
+    const frames = window.__qaWebSocketSends.slice(frameStart);
+    const terminalAttaches = [];
+    for (const frame of frames) {
+      try {
+        const payload = JSON.parse(frame);
+        if (payload && payload.type === 'terminal_attach') {
+          terminalAttaches.push(payload);
         }
-      })
-      .find((entry) => entry && entry.type === 'terminal_attach');
+      } catch {
+        // Non-JSON frames cannot be terminal attach commands.
+      }
+    }
     const evidence = {
-      attachFound: Boolean(payload),
-      sessionIdMatches: payload?.sessionId === sessionId,
-      capabilityMatches: payload?.sessionToken === capability,
+      frameCount: frames.length,
+      attachCount: terminalAttaches.length,
+      sessionIdsMatch:
+        terminalAttaches.length > 0 &&
+        terminalAttaches.every((payload) => payload.sessionId === sessionId),
+      capabilitiesMatch:
+        capability === null ||
+        (terminalAttaches.length > 0 &&
+          terminalAttaches.every(
+            (payload) => payload.sessionToken === capability,
+          )),
     };
     window.__qaWebSocketSends = [];
     return evidence;
-  }, { sessionId, capability });
+  }, { frameStart, sessionId, capability });
 }
 
 async function invokeMockWebSocketCallback(page, callback) {
@@ -1466,6 +1485,10 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
   await page.evaluate(() => {
     window.location.hash = '#/devhub';
   });
+  await page.evaluate(() => {
+    window.__qaWebSocketSends = [];
+  });
+  const initialFrameStart = await capturedOutboundFrameCount(page);
   await page.locator('#dev-tabs .tab[data-tab-id="terminal"]').click();
   await page.waitForSelector('#terminal-session-state .work-session-run-strip');
   const sessionId = await page.locator('#terminal-session-id').inputValue();
@@ -1516,6 +1539,19 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
   });
   await page.waitForSelector('#terminal-container .xterm');
   await waitForMockWebSocket(page);
+  const initialAttach = await inspectTerminalAttachFrameWindow(
+    page,
+    initialFrameStart,
+    sessionId,
+  );
+  if (initialAttach.attachCount !== 1) {
+    errors.push(
+      `Initial terminal attach count is ${initialAttach.attachCount}, expected 1`,
+    );
+  }
+  if (!initialAttach.sessionIdsMatch) {
+    errors.push('Initial terminal_attach used a different session id');
+  }
   const capability = createSyntheticTerminalCapability();
   await deliverMockWebSocketMessage(page, {
     type: 'terminal_session',
@@ -1551,6 +1587,7 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
   if (outputEvidence.state !== 'ready') {
     errors.push('Terminal output changed lifecycle state without a typed event');
   }
+  const reconnectFrameStart = await capturedOutboundFrameCount(page);
   await invokeMockWebSocketCallback(page, 'onclose');
   const closeEvidence = await terminalStateEvidence(page);
   if (closeEvidence.state !== 'unavailable') {
@@ -1575,18 +1612,21 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
     socketCountBeforeReconnect,
   );
   await invokeMockWebSocketCallback(page, 'onopen');
-  const attachPayload = await inspectTerminalAttachPayload(
+  const reconnectAttach = await inspectTerminalAttachFrameWindow(
     page,
+    reconnectFrameStart,
     sessionId,
     capability,
   );
-  if (!attachPayload.attachFound) {
-    errors.push('Reconnect did not send a terminal_attach payload');
+  if (reconnectAttach.attachCount !== 1) {
+    errors.push(
+      `Reconnect terminal attach count is ${reconnectAttach.attachCount}, expected 1`,
+    );
   }
-  if (!attachPayload.sessionIdMatches) {
+  if (!reconnectAttach.sessionIdsMatch) {
     errors.push('Reconnect terminal_attach used a different session id');
   }
-  if (!attachPayload.capabilityMatches) {
+  if (!reconnectAttach.capabilitiesMatch) {
     errors.push('Reconnect terminal_attach did not use the in-memory capability');
   }
   const currentSessionId = await page.locator('#terminal-session-id').inputValue();
@@ -1623,7 +1663,8 @@ async function exerciseTerminalSessionStates(page, viewport, screenshots) {
     states,
     outputEvidence,
     closeEvidence,
-    attachPayload,
+    initialAttach,
+    reconnectAttach,
     capabilityPrivacy,
     errors,
   };
