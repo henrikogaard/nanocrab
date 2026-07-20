@@ -4621,6 +4621,56 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       },
     ];
   }
+  if (pathname === '/source-collections') {
+    return [
+      {
+        id: 'source-collection-mock-1',
+        reportJobId: 'report-mock-2',
+        requestedScopes: ['connector', 'file'],
+        items: [
+          {
+            scope: 'connector',
+            connectorId: 'gmail',
+            sourceLabel: 'Launch readiness email',
+            status: 'completed',
+            requestedAt: iso(35),
+            completedAt: iso(33),
+            itemCount: 1,
+            failureReason: null,
+            provenance: ['mcp:gmail'],
+          },
+          {
+            scope: 'file',
+            sourceLabel: 'AuroraDocs project notes',
+            status: 'failed',
+            requestedAt: iso(35),
+            completedAt: iso(32),
+            itemCount: 0,
+            failureReason: 'Mounted project source is unavailable',
+            provenance: [],
+          },
+        ],
+        ledger: [
+          {
+            id: 'source-ledger-mock-1',
+            reportJobId: 'report-mock-2',
+            scope: 'connector',
+            connectorId: 'gmail',
+            sourceLabel: 'Launch readiness email',
+            sourceUrl: 'https://mail.google.com/mail/u/0/#inbox/mock-thread',
+            citationText:
+              'The launch readiness review is scheduled for Friday.',
+            collectedAt: iso(33),
+            provenance: ['mcp:gmail', 'message:mock-thread'],
+          },
+        ],
+        status: 'partial',
+        startedAt: iso(35),
+        completedAt: iso(32),
+        failureReason: 'One source failed to collect',
+      },
+    ];
+  }
   if (pathname === '/briefings') {
     return [
       {
