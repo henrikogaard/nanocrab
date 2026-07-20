@@ -60,6 +60,7 @@ class FakeElement {
   readonly listeners = new Map<string, Array<(event: FakeEvent) => void>>();
   readonly style = { setProperty: () => {} };
   focusCount = 0;
+  parentElement: FakeElement | null = null;
   textContent = '';
   value = '';
   private html = '';
@@ -120,12 +121,21 @@ class FakeElement {
     for (const listener of this.listeners.get(type) || []) listener(event);
   }
 
+  private hasInertAncestor(): boolean {
+    return (
+      this.hasAttribute('inert') ||
+      Boolean(this.parentElement?.hasInertAncestor())
+    );
+  }
+
   focus() {
+    if (this.hasInertAncestor()) return;
     this.focusCount += 1;
     this.ownerDocument.activeElement = this;
   }
 
   appendChild(child: FakeElement) {
+    child.parentElement = this;
     this.ownerDocument.appendElement(child);
     return child;
   }
@@ -204,10 +214,11 @@ class FakeDocument {
   appendElement(element: FakeElement) {
     if (!this.elements.includes(element)) this.elements.push(element);
     if (element.id !== 'nc-command-palette') return;
-    this.elements.push(
-      new FakeElement(this, 'INPUT', '', 'cp-input'),
-      new FakeElement(this, 'DIV', '', 'cp-results'),
-    );
+    const input = new FakeElement(this, 'INPUT', '', 'cp-input');
+    const results = new FakeElement(this, 'DIV', '', 'cp-results');
+    input.parentElement = element;
+    results.parentElement = element;
+    this.elements.push(input, results);
   }
 
   addEventListener(type: string, listener: (event: FakeEvent) => void) {
@@ -523,22 +534,37 @@ describe('Focus Stack executable shell integration', () => {
   });
 
   it.each([
-    ['#/projects/project%201/chat/thread%202', 'project-chat'],
-    ['#/projects/project%201/files/docs%2Fbrief.md', 'projects'],
+    ['#/chat/thread%202', 'chat', 'chat'],
+    ['#/projects/project%201/chat/thread%202', 'project-chat', 'cowork'],
+    ['#/projects/project%201/files/docs%2Fbrief.md', 'projects', 'cowork'],
   ])(
-    'preserves nested startup route %s through the %s shell',
-    async (hash, pageLabel) => {
+    'preserves valid encoded startup route %s through the %s shell',
+    async (hash, pageLabel, mode) => {
       const harness = loadShellHarness(hash, 'chat');
 
       await new Promise((resolve) => setImmediate(resolve));
 
       expect(harness.currentHash()).toBe(hash);
-      expect(harness.app.innerHTML).toContain('data-workspace-mode="cowork"');
+      expect(harness.app.innerHTML).toContain(`data-workspace-mode="${mode}"`);
       expect(harness.app.innerHTML).toContain(
-        `<strong>${pageLabel === 'project-chat' ? 'Project chat' : 'Cowork Projects'}</strong>`,
+        `<strong>${pageLabel === 'project-chat' ? 'Project chat' : pageLabel === 'projects' ? 'Cowork Projects' : 'Chat'}</strong>`,
       );
     },
   );
+
+  it.each([
+    '#/chat/%E0%A4%A',
+    '#/projects/%E0%A4%A/chat/thread',
+    '#/projects/project/chat/%E0%A4%A',
+    '#/projects/%E0%A4%A/files/readme.md',
+    '#/projects/project/files/%E0%A4%A',
+  ])('recovers malformed encoded startup route %s to Today', async (hash) => {
+    const harness = loadShellHarness(hash, 'code');
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(harness.currentHash()).toBe('#/dashboard');
+  });
 
   it('keeps active alerts visible and announced outside the closed Inspector', async () => {
     const harness = loadShellHarness('#/reports', 'chat', [
@@ -606,6 +632,61 @@ describe('Focus Stack executable shell integration', () => {
     expect(harness.document.listenerCount('keydown')).toBe(listenerCount);
   });
 
+  it('keeps the closed palette inert and restores inert focus containment after close', () => {
+    const harness = loadShellHarness('#/reports');
+    harness.showShell('reports');
+    const overlay = harness.document.getElementById('nc-command-palette')!;
+    const input = harness.document.querySelector('.cp-input')!;
+    const returnTarget = harness.document.querySelector('.focus-stack-more')!;
+
+    returnTarget.focus();
+    input.focus();
+    expect(overlay.hasAttribute('inert')).toBe(true);
+    expect(overlay.getAttribute('aria-hidden')).toBe('true');
+    expect(harness.document.activeElement).toBe(returnTarget);
+
+    harness.palette.open();
+    expect(overlay.hasAttribute('inert')).toBe(false);
+    expect(overlay.getAttribute('aria-hidden')).toBe('false');
+    expect(harness.document.activeElement).toBe(input);
+
+    harness.palette.close();
+    expect(overlay.hasAttribute('inert')).toBe(true);
+    expect(overlay.getAttribute('aria-hidden')).toBe('true');
+    expect(harness.document.activeElement).toBe(returnTarget);
+    input.focus();
+    expect(harness.document.activeElement).toBe(returnTarget);
+  });
+
+  it('lets inactive palette-local Escape reach and close Inspector', () => {
+    const harness = loadShellHarness('#/reports');
+    harness.showShell('reports');
+    const trigger = harness.document.querySelector(
+      '.focus-stack-inspector-trigger',
+    )!;
+    const inspector = harness.document.getElementById('workspace-inspector')!;
+    const paletteInput = harness.document.querySelector('.cp-input')!;
+    let prevented = false;
+    const escape: FakeEvent = {
+      key: 'Escape',
+      get defaultPrevented() {
+        return prevented;
+      },
+      preventDefault() {
+        prevented = true;
+      },
+    };
+
+    harness.toggleInspector(trigger);
+    paletteInput.dispatch('keydown', escape);
+    harness.document.dispatch('keydown', escape);
+
+    expect(prevented).toBe(true);
+    expect(inspector.classList.contains('is-open')).toBe(false);
+    expect(inspector.hasAttribute('inert')).toBe(true);
+    expect(harness.document.activeElement).toBe(trigger);
+  });
+
   it('dismisses the command palette before its underlying inspector on layered Escape', () => {
     const harness = loadShellHarness('#/reports');
     harness.showShell('reports');
@@ -620,8 +701,10 @@ describe('Focus Stack executable shell integration', () => {
       harness.document.getElementById('nc-command-palette')!;
     const paletteInput = harness.document.querySelector('.cp-input')!;
 
+    expect(paletteOverlay.hasAttribute('inert')).toBe(true);
     harness.toggleInspector(trigger);
     harness.palette.open();
+    expect(paletteOverlay.hasAttribute('inert')).toBe(false);
     expect(harness.document.activeElement).toBe(paletteInput);
 
     let palettePrevented = false;
@@ -639,6 +722,7 @@ describe('Focus Stack executable shell integration', () => {
 
     expect(palettePrevented).toBe(true);
     expect(paletteOverlay.classList.contains('cp-visible')).toBe(false);
+    expect(paletteOverlay.hasAttribute('inert')).toBe(true);
     expect(paletteOverlay.getAttribute('aria-hidden')).toBe('true');
     expect(inspector.classList.contains('is-open')).toBe(true);
     expect(inspector.hasAttribute('inert')).toBe(false);

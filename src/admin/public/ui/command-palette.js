@@ -208,6 +208,7 @@
   }
 
   function close() {
+    if (overlay) overlay.toggleAttribute('inert', true);
     if (!active) return;
     active = false;
     overlay.classList.remove('cp-visible');
@@ -225,12 +226,14 @@
     active = true;
     overlay.classList.add('cp-visible');
     overlay.setAttribute('aria-hidden', 'false');
+    overlay.toggleAttribute('inert', false);
     input.value = '';
     input.focus();
     render('');
   }
 
   function onKeydown(e) {
+    if (!active) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       close();
@@ -294,6 +297,7 @@
     el.setAttribute('aria-modal', 'true');
     el.setAttribute('aria-label', 'Command palette');
     el.setAttribute('aria-hidden', 'true');
+    el.toggleAttribute('inert', true);
     el.innerHTML =
       '<div class="cp-modal">' +
         '<div class="cp-header">' +

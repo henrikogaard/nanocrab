@@ -24053,6 +24053,15 @@ window.navigate = (page) => {
 };
 // Parse a #/chat or #/chat/<id> hash into { isChatRoute, threadId }.
 // Returns null when the hash is not a chat thread route.
+function safeDecodeHashComponent(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    if (error instanceof URIError) return null;
+    throw error;
+  }
+}
+
 function parseChatHash(hash) {
   if (!hash) return null;
   // Remove leading '#'
@@ -24062,7 +24071,8 @@ function parseChatHash(hash) {
     const encoded = raw.slice('/chat/'.length);
     // Only treat as a thread route when there is a non-empty id segment
     if (encoded) {
-      const decoded = decodeURIComponent(encoded);
+      const decoded = safeDecodeHashComponent(encoded);
+      if (decoded === null) return null;
       return {
         isChatRoute: true,
         threadId: decoded.startsWith('web:') ? decoded : 'web:' + decoded,
@@ -24078,10 +24088,12 @@ function parseProjectChatHash(hash) {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash;
   const parts = raw.split('/').filter(Boolean);
   if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'chat') {
-    const decodedThreadId = decodeURIComponent(parts[3]);
+    const decodedProjectId = safeDecodeHashComponent(parts[1]);
+    const decodedThreadId = safeDecodeHashComponent(parts[3]);
+    if (decodedProjectId === null || decodedThreadId === null) return null;
     return {
       isProjectChatRoute: true,
-      projectId: decodeURIComponent(parts[1]),
+      projectId: decodedProjectId,
       threadId: decodedThreadId.startsWith('web:')
         ? decodedThreadId
         : 'web:' + decodedThreadId,
@@ -24095,10 +24107,13 @@ function parseProjectFileHash(hash) {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash;
   const parts = raw.split('/').filter(Boolean);
   if (parts.length === 4 && parts[0] === 'projects' && parts[2] === 'files') {
+    const decodedProjectId = safeDecodeHashComponent(parts[1]);
+    const decodedFilePath = safeDecodeHashComponent(parts[3]);
+    if (decodedProjectId === null || decodedFilePath === null) return null;
     return {
       isProjectFileRoute: true,
-      projectId: decodeURIComponent(parts[1]),
-      filePath: decodeURIComponent(parts[3]),
+      projectId: decodedProjectId,
+      filePath: decodedFilePath,
     };
   }
   return null;

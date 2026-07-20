@@ -65,6 +65,7 @@ function loadCommandPalette() {
     id: '',
     className: '',
     setAttribute: () => {},
+    toggleAttribute: () => {},
     classList: { add: () => {}, remove: () => {} },
     addEventListener: () => {},
     appendChild: (child: any) => child,
