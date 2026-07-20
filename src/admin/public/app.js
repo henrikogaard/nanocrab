@@ -13,8 +13,8 @@ const {
   moreDrawerSections,
   isVisibleForRole,
 } = window.NanoShellNavigation;
-// Seed from the persisted last-used mode so deep-links to admin/More pages
-// (which don't resolve to a mode) still show the correct mode in the switcher.
+// Seed the persisted primary mode for landing and explicit session preference.
+// Each rendered route derives its displayed Focus Stack mode independently.
 let activeMode =
   (window.NanoModes &&
     window.NanoModes.loadActiveMode(window.localStorage)) ||
@@ -50,8 +50,8 @@ initTheme();
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'nanocrab_sidebar_width';
 const SIDEBAR_WIDTH_DEFAULT = 280;
-const SIDEBAR_WIDTH_MIN = 232;
-const SIDEBAR_WIDTH_MAX = 420;
+const SIDEBAR_WIDTH_MIN = 220;
+const SIDEBAR_WIDTH_MAX = 300;
 
 function clampSidebarWidth(width) {
   const n = Number(width);
@@ -139,6 +139,54 @@ function initSidebarResize() {
   });
 }
 loadSidebarWidth();
+
+let workspaceInspectorTrigger = null;
+
+function setWorkspaceInspectorState(isOpen, trigger) {
+  const inspector = document.getElementById('workspace-inspector');
+  const shell = document.querySelector('.focus-stack-shell');
+  if (!inspector || !shell) return;
+
+  if (isOpen && trigger) workspaceInspectorTrigger = trigger;
+  inspector.classList.toggle('is-open', isOpen);
+  shell.classList.toggle('is-inspector-open', isOpen);
+  inspector.toggleAttribute('inert', !isOpen);
+  inspector.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  document
+    .querySelectorAll('[aria-controls="workspace-inspector"]')
+    .forEach((trigger) => {
+      trigger.setAttribute('aria-expanded', String(isOpen));
+    });
+
+  if (isOpen) {
+    inspector.querySelector('.focus-stack-inspector-close')?.focus();
+  } else if (workspaceInspectorTrigger) {
+    workspaceInspectorTrigger.focus();
+    workspaceInspectorTrigger = null;
+  }
+}
+
+function initWorkspaceInspector() {
+  const inspector = document.getElementById('workspace-inspector');
+  if (!inspector || inspector.dataset.keyboardReady === 'true') return;
+  inspector.dataset.keyboardReady = 'true';
+  inspector.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setWorkspaceInspectorState(false);
+    }
+  });
+}
+
+window.toggleWorkspaceInspector = function (trigger) {
+  const inspector = document.getElementById('workspace-inspector');
+  if (!inspector) return;
+  setWorkspaceInspectorState(!inspector.classList.contains('is-open'), trigger);
+};
+
+window.closeWorkspaceInspector = function () {
+  setWorkspaceInspectorState(false);
+};
 
 // --- API ---
 async function api(path, opts = {}) {
@@ -696,6 +744,10 @@ function brandLogo(extraClass = '', variant = 'mark') {
 
 function shellModeCue(mode) {
   const cues = {
+    today: {
+      title: 'Today overview',
+      detail: 'Attention, current work, and one useful next action.',
+    },
     chat: {
       title: 'Plain chat',
       detail: 'Questions, drafting, and quick thinking.',
@@ -708,35 +760,52 @@ function shellModeCue(mode) {
       title: 'Code work',
       detail: 'Repos, issues, tests, PRs, and handoffs.',
     },
+    more: {
+      title: 'Workspace administration',
+      detail: 'Settings, operations, security, and recovery tools.',
+    },
   };
-  return cues[mode] || cues.chat;
+  return cues[mode] || cues.more;
 }
 
 function showShell(page) {
+  const routeContext = window.NanoWorkspaceShell.resolveRoute(page, activeMode);
+  const displayedMode = routeContext.mode;
   stopPolling();
   currentPage = page;
-  // Derive the active mode from the page being shown (deep links land in the
-  // correct mode). Admin/More pages resolve to null and keep the last mode.
   const NM = window.NanoModes;
-  const ownerMode = NM.resolveMode(page);
-  if (ownerMode) {
-    activeMode = ownerMode;
+  const primaryDisplayedMode = ['chat', 'cowork', 'code'].includes(
+    displayedMode,
+  );
+  if (primaryDisplayedMode) {
+    activeMode = displayedMode;
     NM.saveActiveMode(activeMode, window.localStorage);
   }
-  // Mode-scoped nav: only the pages for the active mode (in config order).
   const NM2 = window.NanoModes;
   const primaryModeIds = NM2.primaryModeIds();
-  const navItems = NM2.navPagesForMode(activeMode).map((id) => ({
+  const navItems = NM2.navPagesForMode(displayedMode).map((id) => ({
     id,
     icon: metaIcon(id),
     label: metaLabel(id),
   }));
+  if (routeContext.isToday) {
+    for (const id of ['chat', 'projects', 'gitcode', 'sessions']) {
+      if (!pages[id] || navItems.some((item) => item.id === id)) continue;
+      navItems.push({ id, icon: metaIcon(id), label: metaLabel(id) });
+    }
+  } else if (pages[page] && !navItems.some((item) => item.id === page)) {
+    navItems.push({
+      id: page,
+      icon: metaIcon(page),
+      label: page === 'dashboard' ? 'Today' : metaLabel(page),
+    });
+  }
 
-  // Inject enabled plugins whose page belongs to the active mode.
+  // Keep plugin registration scoped through the existing mode registry.
   const cachedPlugins = window._pluginsList || [];
   for (const p of cachedPlugins) {
     if (!p.enabled || !p.sidebar) continue;
-    if (NM2.resolveMode(p.sidebar.id) !== activeMode) continue;
+    if (NM2.resolveMode(p.sidebar.id) !== displayedMode) continue;
     if (navItems.some((n) => n.id === p.sidebar.id)) continue;
     navItems.push({
       id: p.sidebar.id,
@@ -748,9 +817,9 @@ function showShell(page) {
   // Role-based sidebar filtering (see isVisibleForRole at module scope).
   const filteredNavItems = navItems.filter((item) => isVisibleForRole(item.id));
 
-  // Chat mode gets a dynamic thread list instead of static page links
+  // Chat keeps its existing dynamic thread deep-link hydration.
   let navHtml;
-  if (activeMode === 'chat' && window.WebChat) {
+  if (displayedMode === 'chat' && window.WebChat) {
     navHtml =
       '<div id="chat-thread-nav">' +
       renderShellLoadingState(
@@ -763,7 +832,7 @@ function showShell(page) {
     navHtml = filteredNavItems
       .map(
         (item) =>
-          `<a class="nav-link ${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`,
+          `<a class="nav-link ${page === item.id ? 'active' : ''}" href="#/${item.id}" onclick="navigate('${item.id}'); return false;">${navIcon(item.icon)}<span class="nav-label">${item.label}</span></a>`,
       )
       .join('');
   }
@@ -772,11 +841,15 @@ function showShell(page) {
   const mobileMenuHtml = filteredNavItems
     .map(
       (item) =>
-        `<a class="${page === item.id ? 'active' : ''}" onclick="navigate('${item.id}')">${navIcon(item.icon)}<span>${item.label}</span></a>`,
+        `<a class="${page === item.id ? 'active' : ''}" href="#/${item.id}" onclick="navigate('${item.id}'); return false;">${navIcon(item.icon)}<span>${item.label}</span></a>`,
     )
     .join('');
   const moreDrawerIds = window.NanoModes.MORE_IDS.filter(
-    (id) => pages[id] && isVisibleForRole(id) && filteredNavItems.every((n) => n.id !== id),
+    (id) =>
+      id !== 'dashboard' &&
+      pages[id] &&
+      isVisibleForRole(id) &&
+      filteredNavItems.every((n) => n.id !== id),
   );
   const moreDrawerHtml = moreDrawerSections(moreDrawerIds)
     .map(
@@ -787,7 +860,7 @@ function showShell(page) {
             ${section.pages
               .map(
                 (id) =>
-                  `<a class="nav-link" onclick="toggleMoreDrawer(); navigate('${id}')">${navIcon(metaIcon(id))}<span class="nav-label">${metaLabel(id)}</span></a>`,
+                  `<a class="nav-link" href="#/${id}" onclick="toggleMoreDrawer(); navigate('${id}'); return false;">${navIcon(metaIcon(id))}<span class="nav-label">${metaLabel(id)}</span></a>`,
               )
               .join('')}
           </div>
@@ -795,13 +868,18 @@ function showShell(page) {
       `,
     )
     .join('');
-  const modeCue = shellModeCue(activeMode);
+  const modeCue = shellModeCue(displayedMode);
+  const pageLabel = routeContext.isToday
+    ? 'Today'
+    : page === 'dashboard'
+      ? 'Today'
+      : metaLabel(page);
   const pluginHealthHtml = window._pluginsLoadIssue
     ? `<div class="sidebar-data-health" role="status">${esc(window._pluginsLoadIssue)}</div>`
     : '';
 
   app.innerHTML = `
-    <div class="app">
+    <div class="app focus-stack-shell" data-workspace-mode="${esc(displayedMode)}" data-workspace-section="${esc(routeContext.section)}">
       <a class="skip-link" href="#page-content">Skip to content</a>
       <div class="more-overlay" onclick="toggleMoreDrawer()" aria-hidden="true"></div>
       <div class="more-drawer" id="more-drawer" aria-hidden="true" inert>
@@ -817,24 +895,37 @@ function showShell(page) {
       </div>
       <div class="mobile-nav">
         <div class="mobile-nav-header">
-          <div class="mobile-brand"><span class="brand-mark">${brandLogo()}</span><div><h1>${esc(botName)}</h1><span>${window._editionShort || 'NanoCrab'}</span></div></div>
+          <button class="mobile-brand" type="button" onclick="navigate('dashboard')" aria-label="Open Today"><span class="brand-mark">${brandLogo()}</span><span class="mobile-brand-copy"><strong>${esc(botName)}</strong><small>${window._editionShort || 'NanoCrab'}</small></span></button>
           <button class="hamburger" onclick="toggleMobileMenu()" aria-label="Open menu">${navIcon('menu')}</button>
         </div>
         <div class="mobile-menu" id="mobile-menu">
           ${mobileMenuHtml}
           <div class="mobile-section">Account</div>
-          <a onclick="navigate('help')">${navIcon('help')}<span>Help</span></a>
-          <a onclick="logout()">${navIcon('logout')}<span>Logout</span></a>
+          <a href="#/help" onclick="navigate('help'); return false;">${navIcon('help')}<span>Help</span></a>
+          <button type="button" onclick="logout()">${navIcon('logout')}<span>Logout</span></button>
         </div>
       </div>
       <div class="sidebar-overlay" onclick="toggleMobileMenu()"></div>
-      <nav class="sidebar">
-        <div class="sidebar-header"><span class="brand-mark">${brandLogo()}</span><div><h1>${esc(botName)}</h1><span>${window._editionShort || 'NanoCrab'}</span></div></div>
-        <div class="mode-switcher">
+      <nav class="focus-stack-rail" aria-label="Workspace modes">
+        <button class="focus-stack-home${routeContext.isToday ? ' active' : ''}" type="button" onclick="navigate('dashboard')" aria-label="Open Today" aria-current="${routeContext.isToday ? 'page' : 'false'}">
+          <span class="brand-mark">${brandLogo()}</span>
+          <span>Today</span>
+        </button>
+        <div class="focus-stack-rail-modes">
           ${primaryModeIds.map((m) => {
             const cfg = window.NanoModes.MODES[m];
-            return `<button class="mode-tab ${activeMode === m ? 'active' : ''}" onclick="setMode('${m}')" type="button" title="${esc(cfg.guidance || '')}">${navIcon(cfg.icon)}<span>${cfg.label}</span></button>`;
+            return `<button class="mode-tab${displayedMode === m ? ' active' : ''}" onclick="setMode('${m}')" type="button" title="${esc(cfg.guidance || '')}" aria-pressed="${displayedMode === m ? 'true' : 'false'}">${navIcon(cfg.icon)}<span>${cfg.label}</span></button>`;
           }).join('')}
+        </div>
+        <button class="focus-stack-more${displayedMode === 'more' ? ' active' : ''}" type="button" onclick="toggleMoreDrawer()" aria-pressed="${displayedMode === 'more' ? 'true' : 'false'}">
+          ${navIcon('menu')}
+          <span>More</span>
+        </button>
+      </nav>
+      <nav class="sidebar focus-stack-context" aria-label="${esc(modeCue.title)} context">
+        <div class="focus-stack-context-header">
+          <span>${routeContext.isToday ? 'Overview' : esc(window.NanoModes.MODES[displayedMode]?.label || 'More')}</span>
+          <h1>${esc(pageLabel)}</h1>
         </div>
         <div class="mode-route-cue compact" aria-label="Active focus route cue">
           <span>${esc(modeCue.title)}</span>
@@ -842,38 +933,57 @@ function showShell(page) {
         </div>
         ${pluginHealthHtml}
         <div class="sidebar-nav">${navHtml}</div>
-        <div class="sidebar-pinned">
-          <a class="nav-link" onclick="toggleMoreDrawer()">${navIcon('menu')}<span class="nav-label">More</span></a>
-        </div>
         <div class="sidebar-footer">
           <div class="sidebar-footer-actions">
             <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme"></button>
-            <a class="nav-link nav-link-icon-only" onclick="navigate('help')" title="Help & Manual">${navIcon('help')}</a>
-            <a class="nav-link nav-link-icon-only" onclick="logout()" title="Logout">${navIcon('logout')}</a>
+            <a class="nav-link nav-link-icon-only" href="#/help" onclick="navigate('help'); return false;" title="Help & Manual">${navIcon('help')}</a>
+            <button type="button" onclick="logout()" class="nav-link nav-link-icon-only" title="Logout">${navIcon('logout')}</button>
           </div>
         </div>
       </nav>
       <div class="sidebar-resize-handle" id="sidebar-resize-handle" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin="${SIDEBAR_WIDTH_MIN}" aria-valuemax="${SIDEBAR_WIDTH_MAX}" aria-valuenow="${SIDEBAR_WIDTH_DEFAULT}" tabindex="0"></div>
-      <main class="main" id="main-content" tabindex="-1">
-        <div class="metrics-bar" id="metrics-bar"></div>
-        <div id="alerts-bar"></div>
+      <main class="main focus-stack-canvas" id="main-content" tabindex="-1">
+        <header class="focus-stack-canvas-header">
+          <div>
+            <span>${esc(window.NanoModes.MODES[displayedMode]?.label || 'Today')}</span>
+            <strong>${esc(pageLabel)}</strong>
+          </div>
+          <button class="focus-stack-inspector-trigger" type="button" onclick="toggleWorkspaceInspector(this)" aria-controls="workspace-inspector" aria-expanded="false" aria-label="Show workspace details">Details</button>
+        </header>
         <div id="page-content" tabindex="-1">${renderShellLoadingState()}</div>
       </main>
+      <aside id="workspace-inspector" class="focus-stack-inspector" inert aria-hidden="true">
+        <div class="focus-stack-inspector-head">
+          <div>
+            <span>Workspace details</span>
+            <strong>${esc(pageLabel)}</strong>
+          </div>
+          <button class="focus-stack-inspector-close" type="button" onclick="closeWorkspaceInspector()" aria-label="Close workspace details">${navIcon('chevron')}</button>
+        </div>
+        <section class="focus-stack-inspector-context" aria-label="Current route">
+          <span>${esc(routeContext.section.replace(/-/g, ' '))}</span>
+          <strong>${esc(modeCue.title)}</strong>
+          <p>${esc(modeCue.detail)}</p>
+        </section>
+        <div class="metrics-bar" id="metrics-bar"></div>
+        <div id="alerts-bar"></div>
+      </aside>
       <div class="bottom-tabs">
         <nav>
           ${primaryModeIds.map((m) => {
             const cfg = window.NanoModes.MODES[m];
-            return `<button class="bottom-tab ${activeMode === m ? 'active' : ''}" onclick="setMode('${m}')">${navIcon(cfg.icon, 'tab-icon')}<span>${cfg.label}</span></button>`;
+            return `<button class="bottom-tab${displayedMode === m ? ' active' : ''}" onclick="setMode('${m}')" aria-pressed="${displayedMode === m ? 'true' : 'false'}">${navIcon(cfg.icon, 'tab-icon')}<span>${cfg.label}</span></button>`;
           }).join('')}
-          <button class="bottom-tab" onclick="toggleMoreDrawer()">${navIcon('menu', 'tab-icon')}<span>More</span></button>
+          <button class="bottom-tab${displayedMode === 'more' ? ' active' : ''}" onclick="toggleMoreDrawer()" aria-pressed="${displayedMode === 'more' ? 'true' : 'false'}">${navIcon('menu', 'tab-icon')}<span>More</span></button>
         </nav>
       </div>
     </div>`;
   initSidebarResize();
+  initWorkspaceInspector();
   loadMetricsBar();
   loadAlerts();
   // Hydrate chat-mode thread sidebar
-  if (activeMode === 'chat' && window.WebChat) {
+  if (displayedMode === 'chat' && window.WebChat) {
     const navEl = document.getElementById('chat-thread-nav');
     if (navEl) {
       WebChat.loadThreads().then((threads) => {
@@ -13692,7 +13802,7 @@ async function renderEditor(el) {
         'Scanning files and folders for the selected repository.',
         true,
       )}</aside>
-      <main class="editor-main-panel">
+      <section class="editor-main-panel" aria-label="File editor">
         <div class="editor-surface">
           <div id="editor-container" class="editor-container">${renderEditorFileIdleState()}</div>
         </div>
@@ -13701,7 +13811,7 @@ async function renderEditor(el) {
           <span id="editor-path" class="editor-path"></span>
           <span id="editor-msg" class="editor-msg"></span>
         </div>
-      </main>
+      </section>
       <aside class="editor-git-panel" id="editor-git"></aside>
     </section>`;
 

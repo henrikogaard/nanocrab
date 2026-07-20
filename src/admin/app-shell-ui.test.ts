@@ -270,7 +270,7 @@ describe('App shell accessibility UI', () => {
       '<a class="skip-link" href="#page-content">Skip to content</a>',
     );
     expect(source).toContain(
-      '<main class="main" id="main-content" tabindex="-1">',
+      '<main class="main focus-stack-canvas" id="main-content" tabindex="-1">',
     );
     expect(source).not.toContain('Mock dashboard mode: sample data only.');
     expect(source).toContain('window.NanoDataHealth.renderAlerts(alerts');
@@ -292,18 +292,54 @@ describe('App shell accessibility UI', () => {
     expect(source).not.toContain(
       '<div id="page-content" tabindex="-1"><div class="loading">Loading</div></div>',
     );
+    expect(source.match(/<main\b/g)).toHaveLength(1);
+    expect(source).not.toContain('<main class="editor-main-panel">');
+    expect(source).toContain('href="#/help"');
+    expect(source).toContain('<button type="button" onclick="logout()"');
+    expect(source).not.toContain('<a onclick="logout()"');
     expect(source).toContain('</main>');
   });
 
-  it('shows active focus guidance for Chat, Cowork, and Code modes', () => {
+  it('derives stable Focus Stack layers and cues from the resolved route', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
 
+    const showShellStart = appSource.indexOf('function showShell(page)');
+    const showShellEnd = appSource.indexOf(
+      'window.setMode = function (mode)',
+      showShellStart,
+    );
+    const showShellSource = appSource.slice(showShellStart, showShellEnd);
+
+    expect(showShellStart).toBeGreaterThanOrEqual(0);
+    expect(showShellSource).toContain(
+      'window.NanoWorkspaceShell.resolveRoute(page, activeMode)',
+    );
+    expect(showShellSource).toContain(
+      'const displayedMode = routeContext.mode',
+    );
+    expect(showShellSource).toContain(
+      'data-workspace-mode="${esc(displayedMode)}"',
+    );
+    expect(showShellSource).toContain(
+      'data-workspace-section="${esc(routeContext.section)}"',
+    );
+    expect(showShellSource).toContain('class="focus-stack-rail"');
+    expect(showShellSource).toContain('class="sidebar focus-stack-context"');
+    expect(showShellSource).toContain('class="main focus-stack-canvas"');
+    expect(showShellSource).toContain(
+      '<aside id="workspace-inspector" class="focus-stack-inspector" inert aria-hidden="true">',
+    );
+    expect(showShellSource.match(/<main\b/g)).toHaveLength(1);
+    expect(showShellSource).toContain('href="#/${item.id}"');
+    expect(showShellSource).toContain(
+      'onclick="navigate(\'${item.id}\'); return false;"',
+    );
     expect(appSource).toContain('id="more-drawer" aria-hidden="true" inert');
     expect(appSource).toContain("drawer.toggleAttribute('inert', !isOpen)");
     expect(appSource).toContain('title="${esc(cfg.guidance || \'\')}"');
     expect(appSource).toContain('function shellModeCue(mode)');
-    expect(appSource).toContain('const modeCue = shellModeCue(activeMode)');
+    expect(appSource).toContain('const modeCue = shellModeCue(displayedMode)');
     expect(appSource).toContain('class="mode-route-cue compact"');
     expect(appSource).toContain('Active focus route cue');
     expect(appSource).toContain('SIDEBAR_WIDTH_STORAGE_KEY');
@@ -313,6 +349,8 @@ describe('App shell accessibility UI', () => {
     expect(appSource).toContain('Plain chat');
     expect(appSource).toContain('Project work');
     expect(appSource).toContain('Code work');
+    expect(appSource).toContain('Today overview');
+    expect(appSource).toContain('Workspace administration');
     expect(appSource).toContain('Questions, drafting, and quick thinking.');
     expect(appSource).toContain('Files, artifacts, chats, and approved tools.');
     expect(appSource).toContain('Repos, issues, tests, PRs, and handoffs.');
@@ -322,11 +360,18 @@ describe('App shell accessibility UI', () => {
     expect(styleSource).toContain('.mode-route-cue p');
     expect(styleSource).toContain('--sidebar-width: 280px;');
     expect(styleSource).toContain('width: var(--sidebar-width);');
-    expect(styleSource).toContain('margin-left: var(--sidebar-width);');
-    expect(styleSource).toContain('.sidebar-resize-handle');
     expect(styleSource).toContain(
-      'grid-template-columns: repeat(3, minmax(0, 1fr));',
+      'grid-template-columns: 72px minmax(220px, var(--sidebar-width)) minmax(0, 1fr);',
     );
+    expect(styleSource).toContain(
+      'grid-template-columns: 72px minmax(220px, var(--sidebar-width)) minmax(0, 1fr) 320px;',
+    );
+    expect(styleSource).toContain('.sidebar-resize-handle');
+    expect(styleSource).toContain('.focus-stack-rail');
+    expect(styleSource).toContain('.focus-stack-context');
+    expect(styleSource).toContain('.focus-stack-context button.nav-link');
+    expect(styleSource).toContain('.focus-stack-canvas');
+    expect(styleSource).toContain('.focus-stack-inspector');
     expect(styleSource).toContain('.mode-tab span:not(.nav-icon)');
     expect(styleSource).toContain('.alert-compact');
   });
@@ -350,7 +395,7 @@ describe('App shell accessibility UI', () => {
     expect(modesSource).toContain("'devhub'");
     expect(modesSource).toContain("'autofix'");
     expect(modesSource).toContain("'copilot'");
-    expect(appSource).toContain('<span class="nav-label">More</span>');
+    expect(appSource).toContain('<span>More</span>');
     expect(appSource).not.toContain(
       '<span class="nav-label">Settings</span></a>',
     );
@@ -358,33 +403,24 @@ describe('App shell accessibility UI', () => {
 
   it('renders More once per shell surface as a functional non-persistent drawer action', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
-    const modeSwitcherStart = appSource.indexOf('<div class="mode-switcher">');
-    const modeSwitcherEnd = appSource.indexOf(
-      '<div class="mode-route-cue',
-      modeSwitcherStart,
-    );
-    const desktopMoreStart = appSource.indexOf('<div class="sidebar-pinned">');
-    const desktopMoreEnd = appSource.indexOf(
-      '<div class="sidebar-footer">',
-      desktopMoreStart,
-    );
+    const railStart = appSource.indexOf('<nav class="focus-stack-rail"');
+    const railEnd = appSource.indexOf('</nav>', railStart);
     const bottomTabsStart = appSource.indexOf('<div class="bottom-tabs">');
     const bottomTabsEnd = appSource.indexOf('</nav>', bottomTabsStart);
-    const modeSwitcher = appSource.slice(modeSwitcherStart, modeSwitcherEnd);
-    const desktopMore = appSource.slice(desktopMoreStart, desktopMoreEnd);
+    const rail = appSource.slice(railStart, railEnd);
     const bottomTabs = appSource.slice(bottomTabsStart, bottomTabsEnd);
 
     expect(appSource).toContain('const primaryModeIds = NM2.primaryModeIds();');
-    expect(modeSwitcher).toContain('${primaryModeIds.map((m) => {');
-    expect(modeSwitcher).not.toContain('MODE_ORDER.map');
-    expect(
-      desktopMore.match(/<span class="nav-label">More<\/span>/g),
-    ).toHaveLength(1);
-    expect(desktopMore).toContain('onclick="toggleMoreDrawer()"');
+    expect(rail).toContain('${primaryModeIds.map((m) => {');
+    expect(rail).not.toContain('MODE_ORDER.map');
+    expect(rail.match(/<span>More<\/span>/g)).toHaveLength(1);
+    expect(rail.match(/onclick="toggleMoreDrawer\(\)"/g)).toHaveLength(1);
+    expect(rail).toContain("displayedMode === 'more' ? ' active' : ''");
     expect(bottomTabs).toContain('${primaryModeIds.map((m) => {');
     expect(bottomTabs).not.toContain('MODE_ORDER.map');
     expect(bottomTabs.match(/<span>More<\/span>/g)).toHaveLength(1);
     expect(bottomTabs.match(/onclick="toggleMoreDrawer\(\)"/g)).toHaveLength(1);
+    expect(bottomTabs).toContain("displayedMode === 'more' ? ' active' : ''");
 
     const specialActionIndex = appSource.indexOf("if (mode === 'more') {");
     const validationIndex = appSource.indexOf(
@@ -398,6 +434,107 @@ describe('App shell accessibility UI', () => {
     expect(appSource.slice(specialActionIndex, validationIndex)).not.toContain(
       'saveActiveMode',
     );
+  });
+
+  it('keeps Today out of persisted modes while selecting deep-linked route owners', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const showShellStart = source.indexOf('function showShell(page)');
+    const showShellEnd = source.indexOf(
+      'window.setMode = function (mode)',
+      showShellStart,
+    );
+    const shell = source.slice(showShellStart, showShellEnd);
+
+    expect(shell).toContain(
+      'const routeContext = window.NanoWorkspaceShell.resolveRoute(page, activeMode);',
+    );
+    expect(shell).toContain(
+      "const primaryDisplayedMode = ['chat', 'cowork', 'code'].includes(",
+    );
+    expect(shell).toContain(
+      'NM.saveActiveMode(activeMode, window.localStorage)',
+    );
+    expect(shell).toContain('routeContext.isToday');
+    expect(shell).toContain('onclick="navigate(\'dashboard\')"');
+    expect(shell).toContain('aria-label="Open Today"');
+    expect(shell).toContain(
+      'const navItems = NM2.navPagesForMode(displayedMode)',
+    );
+    expect(shell).toContain("displayedMode === m ? ' active' : ''");
+    expect(shell).not.toContain('shellModeCue(activeMode)');
+  });
+
+  it('keeps the inspector inert until opened and restores trigger focus on close', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+
+    expect(source).toContain('let workspaceInspectorTrigger = null');
+    expect(source).toContain(
+      'function setWorkspaceInspectorState(isOpen, trigger)',
+    );
+    expect(source).toContain("inspector.toggleAttribute('inert', !isOpen)");
+    expect(source).toContain(
+      "inspector.setAttribute('aria-hidden', isOpen ? 'false' : 'true')",
+    );
+    expect(source).toContain(
+      "trigger.setAttribute('aria-expanded', String(isOpen))",
+    );
+    expect(source).toContain(
+      "inspector.querySelector('.focus-stack-inspector-close')?.focus()",
+    );
+    expect(source).toContain('workspaceInspectorTrigger.focus()');
+    expect(source).toContain("if (event.key === 'Escape')");
+    expect(source).toContain(
+      'window.toggleWorkspaceInspector = function (trigger)',
+    );
+    expect(source).toContain('window.closeWorkspaceInspector = function ()');
+    expect(source).toContain('aria-controls="workspace-inspector"');
+    expect(source).toContain('aria-label="Show workspace details"');
+    expect(source).toContain('aria-label="Close workspace details"');
+  });
+
+  it('renders exactly four stable mobile mode actions and sheet-ready context at 720px', () => {
+    const appSource = fs.readFileSync(appPath, 'utf8');
+    const styleSource = fs.readFileSync(stylePath, 'utf8');
+    const bottomTabsStart = appSource.indexOf('<div class="bottom-tabs">');
+    const bottomTabsEnd = appSource.indexOf('</nav>', bottomTabsStart);
+    const bottomTabs = appSource.slice(bottomTabsStart, bottomTabsEnd);
+    const focusMobileStart = styleSource.indexOf(
+      '@media (max-width: 720px) {\n  .focus-stack-shell',
+    );
+    const focusMobile = styleSource.slice(focusMobileStart);
+
+    expect(bottomTabs).toContain('${primaryModeIds.map((m) => {');
+    expect(bottomTabs.match(/<button class="bottom-tab/g)).toHaveLength(2);
+    expect(bottomTabs).not.toContain('Today</span>');
+    expect(focusMobileStart).toBeGreaterThanOrEqual(0);
+    expect(focusMobile).toContain('.focus-stack-context');
+    expect(focusMobile).toContain('display: none !important;');
+    expect(focusMobile).toContain('.focus-stack-inspector');
+    expect(focusMobile).toContain('position: fixed;');
+    expect(focusMobile).toContain('max-width: 100%;');
+    expect(styleSource).toContain('overflow-x: clip;');
+  });
+
+  it('keeps the optional inspector from collapsing the canvas at intermediate widths', () => {
+    const styleSource = fs.readFileSync(stylePath, 'utf8');
+    const mediumStart = styleSource.indexOf(
+      '@media (max-width: 1200px) and (min-width: 769px)',
+    );
+    const mediumEnd = styleSource.indexOf(
+      '@media (max-width: 768px)',
+      mediumStart,
+    );
+    const mediumSource = styleSource.slice(mediumStart, mediumEnd);
+
+    expect(mediumStart).toBeGreaterThanOrEqual(0);
+    expect(mediumSource).toContain('.focus-stack-shell.is-inspector-open');
+    expect(mediumSource).toContain(
+      'grid-template-columns: 72px minmax(220px, var(--sidebar-width)) minmax(0, 1fr);',
+    );
+    expect(mediumSource).toContain('.focus-stack-inspector.is-open');
+    expect(mediumSource).toContain('position: fixed;');
+    expect(mediumSource).toContain('right: 0;');
+    expect(mediumSource).toContain('width: 320px;');
   });
 
   it('restores chat thread deep links without double-prefixing legacy web ids', () => {

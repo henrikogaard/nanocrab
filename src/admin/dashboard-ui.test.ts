@@ -8,21 +8,24 @@ const dashboardPath = path.join(
 );
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
 
-describe('Dashboard workspace home UI', () => {
-  it('pulls only enough state to choose between Chat, Cowork, Code, and More', () => {
+describe('Today workspace overview UI', () => {
+  it('pulls only enough state to prioritize attention and one next action', () => {
     const source = fs.readFileSync(dashboardPath, 'utf8');
 
     expect(source).toContain("api('/approvals?status=pending&limit=5')");
     expect(source).toContain("api('/projects')");
     expect(source).toContain("api('/tasks')");
-    expect(source).toContain('Workspace home');
-    expect(source).toContain('Start with the right surface');
+    expect(source).toContain('<span class="dash-kicker">Today</span>');
+    expect(source).toContain('What needs your attention');
     expect(source).toContain('Chat');
     expect(source).toContain('Cowork');
     expect(source).toContain('Code');
     expect(source).toContain('More');
+    expect(source).toContain('dash-today-header');
     expect(source).toContain('dash-next-action');
-    expect(source).toContain('dash-primary-lanes');
+    expect(source).toContain('dash-attention-list');
+    expect(source).toContain('dash-focus-paths');
+    expect(source).toContain('<details class="dash-focus-paths">');
     expect(source).toContain('dash-more-strip');
     expect(source).toContain('toggleMoreDrawer()');
     expect(source).toContain("navigate('chat')");
@@ -32,6 +35,8 @@ describe('Dashboard workspace home UI', () => {
     expect(source).not.toContain(
       "['Assign task', 'Tasks, issues, auto-pickup'",
     );
+    expect(source).not.toContain('Workspace home');
+    expect(source).not.toContain('dash-primary-lanes');
   });
 
   it('keeps copy helpers focused on selecting the right workspace surface', () => {
@@ -46,30 +51,28 @@ describe('Dashboard workspace home UI', () => {
     expect(source).toContain('Start in Chat, Cowork, or Code');
     expect(source).toContain('dailyBriefStats');
     expect(source).toContain('dashboardOperatingBriefText');
-    expect(source).toContain('NanoCrab workspace brief');
+    expect(source).toContain('NanoCrab Today brief');
     expect(source).toContain('window._dashboardOperatingBrief');
     expect(source).toContain('window._dashboardDataHealthState');
     expect(source).toContain('Data health:');
-    expect(source).toContain('Dashboard feeds loaded without known fallback.');
+    expect(source).toContain('Today feeds loaded without known fallback.');
     expect(source).toContain('renderDashboardDataHealthChip');
     expect(source).toContain('dashboard-data-health-chip');
     expect(source).toContain('updateDashboardRefreshDataHealth');
-    expect(source).toContain(
-      'Dashboard smart refresh cockpit feed unavailable',
-    );
+    expect(source).toContain('Today smart refresh cockpit feed unavailable');
     expect(source).toContain('baseLoadIssues');
     expect(source).toContain('refreshIssues');
     expect(source).toContain('Data confidence');
     expect(source).toContain('copyDashboardOperatingBrief');
     expect(source).toContain('Copy brief');
-    expect(source).toContain('Dashboard brief copied');
+    expect(source).toContain('Today brief copied');
     expect(source).toContain('dashboardKickoffPromptText');
     expect(source).toContain('Start my NanoCrab work session.');
     expect(source).toContain('window._dashboardKickoffPrompt');
     expect(source).toContain('copyDashboardKickoffPrompt');
     expect(source).toContain('Copy kickoff prompt');
-    expect(source).toContain('Dashboard kickoff prompt copied');
-    expect(source).toContain('Copy dashboard kickoff prompt');
+    expect(source).toContain('Today kickoff prompt copied');
+    expect(source).toContain('Copy Today kickoff prompt');
     expect(source).toContain('Return the first surface to open');
     expect(source).toContain('copyTextWithFallback');
     expect(source).not.toContain("window.prompt('Copy dashboard brief:'");
@@ -77,7 +80,7 @@ describe('Dashboard workspace home UI', () => {
       "window.prompt('Copy dashboard kickoff prompt:'",
     );
     expect(source).toContain(
-      'Use this brief to decide whether to start in Chat, Cowork, Code, or More.',
+      'Use this Today brief to decide whether to start in Chat, Cowork, Code, or More.',
     );
   });
 
@@ -97,7 +100,7 @@ describe('Dashboard workspace home UI', () => {
       "loadIssues.push('Copilot job queue unavailable')",
     );
     expect(source).toContain('Review workspace data confidence');
-    expect(source).toContain('dashboard feed${loadIssues.length === 1 ?');
+    expect(source).toContain('Today feed${loadIssues.length === 1 ?');
     expect(source).toContain('toggleMoreDrawer()');
     expect(source).toContain('Open More');
     expect(source).toContain('dash-data-health is-warning');
@@ -106,7 +109,7 @@ describe('Dashboard workspace home UI', () => {
     expect(source).toContain('Promise.allSettled');
     expect(source).toContain("api('/sessions/cockpit'),");
     expect(source).toContain(
-      "updateDashboardRefreshDataHealth(['Dashboard smart refresh cockpit feed unavailable'])",
+      "updateDashboardRefreshDataHealth(['Today smart refresh cockpit feed unavailable'])",
     );
     expect(source).toContain('updateDashboardRefreshDataHealth([])');
     const mainLoadBlock = source.slice(
@@ -202,21 +205,39 @@ describe('Dashboard workspace home UI', () => {
     );
   });
 
-  it('styles the priority queue as a dense triage surface', () => {
+  it('styles Today as a calm attention-first surface with progressive disclosure', () => {
     const source = fs.readFileSync(stylePath, 'utf8');
 
     expect(source).toContain('.dash-home-shell');
+    expect(source).toContain('.dash-today-header');
     expect(source).toContain('.dash-next-action');
-    expect(source).toContain('.dash-primary-lanes');
-    expect(source).toContain('.dash-primary-lane');
+    expect(source).toContain('.dash-attention-list');
+    expect(source).toContain('.dash-focus-paths');
+    expect(source).toContain('.dash-focus-link');
     expect(source).toContain('.dash-more-strip');
     expect(source).toContain('.dash-empty-state');
     expect(source).toContain('.dash-empty-actions');
     expect(source).toContain('.dash-empty-state.is-ready');
     expect(source).toContain('.dash-empty-state.is-setup');
+    expect(source).toContain('.dash-focus-paths[open]');
+    expect(source).not.toContain('.dash-primary-lanes');
+  });
+
+  it('names loading, error, retry, and copy feedback for Today', () => {
+    const source = fs.readFileSync(dashboardPath, 'utf8');
+
+    expect(source).toContain('aria-label="Loading Today"');
     expect(source).toContain(
-      'grid-template-columns: repeat(3, minmax(0, 1fr))',
+      '<span class="dash-kicker">Today unavailable</span>',
     );
+    expect(source).toContain('Could not load Today');
+    expect(source).toContain(
+      'onclick="navigate(\'dashboard\')">Retry Today</button>',
+    );
+    expect(source).toContain('Today brief is not ready');
+    expect(source).toContain('Today kickoff prompt is not ready');
+    expect(source).not.toContain('Dashboard unavailable');
+    expect(source).not.toContain('Workspace home');
   });
 
   it('keeps cockpit progress bars class-based', () => {
@@ -398,12 +419,12 @@ describe('Dashboard workspace home UI', () => {
     expect(style).toContain('height: var(--bar-h)');
   });
 
-  it('adds live workspace lanes for Chat, Cowork, and Code routing', () => {
+  it('keeps Chat, Cowork, and Code routes available behind a calm disclosure', () => {
     const source = fs.readFileSync(dashboardPath, 'utf8');
 
     expect(source).toContain("api('/copilot/jobs')");
-    expect(source).toContain('Start with the right surface');
-    expect(source).toContain('dash-primary-lanes');
+    expect(source).toContain('Choose another focus');
+    expect(source).toContain('dash-focus-paths');
     expect(source).toContain('workspaceLaneItems');
     expect(source).toContain('Plain chat');
     expect(source).toContain('Projects and agent work');
@@ -427,15 +448,15 @@ describe('Dashboard workspace home UI', () => {
     );
   });
 
-  it('styles workspace lanes as a responsive first-screen routing strip', () => {
+  it('styles disclosed workspace routes without equal-weight first-screen cards', () => {
     const source = fs.readFileSync(stylePath, 'utf8');
 
-    expect(source).toContain('.dash-primary-lanes');
-    expect(source).toContain('.dash-primary-lane');
-    expect(source).toContain('.dash-workspace-lane');
-    expect(source).toContain('.dash-workspace-lane:focus-visible');
+    expect(source).toContain('.dash-focus-paths');
+    expect(source).toContain('.dash-focus-path-list');
+    expect(source).toContain('.dash-focus-link');
+    expect(source).toContain('.dash-focus-link:focus-visible');
     expect(source).toContain(
-      '.dash-primary-lanes {\n    grid-template-columns: 1fr;',
+      '.dash-focus-path-list {\n    grid-template-columns: 1fr;',
     );
   });
 });
