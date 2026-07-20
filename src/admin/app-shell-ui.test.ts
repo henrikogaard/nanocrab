@@ -480,6 +480,20 @@ describe('App shell accessibility UI', () => {
     expect(shell).not.toContain('shellModeCue(activeMode)');
   });
 
+  it('applies Today current-page semantics and active styling to both responsive controls', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const style = fs.readFileSync(stylePath, 'utf8');
+
+    expect(source).toContain(
+      "class=\"mobile-brand${routeContext.isToday ? ' active' : ''}\"",
+    );
+    expect(source).toContain(
+      "aria-current=\"${routeContext.isToday ? 'page' : 'false'}\"",
+    );
+    expect(style).toContain('.mobile-brand.active');
+    expect(style).toContain('.mobile-brand.active .brand-mark');
+  });
+
   it('keeps the inspector inert until opened and restores trigger focus on close', () => {
     const source = fs.readFileSync(appPath, 'utf8');
 
@@ -512,6 +526,20 @@ describe('App shell accessibility UI', () => {
     expect(source).toContain('aria-controls="workspace-inspector"');
     expect(source).toContain('aria-label="Show workspace details"');
     expect(source).toContain('aria-label="Close workspace details"');
+  });
+
+  it('installs one document-level inspector Escape handler across shell rerenders', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const initStart = source.indexOf('function initWorkspaceInspector()');
+    const initEnd = source.indexOf('function initMoreDrawer()', initStart);
+    const initSource = source.slice(initStart, initEnd);
+
+    expect(initSource).toContain('workspaceInspectorEscapeReady');
+    expect(initSource).toContain("document.addEventListener('keydown'");
+    expect(initSource).toContain("event.key !== 'Escape'");
+    expect(initSource).toContain("classList.contains('is-open')");
+    expect(initSource).toContain('setWorkspaceInspectorState(false)');
+    expect(initSource).not.toContain("inspector.addEventListener('keydown'");
   });
 
   it('keeps keyboard focus inside the modal More drawer and supports Escape', () => {
@@ -592,6 +620,13 @@ describe('App shell accessibility UI', () => {
     expect(focusMobile).toContain('env(safe-area-inset-bottom, 0px)');
     expect(styleSource).toContain('.more-close:focus-visible');
     expect(styleSource).toContain('outline: 2px solid var(--accent);');
+    expect(styleSource).toContain('width: 36px;');
+    expect(styleSource).toContain('height: 36px;');
+    expect(focusMobile).toContain('.more-close');
+    expect(focusMobile).toContain('width: 44px;');
+    expect(focusMobile).toContain('height: 44px;');
+    expect(focusMobile).toContain('.more-drawer-header');
+    expect(focusMobile).toContain('min-height: 60px;');
   });
 
   it('keeps the optional inspector from collapsing the canvas at intermediate widths', () => {

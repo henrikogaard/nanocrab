@@ -150,6 +150,7 @@ loadSidebarWidth();
 
 let workspaceInspectorTrigger = null;
 let moreDrawerTrigger = null;
+let workspaceInspectorEscapeReady = false;
 
 function synchronizeMoreDrawerControls() {
   const drawer = document.getElementById('more-drawer');
@@ -223,14 +224,18 @@ function setMoreDrawerState(isOpen, trigger, options = {}) {
 }
 
 function initWorkspaceInspector() {
-  const inspector = document.getElementById('workspace-inspector');
-  if (!inspector || inspector.dataset.keyboardReady === 'true') return;
-  inspector.dataset.keyboardReady = 'true';
-  inspector.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      setWorkspaceInspectorState(false);
+  if (workspaceInspectorEscapeReady) return;
+  workspaceInspectorEscapeReady = true;
+  document.addEventListener('keydown', (event) => {
+    const inspector = document.getElementById('workspace-inspector');
+    if (
+      event.key !== 'Escape' ||
+      !inspector?.classList.contains('is-open')
+    ) {
+      return;
     }
+    event.preventDefault();
+    setWorkspaceInspectorState(false);
   });
 }
 
@@ -1012,7 +1017,7 @@ function showShell(page) {
       </div>
       <div class="mobile-nav">
         <div class="mobile-nav-header">
-          <button class="mobile-brand" type="button" onclick="navigate('dashboard')" aria-label="Open Today"><span class="brand-mark">${brandLogo()}</span><span class="mobile-brand-copy"><strong>${esc(botName)}</strong><small>${window._editionShort || 'NanoCrab'}</small></span></button>
+          <button class="mobile-brand${routeContext.isToday ? ' active' : ''}" type="button" onclick="navigate('dashboard')" aria-label="Open Today" aria-current="${routeContext.isToday ? 'page' : 'false'}"><span class="brand-mark">${brandLogo()}</span><span class="mobile-brand-copy"><strong>${esc(botName)}</strong><small>${window._editionShort || 'NanoCrab'}</small></span></button>
           <button class="hamburger" onclick="toggleMobileMenu()" aria-label="Open menu">${navIcon('menu')}</button>
         </div>
         <div class="mobile-menu" id="mobile-menu">
@@ -5518,7 +5523,7 @@ async function renderTasks(el) {
 
     <div class="routine-command-card">
       <div class="routine-command-row">
-        <input id="routine-search" class="search-input routine-search" placeholder="What do you want automated?" oninput="filterRoutineCards()">
+        <input id="routine-search" class="search-input routine-search" aria-label="Search routines and scheduled tasks" placeholder="What do you want automated?" oninput="filterRoutineCards()">
         <button class="btn btn-primary" onclick="openRoutineWizard()">Draft routine</button>
       </div>
       <div class="routine-chip-row">
@@ -5668,10 +5673,10 @@ async function renderTasks(el) {
           <div class="form-group"><label for="operation-intent">Kind</label><select id="operation-intent"><option value="orders">Repeat orders</option><option value="reminder">Reminder</option></select></div>
         </div>
         <div class="grid grid-2">
-          <div class="form-group"><label>Title</label><input id="operation-title" placeholder="Night rally orders"></div>
-          <div class="form-group"><label for="operation-schedule-type">Schedule</label><div class="routine-operation-schedule"><select id="operation-schedule-type" class="routine-operation-type"><option value="interval">Interval</option><option value="cron">Cron</option></select><input id="operation-schedule-value" placeholder="30m or 0 */2 * * *"></div></div>
+          <div class="form-group"><label for="operation-title">Title</label><input id="operation-title" placeholder="Night rally orders"></div>
+          <div class="form-group"><label for="operation-schedule-type">Schedule</label><div class="routine-operation-schedule"><select id="operation-schedule-type" class="routine-operation-type"><option value="interval">Interval</option><option value="cron">Cron</option></select><input id="operation-schedule-value" aria-label="Schedule value" placeholder="30m or 0 */2 * * *"></div></div>
         </div>
-        <div class="form-group"><label>Orders / Reminder Text</label><textarea id="operation-orders" class="routine-textarea" placeholder="What should the bot repeat or remind the group about?"></textarea></div>
+        <div class="form-group"><label for="operation-orders">Orders / Reminder Text</label><textarea id="operation-orders" class="routine-textarea" placeholder="What should the bot repeat or remind the group about?"></textarea></div>
         <label class="routine-check"><input type="checkbox" id="operation-delivery-approved"> Send scheduled messages to this group</label>
         <button type="submit" class="btn btn-sm btn-primary">Create Operation Schedule</button>
       </form>
@@ -8536,11 +8541,11 @@ async function renderReports(el) {
           </div>
           <form id="report-create-form" class="report-create-form">
             <div class="form-group">
-              <label>Title</label>
+              <label for="report-title">Title</label>
               <input id="report-title" placeholder="Weekly alliance digest">
             </div>
             <div class="form-group">
-              <label>Request</label>
+              <label for="report-request">Request</label>
               <textarea id="report-request" rows="5" placeholder="Summarize recent events, decisions, risks, and next actions" required></textarea>
             </div>
             <div class="report-form-grid">
@@ -8554,7 +8559,7 @@ async function renderReports(el) {
               </div>
             </div>
             <div class="form-group">
-              <label>Deliverables Directory</label>
+              <label for="report-dir">Deliverables Directory</label>
               <input id="report-dir" placeholder="store/deliverables">
             </div>
             <div class="report-format-grid" aria-label="Report output formats">
@@ -8582,7 +8587,7 @@ async function renderReports(el) {
         <div class="report-section-panel">
           <div class="card-title">Scheduled Briefings</div>
           <form id="briefing-create-form" class="report-create-form">
-            <div class="form-group"><label>Title</label><input id="briefing-title" placeholder="Daily operations brief" required></div>
+            <div class="form-group"><label for="briefing-title">Title</label><input id="briefing-title" placeholder="Daily operations brief" required></div>
             <div class="report-form-grid">
               <div class="form-group"><label for="briefing-cadence">Cadence</label><select id="briefing-cadence"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
               <div class="form-group"><label for="briefing-time">Local Time</label><input id="briefing-time" type="time" value="08:30" required></div>
@@ -17121,7 +17126,7 @@ async function renderSessions(el) {
       ${renderSessionContinuationGuide()}
       <div class="sessions-layout">
         <aside class="sessions-rail">
-          <input id="session-search" class="search-input" placeholder="Search runs..." oninput="filterSessions(window._sessionGroupFilter || 'all')">
+          <input id="session-search" class="search-input" aria-label="Search sessions" placeholder="Search runs..." oninput="filterSessions(window._sessionGroupFilter || 'all')">
           <div class="sessions-filter-card">
             <div class="card-title">Groups</div>
             ${Object.keys(grouped)

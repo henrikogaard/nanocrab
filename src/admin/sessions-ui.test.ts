@@ -103,7 +103,9 @@ describe('Sessions handoff cockpit UI', () => {
   it('adds filtering and search without losing the existing detail route', () => {
     const source = fs.readFileSync(appPath, 'utf8');
 
-    expect(source).toContain('id="session-search"');
+    expect(source).toContain(
+      'id="session-search" class="search-input" aria-label="Search sessions"',
+    );
     expect(source).toContain('window._sessionGroupFilter');
     expect(source).toContain('filterSessions');
     expect(source).toContain("'session-detail'");

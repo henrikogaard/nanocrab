@@ -149,6 +149,7 @@ class FakeDocument {
   readonly body = new FakeElement(this, 'BODY');
   readonly app = new FakeElement(this, 'DIV', 'app');
   readonly elements: FakeElement[] = [this.app];
+  readonly listeners = new Map<string, Array<(event: FakeEvent) => void>>();
   activeElement: FakeElement = this.body;
   cookie = '';
   hidden = false;
@@ -190,7 +191,19 @@ class FakeDocument {
     return new FakeElement(this, tagName.toUpperCase());
   }
 
-  addEventListener() {}
+  addEventListener(type: string, listener: (event: FakeEvent) => void) {
+    const listeners = this.listeners.get(type) || [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  dispatch(type: string, event: FakeEvent) {
+    for (const listener of this.listeners.get(type) || []) listener(event);
+  }
+
+  listenerCount(type: string) {
+    return this.listeners.get(type)?.length || 0;
+  }
 
   queryWithin(parent: FakeElement, selector: string) {
     if (
@@ -421,6 +434,32 @@ function markupSection(markup: string, start: string, end: string) {
 }
 
 describe('Focus Stack executable shell integration', () => {
+  it('closes the non-modal inspector from global Escape after focus moves outside', () => {
+    const harness = loadShellHarness('#/reports');
+    harness.showShell('reports');
+    const trigger = harness.document.querySelector(
+      '.focus-stack-inspector-trigger',
+    );
+    const outside = harness.document.querySelector('.focus-stack-more');
+    const inspector = harness.document.getElementById('workspace-inspector');
+
+    harness.toggleInspector(trigger || undefined);
+    outside?.focus();
+    harness.document.dispatch('keydown', {
+      key: 'Escape',
+      preventDefault() {},
+    });
+
+    expect(inspector?.classList.contains('is-open')).toBe(false);
+    expect(inspector?.hasAttribute('inert')).toBe(true);
+    expect(inspector?.getAttribute('aria-hidden')).toBe('true');
+    expect(harness.document.activeElement).toBe(trigger);
+    const listenerCount = harness.document.listenerCount('keydown');
+    expect(listenerCount).toBeGreaterThan(0);
+    harness.showShell('reports');
+    expect(harness.document.listenerCount('keydown')).toBe(listenerCount);
+  });
+
   it('uses Code for a direct Sessions route without a persisted mode', () => {
     const harness = loadShellHarness('#/sessions');
 
@@ -546,7 +585,7 @@ describe('Focus Stack executable shell integration', () => {
     expect(harness.document.activeElement).toBe(inspectorClose);
 
     let prevented = false;
-    inspector.dispatch('keydown', {
+    harness.document.dispatch('keydown', {
       key: 'Escape',
       preventDefault: () => {
         prevented = true;

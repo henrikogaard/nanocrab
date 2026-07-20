@@ -47,6 +47,9 @@ close control or `Escape`; the modal More drawer also contains Tab focus until
 it closes. Focus returns to the control that opened the layer, and all rail,
 bottom-bar, drawer, and inspector controls are keyboard reachable with a visible
 focus indicator.
+Whichever responsive **Today** control is visible also exposes the current-page
+state, so keyboard and assistive-technology users receive the same route cue at
+desktop, tablet, and mobile widths.
 
 Direct links continue to work. The current hash determines the visible context:
 for example, `#/reports` and `#/source-collections` open in Cowork, `#/devhub`

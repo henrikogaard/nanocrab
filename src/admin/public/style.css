@@ -33863,6 +33863,12 @@ select {
   color: var(--text);
 }
 .more-close {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   border: 0;
   background: transparent;
   color: var(--text-muted);
@@ -38054,6 +38060,19 @@ select {
   cursor: pointer;
 }
 
+.mobile-brand.active {
+  color: var(--accent);
+}
+
+.mobile-brand.active .brand-mark {
+  outline: 2px solid color-mix(in oklch, var(--accent) 54%, transparent);
+  outline-offset: 2px;
+}
+
+.mobile-brand.active .mobile-brand-copy strong {
+  color: var(--accent);
+}
+
 .mobile-brand-copy {
   display: grid;
   gap: 2px;
@@ -38148,6 +38167,16 @@ select {
 
   .more-drawer.open {
     transform: translateX(0);
+  }
+
+  .more-drawer-header {
+    min-height: 60px;
+    padding: 8px 10px 8px 18px;
+  }
+
+  .more-close {
+    width: 44px;
+    height: 44px;
   }
 
   .more-drawer-body {

@@ -3,10 +3,14 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
+import {
+  selectAvailablePort,
+  waitForSpawnedServer,
+} from './admin-workspace-qa-server.mjs';
 
 const repoRoot = process.cwd();
-const port = Number(process.env.MOCK_ADMIN_PORT || 5187);
-const baseUrl = process.env.ADMIN_QA_BASE_URL || `http://127.0.0.1:${port}`;
+let port;
+let baseUrl = process.env.ADMIN_QA_BASE_URL || '';
 const screenshotRoot = path.resolve(
   process.env.ADMIN_QA_SCREENSHOT_ROOT ||
     path.join(
@@ -16,6 +20,11 @@ const screenshotRoot = path.resolve(
       new Date().toISOString().replace(/[:.]/g, '-'),
     ),
 );
+
+function evidencePath(filePath) {
+  if (!filePath) return '';
+  return path.relative(screenshotRoot, filePath).split(path.sep).join('/');
+}
 
 const routes = [
   {
@@ -47,12 +56,20 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForServer(url, timeoutMs = 30000) {
+async function waitForServer(url, timeoutMs = 30000, child = null) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
+    if (child && (child.exitCode !== null || child.signalCode !== null)) {
+      throw new Error(`Spawned QA server exited before ${url} became ready`);
+    }
     try {
       const response = await fetch(url);
-      if (response.ok) return;
+      if (response.ok) {
+        if (child && (child.exitCode !== null || child.signalCode !== null)) {
+          throw new Error(`Spawned QA server exited while probing ${url}`);
+        }
+        return;
+      }
     } catch {
       // The mock server is still starting.
     }
@@ -70,7 +87,24 @@ function startMockServer() {
   });
   child.stdout.on('data', (chunk) => process.stdout.write(chunk));
   child.stderr.on('data', (chunk) => process.stderr.write(chunk));
-  return child;
+  return {
+    child,
+    ready: waitForSpawnedServer(child, baseUrl),
+  };
+}
+
+async function configureServerTarget() {
+  if (process.env.ADMIN_QA_BASE_URL) {
+    baseUrl = process.env.ADMIN_QA_BASE_URL;
+    return;
+  }
+  port = process.env.MOCK_ADMIN_PORT
+    ? Number(process.env.MOCK_ADMIN_PORT)
+    : await selectAvailablePort();
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid MOCK_ADMIN_PORT: ${process.env.MOCK_ADMIN_PORT}`);
+  }
+  baseUrl = `http://127.0.0.1:${port}`;
 }
 
 async function waitForWorkspace(page) {
@@ -138,7 +172,6 @@ async function unnamedVisibleControls(page) {
           (valueEligible ? element.value?.trim() : '') ||
           element.getAttribute('alt')?.trim() ||
           element.getAttribute('title')?.trim() ||
-          element.getAttribute('placeholder')?.trim() ||
           ''
         );
       };
@@ -219,6 +252,15 @@ async function selectedWorkspaceControl(page, expectedMode) {
     const selected = modeControls.filter(
       (element) => element.getAttribute('aria-pressed') === 'true',
     );
+    const visibleTodayControls = Array.from(
+      document.querySelectorAll('.focus-stack-home, .mobile-brand'),
+    ).filter(visible);
+    const currentTodayControls = visibleTodayControls.filter(
+      (element) => element.getAttribute('aria-current') === 'page',
+    );
+    const activeTodayControls = visibleTodayControls.filter((element) =>
+      element.classList.contains('active'),
+    );
     const expectedLabel =
       mode === 'cowork'
         ? 'Cowork'
@@ -232,18 +274,13 @@ async function selectedWorkspaceControl(page, expectedMode) {
     if (mode === 'today') {
       if (selected.length > 0)
         issues.push('Today must not select a persisted primary mode');
-      const desktopHome = document.querySelector('.focus-stack-home');
-      const mobileHome = document.querySelector('.mobile-brand');
-      const visibleHome = [desktopHome, mobileHome].find(
-        (element) => element && visible(element),
-      );
-      if (!visibleHome) issues.push('No visible Today control');
-      if (
-        visibleHome === desktopHome &&
-        desktopHome.getAttribute('aria-current') !== 'page'
-      ) {
-        issues.push('Desktop Today control is not current');
-      }
+      if (visibleTodayControls.length !== 1)
+        issues.push('Expected exactly one visible Today control');
+      if (currentTodayControls.length !== 1)
+        issues.push('Visible Today control does not expose aria-current=page');
+      if (activeTodayControls.length !== 1)
+        issues.push('Visible Today control lacks active visual state');
+      const visibleHome = visibleTodayControls[0];
       return {
         expected: expectedLabel,
         selected: visibleHome
@@ -252,10 +289,17 @@ async function selectedWorkspaceControl(page, expectedMode) {
             ''
           : '',
         selectedCount: selected.length,
+        visibleTodayControlCount: visibleTodayControls.length,
+        currentTodayControlCount: currentTodayControls.length,
+        activeTodayControlCount: activeTodayControls.length,
         issues,
       };
     }
 
+    if (visibleTodayControls.length !== 1)
+      issues.push('Expected exactly one visible Today control');
+    if (currentTodayControls.length > 0 || activeTodayControls.length > 0)
+      issues.push('Today remains current or active outside the Today route');
     if (selected.length !== 1)
       issues.push(`Expected one selected ${expectedLabel} control`);
     const selectedLabel = selected[0]?.textContent?.trim() || '';
@@ -266,6 +310,9 @@ async function selectedWorkspaceControl(page, expectedMode) {
       expected: expectedLabel,
       selected: selectedLabel,
       selectedCount: selected.length,
+      visibleTodayControlCount: visibleTodayControls.length,
+      currentTodayControlCount: currentTodayControls.length,
+      activeTodayControlCount: activeTodayControls.length,
       issues,
     };
   }, expectedMode);
@@ -471,6 +518,33 @@ async function tabToTarget(page, target, maxSteps = 200) {
   };
 }
 
+async function tabOutsideInspector(page, maxSteps = 100) {
+  for (let steps = 1; steps <= maxSteps; steps += 1) {
+    await page.keyboard.press('Tab');
+    const focus = await page.evaluate(() => {
+      const inspector = document.getElementById('workspace-inspector');
+      const active = document.activeElement;
+      return {
+        outside: Boolean(
+          inspector &&
+          active instanceof HTMLElement &&
+          active !== document.body &&
+          !inspector.contains(active),
+        ),
+        descriptor:
+          active instanceof HTMLElement
+            ? active.getAttribute('aria-label') ||
+              active.textContent?.trim().replace(/\s+/g, ' ').slice(0, 80) ||
+              active.id ||
+              active.tagName
+            : '',
+      };
+    });
+    if (focus.outside) return { moved: true, steps, ...focus };
+  }
+  return { moved: false, steps: maxSteps, descriptor: '' };
+}
+
 async function exerciseInspector(page, screenshotPath = '') {
   const errors = [];
   const trigger = await firstVisible(
@@ -555,13 +629,21 @@ async function exerciseInspector(page, screenshotPath = '') {
     errors.push('Inspector close control lacks visible keyboard focus');
   if (screenshotPath) await page.screenshot({ path: screenshotPath });
 
+  const focusMovedOutsideInspector = await tabOutsideInspector(page);
+  if (!focusMovedOutsideInspector.moved)
+    errors.push('Tab did not move focus outside the non-modal inspector');
   await page.keyboard.press('Escape');
-  await page.waitForFunction(
+  await page.waitForTimeout(100);
+  const closedByGlobalEscape = await page.evaluate(
     () =>
       !document
         .getElementById('workspace-inspector')
         ?.classList.contains('is-open'),
   );
+  if (!closedByGlobalEscape) {
+    errors.push('Inspector did not close from global Escape outside the panel');
+    await page.evaluate(() => window.closeWorkspaceInspector?.());
+  }
   const closed = await page.evaluate(() => {
     const inspector = document.getElementById('workspace-inspector');
     const trigger = document.querySelector('.focus-stack-inspector-trigger');
@@ -582,9 +664,11 @@ async function exerciseInspector(page, screenshotPath = '') {
   return {
     keyboardNavigation,
     opened,
+    focusMovedOutsideInspector,
+    closedByGlobalEscape,
     closed,
     errors,
-    screenshotPath,
+    screenshotPath: evidencePath(screenshotPath),
   };
 }
 
@@ -682,6 +766,7 @@ async function exerciseMoreDrawer(page, screenshotPath = '') {
     const closeGeometry = geometry(close);
     const closeStyle = close ? window.getComputedStyle(close) : null;
     const overlayStyle = overlay ? window.getComputedStyle(overlay) : null;
+    const minimumCloseTargetPx = window.innerWidth <= 768 ? 44 : 36;
     const overlayPoint = drawerGeometry
       ? {
           x: Math.min(
@@ -719,6 +804,12 @@ async function exerciseMoreDrawer(page, screenshotPath = '') {
         rendered(bodyGeometry) && withinViewport(bodyGeometry),
       closeWithinViewport:
         rendered(closeGeometry) && withinViewport(closeGeometry),
+      minimumCloseTargetPx,
+      closeMeetsMinimumTarget: Boolean(
+        closeGeometry &&
+        closeGeometry.width >= minimumCloseTargetPx &&
+        closeGeometry.height >= minimumCloseTargetPx,
+      ),
       closeTopmost: Boolean(
         closeGeometry &&
         hitBelongsTo(
@@ -790,6 +881,10 @@ async function exerciseMoreDrawer(page, screenshotPath = '') {
   if (!opened.closeWithinViewport || !opened.closeTopmost)
     errors.push(
       'More drawer close control is outside the viewport or occluded',
+    );
+  if (!opened.closeMeetsMinimumTarget)
+    errors.push(
+      `More drawer close control is smaller than ${opened.minimumCloseTargetPx}px`,
     );
   if (!opened.focusVisible || !opened.focusIndicatorVisible)
     errors.push('More drawer close control lacks visible keyboard focus');
@@ -967,7 +1062,7 @@ async function exerciseMoreDrawer(page, screenshotPath = '') {
     scrolled,
     closed,
     errors,
-    screenshotPath,
+    screenshotPath: evidencePath(screenshotPath),
   };
 }
 
@@ -1002,7 +1097,7 @@ async function runRouteCase(
     hash: route.hash,
     expectedMode: route.mode,
     expectedSection: route.section,
-    screenshotPath,
+    screenshotPath: evidencePath(screenshotPath),
     evidence: null,
     pageErrors,
     consoleErrors,
@@ -1015,7 +1110,7 @@ async function runRouteCase(
     });
     await waitForWorkspace(page);
     await page.screenshot({ path: screenshotPath });
-    screenshots.push(screenshotPath);
+    screenshots.push(evidencePath(screenshotPath));
     record.evidence = await collectRouteEvidence(page, route, viewport);
     record.issues.push(...record.evidence.issues);
 
@@ -1030,7 +1125,10 @@ async function runRouteCase(
       );
       const inspector = await exerciseInspector(page, inspectorScreenshot);
       const more = await exerciseMoreDrawer(page, moreScreenshot);
-      screenshots.push(inspectorScreenshot, moreScreenshot);
+      screenshots.push(
+        evidencePath(inspectorScreenshot),
+        evidencePath(moreScreenshot),
+      );
       interactions.push({
         viewport: viewport.name,
         route: route.name,
@@ -1059,6 +1157,7 @@ async function runRouteCase(
 }
 
 async function main() {
+  await configureServerTarget();
   fs.mkdirSync(screenshotRoot, { recursive: true });
   const server = startMockServer();
   const cases = [];
@@ -1066,7 +1165,8 @@ async function main() {
   const screenshots = [];
   let browser;
   try {
-    await waitForServer(baseUrl);
+    if (server) await server.ready;
+    await waitForServer(baseUrl, 30000, server?.child || null);
     browser = await chromium.launch({ headless: true });
     for (const viewport of viewports) {
       for (const route of routes) {
@@ -1083,7 +1183,7 @@ async function main() {
     }
   } finally {
     if (browser) await browser.close();
-    if (server) server.kill('SIGTERM');
+    if (server?.child) server.child.kill('SIGTERM');
   }
 
   const issues = cases.flatMap((entry) =>
@@ -1093,8 +1193,8 @@ async function main() {
   const summary = {
     generatedAt: new Date().toISOString(),
     baseUrl,
-    screenshotRoot,
-    summaryPath,
+    screenshotRoot: '.',
+    summaryPath: 'summary.json',
     routeCount: routes.length,
     viewportCount: viewports.length,
     expectedCaseCount: routes.length * viewports.length,

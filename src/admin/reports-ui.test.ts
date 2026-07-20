@@ -10,8 +10,12 @@ describe('Report Studio UI', () => {
     const source = fs.readFileSync(appPath, 'utf8');
 
     for (const [label, id] of [
+      ['Title', 'report-title'],
+      ['Request', 'report-request'],
       ['Source Scopes', 'report-sources'],
       ['Provider Profile', 'report-provider-profile'],
+      ['Deliverables Directory', 'report-dir'],
+      ['Title', 'briefing-title'],
       ['Cadence', 'briefing-cadence'],
       ['Local Time', 'briefing-time'],
       ['Target Group', 'briefing-group'],
@@ -20,6 +24,21 @@ describe('Report Studio UI', () => {
     ]) {
       expect(source).toContain(`<label for="${id}">${label}</label>`);
     }
+    expect(source).toContain(
+      '<label class="report-format-option"><input type="checkbox" class="report-format"',
+    );
+    expect(source).toContain(
+      '<label class="report-format-option"><input type="checkbox" class="briefing-format"',
+    );
+    expect(source).toContain(
+      '<label class="report-check-option"><input id="report-outline-approval"',
+    );
+    expect(source).toContain(
+      '<label class="report-check-option"><input id="report-delivery-approval"',
+    );
+    expect(source).toContain(
+      '<label class="report-check-option"><input id="briefing-delivery-approval"',
+    );
   });
 
   it('keeps production actions compact and gives the approval path visual priority', () => {

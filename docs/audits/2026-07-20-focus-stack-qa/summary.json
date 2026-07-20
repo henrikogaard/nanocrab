@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-07-20T13:55:44.215Z",
-  "baseUrl": "http://127.0.0.1:5187",
-  "screenshotRoot": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final",
-  "summaryPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/summary.json",
+  "generatedAt": "2026-07-20T15:10:46.449Z",
+  "baseUrl": "http://127.0.0.1:60174",
+  "screenshotRoot": ".",
+  "summaryPath": "summary.json",
   "routeCount": 7,
   "viewportCount": 3,
   "expectedCaseCount": 21,
@@ -77,7 +77,7 @@
       "hash": "#/dashboard",
       "expectedMode": "today",
       "expectedSection": "overview",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-dashboard.png",
+      "screenshotPath": "desktop-dashboard.png",
       "evidence": {
         "dataWorkspaceMode": "today",
         "dataWorkspaceSection": "overview",
@@ -89,6 +89,9 @@
           "expected": "Today",
           "selected": "Open Today",
           "selectedCount": 0,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 1,
+          "activeTodayControlCount": 1,
           "issues": []
         },
         "layoutIssues": [],
@@ -143,7 +146,7 @@
       "hash": "#/reports",
       "expectedMode": "cowork",
       "expectedSection": "report",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-reports.png",
+      "screenshotPath": "desktop-reports.png",
       "evidence": {
         "dataWorkspaceMode": "cowork",
         "dataWorkspaceSection": "report",
@@ -155,6 +158,9 @@
           "expected": "Cowork",
           "selected": "Cowork",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -209,7 +215,7 @@
       "hash": "#/source-collections",
       "expectedMode": "cowork",
       "expectedSection": "source",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-source-collections.png",
+      "screenshotPath": "desktop-source-collections.png",
       "evidence": {
         "dataWorkspaceMode": "cowork",
         "dataWorkspaceSection": "source",
@@ -221,6 +227,9 @@
           "expected": "Cowork",
           "selected": "Cowork",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -275,7 +284,7 @@
       "hash": "#/tasks",
       "expectedMode": "cowork",
       "expectedSection": "routine",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-tasks.png",
+      "screenshotPath": "desktop-tasks.png",
       "evidence": {
         "dataWorkspaceMode": "cowork",
         "dataWorkspaceSection": "routine",
@@ -287,6 +296,9 @@
           "expected": "Cowork",
           "selected": "Cowork",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -341,7 +353,7 @@
       "hash": "#/sessions",
       "expectedMode": "code",
       "expectedSection": "session",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-sessions.png",
+      "screenshotPath": "desktop-sessions.png",
       "evidence": {
         "dataWorkspaceMode": "code",
         "dataWorkspaceSection": "session",
@@ -353,6 +365,9 @@
           "expected": "Code",
           "selected": "Code",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -407,7 +422,7 @@
       "hash": "#/devhub",
       "expectedMode": "code",
       "expectedSection": "terminal",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-devhub.png",
+      "screenshotPath": "desktop-devhub.png",
       "evidence": {
         "dataWorkspaceMode": "code",
         "dataWorkspaceSection": "terminal",
@@ -419,6 +434,9 @@
           "expected": "Code",
           "selected": "Code",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -473,7 +491,7 @@
       "hash": "#/security",
       "expectedMode": "more",
       "expectedSection": "security",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-security.png",
+      "screenshotPath": "desktop-security.png",
       "evidence": {
         "dataWorkspaceMode": "more",
         "dataWorkspaceSection": "security",
@@ -485,6 +503,9 @@
           "expected": "More",
           "selected": "More",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -539,7 +560,7 @@
       "hash": "#/dashboard",
       "expectedMode": "today",
       "expectedSection": "overview",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-dashboard.png",
+      "screenshotPath": "tablet-dashboard.png",
       "evidence": {
         "dataWorkspaceMode": "today",
         "dataWorkspaceSection": "overview",
@@ -551,6 +572,9 @@
           "expected": "Today",
           "selected": "Open Today",
           "selectedCount": 0,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 1,
+          "activeTodayControlCount": 1,
           "issues": []
         },
         "layoutIssues": [],
@@ -605,7 +629,7 @@
       "hash": "#/reports",
       "expectedMode": "cowork",
       "expectedSection": "report",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-reports.png",
+      "screenshotPath": "tablet-reports.png",
       "evidence": {
         "dataWorkspaceMode": "cowork",
         "dataWorkspaceSection": "report",
@@ -617,6 +641,9 @@
           "expected": "Cowork",
           "selected": "Cowork",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -671,7 +698,7 @@
       "hash": "#/source-collections",
       "expectedMode": "cowork",
       "expectedSection": "source",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-source-collections.png",
+      "screenshotPath": "tablet-source-collections.png",
       "evidence": {
         "dataWorkspaceMode": "cowork",
         "dataWorkspaceSection": "source",
@@ -683,6 +710,9 @@
           "expected": "Cowork",
           "selected": "Cowork",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -737,7 +767,7 @@
       "hash": "#/tasks",
       "expectedMode": "cowork",
       "expectedSection": "routine",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-tasks.png",
+      "screenshotPath": "tablet-tasks.png",
       "evidence": {
         "dataWorkspaceMode": "cowork",
         "dataWorkspaceSection": "routine",
@@ -749,6 +779,9 @@
           "expected": "Cowork",
           "selected": "Cowork",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -779,7 +812,7 @@
               "visible": true
             },
             {
-              "descriptor": "routine-search",
+              "descriptor": "Search routines and scheduled tasks",
               "visible": true
             },
             {
@@ -803,7 +836,7 @@
       "hash": "#/sessions",
       "expectedMode": "code",
       "expectedSection": "session",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-sessions.png",
+      "screenshotPath": "tablet-sessions.png",
       "evidence": {
         "dataWorkspaceMode": "code",
         "dataWorkspaceSection": "session",
@@ -815,6 +848,9 @@
           "expected": "Code",
           "selected": "Code",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -869,7 +905,7 @@
       "hash": "#/devhub",
       "expectedMode": "code",
       "expectedSection": "terminal",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-devhub.png",
+      "screenshotPath": "tablet-devhub.png",
       "evidence": {
         "dataWorkspaceMode": "code",
         "dataWorkspaceSection": "terminal",
@@ -881,6 +917,9 @@
           "expected": "Code",
           "selected": "Code",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -935,7 +974,7 @@
       "hash": "#/security",
       "expectedMode": "more",
       "expectedSection": "security",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-security.png",
+      "screenshotPath": "tablet-security.png",
       "evidence": {
         "dataWorkspaceMode": "more",
         "dataWorkspaceSection": "security",
@@ -947,6 +986,9 @@
           "expected": "More",
           "selected": "More",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -1001,7 +1043,7 @@
       "hash": "#/dashboard",
       "expectedMode": "today",
       "expectedSection": "overview",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-dashboard.png",
+      "screenshotPath": "mobile-dashboard.png",
       "evidence": {
         "dataWorkspaceMode": "today",
         "dataWorkspaceSection": "overview",
@@ -1013,6 +1055,9 @@
           "expected": "Today",
           "selected": "Open Today",
           "selectedCount": 0,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 1,
+          "activeTodayControlCount": 1,
           "issues": []
         },
         "layoutIssues": [],
@@ -1067,7 +1112,7 @@
       "hash": "#/reports",
       "expectedMode": "cowork",
       "expectedSection": "report",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-reports.png",
+      "screenshotPath": "mobile-reports.png",
       "evidence": {
         "dataWorkspaceMode": "cowork",
         "dataWorkspaceSection": "report",
@@ -1079,6 +1124,9 @@
           "expected": "Cowork",
           "selected": "Cowork",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -1133,7 +1181,7 @@
       "hash": "#/source-collections",
       "expectedMode": "cowork",
       "expectedSection": "source",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-source-collections.png",
+      "screenshotPath": "mobile-source-collections.png",
       "evidence": {
         "dataWorkspaceMode": "cowork",
         "dataWorkspaceSection": "source",
@@ -1145,6 +1193,9 @@
           "expected": "Cowork",
           "selected": "Cowork",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -1199,7 +1250,7 @@
       "hash": "#/tasks",
       "expectedMode": "cowork",
       "expectedSection": "routine",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-tasks.png",
+      "screenshotPath": "mobile-tasks.png",
       "evidence": {
         "dataWorkspaceMode": "cowork",
         "dataWorkspaceSection": "routine",
@@ -1211,6 +1262,9 @@
           "expected": "Cowork",
           "selected": "Cowork",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -1241,7 +1295,7 @@
               "visible": true
             },
             {
-              "descriptor": "routine-search",
+              "descriptor": "Search routines and scheduled tasks",
               "visible": true
             },
             {
@@ -1265,7 +1319,7 @@
       "hash": "#/sessions",
       "expectedMode": "code",
       "expectedSection": "session",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-sessions.png",
+      "screenshotPath": "mobile-sessions.png",
       "evidence": {
         "dataWorkspaceMode": "code",
         "dataWorkspaceSection": "session",
@@ -1277,6 +1331,9 @@
           "expected": "Code",
           "selected": "Code",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -1331,7 +1388,7 @@
       "hash": "#/devhub",
       "expectedMode": "code",
       "expectedSection": "terminal",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-devhub.png",
+      "screenshotPath": "mobile-devhub.png",
       "evidence": {
         "dataWorkspaceMode": "code",
         "dataWorkspaceSection": "terminal",
@@ -1343,6 +1400,9 @@
           "expected": "Code",
           "selected": "Code",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -1397,7 +1457,7 @@
       "hash": "#/security",
       "expectedMode": "more",
       "expectedSection": "security",
-      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-security.png",
+      "screenshotPath": "mobile-security.png",
       "evidence": {
         "dataWorkspaceMode": "more",
         "dataWorkspaceSection": "security",
@@ -1409,6 +1469,9 @@
           "expected": "More",
           "selected": "More",
           "selectedCount": 1,
+          "visibleTodayControlCount": 1,
+          "currentTodayControlCount": 0,
+          "activeTodayControlCount": 0,
           "issues": []
         },
         "layoutIssues": [],
@@ -1478,6 +1541,13 @@
           "closeTopmost": true,
           "focusIndicatorVisible": true
         },
+        "focusMovedOutsideInspector": {
+          "moved": true,
+          "steps": 2,
+          "outside": true,
+          "descriptor": "Search pages"
+        },
+        "closedByGlobalEscape": true,
         "closed": {
           "ariaHidden": "true",
           "inert": true,
@@ -1485,7 +1555,7 @@
           "focusReturned": true
         },
         "errors": [],
-        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-dashboard-inspector-open.png"
+        "screenshotPath": "desktop-dashboard-inspector-open.png"
       },
       "more": {
         "inspectorKeyboardNavigation": {
@@ -1527,9 +1597,9 @@
             "left": 0,
             "right": 319,
             "top": 0,
-            "bottom": 57.796875,
+            "bottom": 69,
             "width": 319,
-            "height": 57.796875,
+            "height": 69,
             "display": "flex",
             "visibility": "visible",
             "opacity": 1
@@ -1537,22 +1607,22 @@
           "bodyGeometry": {
             "left": 0,
             "right": 319,
-            "top": 57.796875,
+            "top": 69,
             "bottom": 1000,
             "width": 319,
-            "height": 942.203125,
+            "height": 931,
             "display": "block",
             "visibility": "visible",
             "opacity": 1
           },
           "closeGeometry": {
-            "left": 287.265625,
+            "left": 265,
             "right": 301,
-            "top": 19.390625,
-            "bottom": 37.390625,
-            "width": 13.734375,
-            "height": 18,
-            "display": "block",
+            "top": 16,
+            "bottom": 52,
+            "width": 36,
+            "height": 36,
+            "display": "grid",
             "visibility": "visible",
             "opacity": 1
           },
@@ -1560,6 +1630,8 @@
           "headerWithinViewport": true,
           "bodyWithinViewport": true,
           "closeWithinViewport": true,
+          "minimumCloseTargetPx": 36,
+          "closeMeetsMinimumTarget": true,
           "closeTopmost": true,
           "headerTopmost": true,
           "overlayTopmost": true,
@@ -1587,29 +1659,29 @@
             "left": 0,
             "right": 319,
             "top": 0,
-            "bottom": 57.796875,
+            "bottom": 69,
             "width": 319,
-            "height": 57.796875
+            "height": 69
           },
           "bodyGeometry": {
             "left": 0,
             "right": 319,
-            "top": 57.796875,
+            "top": 69,
             "bottom": 1000,
             "width": 319,
-            "height": 942.203125
+            "height": 931
           },
           "lastControlGeometry": {
             "left": 16,
             "right": 303,
-            "top": 948.078125,
-            "bottom": 978.671875,
+            "top": 948.28125,
+            "bottom": 978.875,
             "width": 287,
             "height": 30.59375
           },
-          "bodyScrollTop": 718,
+          "bodyScrollTop": 729,
           "bodyScrollHeight": 1660,
-          "bodyClientHeight": 942,
+          "bodyClientHeight": 931,
           "lastControlName": "Audit",
           "headerWithinViewport": true,
           "lastControlWithinBody": true,
@@ -1623,7 +1695,7 @@
           "focusReturned": true
         },
         "errors": [],
-        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-dashboard-more-open.png"
+        "screenshotPath": "desktop-dashboard-more-open.png"
       }
     },
     {
@@ -1645,6 +1717,13 @@
           "closeTopmost": true,
           "focusIndicatorVisible": true
         },
+        "focusMovedOutsideInspector": {
+          "moved": true,
+          "steps": 2,
+          "outside": true,
+          "descriptor": "Search pages"
+        },
+        "closedByGlobalEscape": true,
         "closed": {
           "ariaHidden": "true",
           "inert": true,
@@ -1652,7 +1731,7 @@
           "focusReturned": true
         },
         "errors": [],
-        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-reports-inspector-open.png"
+        "screenshotPath": "desktop-reports-inspector-open.png"
       },
       "more": {
         "inspectorKeyboardNavigation": {
@@ -1693,9 +1772,9 @@
             "left": 0,
             "right": 319,
             "top": 0,
-            "bottom": 57.796875,
+            "bottom": 69,
             "width": 319,
-            "height": 57.796875,
+            "height": 69,
             "display": "flex",
             "visibility": "visible",
             "opacity": 1
@@ -1703,22 +1782,22 @@
           "bodyGeometry": {
             "left": 0,
             "right": 319,
-            "top": 57.796875,
+            "top": 69,
             "bottom": 1000,
             "width": 319,
-            "height": 942.203125,
+            "height": 931,
             "display": "block",
             "visibility": "visible",
             "opacity": 1
           },
           "closeGeometry": {
-            "left": 287.265625,
+            "left": 265,
             "right": 301,
-            "top": 19.390625,
-            "bottom": 37.390625,
-            "width": 13.734375,
-            "height": 18,
-            "display": "block",
+            "top": 16,
+            "bottom": 52,
+            "width": 36,
+            "height": 36,
+            "display": "grid",
             "visibility": "visible",
             "opacity": 1
           },
@@ -1726,6 +1805,8 @@
           "headerWithinViewport": true,
           "bodyWithinViewport": true,
           "closeWithinViewport": true,
+          "minimumCloseTargetPx": 36,
+          "closeMeetsMinimumTarget": true,
           "closeTopmost": true,
           "headerTopmost": true,
           "overlayTopmost": true,
@@ -1753,29 +1834,29 @@
             "left": 0,
             "right": 319,
             "top": 0,
-            "bottom": 57.796875,
+            "bottom": 69,
             "width": 319,
-            "height": 57.796875
+            "height": 69
           },
           "bodyGeometry": {
             "left": 0,
             "right": 319,
-            "top": 57.796875,
+            "top": 69,
             "bottom": 1000,
             "width": 319,
-            "height": 942.203125
+            "height": 931
           },
           "lastControlGeometry": {
             "left": 16,
             "right": 303,
-            "top": 948.078125,
-            "bottom": 978.671875,
+            "top": 948.28125,
+            "bottom": 978.875,
             "width": 287,
             "height": 30.59375
           },
-          "bodyScrollTop": 718,
+          "bodyScrollTop": 729,
           "bodyScrollHeight": 1660,
-          "bodyClientHeight": 942,
+          "bodyClientHeight": 931,
           "lastControlName": "Audit",
           "headerWithinViewport": true,
           "lastControlWithinBody": true,
@@ -1789,7 +1870,7 @@
           "focusReturned": true
         },
         "errors": [],
-        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-reports-more-open.png"
+        "screenshotPath": "desktop-reports-more-open.png"
       }
     },
     {
@@ -1811,6 +1892,13 @@
           "closeTopmost": true,
           "focusIndicatorVisible": true
         },
+        "focusMovedOutsideInspector": {
+          "moved": true,
+          "steps": 2,
+          "outside": true,
+          "descriptor": "Chat"
+        },
+        "closedByGlobalEscape": true,
         "closed": {
           "ariaHidden": "true",
           "inert": true,
@@ -1818,7 +1906,7 @@
           "focusReturned": true
         },
         "errors": [],
-        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-dashboard-inspector-open.png"
+        "screenshotPath": "tablet-dashboard-inspector-open.png"
       },
       "more": {
         "inspectorKeyboardNavigation": {
@@ -1860,9 +1948,9 @@
             "left": 0,
             "right": 319,
             "top": 0,
-            "bottom": 57.796875,
+            "bottom": 61,
             "width": 319,
-            "height": 57.796875,
+            "height": 61,
             "display": "flex",
             "visibility": "visible",
             "opacity": 1
@@ -1870,22 +1958,22 @@
           "bodyGeometry": {
             "left": 0,
             "right": 319,
-            "top": 57.796875,
+            "top": 61,
             "bottom": 1000,
             "width": 319,
-            "height": 942.203125,
+            "height": 939,
             "display": "block",
             "visibility": "visible",
             "opacity": 1
           },
           "closeGeometry": {
-            "left": 287.265625,
-            "right": 301,
-            "top": 19.390625,
-            "bottom": 37.390625,
-            "width": 13.734375,
-            "height": 18,
-            "display": "block",
+            "left": 265,
+            "right": 309,
+            "top": 8,
+            "bottom": 52,
+            "width": 44,
+            "height": 44,
+            "display": "grid",
             "visibility": "visible",
             "opacity": 1
           },
@@ -1893,6 +1981,8 @@
           "headerWithinViewport": true,
           "bodyWithinViewport": true,
           "closeWithinViewport": true,
+          "minimumCloseTargetPx": 44,
+          "closeMeetsMinimumTarget": true,
           "closeTopmost": true,
           "headerTopmost": true,
           "overlayTopmost": true,
@@ -1920,29 +2010,29 @@
             "left": 0,
             "right": 319,
             "top": 0,
-            "bottom": 57.796875,
+            "bottom": 61,
             "width": 319,
-            "height": 57.796875
+            "height": 61
           },
           "bodyGeometry": {
             "left": 0,
             "right": 319,
-            "top": 57.796875,
+            "top": 61,
             "bottom": 1000,
             "width": 319,
-            "height": 942.203125
+            "height": 939
           },
           "lastControlGeometry": {
             "left": 16,
             "right": 303,
-            "top": 948.078125,
-            "bottom": 978.671875,
+            "top": 948.28125,
+            "bottom": 978.875,
             "width": 287,
             "height": 30.59375
           },
-          "bodyScrollTop": 718,
+          "bodyScrollTop": 721,
           "bodyScrollHeight": 1660,
-          "bodyClientHeight": 942,
+          "bodyClientHeight": 939,
           "lastControlName": "Audit",
           "headerWithinViewport": true,
           "lastControlWithinBody": true,
@@ -1956,7 +2046,7 @@
           "focusReturned": true
         },
         "errors": [],
-        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-dashboard-more-open.png"
+        "screenshotPath": "tablet-dashboard-more-open.png"
       }
     },
     {
@@ -1978,6 +2068,13 @@
           "closeTopmost": true,
           "focusIndicatorVisible": true
         },
+        "focusMovedOutsideInspector": {
+          "moved": true,
+          "steps": 2,
+          "outside": true,
+          "descriptor": "Chat"
+        },
+        "closedByGlobalEscape": true,
         "closed": {
           "ariaHidden": "true",
           "inert": true,
@@ -1985,7 +2082,7 @@
           "focusReturned": true
         },
         "errors": [],
-        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-reports-inspector-open.png"
+        "screenshotPath": "tablet-reports-inspector-open.png"
       },
       "more": {
         "inspectorKeyboardNavigation": {
@@ -2026,9 +2123,9 @@
             "left": 0,
             "right": 319,
             "top": 0,
-            "bottom": 57.796875,
+            "bottom": 61,
             "width": 319,
-            "height": 57.796875,
+            "height": 61,
             "display": "flex",
             "visibility": "visible",
             "opacity": 1
@@ -2036,22 +2133,22 @@
           "bodyGeometry": {
             "left": 0,
             "right": 319,
-            "top": 57.796875,
+            "top": 61,
             "bottom": 1000,
             "width": 319,
-            "height": 942.203125,
+            "height": 939,
             "display": "block",
             "visibility": "visible",
             "opacity": 1
           },
           "closeGeometry": {
-            "left": 287.265625,
-            "right": 301,
-            "top": 19.390625,
-            "bottom": 37.390625,
-            "width": 13.734375,
-            "height": 18,
-            "display": "block",
+            "left": 265,
+            "right": 309,
+            "top": 8,
+            "bottom": 52,
+            "width": 44,
+            "height": 44,
+            "display": "grid",
             "visibility": "visible",
             "opacity": 1
           },
@@ -2059,6 +2156,8 @@
           "headerWithinViewport": true,
           "bodyWithinViewport": true,
           "closeWithinViewport": true,
+          "minimumCloseTargetPx": 44,
+          "closeMeetsMinimumTarget": true,
           "closeTopmost": true,
           "headerTopmost": true,
           "overlayTopmost": true,
@@ -2086,29 +2185,29 @@
             "left": 0,
             "right": 319,
             "top": 0,
-            "bottom": 57.796875,
+            "bottom": 61,
             "width": 319,
-            "height": 57.796875
+            "height": 61
           },
           "bodyGeometry": {
             "left": 0,
             "right": 319,
-            "top": 57.796875,
+            "top": 61,
             "bottom": 1000,
             "width": 319,
-            "height": 942.203125
+            "height": 939
           },
           "lastControlGeometry": {
             "left": 16,
             "right": 303,
-            "top": 948.078125,
-            "bottom": 978.671875,
+            "top": 948.28125,
+            "bottom": 978.875,
             "width": 287,
             "height": 30.59375
           },
-          "bodyScrollTop": 718,
+          "bodyScrollTop": 721,
           "bodyScrollHeight": 1660,
-          "bodyClientHeight": 942,
+          "bodyClientHeight": 939,
           "lastControlName": "Audit",
           "headerWithinViewport": true,
           "lastControlWithinBody": true,
@@ -2122,7 +2221,7 @@
           "focusReturned": true
         },
         "errors": [],
-        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-reports-more-open.png"
+        "screenshotPath": "tablet-reports-more-open.png"
       }
     },
     {
@@ -2144,6 +2243,13 @@
           "closeTopmost": true,
           "focusIndicatorVisible": true
         },
+        "focusMovedOutsideInspector": {
+          "moved": true,
+          "steps": 2,
+          "outside": true,
+          "descriptor": "Chat"
+        },
+        "closedByGlobalEscape": true,
         "closed": {
           "ariaHidden": "true",
           "inert": true,
@@ -2151,7 +2257,7 @@
           "focusReturned": true
         },
         "errors": [],
-        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-dashboard-inspector-open.png"
+        "screenshotPath": "mobile-dashboard-inspector-open.png"
       },
       "more": {
         "inspectorKeyboardNavigation": {
@@ -2193,9 +2299,9 @@
             "left": 0,
             "right": 319,
             "top": 0,
-            "bottom": 57.796875,
+            "bottom": 61,
             "width": 319,
-            "height": 57.796875,
+            "height": 61,
             "display": "flex",
             "visibility": "visible",
             "opacity": 1
@@ -2203,22 +2309,22 @@
           "bodyGeometry": {
             "left": 0,
             "right": 319,
-            "top": 57.796875,
+            "top": 61,
             "bottom": 844,
             "width": 319,
-            "height": 786.203125,
+            "height": 783,
             "display": "block",
             "visibility": "visible",
             "opacity": 1
           },
           "closeGeometry": {
-            "left": 287.265625,
-            "right": 301,
-            "top": 19.390625,
-            "bottom": 37.390625,
-            "width": 13.734375,
-            "height": 18,
-            "display": "block",
+            "left": 265,
+            "right": 309,
+            "top": 8,
+            "bottom": 52,
+            "width": 44,
+            "height": 44,
+            "display": "grid",
             "visibility": "visible",
             "opacity": 1
           },
@@ -2226,6 +2332,8 @@
           "headerWithinViewport": true,
           "bodyWithinViewport": true,
           "closeWithinViewport": true,
+          "minimumCloseTargetPx": 44,
+          "closeMeetsMinimumTarget": true,
           "closeTopmost": true,
           "headerTopmost": true,
           "overlayTopmost": true,
@@ -2253,29 +2361,29 @@
             "left": 0,
             "right": 319,
             "top": 0,
-            "bottom": 57.796875,
+            "bottom": 61,
             "width": 319,
-            "height": 57.796875
+            "height": 61
           },
           "bodyGeometry": {
             "left": 0,
             "right": 319,
-            "top": 57.796875,
+            "top": 61,
             "bottom": 844,
             "width": 319,
-            "height": 786.203125
+            "height": 783
           },
           "lastControlGeometry": {
             "left": 16,
             "right": 303,
-            "top": 792.078125,
-            "bottom": 822.671875,
+            "top": 792.28125,
+            "bottom": 822.875,
             "width": 287,
             "height": 30.59375
           },
-          "bodyScrollTop": 874,
+          "bodyScrollTop": 877,
           "bodyScrollHeight": 1660,
-          "bodyClientHeight": 786,
+          "bodyClientHeight": 783,
           "lastControlName": "Audit",
           "headerWithinViewport": true,
           "lastControlWithinBody": true,
@@ -2289,7 +2397,7 @@
           "focusReturned": true
         },
         "errors": [],
-        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-dashboard-more-open.png"
+        "screenshotPath": "mobile-dashboard-more-open.png"
       }
     },
     {
@@ -2311,6 +2419,13 @@
           "closeTopmost": true,
           "focusIndicatorVisible": true
         },
+        "focusMovedOutsideInspector": {
+          "moved": true,
+          "steps": 2,
+          "outside": true,
+          "descriptor": "Chat"
+        },
+        "closedByGlobalEscape": true,
         "closed": {
           "ariaHidden": "true",
           "inert": true,
@@ -2318,7 +2433,7 @@
           "focusReturned": true
         },
         "errors": [],
-        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-reports-inspector-open.png"
+        "screenshotPath": "mobile-reports-inspector-open.png"
       },
       "more": {
         "inspectorKeyboardNavigation": {
@@ -2359,9 +2474,9 @@
             "left": 0,
             "right": 319,
             "top": 0,
-            "bottom": 57.796875,
+            "bottom": 61,
             "width": 319,
-            "height": 57.796875,
+            "height": 61,
             "display": "flex",
             "visibility": "visible",
             "opacity": 1
@@ -2369,22 +2484,22 @@
           "bodyGeometry": {
             "left": 0,
             "right": 319,
-            "top": 57.796875,
+            "top": 61,
             "bottom": 844,
             "width": 319,
-            "height": 786.203125,
+            "height": 783,
             "display": "block",
             "visibility": "visible",
             "opacity": 1
           },
           "closeGeometry": {
-            "left": 287.265625,
-            "right": 301,
-            "top": 19.390625,
-            "bottom": 37.390625,
-            "width": 13.734375,
-            "height": 18,
-            "display": "block",
+            "left": 265,
+            "right": 309,
+            "top": 8,
+            "bottom": 52,
+            "width": 44,
+            "height": 44,
+            "display": "grid",
             "visibility": "visible",
             "opacity": 1
           },
@@ -2392,6 +2507,8 @@
           "headerWithinViewport": true,
           "bodyWithinViewport": true,
           "closeWithinViewport": true,
+          "minimumCloseTargetPx": 44,
+          "closeMeetsMinimumTarget": true,
           "closeTopmost": true,
           "headerTopmost": true,
           "overlayTopmost": true,
@@ -2419,29 +2536,29 @@
             "left": 0,
             "right": 319,
             "top": 0,
-            "bottom": 57.796875,
+            "bottom": 61,
             "width": 319,
-            "height": 57.796875
+            "height": 61
           },
           "bodyGeometry": {
             "left": 0,
             "right": 319,
-            "top": 57.796875,
+            "top": 61,
             "bottom": 844,
             "width": 319,
-            "height": 786.203125
+            "height": 783
           },
           "lastControlGeometry": {
             "left": 16,
             "right": 303,
-            "top": 792.078125,
-            "bottom": 822.671875,
+            "top": 792.28125,
+            "bottom": 822.875,
             "width": 287,
             "height": 30.59375
           },
-          "bodyScrollTop": 874,
+          "bodyScrollTop": 877,
           "bodyScrollHeight": 1660,
-          "bodyClientHeight": 786,
+          "bodyClientHeight": 783,
           "lastControlName": "Audit",
           "headerWithinViewport": true,
           "lastControlWithinBody": true,
@@ -2455,44 +2572,44 @@
           "focusReturned": true
         },
         "errors": [],
-        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-reports-more-open.png"
+        "screenshotPath": "mobile-reports-more-open.png"
       }
     }
   ],
   "screenshots": [
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-dashboard.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-dashboard-inspector-open.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-dashboard-more-open.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-reports.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-reports-inspector-open.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-reports-more-open.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-source-collections.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-tasks.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-sessions.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-devhub.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-security.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-dashboard.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-dashboard-inspector-open.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-dashboard-more-open.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-reports.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-reports-inspector-open.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-reports-more-open.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-source-collections.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-tasks.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-sessions.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-devhub.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-security.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-dashboard.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-dashboard-inspector-open.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-dashboard-more-open.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-reports.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-reports-inspector-open.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-reports-more-open.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-source-collections.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-tasks.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-sessions.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-devhub.png",
-    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-security.png"
+    "desktop-dashboard.png",
+    "desktop-dashboard-inspector-open.png",
+    "desktop-dashboard-more-open.png",
+    "desktop-reports.png",
+    "desktop-reports-inspector-open.png",
+    "desktop-reports-more-open.png",
+    "desktop-source-collections.png",
+    "desktop-tasks.png",
+    "desktop-sessions.png",
+    "desktop-devhub.png",
+    "desktop-security.png",
+    "tablet-dashboard.png",
+    "tablet-dashboard-inspector-open.png",
+    "tablet-dashboard-more-open.png",
+    "tablet-reports.png",
+    "tablet-reports-inspector-open.png",
+    "tablet-reports-more-open.png",
+    "tablet-source-collections.png",
+    "tablet-tasks.png",
+    "tablet-sessions.png",
+    "tablet-devhub.png",
+    "tablet-security.png",
+    "mobile-dashboard.png",
+    "mobile-dashboard-inspector-open.png",
+    "mobile-dashboard-more-open.png",
+    "mobile-reports.png",
+    "mobile-reports-inspector-open.png",
+    "mobile-reports-more-open.png",
+    "mobile-source-collections.png",
+    "mobile-tasks.png",
+    "mobile-sessions.png",
+    "mobile-devhub.png",
+    "mobile-security.png"
   ],
   "issueCount": 0,
   "issues": [],
