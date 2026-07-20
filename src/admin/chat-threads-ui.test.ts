@@ -1,12 +1,68 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import vm from 'node:vm';
 
 const scriptPath = path.join(
   process.cwd(),
   'src/admin/public/pages/chat-threads.js',
 );
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
+const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
+
+type WebChatHarnessApi = {
+  setActiveThreadId(id: string): void;
+  processRunEvent(message: unknown, threadId: string): boolean;
+  promoteThread(destination: string): void;
+};
+
+function loadWebChatHarness() {
+  const strip = {
+    innerHTML: '',
+    onclick: null as null | ((event: unknown) => void),
+    replaceChildren() {
+      this.innerHTML = '';
+    },
+  };
+  const values = new Map<string, string>();
+  const context = {
+    window: {
+      NanoWorkSession: {
+        normalize: (value: Record<string, unknown>) => ({
+          ...value,
+          approvals: value.approvals || [],
+        }),
+        renderRunStrip: (session: Record<string, unknown>) =>
+          `<div>${session.status}:${session.currentStep}</div>`,
+      },
+    },
+    document: {
+      addEventListener() {},
+      getElementById(id: string) {
+        return id === 'thread-run-strip' ? strip : null;
+      },
+      querySelector() {
+        return null;
+      },
+    },
+    sessionStorage: {
+      getItem(key: string) {
+        return values.get(key) || null;
+      },
+      removeItem(key: string) {
+        values.delete(key);
+      },
+      setItem(key: string, value: string) {
+        values.set(key, value);
+      },
+    },
+    setWsMessageSubscriber() {},
+    navigate() {},
+    console,
+  } as Record<string, unknown>;
+  vm.runInNewContext(fs.readFileSync(scriptPath, 'utf8'), context);
+  return { context, strip, values };
+}
 
 describe('WebChat new conversation start surface', () => {
   it('shows shared run state only for active work and keeps promotions explicit', () => {
@@ -25,6 +81,158 @@ describe('WebChat new conversation start surface', () => {
     expect(source).toContain("navigate('gitcode')");
     expect(source).not.toContain('onclick="promote');
     expect(source).not.toContain("api('/threads/promote'");
+    expect(source).not.toContain(
+      "updateActiveChatRun({ currentStep: 'Sending message'",
+    );
+    expect(source).toContain('function applyChatRunEvent(msg, threadId)');
+    expect(source).toContain("msg.type === 'task_progress'");
+    expect(source).toContain('if (evJid !== threadId) return false');
+    expect(source).toContain('isTerminalTaskProgress(msg.data)');
+    expect(source).toContain("setWsMessageSubscriber('web-chat-thread'");
+    expect(source).not.toContain('var origHandler = handleWsMessage');
+    expect(source).not.toContain('handleWsMessage = threadWsHandler');
+  });
+
+  it('creates fresh, consumed promotion handoffs for the current thread', () => {
+    const source = fs.readFileSync(scriptPath, 'utf8');
+
+    expect(source).toContain(
+      "sessionStorage.removeItem('work_session_promotion')",
+    );
+    expect(source).toContain("threadId: _activeThreadId || ''");
+    expect(source).toContain('brief: chatThreadBriefText(state)');
+    const promotionBlock = source.slice(
+      source.indexOf('function promoteThread(destination)'),
+      source.indexOf('function installWebChatActionHandlers'),
+    );
+    expect(promotionBlock).not.toContain('state.threadId || _activeThreadId');
+    expect(source).toContain('clearWebChatThreadState()');
+  });
+
+  it('activates run state only from scoped live lifecycle evidence', () => {
+    const { context, strip } = loadWebChatHarness();
+    const webChat = (context.window as { WebChat: WebChatHarnessApi }).WebChat;
+    webChat.setActiveThreadId('web:current');
+
+    expect(
+      webChat.processRunEvent(
+        {
+          type: 'task_progress',
+          data: { groupJid: 'web:other', phase: 'run', pct: 20 },
+        },
+        'web:current',
+      ),
+    ).toBe(false);
+    expect(strip.innerHTML).toBe('');
+
+    expect(
+      webChat.processRunEvent(
+        {
+          type: 'task_progress',
+          data: {
+            groupJid: 'web:current',
+            phase: 'run',
+            message: 'Inspecting',
+            pct: 20,
+          },
+        },
+        'web:current',
+      ),
+    ).toBe(true);
+    expect(strip.innerHTML).toContain('running:Inspecting');
+
+    webChat.processRunEvent(
+      {
+        type: 'task_progress',
+        data: { groupJid: 'web:current', phase: 'failed', pct: 20 },
+      },
+      'web:current',
+    );
+    expect(strip.innerHTML).toBe('');
+  });
+
+  it('always promotes the currently selected thread and preserves hostile ids as data', () => {
+    const { context, values } = loadWebChatHarness();
+    const window = context.window as {
+      WebChat: WebChatHarnessApi;
+      _webchatThreadBriefState?: Record<string, unknown>;
+    };
+    const hostileId = 'web:new<thread>"';
+    window.WebChat.setActiveThreadId('web:stale');
+    window._webchatThreadBriefState = {
+      threadId: 'web:stale',
+      title: 'Old',
+      messages: [],
+      threadMeta: {},
+    };
+    window.WebChat.setActiveThreadId(hostileId);
+    window._webchatThreadBriefState = {
+      threadId: hostileId,
+      title: 'Current',
+      messages: [],
+      threadMeta: {},
+    };
+
+    window.WebChat.promoteThread('code');
+    const payload = JSON.parse(values.get('work_session_promotion') || '{}');
+    expect(payload).toMatchObject({ destination: 'code', threadId: hostileId });
+    expect(payload.brief).toContain('Current');
+    expect(payload.brief).not.toContain('Old');
+  });
+
+  it('consumes promotion only at the matching destination and escapes its surface', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const start = source.indexOf('function consumeWorkSessionPromotion');
+    const end = source.indexOf(
+      'window.renderWorkSessionPromotion = renderWorkSessionPromotion;',
+      start,
+    );
+    const values = new Map<string, string>();
+    const context = {
+      window: {},
+      sessionStorage: {
+        getItem: (key: string) => values.get(key) || null,
+        removeItem: (key: string) => values.delete(key),
+      },
+      esc: (value: unknown) =>
+        String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;'),
+    } as Record<string, unknown>;
+    vm.runInNewContext(
+      source.slice(start, end) +
+        '\n;globalThis.consume = consumeWorkSessionPromotion;' +
+        '\n;globalThis.render = renderWorkSessionPromotion;',
+      context,
+    );
+    const hostileId = 'web:<img src=x onerror=alert(1)>"';
+    values.set(
+      'work_session_promotion',
+      JSON.stringify({
+        destination: 'code',
+        threadId: hostileId,
+        brief: '<script>alert(1)</script>',
+      }),
+    );
+    const consume = context.consume as (destination: string) => unknown;
+    const render = context.render as (promotion: unknown) => string;
+
+    expect(consume('cowork')).toBeNull();
+    expect(values.has('work_session_promotion')).toBe(true);
+    const promotion = consume('code') as Record<string, string>;
+    expect(promotion.threadId).toBe(hostileId);
+    expect(values.has('work_session_promotion')).toBe(false);
+    const html = render(promotion);
+    expect(html).toContain('data-work-session-promotion');
+    expect(html).toContain('data-promotion-destination="code"');
+    expect(html).not.toContain('<script>');
+    expect(html).not.toContain('<img');
+    const style = fs.readFileSync(stylePath, 'utf8');
+    expect(style).toContain('.work-session-promotion-handoff pre');
+    expect(style).toContain('white-space: pre-wrap;');
+    expect(style).toContain('overflow-wrap: anywhere;');
   });
 
   it('creates plain chat threads from the configured model picker, not agent templates', () => {

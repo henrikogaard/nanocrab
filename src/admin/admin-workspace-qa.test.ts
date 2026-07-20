@@ -67,6 +67,43 @@ describe('Focus Stack rendered QA contract', () => {
     expect(source).toContain(`{ name: 'mobile', width: 390, height: 844 }`);
   });
 
+  it('exercises scoped Chat progress, promotion handoff, and terminal recovery states at desktop and mobile widths', () => {
+    const source = qaScriptSource();
+
+    for (const contractMarker of [
+      'async function exerciseChatRunFlow',
+      'async function exercisePromotionHandoff',
+      'async function exerciseTerminalSessionStates',
+      "name: 'desktop'",
+      "name: 'mobile'",
+      '#/chat',
+      '#/terminal',
+      '#thread-run-strip',
+      '.work-session-run-strip',
+      'data-work-session-promotion',
+      '#terminal-session-state',
+      'data-terminal-state',
+      "'loading'",
+      "'ready'",
+      "'reconnecting'",
+      "'unavailable'",
+      "'interrupted'",
+      'Resume',
+      'chat-run-before-progress',
+      'chat-run-progress-active',
+      'promotion-handoff',
+      'terminal-session-',
+    ]) {
+      expect(source).toContain(contractMarker);
+    }
+
+    expect(source).toContain('await exerciseChatRunFlow(page, viewport');
+    expect(source).toContain(
+      'record.promotion = await exercisePromotionHandoff(',
+    );
+    expect(source).toContain('await exerciseTerminalSessionStates(');
+  });
+
   it('records the route, landmark, overflow, accessibility, selection, layout, error, interaction, screenshot, and summary evidence', () => {
     const source = qaScriptSource();
 

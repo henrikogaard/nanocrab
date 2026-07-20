@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* global document, HTMLElement, sessionStorage, window */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -571,15 +572,15 @@ async function exerciseGlobalAlerts(page) {
     const overlaps = (left, right) =>
       Boolean(
         left &&
-          right &&
-          left.width > 0 &&
-          left.height > 0 &&
-          right.width > 0 &&
-          right.height > 0 &&
-          left.left < right.right &&
-          left.right > right.left &&
-          left.top < right.bottom &&
-          left.bottom > right.top,
+        right &&
+        left.width > 0 &&
+        left.height > 0 &&
+        right.width > 0 &&
+        right.height > 0 &&
+        left.left < right.right &&
+        left.right > right.left &&
+        left.top < right.bottom &&
+        left.bottom > right.top,
       );
     const containerRect = rectOf(container);
     const style = container ? window.getComputedStyle(container) : null;
@@ -589,10 +590,10 @@ async function exerciseGlobalAlerts(page) {
         container?.querySelectorAll('.alert-banner').length || 0,
       activeVisible: Boolean(
         containerRect &&
-          containerRect.width > 0 &&
-          containerRect.height > 0 &&
-          style?.display !== 'none' &&
-          style?.visibility !== 'hidden',
+        containerRect.width > 0 &&
+        containerRect.height > 0 &&
+        style?.display !== 'none' &&
+        style?.visibility !== 'hidden',
       ),
       outsideInspector: Boolean(
         container && !container.closest('#workspace-inspector'),
@@ -602,9 +603,9 @@ async function exerciseGlobalAlerts(page) {
       ariaAtomic: container?.getAttribute('aria-atomic'),
       inspectorClosed: Boolean(
         inspector &&
-          inspector.hasAttribute('inert') &&
-          inspector.getAttribute('aria-hidden') === 'true' &&
-          !inspector.classList.contains('is-open'),
+        inspector.hasAttribute('inert') &&
+        inspector.getAttribute('aria-hidden') === 'true' &&
+        !inspector.classList.contains('is-open'),
       ),
       position: style?.position,
       overlapsPageContent: overlaps(containerRect, rectOf(pageContent)),
@@ -627,7 +628,9 @@ async function exerciseGlobalAlerts(page) {
     errors.push('Global alerts are missing live-region semantics');
   }
   if (active.position !== 'static')
-    errors.push(`Global alerts use obstructive positioning: ${active.position}`);
+    errors.push(
+      `Global alerts use obstructive positioning: ${active.position}`,
+    );
   if (active.overlapsPageContent || active.overlapsMobileControls)
     errors.push('Global alerts obstruct route content or mobile controls');
 
@@ -663,10 +666,10 @@ async function exerciseGlobalAlerts(page) {
         emptyHeight: rect?.height || 0,
         pageContentVisible: Boolean(
           contentRect &&
-            contentRect.width > 0 &&
-            contentRect.height > 0 &&
-            contentStyle?.display !== 'none' &&
-            contentStyle?.visibility !== 'hidden',
+          contentRect.width > 0 &&
+          contentRect.height > 0 &&
+          contentStyle?.display !== 'none' &&
+          contentStyle?.visibility !== 'hidden',
         ),
       };
     });
@@ -1208,6 +1211,285 @@ async function exerciseMoreDrawer(page, screenshotPath = '') {
   };
 }
 
+function targetedViewport(viewport) {
+  return viewport.name === 'desktop' || viewport.name === 'mobile';
+}
+
+function stateScreenshotPath(viewport, name) {
+  return path.join(screenshotRoot, `${viewport.name}-${name}.png`);
+}
+
+async function exerciseChatRunFlow(page, viewport, screenshots) {
+  const errors = [];
+  const screenshotPath = stateScreenshotPath(
+    viewport,
+    'chat-run-before-progress',
+  );
+  await page.goto(`${baseUrl}/#/chat/web%3Amock-1`, {
+    waitUntil: 'domcontentloaded',
+  });
+  await page.waitForSelector('#chat-msg-input');
+  await page.locator('#thread-run-strip').waitFor({ state: 'attached' });
+
+  const before = await page.evaluate(() => ({
+    runStripCount: document.querySelectorAll(
+      '#thread-run-strip .work-session-run-strip',
+    ).length,
+    progressVisible: document
+      .getElementById('chat-progress-bar')
+      ?.classList.contains('visible'),
+  }));
+  if (before.runStripCount !== 0 || before.progressVisible) {
+    errors.push('Chat exposed run progress before scoped work started');
+  }
+  await page.screenshot({ path: screenshotPath });
+  screenshots.push(evidencePath(screenshotPath));
+
+  await page.evaluate(
+    (event) => window.WebChat.processRunEvent(event, 'web:mock-1'),
+    {
+      type: 'task_progress',
+      data: {
+        groupJid: 'web:mock-1',
+        message: 'Scoped QA progress',
+        pct: 42,
+      },
+    },
+  );
+  await page.waitForSelector('#thread-run-strip .work-session-run-strip');
+  const active = await page.evaluate(() => {
+    const runStrip = document.querySelector(
+      '#thread-run-strip .work-session-run-strip',
+    );
+    return {
+      status: runStrip?.getAttribute('data-session-status') || '',
+      text: runStrip?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      progressValue: runStrip?.querySelector('progress')?.getAttribute('value'),
+      hasResume: Array.from(runStrip?.querySelectorAll('button') || []).some(
+        (button) => button.textContent?.trim() === 'Resume',
+      ),
+    };
+  });
+  if (active.status !== 'running')
+    errors.push(`Chat scoped progress status is ${active.status || 'missing'}`);
+  if (!active.text.includes('Scoped QA progress'))
+    errors.push('Chat scoped progress did not describe the active event');
+  if (active.progressValue !== '42')
+    errors.push(
+      `Chat scoped progress value is ${active.progressValue || 'missing'}`,
+    );
+  if (active.hasResume) errors.push('Chat scoped progress exposed Resume');
+
+  const activeScreenshotPath = stateScreenshotPath(
+    viewport,
+    'chat-run-progress-active',
+  );
+  await page.screenshot({ path: activeScreenshotPath });
+  screenshots.push(evidencePath(activeScreenshotPath));
+
+  return {
+    before,
+    active,
+    errors,
+    screenshotPaths: [
+      evidencePath(screenshotPath),
+      evidencePath(activeScreenshotPath),
+    ],
+  };
+}
+
+async function exercisePromotionHandoff(page, viewport, screenshots) {
+  const errors = [];
+  const trigger = page.locator(
+    '[data-webchat-action="promote-thread"][data-promotion-destination="cowork"]',
+  );
+  await trigger.click();
+  await page.waitForSelector('[data-work-session-promotion]');
+  const handoff = await page.evaluate(() => {
+    const surface = document.querySelector('[data-work-session-promotion]');
+    return {
+      destination: surface?.getAttribute('data-promotion-destination') || '',
+      threadId: surface?.getAttribute('data-promotion-thread-id') || '',
+      text: surface?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      pendingStorage: sessionStorage.getItem('work_session_promotion'),
+    };
+  });
+  if (handoff.destination !== 'cowork')
+    errors.push(`Promotion destination is ${handoff.destination || 'missing'}`);
+  if (handoff.threadId !== 'web:mock-1')
+    errors.push(`Promotion thread id is ${handoff.threadId || 'missing'}`);
+  if (!handoff.text)
+    errors.push('Promotion handoff surface is not visibly described');
+  if (handoff.pendingStorage !== null)
+    errors.push(
+      'Promotion context remained in session storage after handoff rendered',
+    );
+
+  const screenshotPath = stateScreenshotPath(viewport, 'promotion-handoff');
+  await page.screenshot({ path: screenshotPath });
+  screenshots.push(evidencePath(screenshotPath));
+  return {
+    handoff,
+    errors,
+    screenshotPath: evidencePath(screenshotPath),
+  };
+}
+
+async function terminalStateEvidence(page) {
+  return page.evaluate(() => {
+    const container = document.getElementById('terminal-session-state');
+    const runStrip = container?.querySelector('.work-session-run-strip');
+    return {
+      state: container?.getAttribute('data-terminal-state') || '',
+      status: runStrip?.getAttribute('data-session-status') || '',
+      text: runStrip?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      hasResume: Array.from(runStrip?.querySelectorAll('button') || []).some(
+        (button) => button.textContent?.trim() === 'Resume',
+      ),
+      isReadOnly: /transcript only/i.test(runStrip?.textContent || ''),
+    };
+  });
+}
+
+async function setTerminalQaState(page, kind, sessionId) {
+  await page.evaluate(
+    ([state, id]) => {
+      window.eval(
+        `setTerminalSessionState(${JSON.stringify(state)}, ${JSON.stringify(id)})`,
+      );
+    },
+    [kind, sessionId],
+  );
+}
+
+async function exerciseTerminalSessionStates(page, viewport, screenshots) {
+  const errors = [];
+  await page.goto(`${baseUrl}/#/devhub`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#dev-tabs .tab[data-tab-id="terminal"]').click();
+  await page.waitForSelector('#terminal-session-state .work-session-run-strip');
+  const sessionId = await page.locator('#terminal-session-id').inputValue();
+  const expectedStates = [
+    {
+      kind: 'loading',
+      expectedStatus: 'running',
+      isReadOnly: false,
+    },
+    {
+      kind: 'ready',
+      expectedStatus: 'running',
+      isReadOnly: false,
+    },
+    {
+      kind: 'reconnecting',
+      expectedStatus: 'running',
+      isReadOnly: false,
+    },
+    {
+      kind: 'unavailable',
+      expectedStatus: 'failed',
+      isReadOnly: false,
+    },
+    {
+      kind: 'interrupted',
+      expectedStatus: 'interrupted',
+      isReadOnly: true,
+    },
+  ];
+  const states = [];
+  for (const expected of expectedStates) {
+    await setTerminalQaState(page, expected.kind, sessionId);
+    await page.waitForFunction(
+      (kind) =>
+        document
+          .getElementById('terminal-session-state')
+          ?.getAttribute('data-terminal-state') === kind,
+      expected.kind,
+    );
+    const evidence = await terminalStateEvidence(page);
+    if (evidence.status !== expected.expectedStatus) {
+      errors.push(
+        `Terminal ${expected.kind} status is ${evidence.status || 'missing'}`,
+      );
+    }
+    if (!evidence.text) errors.push(`Terminal ${expected.kind} is not visible`);
+    if (evidence.hasResume)
+      errors.push(`Terminal ${expected.kind} exposed Resume`);
+    if (evidence.isReadOnly !== expected.isReadOnly) {
+      errors.push(
+        `Terminal ${expected.kind} read-only state is ${evidence.isReadOnly}`,
+      );
+    }
+    const screenshotPath = stateScreenshotPath(
+      viewport,
+      `terminal-session-${expected.kind}`,
+    );
+    await page.screenshot({ path: screenshotPath });
+    screenshots.push(evidencePath(screenshotPath));
+    states.push({
+      ...expected,
+      evidence,
+      screenshotPath: evidencePath(screenshotPath),
+    });
+  }
+  return { sessionId, states, errors };
+}
+
+async function runTargetedFlowCase(browser, viewport, screenshots) {
+  const context = await browser.newContext({
+    viewport: { width: viewport.width, height: viewport.height },
+    reducedMotion: 'reduce',
+  });
+  const page = await context.newPage();
+  const pageErrors = [];
+  const consoleErrors = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  const record = {
+    viewport: viewport.name,
+    routes: ['#/chat', '#/terminal'],
+    pageErrors,
+    consoleErrors,
+    chat: null,
+    promotion: null,
+    terminal: null,
+    issues: [],
+  };
+  try {
+    record.chat = await exerciseChatRunFlow(page, viewport, screenshots);
+    record.issues.push(...record.chat.errors.map((error) => `chat: ${error}`));
+    record.promotion = await exercisePromotionHandoff(
+      page,
+      viewport,
+      screenshots,
+    );
+    record.issues.push(
+      ...record.promotion.errors.map((error) => `promotion: ${error}`),
+    );
+    record.terminal = await exerciseTerminalSessionStates(
+      page,
+      viewport,
+      screenshots,
+    );
+    record.issues.push(
+      ...record.terminal.errors.map((error) => `terminal: ${error}`),
+    );
+    await page.waitForTimeout(100);
+    if (pageErrors.length > 0)
+      record.issues.push(`${pageErrors.length} uncaught page error(s)`);
+    if (consoleErrors.length > 0)
+      record.issues.push(`${consoleErrors.length} console error(s)`);
+  } catch (error) {
+    record.issues.push(
+      `QA execution failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  } finally {
+    await context.close();
+  }
+  return record;
+}
+
 async function runRouteCase(
   browser,
   route,
@@ -1308,28 +1590,37 @@ async function runRouteCase(
 
 async function main() {
   await configureServerTarget();
+  const targetedOnly = process.env.ADMIN_QA_TARGETED_ONLY === '1';
   fs.mkdirSync(screenshotRoot, { recursive: true });
   const server = startMockServer();
   const cases = [];
   const interactions = [];
+  const targetedFlows = [];
   const screenshots = [];
   let browser;
   try {
     if (server) await server.ready;
     await waitForServer(baseUrl, 30000, server?.child || null);
     browser = await chromium.launch({ headless: true });
-    for (const viewport of viewports) {
-      for (const route of routes) {
-        cases.push(
-          await runRouteCase(
-            browser,
-            route,
-            viewport,
-            interactions,
-            screenshots,
-          ),
-        );
+    if (!targetedOnly) {
+      for (const viewport of viewports) {
+        for (const route of routes) {
+          cases.push(
+            await runRouteCase(
+              browser,
+              route,
+              viewport,
+              interactions,
+              screenshots,
+            ),
+          );
+        }
       }
+    }
+    for (const viewport of viewports.filter(targetedViewport)) {
+      targetedFlows.push(
+        await runTargetedFlowCase(browser, viewport, screenshots),
+      );
     }
   } finally {
     if (browser) await browser.close();
@@ -1339,6 +1630,11 @@ async function main() {
   const issues = cases.flatMap((entry) =>
     entry.issues.map((issue) => `${entry.viewport}/${entry.route}: ${issue}`),
   );
+  issues.push(
+    ...targetedFlows.flatMap((entry) =>
+      entry.issues.map((issue) => `${entry.viewport}/targeted-flows: ${issue}`),
+    ),
+  );
   const summaryPath = path.join(screenshotRoot, 'summary.json');
   const summary = {
     generatedAt: new Date().toISOString(),
@@ -1347,14 +1643,16 @@ async function main() {
     summaryPath: 'summary.json',
     routeCount: routes.length,
     viewportCount: viewports.length,
-    expectedCaseCount: routes.length * viewports.length,
+    expectedCaseCount: targetedOnly ? 0 : routes.length * viewports.length,
     completedCaseCount: cases.length,
     interactionCaseCount: interactions.length,
+    targetedFlowCaseCount: targetedFlows.length,
     capturedScreenshotCount: screenshots.length,
     routeContract: routes,
     viewportContract: viewports,
     cases,
     interactions,
+    targetedFlows,
     screenshots,
     issueCount: issues.length,
     issues,

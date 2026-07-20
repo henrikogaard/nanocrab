@@ -344,11 +344,12 @@ function renderRoute(el, renderFn, afterRender) {
 function stopPolling() {
   pollTimers.forEach((t) => clearInterval(t));
   pollTimers = [];
-  activeTerminal = null;
-  if (window._chatWsRestore) {
-    handleWsMessage = window._chatWsRestore;
-    delete window._chatWsRestore;
+  if (activeTerminal && activeTerminal.attachTimer) {
+    clearInterval(activeTerminal.attachTimer);
   }
+  activeTerminal = null;
+  setWsMessageSubscriber('web-chat-thread', null);
+  setWsMessageSubscriber('group-chat', null);
 }
 function poll(fn, ms) {
   fn();
@@ -356,6 +357,23 @@ function poll(fn, ms) {
 }
 
 // --- WebSocket ---
+const wsMessageSubscribers = new Map();
+
+function setWsMessageSubscriber(id, subscriber) {
+  if (typeof subscriber === 'function') wsMessageSubscribers.set(id, subscriber);
+  else wsMessageSubscribers.delete(id);
+}
+
+function dispatchWsMessageSubscribers(msg) {
+  for (const subscriber of wsMessageSubscribers.values()) {
+    try {
+      subscriber(msg);
+    } catch (error) {
+      console.error('WS subscriber failed:', error);
+    }
+  }
+}
+
 function connectWs() {
   if (wsReconnectTimer) {
     clearTimeout(wsReconnectTimer);
@@ -392,18 +410,25 @@ function connectWs() {
     }
   };
   ws.onmessage = (e) => {
+    let message;
     try {
-      handleWsMessage(JSON.parse(e.data));
+      message = JSON.parse(e.data);
+    } catch {
+      return;
+    }
+    try {
+      handleWsMessage(message);
     } catch {}
+    dispatchWsMessageSubscribers(message);
   };
   ws.onclose = (e) => {
     console.log('WS closed:', e.code, e.reason);
     ws = null;
-    if (activeTerminal) {
-      setTerminalSessionState('unavailable', activeTerminal.sessionId);
-    }
     if (!window._mockMode) {
       wsReconnectTimer = setTimeout(connectWs, 5000);
+    }
+    if (activeTerminal) {
+      setTerminalSessionState(wsReconnectTimer ? 'reconnecting' : 'unavailable', activeTerminal.sessionId);
     }
   };
   ws.onerror = (e) => {
@@ -412,6 +437,21 @@ function connectWs() {
 }
 
 let activeTerminal = null; // { sessionId, term }
+
+function activeTerminalId() {
+  return activeTerminal && activeTerminal.sessionId
+    ? activeTerminal.sessionId
+    : '';
+}
+
+function terminalOutputEndedProcess(data) {
+  const output = String(data || '');
+  return (
+    output.includes('[Process exited]') ||
+    output.includes('[Session ended — read-only view.') ||
+    output.includes('[Session timed out after')
+  );
+}
 
 const PAGE_ALIASES = {
   terminal: 'devhub',
@@ -500,7 +540,10 @@ let handleWsMessage = function (msg) {
     activeTerminal.term.write(msg.data.replace(/\n/g, '\r\n'));
     activeTerminal.transcript =
       (activeTerminal.transcript || '') + String(msg.data || '');
-    if (!activeTerminal.readOnly) {
+    if (terminalOutputEndedProcess(msg.data)) {
+      activeTerminal.readOnly = true;
+      setTerminalSessionState('interrupted', msg.sessionId);
+    } else if (!activeTerminal.readOnly) {
       setTerminalSessionState('ready', msg.sessionId);
     }
     return;
@@ -1373,6 +1416,50 @@ const pages = new Proxy(_pageMap, {
 
 // --- Consolidated render functions ---
 
+function consumeWorkSessionPromotion(destination) {
+  let raw = null;
+  try {
+    raw = sessionStorage.getItem('work_session_promotion');
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  let promotion = null;
+  try {
+    promotion = JSON.parse(raw);
+  } catch {
+    sessionStorage.removeItem('work_session_promotion');
+    return null;
+  }
+  if (
+    !promotion ||
+    promotion.destination !== destination ||
+    typeof promotion.threadId !== 'string' ||
+    typeof promotion.brief !== 'string'
+  ) {
+    return null;
+  }
+  sessionStorage.removeItem('work_session_promotion');
+  return {
+    destination,
+    threadId: promotion.threadId.slice(0, 512),
+    brief: promotion.brief.slice(0, 20000),
+  };
+}
+
+function renderWorkSessionPromotion(promotion) {
+  if (!promotion) return '';
+  return `<section class="work-session-promotion-handoff" data-work-session-promotion data-promotion-destination="${esc(promotion.destination)}" data-promotion-thread-id="${esc(promotion.threadId)}">
+    <span class="report-kicker">Chat handoff</span>
+    <h2>Continue this Chat thread in ${promotion.destination === 'cowork' ? 'Cowork' : 'Code'}</h2>
+    <p>Thread <code>${esc(promotion.threadId)}</code> remains in Chat. Use this brief as context; no messages were moved.</p>
+    <pre>${esc(promotion.brief)}</pre>
+  </section>`;
+}
+
+window.consumeWorkSessionPromotion = consumeWorkSessionPromotion;
+window.renderWorkSessionPromotion = renderWorkSessionPromotion;
+
 async function renderMemoryConsolidated(el) {
   el.innerHTML = `<div class="page-header"><h2>Memory & Knowledge</h2></div>
     <div id="mem-tabs">${renderTabs(
@@ -1441,6 +1528,7 @@ async function renderDevHubConsolidated(el) {
 }
 
 async function renderGitCodeConsolidated(el) {
+  const promotion = consumeWorkSessionPromotion('code');
   window._gitCodeWorkspaceState = {
     lanes: [
       ['Git Ops', 'Review working tree, branches, diffs, and commits.'],
@@ -1450,7 +1538,7 @@ async function renderGitCodeConsolidated(el) {
       ['Review Rules', 'Keep review expectations close to the work.'],
     ],
   };
-  el.innerHTML = `
+  el.innerHTML = `${renderWorkSessionPromotion(promotion)}
     <section class="gitcode-command-center">
       <div class="gitcode-command-copy">
         <span class="report-kicker">Code workspace</span>
@@ -3467,9 +3555,7 @@ async function renderChat(el) {
   };
 
   // Listen for WebSocket new_message events
-  const origHandler = handleWsMessage;
   const chatWsHandler = (msg) => {
-    origHandler(msg);
     if (msg.type === 'task_progress') {
       const activeGroup = document.getElementById('chat-group-select')?.value;
       if (msg.data.groupJid !== activeGroup) return;
@@ -3514,9 +3600,7 @@ async function renderChat(el) {
       }
     }
   };
-  // Patch the global handler while on chat page
-  window._chatWsRestore = handleWsMessage;
-  handleWsMessage = chatWsHandler;
+  setWsMessageSubscriber('group-chat', chatWsHandler);
 
   // Check for fork prompt from session branching
   const forkPrompt = sessionStorage.getItem('fork_prompt');
@@ -13214,8 +13298,19 @@ async function renderTerminal(el) {
 
   // Spawn or attach terminal session
   const initTerminal = () => {
+    const currentSessionId = activeTerminalId();
+    if (!currentSessionId) return;
+    if (activeTerminal.attachTimer) {
+      clearInterval(activeTerminal.attachTimer);
+      activeTerminal.attachTimer = null;
+    }
     if (ws?.readyState === 1) {
-      ws.send(JSON.stringify({ type: 'terminal_attach', sessionId }));
+      ws.send(
+        JSON.stringify({
+          type: 'terminal_attach',
+          sessionId: currentSessionId,
+        }),
+      );
       return;
     }
     term.write('Connecting...\r\n');
@@ -13225,20 +13320,37 @@ async function renderTerminal(el) {
       attempts++;
       if (ws?.readyState === 1) {
         clearInterval(check);
-        ws.send(JSON.stringify({ type: 'terminal_attach', sessionId }));
+        if (activeTerminal) activeTerminal.attachTimer = null;
+        const currentSessionId = activeTerminalId();
+        if (!currentSessionId) return;
+        ws.send(
+          JSON.stringify({
+            type: 'terminal_attach',
+            sessionId: currentSessionId,
+          }),
+        );
       } else if (attempts > 20) {
         clearInterval(check);
-        setTerminalSessionState('unavailable', sessionId);
+        if (activeTerminal) activeTerminal.attachTimer = null;
+        setTerminalSessionState('unavailable', activeTerminalId());
         term.write('\r\nFailed to connect. Check WebSocket.\r\n');
       }
     }, 500);
+    activeTerminal.attachTimer = check;
   };
   window._spawnTerminalSession = initTerminal;
   initTerminal();
 
   term.onData((data) => {
-    if (ws?.readyState === 1 && !activeTerminal.readOnly) {
-      ws.send(JSON.stringify({ type: 'terminal_input', sessionId, data }));
+    const currentSessionId = activeTerminalId();
+    if (currentSessionId && ws?.readyState === 1 && !activeTerminal.readOnly) {
+      ws.send(
+        JSON.stringify({
+          type: 'terminal_input',
+          sessionId: currentSessionId,
+          data,
+        }),
+      );
     }
   });
 

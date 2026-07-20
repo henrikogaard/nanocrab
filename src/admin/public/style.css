@@ -22035,6 +22035,30 @@ button.sessions-command-stat:active {
   box-shadow: var(--shadow);
 }
 
+.work-session-promotion-handoff {
+  margin-bottom: 20px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.work-session-promotion-handoff h2,
+.work-session-promotion-handoff p {
+  margin: 6px 0 0;
+}
+
+.work-session-promotion-handoff pre {
+  max-height: 220px;
+  margin: 14px 0 0;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+}
+
 .work-session-run-status,
 .work-session-progress {
   display: grid;

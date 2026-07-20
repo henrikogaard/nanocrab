@@ -35,13 +35,17 @@ and closing either layer restores focus to its trigger.
 
 ## Unified Work Sessions
 
-The Sessions cockpit (`#/sessions`) normalizes Chat, Cowork, Code, routine, and
-terminal work into the same status, progress, timeline, tool-call, file,
-proposal, approval, and artifact vocabulary. Chat shows the shared run strip
-only while an agent run is active. **Promote to Cowork** and **Promote to Code**
-are explicit handoffs: they remember the selected destination and navigate to
-the existing Cowork projects or Code workspace without moving or copying plain
-messages automatically.
+The Sessions cockpit (`#/sessions`) normalizes the persisted agent and routine
+sources exposed by its APIs into the same status, progress, timeline, tool-call,
+file, proposal, approval, and artifact vocabulary. Terminal history remains in
+the Terminal session browser; it is not a Sessions-cockpit source.
+
+Chat shows the shared run strip only after live, thread-scoped progress or
+approval evidence arrives over WebSocket. Sending a message alone does not
+claim an agent is running, and a reload shows no strip until new live evidence
+arrives. **Promote to Cowork** and **Promote to Code** are explicit handoffs:
+the matching destination consumes and displays the current thread brief without
+moving or copying plain messages automatically.
 
 The Terminal tab maps WebSocket state into the same run strip with explicit
 loading, ready, reconnecting, unavailable, and interrupted states. A transcript
@@ -54,7 +58,7 @@ shell process still exists.
 | ----------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | Today overview                            | `#/dashboard`                                     | Dashboard metrics, alerts, and current-work APIs                                                          | Dashboard home action                                                                                               | Ready                                                             |
 | Chat                                      | `#/chat`                                          | `/api/threads`, `/api/chat`, web channel runtime                                                          | Dashboard chat thread composer                                                                                      | Ready                                                             |
-| Unified work sessions                     | `#/sessions`, Chat run strip, Terminal tab        | `/api/sessions`, `/api/sessions/cockpit`, session streams, terminal WebSocket                             | Explicit Chat-to-Cowork/Code handoff; shared session inspector                                                      | Ready                                                             |
+| Unified work sessions                     | `#/sessions`, Chat run strip, Terminal tab        | `/api/sessions`, `/api/sessions/cockpit`, session streams; separate terminal WebSocket/history            | Explicit consumed Chat-to-Cowork/Code handoff; shared vocabulary                                                    | Ready                                                             |
 | Cowork projects                           | `#/projects`                                      | `/api/projects`, project files, context, runs, approvals                                                  | Channel workspace-intent prompts can resolve Cowork projects                                                        | Ready                                                             |
 | Git & Code workspace                      | `#/gitcode`                                       | `/api/files/repos`, `/api/dev/git/*`, `/api/dev/test/*`, `/api/dev/snippets`, `/api/dev/review-rules`     | Main group `/code ...` commands and coding-job MCP tools                                                            | Ready                                                             |
 | GitHub Autofix                            | `#/autofix`                                       | `/api/autofix/*`, GitHub webhook route                                                                    | GitHub issue label or dashboard workbench                                                                           | Ready                                                             |

@@ -30,6 +30,124 @@ describe('Terminal operator console UI', () => {
     expect(source).toContain("setTerminalSessionState('unavailable'");
     expect(source).toContain("setTerminalSessionState('reconnecting'");
     expect(source).not.toContain('data-work-session-action="resume"');
+    expect(source).toContain('function terminalOutputEndedProcess(data)');
+    expect(source).toContain("setTerminalSessionState('interrupted'");
+    expect(source).toContain('activeTerminal.readOnly = true');
+    expect(source).toContain(
+      "setTerminalSessionState(wsReconnectTimer ? 'reconnecting' : 'unavailable'",
+    );
+  });
+
+  it('resolves the current terminal session id for every live callback', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const initBlock = source.slice(
+      source.indexOf('// Spawn or attach terminal session'),
+      source.indexOf(
+        'const container = document.getElementById',
+        source.indexOf('// Spawn or attach terminal session'),
+      ),
+    );
+
+    expect(source).toContain('function activeTerminalId()');
+    expect(initBlock).toContain('const currentSessionId = activeTerminalId()');
+    expect(initBlock).toContain("type: 'terminal_attach'");
+    expect(initBlock).toContain('sessionId: currentSessionId');
+    expect(initBlock).toContain("type: 'terminal_input'");
+    expect(initBlock).not.toContain("type: 'terminal_input', sessionId, data");
+    expect(source).toContain('activeTerminal.sessionId = sessionId');
+  });
+
+  it('uses a stable websocket subscriber registry instead of wrapper restoration', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+
+    expect(source).toContain('const wsMessageSubscribers = new Map()');
+    expect(source).toContain('function setWsMessageSubscriber(id, subscriber)');
+    expect(source).toContain('function dispatchWsMessageSubscribers(msg)');
+    expect(source).toContain("setWsMessageSubscriber('web-chat-thread', null)");
+    expect(source).not.toContain('window._chatWsRestore');
+  });
+
+  it('replaces a page subscriber by id while preserving other websocket consumers', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const registrySource = source.slice(
+      source.indexOf('const wsMessageSubscribers = new Map()'),
+      source.indexOf('function connectWs()'),
+    );
+    const context = {} as Record<string, unknown>;
+    vm.runInNewContext(
+      registrySource +
+        '\n;globalThis.setSubscriber = setWsMessageSubscriber;' +
+        '\n;globalThis.dispatch = dispatchWsMessageSubscribers;',
+      context,
+    );
+    const first = vi.fn();
+    const replacement = vi.fn();
+    const other = vi.fn();
+    const setSubscriber = context.setSubscriber as (
+      id: string,
+      subscriber: null | ((message: unknown) => void),
+    ) => void;
+    const dispatch = context.dispatch as (message: unknown) => void;
+
+    setSubscriber('chat', first);
+    setSubscriber('other', other);
+    setSubscriber('chat', replacement);
+    dispatch({ type: 'task_progress' });
+
+    expect(first).not.toHaveBeenCalled();
+    expect(replacement).toHaveBeenCalledTimes(1);
+    expect(other).toHaveBeenCalledTimes(1);
+    setSubscriber('chat', null);
+    dispatch({ type: 'task_progress' });
+    expect(replacement).toHaveBeenCalledTimes(1);
+    expect(other).toHaveBeenCalledTimes(2);
+  });
+
+  it('terminalizes process-exit output and never relabels it ready', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const helperStart = source.indexOf('function terminalOutputEndedProcess');
+    const helperEnd = source.indexOf('\n}\n', helperStart) + 3;
+    const handlerStart = source.indexOf('let handleWsMessage = function (msg)');
+    const handlerEnd = source.indexOf(
+      '\n};\n\nfunction bindChatApprovalActions',
+      handlerStart,
+    );
+    const handlerSource = source
+      .slice(handlerStart, handlerEnd + 3)
+      .replace('let handleWsMessage =', 'globalThis.handleWsMessage =');
+    const setTerminalSessionState = vi.fn();
+    const context = {
+      activeTerminal: {
+        sessionId: 'live-session',
+        readOnly: false,
+        transcript: '',
+        term: { write: vi.fn() },
+      },
+      setTerminalSessionState,
+      ws: { readyState: 1, send: vi.fn() },
+    } as Record<string, unknown>;
+    vm.runInNewContext(
+      source.slice(helperStart, helperEnd) + '\n' + handlerSource,
+      context,
+    );
+
+    (context.handleWsMessage as (message: unknown) => void)({
+      type: 'terminal_output',
+      sessionId: 'live-session',
+      data: '\r\n[Process exited]\r\n',
+    });
+
+    expect((context.activeTerminal as { readOnly: boolean }).readOnly).toBe(
+      true,
+    );
+    expect(setTerminalSessionState).toHaveBeenCalledWith(
+      'interrupted',
+      'live-session',
+    );
+    expect(setTerminalSessionState).not.toHaveBeenCalledWith(
+      'ready',
+      'live-session',
+    );
   });
 
   it('frames terminal as an owner-only operator console', () => {
@@ -306,9 +424,8 @@ describe('Terminal operator console UI', () => {
     expect(source).toContain("window.switchTermPane?.('right', 'search')");
     expect(source).toContain('input.select();');
     expect(source).toContain('term-search-input');
-    expect(source).toContain(
-      "ws.send(JSON.stringify({ type: 'terminal_input', sessionId, data }))",
-    );
+    expect(source).toContain("type: 'terminal_input'");
+    expect(source).toContain('sessionId: currentSessionId');
     expect(source).toContain(
       "ws.send(JSON.stringify({ type: 'subscribe_logs', data: 'system' }))",
     );
