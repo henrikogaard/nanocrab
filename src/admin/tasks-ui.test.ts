@@ -187,6 +187,12 @@ describe('Scheduled tasks productivity UI', () => {
     const scheduled = scheduledWorkSource(source);
 
     expect(scheduled).toContain('routine-kind-filter');
+    expect(scheduled).toContain('aria-label="Filter scheduled work by type"');
+    expect(scheduled).toContain('<label for="operation-group">Group</label>');
+    expect(scheduled).toContain('<label for="operation-intent">Kind</label>');
+    expect(scheduled).toContain(
+      '<label for="operation-schedule-type">Schedule</label>',
+    );
     expect(scheduled).toContain('routine-operation-schedule');
     expect(scheduled).toContain('routine-operation-type');
     expect(scheduled).not.toContain(

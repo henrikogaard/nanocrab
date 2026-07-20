@@ -6,6 +6,42 @@ const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
 
 describe('Report Studio UI', () => {
+  it('associates every report and briefing field label with its control', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+
+    for (const [label, id] of [
+      ['Source Scopes', 'report-sources'],
+      ['Provider Profile', 'report-provider-profile'],
+      ['Cadence', 'briefing-cadence'],
+      ['Local Time', 'briefing-time'],
+      ['Target Group', 'briefing-group'],
+      ['Source Scopes', 'briefing-sources'],
+      ['Provider Profile', 'briefing-provider-profile'],
+    ]) {
+      expect(source).toContain(`<label for="${id}">${label}</label>`);
+    }
+  });
+
+  it('keeps production actions compact and gives the approval path visual priority', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const style = fs.readFileSync(stylePath, 'utf8');
+    const actionStyles = style.slice(
+      style.indexOf('.report-production-actions {'),
+      style.indexOf('.report-source-recipes {'),
+    );
+
+    expect(source).toContain(
+      '<button class="report-production-primary" type="button" onclick="navigate(\'approvals\')">Review approvals</button>',
+    );
+    expect(actionStyles).toContain('grid-column: 1 / -1;');
+    expect(actionStyles).toContain('display: flex;');
+    expect(actionStyles).toContain('min-height: 38px;');
+    expect(actionStyles).not.toContain('min-height: 82px;');
+    expect(actionStyles).toContain(
+      '.report-production-actions .report-production-primary',
+    );
+  });
+
   it('summarizes the production queue before report creation controls', () => {
     const source = fs.readFileSync(appPath, 'utf8');
 

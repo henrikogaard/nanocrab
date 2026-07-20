@@ -318,7 +318,10 @@ describe('App shell accessibility UI', () => {
 
     expect(showShellStart).toBeGreaterThanOrEqual(0);
     expect(showShellSource).toContain(
-      'window.NanoWorkspaceShell.resolveRoute(page, activeMode)',
+      'window.NanoWorkspaceShell.resolveRoute(',
+    );
+    expect(showShellSource).toContain(
+      'hasExplicitActiveMode ? activeMode : undefined',
     );
     expect(showShellSource).toContain(
       'const displayedMode = routeContext.mode',
@@ -455,15 +458,16 @@ describe('App shell accessibility UI', () => {
     );
     const shell = source.slice(showShellStart, showShellEnd);
 
-    expect(shell).toContain(
-      'const routeContext = window.NanoWorkspaceShell.resolveRoute(page, activeMode);',
-    );
+    expect(source).toContain('let hasExplicitActiveMode = false');
+    expect(shell).toContain('window.NanoWorkspaceShell.resolveRoute(');
+    expect(shell).toContain('hasExplicitActiveMode ? activeMode : undefined');
     expect(shell).toContain(
       "const primaryDisplayedMode = ['chat', 'cowork', 'code'].includes(",
     );
     expect(shell).toContain(
       'NM.saveActiveMode(activeMode, window.localStorage)',
     );
+    expect(shell).toContain('hasExplicitActiveMode = true');
     expect(shell).toContain('routeContext.isToday');
     expect(shell).toContain('onclick="navigate(\'dashboard\')"');
     expect(shell).toContain('aria-label="Open Today"');
@@ -681,8 +685,14 @@ describe('App shell accessibility UI', () => {
     expect(navigation.metaLabel('projects')).toBe('Cowork Projects');
     expect(navigation.metaLabel('dashboard')).toBe('Today');
     expect(navigation.metaIcon('projects')).toBe('agents');
+    expect(navigation.metaLabel('project-chat')).toBe('Project chat');
+    expect(navigation.metaIcon('project-chat')).toBe('chat');
     expect(navigation.metaLabel('unknown-route')).toBe('unknown-route');
     expect(navigation.metaIcon('unknown-route')).toBe('integrations');
+    expect(navigation.PAGE_META['project-chat']).toEqual({
+      label: 'Project chat',
+      icon: 'chat',
+    });
     expect(navigation.PAGE_META['session-detail']).toEqual({
       label: 'Session Detail',
       icon: 'sessions',

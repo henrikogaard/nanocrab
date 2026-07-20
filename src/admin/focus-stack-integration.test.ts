@@ -306,9 +306,10 @@ type ShellHarness = {
   closeMore(): void;
 };
 
-function loadShellHarness(initialHash = ''): ShellHarness {
+function loadShellHarness(initialHash = '', persistedMode = ''): ShellHarness {
   const document = new FakeDocument();
   const storageValues = new Map<string, string>();
+  if (persistedMode) storageValues.set('active_mode', persistedMode);
   const storage = {
     getItem: (key: string) => storageValues.get(key) ?? null,
     setItem: (key: string, value: string) => storageValues.set(key, value),
@@ -420,6 +421,26 @@ function markupSection(markup: string, start: string, end: string) {
 }
 
 describe('Focus Stack executable shell integration', () => {
+  it('uses Code for a direct Sessions route without a persisted mode', () => {
+    const harness = loadShellHarness('#/sessions');
+
+    harness.showShell('sessions');
+
+    const shell = harness.document.querySelector('.focus-stack-shell');
+    expect(shell?.dataset.workspaceMode).toBe('code');
+    expect(shell?.dataset.workspaceSection).toBe('session');
+  });
+
+  it('preserves an explicitly persisted workspace mode for Sessions', () => {
+    const harness = loadShellHarness('#/sessions', 'cowork');
+
+    harness.showShell('sessions');
+
+    const shell = harness.document.querySelector('.focus-stack-shell');
+    expect(shell?.dataset.workspaceMode).toBe('cowork');
+    expect(shell?.dataset.workspaceSection).toBe('session');
+  });
+
   it('preserves the exact durable project chat hash in its active Cowork link', () => {
     const durableHash = '#/projects/project%2Fdelta/chat/web%3Athread-17';
     const harness = loadShellHarness(durableHash);
@@ -577,6 +598,28 @@ describe('Focus Stack executable shell integration', () => {
       expect(button.getAttribute('onclick')).toBe('toggleMoreDrawer(this)');
       expect(button.getAttribute('aria-controls')).toBe('more-drawer');
       expect(button.getAttribute('aria-expanded')).toBe('false');
+    }
+  });
+
+  it('synchronizes Today More controls that mount after the drawer opens', async () => {
+    const harness = loadShellHarness();
+    harness.showShell('dashboard');
+
+    const drawer = harness.document.getElementById('more-drawer')!;
+    const shellMore = harness.document.querySelector('.focus-stack-more')!;
+
+    harness.toggleMore(shellMore);
+    expect(drawer.classList.contains('open')).toBe(true);
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const todayMoreButtons = harness.document.elements.filter(
+      (element) => element.textContent === 'Open More',
+    );
+    expect(todayMoreButtons).toHaveLength(2);
+    for (const button of todayMoreButtons) {
+      expect(button.getAttribute('aria-controls')).toBe('more-drawer');
+      expect(button.getAttribute('aria-expanded')).toBe('true');
     }
   });
 });

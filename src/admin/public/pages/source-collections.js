@@ -46,7 +46,7 @@ function sourceLedgerEntry(entry) {
 function sourceCollectionRetryButton(collection) {
   if (collection.status !== 'failed' && collection.status !== 'partial')
     return '';
-  return `<button class="source-collection-retry" data-id="${esc(collection.id)}">Retry failed sources</button>`;
+  return `<button type="button" class="btn btn-sm btn-ghost source-collection-retry" data-id="${esc(collection.id)}">Retry failed sources</button>`;
 }
 
 function sourceCollectionCard(collection) {

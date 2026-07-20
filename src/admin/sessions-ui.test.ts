@@ -16,6 +16,11 @@ describe('Sessions handoff cockpit UI', () => {
     );
     expect(source).toContain("navigate('approvals')");
     expect(source).toContain("navigate('artifacts')");
+    expect(source).toContain('class="sessions-command-main"');
+    expect(source.match(/class="sessions-command-stat"/g)).toHaveLength(3);
+    expect(source).not.toContain(
+      '<button class="session-stat" onclick="navigate(\'approvals\')">',
+    );
   });
 
   it('surfaces approvals, artifacts, files, status, and current step per run', () => {
@@ -217,10 +222,22 @@ describe('Sessions handoff cockpit UI', () => {
 
   it('styles sessions as a responsive cockpit with cards and a handoff rail', () => {
     const source = fs.readFileSync(stylePath, 'utf8');
+    const commandStatStyles = source.slice(
+      source.indexOf('.sessions-command-stat {'),
+      source.indexOf('.session-continuation-guide {'),
+    );
 
     expect(source).toContain('.sessions-command-center');
+    expect(source).toContain('.sessions-command-main h2');
     expect(source).toContain('.sessions-command-stats');
     expect(source).toContain('.sessions-command-actions');
+    expect(commandStatStyles).toContain('color: var(--text);');
+    expect(commandStatStyles).toContain('font: inherit;');
+    expect(commandStatStyles).toContain('text-align: left;');
+    expect(commandStatStyles).toContain('.sessions-command-stat small');
+    expect(commandStatStyles).toContain(
+      'button.sessions-command-stat:focus-visible',
+    );
     expect(source).toContain('.session-continuation-guide');
     expect(source).toContain('.session-continuation-grid');
     expect(source).toContain('.session-continuation-card');

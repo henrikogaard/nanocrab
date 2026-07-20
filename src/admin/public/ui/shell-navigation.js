@@ -3,6 +3,7 @@
   const PAGE_META = {
     chat: { label: 'Chat', icon: 'chat' },
     projects: { label: 'Cowork Projects', icon: 'agents' },
+    'project-chat': { label: 'Project chat', icon: 'chat' },
     channels: { label: 'Channels', icon: 'messages' },
     messages: { label: 'Messages', icon: 'messages' },
     agents: { label: 'Agents', icon: 'agents' },

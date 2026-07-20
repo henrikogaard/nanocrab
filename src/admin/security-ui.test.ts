@@ -58,6 +58,7 @@ describe('Security trust cockpit UI', () => {
     expect(source).toContain('id="sec-allowlist-toggle"');
     expect(source).toContain('id="sec-allowlist-save"');
     expect(source).toContain('id="sec-allowlist-ips"');
+    expect(source).toContain('<label for="sec-allowlist-ips">Allowed IPs');
     expect(source).toContain('loadUnregisteredConversations');
     expect(source).toContain('renderUnregisteredConversationState');
     expect(source).toContain('unregistered-empty-state');
@@ -214,14 +215,29 @@ describe('Security trust cockpit UI', () => {
 
   it('styles the security surface as a responsive cockpit', () => {
     const source = fs.readFileSync(stylePath, 'utf8');
+    const routeStyles = source.slice(
+      source.indexOf('.security-trust-routes {'),
+      source.indexOf('.security-posture-grid {'),
+    );
+    const cardStyles = source.slice(
+      source.indexOf('.security-check-card {'),
+      source.indexOf('.security-check-card.warn {'),
+    );
 
     expect(source).toContain('.security-command-center');
     expect(source).toContain('.security-command-stats');
     expect(source).toContain('.security-trust-brief');
     expect(source).toContain('.security-trust-brief.is-attention');
     expect(source).toContain('.security-trust-routes');
+    expect(routeStyles).toContain('display: grid;');
+    expect(routeStyles).toContain(
+      'grid-template-columns: repeat(4, minmax(0, 1fr));',
+    );
+    expect(routeStyles).toContain('.security-route-card {');
     expect(source).toContain('.security-posture-grid');
     expect(source).toContain('.security-check-card');
+    expect(cardStyles).toContain('display: grid;');
+    expect(cardStyles).toContain('align-content: start;');
     expect(source).toContain('.security-allowlist-input');
     expect(source).toContain('.security-check-row');
     expect(source).toContain('.security-audit-table-wrap');

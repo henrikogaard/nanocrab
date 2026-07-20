@@ -127,6 +127,9 @@ describe('source collections classic-script contract', () => {
     await retryUi.renderSourceCollections(retryEl);
 
     expect(retryEl.innerHTML).toContain('Retry failed sources');
+    expect(retryEl.innerHTML).toContain(
+      '<button type="button" class="btn btn-sm btn-ghost source-collection-retry"',
+    );
     expect(retryEl.innerHTML).toContain('data-id="source-collection-mock-1"');
   });
 });

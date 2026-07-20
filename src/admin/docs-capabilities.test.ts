@@ -11,17 +11,19 @@ describe('current capability documentation', () => {
     const source = fs.readFileSync(capabilitiesPath, 'utf8');
 
     expect(source).toContain('# NanoCrab Capabilities');
-    expect(source).toContain('Last updated: 2026-07-09');
-    expect(source).toContain(
-      '| Capability | UI route | Backend/API | Command or MCP path | Status |',
+    expect(source).toContain('Last updated: 2026-07-20');
+    expect(source).toMatch(
+      /\|\s*Capability\s*\|\s*UI route\s*\|\s*Backend\/API\s*\|\s*Command or MCP path\s*\|\s*Status\s*\|/,
     );
-    expect(source).toContain('Copilot chat');
+    expect(source).toContain('Today overview');
+    expect(source).toMatch(/\|\s*Chat\s*\|\s*`#\/chat`\s*\|/);
     expect(source).toContain('Cowork projects');
     expect(source).toContain('Git & Code workspace');
     expect(source).toContain('GitHub Autofix');
     expect(source).toContain('Provider profiles');
     expect(source).toContain('Memory, Journal, and Skills');
     expect(source).toContain('Reports, Research, and Artifacts');
+    expect(source).toContain('Source Collections');
     expect(source).toContain('Tasks, Workflows, Missions, and Briefings');
     expect(source).toContain('Approvals, Audit, and Security');
     expect(source).toContain('Integrations, MCP, and Credentials');
@@ -34,21 +36,23 @@ describe('current capability documentation', () => {
     expect(source).toContain('Discord gateway');
     expect(source).toContain('Hermes alignment');
     expect(source).toContain('OpenClaw alignment');
+    expect(source).toContain('Focus Stack Foundation');
+    expect(source).toContain('top-level JSON array');
   });
 
   it('updates user-facing docs to the current Chat/Cowork/Code model', () => {
     const userGuide = fs.readFileSync(userGuidePath, 'utf8');
     const readme = fs.readFileSync(readmePath, 'utf8');
 
-    expect(userGuide).toContain('Copilot / Cowork / Code / More');
+    expect(userGuide).toContain('Chat / Cowork / Code / More');
     expect(userGuide).toContain('Capability overview');
     expect(userGuide).toContain('See [CAPABILITIES.md](CAPABILITIES.md)');
-    expect(userGuide).toContain('ChatGPT-style plain conversations');
+    expect(userGuide).toContain('Plain conversations with provider/model');
     expect(userGuide).toContain(
-      'durable project, document, MCP, and artifact work',
+      'Durable project, document, MCP, and artifact work',
     );
     expect(userGuide).toContain(
-      'repository automation, tests, PRs, snippets, and coding-agent handoffs',
+      'Repository automation, tests, PRs, snippets, and coding-agent handoffs',
     );
     expect(readme).toContain(
       'For a current route-by-route capability matrix, see [docs/CAPABILITIES.md](docs/CAPABILITIES.md).',

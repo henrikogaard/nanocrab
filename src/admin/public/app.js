@@ -15,6 +15,14 @@ const {
 } = window.NanoShellNavigation;
 // Seed the persisted primary mode for landing and explicit session preference.
 // Each rendered route derives its displayed Focus Stack mode independently.
+let hasExplicitActiveMode = false;
+try {
+  hasExplicitActiveMode = ['chat', 'cowork', 'code', 'work'].includes(
+    window.localStorage.getItem('active_mode'),
+  );
+} catch {
+  hasExplicitActiveMode = false;
+}
 let activeMode =
   (window.NanoModes &&
     window.NanoModes.loadActiveMode(window.localStorage)) ||
@@ -143,6 +151,16 @@ loadSidebarWidth();
 let workspaceInspectorTrigger = null;
 let moreDrawerTrigger = null;
 
+function synchronizeMoreDrawerControls() {
+  const drawer = document.getElementById('more-drawer');
+  const isOpen = Boolean(drawer?.classList.contains('open'));
+  document
+    .querySelectorAll('[aria-controls="more-drawer"]')
+    .forEach((trigger) => {
+      trigger.setAttribute('aria-expanded', String(isOpen));
+    });
+}
+
 function setWorkspaceInspectorState(isOpen, trigger, options = {}) {
   const inspector = document.getElementById('workspace-inspector');
   const shell = document.querySelector('.focus-stack-shell');
@@ -193,11 +211,7 @@ function setMoreDrawerState(isOpen, trigger, options = {}) {
     overlay.classList.toggle('visible', isOpen);
     overlay.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
   }
-  document
-    .querySelectorAll('[aria-controls="more-drawer"]')
-    .forEach((trigger) => {
-      trigger.setAttribute('aria-expanded', String(isOpen));
-    });
+  synchronizeMoreDrawerControls();
 
   if (isOpen) {
     drawer.querySelector('.more-close')?.focus();
@@ -821,7 +835,10 @@ function shellNavigationTarget(pageId, currentPage) {
 }
 
 function showShell(page) {
-  const routeContext = window.NanoWorkspaceShell.resolveRoute(page, activeMode);
+  const routeContext = window.NanoWorkspaceShell.resolveRoute(
+    page,
+    hasExplicitActiveMode ? activeMode : undefined,
+  );
   const displayedMode = routeContext.mode;
   stopPolling();
   currentPage = page;
@@ -831,6 +848,7 @@ function showShell(page) {
   );
   if (primaryDisplayedMode) {
     activeMode = displayedMode;
+    hasExplicitActiveMode = true;
     NM.saveActiveMode(activeMode, window.localStorage);
   }
   const NM2 = window.NanoModes;
@@ -1058,6 +1076,7 @@ function showShell(page) {
   const routeTabAlias =
     pendingPageTabAlias && pendingPageTabAlias.page === page ? pendingPageTabAlias : null;
   const afterRouteRender = () => {
+    synchronizeMoreDrawerControls();
     if (!routeTabAlias) return;
     activatePageTabAlias(routeTabAlias);
     if (pendingPageTabAlias === routeTabAlias) pendingPageTabAlias = null;
@@ -1088,6 +1107,7 @@ window.setMode = function (mode) {
   }
   if (NM.primaryModeIds().indexOf(mode) === -1) return;
   activeMode = mode;
+  hasExplicitActiveMode = true;
   NM.saveActiveMode(mode, window.localStorage);
   // Open the first page of the chosen mode that this role can see.
   const visible = NM.navPagesForMode(mode).filter(isVisibleForRole);
@@ -5587,7 +5607,7 @@ async function renderTasks(el) {
         <div class="card-title">Scheduled work <span class="badge badge-muted routine-count-badge">${tasks.length}</span></div>
         <div class="routine-page-subtitle">Search, run now, pause, resume, or inspect recent history.</div>
       </div>
-      <select class="search-input routine-kind-filter" id="routine-kind-filter" onchange="filterRoutineCards()">
+      <select class="search-input routine-kind-filter" id="routine-kind-filter" onchange="filterRoutineCards()" aria-label="Filter scheduled work by type">
         <option value="">All types</option>
         <option value="briefing">Briefing</option>
         <option value="github">GitHub</option>
@@ -5604,12 +5624,12 @@ async function renderTasks(el) {
       <div class="card-title">Operation reminder</div>
       <form id="operation-schedule-form">
         <div class="grid grid-2">
-          <div class="form-group"><label>Group</label><select id="operation-group">${groups.map((g) => `<option value="${esc(g.folder)}|${esc(g.jid)}">${esc(g.name)}</option>`).join('')}</select></div>
-          <div class="form-group"><label>Kind</label><select id="operation-intent"><option value="orders">Repeat orders</option><option value="reminder">Reminder</option></select></div>
+          <div class="form-group"><label for="operation-group">Group</label><select id="operation-group">${groups.map((g) => `<option value="${esc(g.folder)}|${esc(g.jid)}">${esc(g.name)}</option>`).join('')}</select></div>
+          <div class="form-group"><label for="operation-intent">Kind</label><select id="operation-intent"><option value="orders">Repeat orders</option><option value="reminder">Reminder</option></select></div>
         </div>
         <div class="grid grid-2">
           <div class="form-group"><label>Title</label><input id="operation-title" placeholder="Night rally orders"></div>
-          <div class="form-group"><label>Schedule</label><div class="routine-operation-schedule"><select id="operation-schedule-type" class="routine-operation-type"><option value="interval">Interval</option><option value="cron">Cron</option></select><input id="operation-schedule-value" placeholder="30m or 0 */2 * * *"></div></div>
+          <div class="form-group"><label for="operation-schedule-type">Schedule</label><div class="routine-operation-schedule"><select id="operation-schedule-type" class="routine-operation-type"><option value="interval">Interval</option><option value="cron">Cron</option></select><input id="operation-schedule-value" placeholder="30m or 0 */2 * * *"></div></div>
         </div>
         <div class="form-group"><label>Orders / Reminder Text</label><textarea id="operation-orders" class="routine-textarea" placeholder="What should the bot repeat or remind the group about?"></textarea></div>
         <label class="routine-check"><input type="checkbox" id="operation-delivery-approved"> Send scheduled messages to this group</label>
@@ -8239,7 +8259,7 @@ function renderReportProductionBrief(reportJobs, briefingSchedules, loadIssues =
       </div>
       <div class="report-production-actions">
         <button type="button" onclick="copyReportProductionBrief()">Copy production brief</button>
-        <button type="button" onclick="navigate('approvals')">Review approvals</button>
+        <button class="report-production-primary" type="button" onclick="navigate('approvals')">Review approvals</button>
         <button type="button" onclick="navigate('artifacts')">Open artifacts</button>
         <button type="button" onclick="navigate('projects')">Use project context</button>
       </div>
@@ -8485,11 +8505,11 @@ async function renderReports(el) {
             </div>
             <div class="report-form-grid">
               <div class="form-group">
-                <label>Source Scopes</label>
+                <label for="report-sources">Source Scopes</label>
                 <input id="report-sources" value="journal, memory">
               </div>
               <div class="form-group">
-                <label>Provider Profile</label>
+                <label for="report-provider-profile">Provider Profile</label>
                 <select id="report-provider-profile">${reportProfileOptions}</select>
               </div>
             </div>
@@ -8524,14 +8544,14 @@ async function renderReports(el) {
           <form id="briefing-create-form" class="report-create-form">
             <div class="form-group"><label>Title</label><input id="briefing-title" placeholder="Daily operations brief" required></div>
             <div class="report-form-grid">
-              <div class="form-group"><label>Cadence</label><select id="briefing-cadence"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
-              <div class="form-group"><label>Local Time</label><input id="briefing-time" type="time" value="08:30" required></div>
+              <div class="form-group"><label for="briefing-cadence">Cadence</label><select id="briefing-cadence"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
+              <div class="form-group"><label for="briefing-time">Local Time</label><input id="briefing-time" type="time" value="08:30" required></div>
             </div>
             <div class="report-form-grid">
-              <div class="form-group"><label>Target Group</label><select id="briefing-group">${groupList.map((group) => `<option value="${esc(group.folder)}" data-jid="${esc(group.jid)}">${esc(group.name)}</option>`).join('')}</select></div>
-              <div class="form-group"><label>Source Scopes</label><input id="briefing-sources" value="journal, memory"></div>
+              <div class="form-group"><label for="briefing-group">Target Group</label><select id="briefing-group">${groupList.map((group) => `<option value="${esc(group.folder)}" data-jid="${esc(group.jid)}">${esc(group.name)}</option>`).join('')}</select></div>
+              <div class="form-group"><label for="briefing-sources">Source Scopes</label><input id="briefing-sources" value="journal, memory"></div>
             </div>
-            <div class="form-group"><label>Provider Profile</label><select id="briefing-provider-profile">${reportProfileOptions}</select></div>
+            <div class="form-group"><label for="briefing-provider-profile">Provider Profile</label><select id="briefing-provider-profile">${reportProfileOptions}</select></div>
             <div class="report-format-grid" aria-label="Briefing output formats">
               ${['markdown', 'html', 'docx', 'pdf'].map((format) => `<label class="report-format-option"><input type="checkbox" class="briefing-format" value="${format}" ${format === 'markdown' ? 'checked' : ''}> <span>${format.toUpperCase()}</span></label>`).join('')}
             </div>
@@ -15449,7 +15469,7 @@ async function renderSecurity(el) {
           <button class="btn btn-sm ${allowlist.enabled ? 'btn-danger' : 'btn-success'}" id="sec-allowlist-toggle">${allowlist.enabled ? 'Disable' : 'Enable'}</button>
         </div>
         <div class="form-group">
-          <label>Allowed IPs (one per line, supports CIDR notation like 192.168.1.0/24)</label>
+          <label for="sec-allowlist-ips">Allowed IPs (one per line, supports CIDR notation like 192.168.1.0/24)</label>
           <textarea id="sec-allowlist-ips" class="security-allowlist-input">${allowlist.ips.join('\n')}</textarea>
         </div>
         <div class="security-inline-actions">
@@ -17044,15 +17064,15 @@ async function renderSessions(el) {
 
     el.innerHTML = `
       <section class="sessions-command-center">
-        <div class="sessions-command-copy">
+        <div class="sessions-command-main">
           <span class="messages-kicker">Agent run history</span>
           <h2>Handoff cockpit</h2>
           <p>See what agents are doing, what needs you, and what can be reused across Copilot, Cowork, Code, and routines.</p>
         </div>
         <div class="sessions-command-stats">
-          <div class="session-stat"><span>Runs</span><strong>${sessions.length}</strong><small>${Object.keys(grouped).length} groups</small></div>
-          <button class="session-stat" onclick="navigate('approvals')"><span>Approvals</span><strong>${approvals.length}</strong><small>needs review</small></button>
-          <button class="session-stat" onclick="navigate('artifacts')"><span>Artifacts</span><strong>${artifactRuns.length}</strong><small>${fileRuns.length} file trails</small></button>
+          <div class="sessions-command-stat"><span>Runs</span><strong>${sessions.length}</strong><small>${Object.keys(grouped).length} groups</small></div>
+          <button type="button" class="sessions-command-stat" onclick="navigate('approvals')"><span>Approvals</span><strong>${approvals.length}</strong><small>needs review</small></button>
+          <button type="button" class="sessions-command-stat" onclick="navigate('artifacts')"><span>Artifacts</span><strong>${artifactRuns.length}</strong><small>${fileRuns.length} file trails</small></button>
         </div>
         <div class="sessions-command-actions">
           <button class="btn btn-sm btn-ghost" onclick="copySessionContinuityBrief()">Copy continuity brief</button>

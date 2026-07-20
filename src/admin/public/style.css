@@ -13957,7 +13957,7 @@ tr {
   min-width: 0;
 }
 
-.sessions-command-main h3 {
+.sessions-command-main h2 {
   max-width: 760px;
   margin: 0;
   color: var(--text);
@@ -13994,6 +13994,9 @@ tr {
   border: 1px solid var(--border);
   border-radius: 18px;
   background: color-mix(in srgb, var(--surface2) 52%, transparent);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
 }
 
 .sessions-command-stat span {
@@ -14010,6 +14013,34 @@ tr {
   font-size: 24px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+}
+
+.sessions-command-stat small {
+  display: block;
+  margin-top: 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+button.sessions-command-stat {
+  cursor: pointer;
+  transition:
+    border-color var(--transition),
+    background var(--transition),
+    transform var(--transition);
+}
+
+button.sessions-command-stat:hover,
+button.sessions-command-stat:focus-visible {
+  border-color: var(--border-hover);
+  background: var(--accent-bg);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+button.sessions-command-stat:active {
+  transform: translateY(0);
 }
 
 .session-continuation-guide {
@@ -16336,9 +16367,39 @@ tr {
 }
 
 .security-trust-routes {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.security-route-card {
+  display: grid;
+  align-content: start;
   gap: 7px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.security-route-card strong {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.security-route-card p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.security-route-card .btn {
+  justify-self: start;
+  margin-top: auto;
 }
 
 .security-posture-grid {
@@ -16418,15 +16479,18 @@ tr {
 }
 
 .security-check-card {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  align-items: flex-start;
+  display: grid;
+  align-content: start;
+  gap: 12px;
   padding: 14px;
   border: 1px solid var(--border);
   border-color: color-mix(in oklch, var(--success) 34%, var(--border));
   border-radius: var(--radius);
   background: color-mix(in oklch, var(--success) 6%, var(--surface2));
+}
+
+.security-posture-grid > .security-check-card:last-child {
+  grid-column: 1 / -1;
 }
 
 .security-check-card.warn {
@@ -21757,7 +21821,7 @@ tr {
     padding: 18px;
     border-radius: 18px;
   }
-  .sessions-command-main h3 {
+  .sessions-command-main h2 {
     font-size: 24px;
   }
   .sessions-command-stats,
@@ -21838,6 +21902,9 @@ tr {
   .security-posture-grid {
     grid-template-columns: 1fr;
   }
+  .security-trust-routes {
+    grid-template-columns: 1fr;
+  }
   .security-audit-empty-flow {
     grid-template-columns: 1fr;
   }
@@ -21858,8 +21925,7 @@ tr {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .security-page-header,
-  .security-panel-head,
-  .security-check-card {
+  .security-panel-head {
     flex-direction: column;
   }
   .security-header-actions {
@@ -27704,6 +27770,14 @@ tr {
   gap: 10px;
   min-height: 142px;
   padding: 14px;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition:
+    border-color var(--transition),
+    background var(--transition),
+    transform var(--transition);
   background:
     linear-gradient(
       135deg,
@@ -27713,10 +27787,22 @@ tr {
     var(--surface);
 }
 
-.devhub-lane-card span {
+.devhub-lane-card strong {
   color: var(--text);
   font-size: 14px;
   font-weight: 700;
+}
+
+.devhub-lane-card:hover,
+.devhub-lane-card:focus-visible {
+  border-color: var(--border-hover);
+  background: var(--accent-bg);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.devhub-lane-card:active {
+  transform: translateY(0);
 }
 
 .devhub-lane-card p {
@@ -27921,6 +28007,18 @@ tr {
   flex-wrap: wrap;
   gap: 7px;
   align-items: center;
+}
+
+@media (max-width: 768px) {
+  .devhub-stats,
+  .devhub-lane-map {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .devhub-workbench,
+  .devhub-repo-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Optional plugin score cards */
@@ -31834,23 +31932,27 @@ select {
 }
 
 .report-production-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .report-production-actions button {
-  display: grid;
-  gap: 4px;
-  min-height: 82px;
-  padding: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--surface2) 48%, transparent);
   color: var(--text);
   cursor: pointer;
   font: inherit;
-  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
   transition:
     transform 0.24s cubic-bezier(0.16, 1, 0.3, 1),
     border-color 0.24s,
@@ -31869,17 +31971,17 @@ select {
   transform: translateY(0);
 }
 
-.report-production-actions span {
-  font-family: var(--mono);
-  font-size: 22px;
-  font-weight: 750;
-  line-height: 1;
+.report-production-actions .report-production-primary {
+  border-color: color-mix(in oklch, var(--accent) 78%, black);
+  background: var(--accent);
+  color: var(--accent-contrast);
 }
 
-.report-production-actions strong {
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.25;
+.report-production-actions .report-production-primary:hover,
+.report-production-actions .report-production-primary:focus-visible {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+  color: var(--accent-contrast);
 }
 
 .report-source-recipes {
