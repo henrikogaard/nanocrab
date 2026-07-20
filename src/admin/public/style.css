@@ -22177,7 +22177,7 @@ button.sessions-command-stat:active {
   color: var(--text);
 }
 
-.work-session-tabs button[aria-selected="true"] {
+.work-session-tabs button[aria-selected='true'] {
   border-color: color-mix(in oklch, var(--accent) 34%, var(--border));
   background: var(--accent-bg);
   color: var(--accent);
@@ -22248,7 +22248,7 @@ button.sessions-command-stat:active {
   left: 5px;
   width: 1px;
   background: var(--border);
-  content: "";
+  content: '';
 }
 
 .work-session-timeline-marker {
