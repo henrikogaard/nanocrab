@@ -73,4 +73,49 @@ describe('Focus Stack rendered QA contract', () => {
     expect(waitBlock).not.toContain("getAttribute('data-workspace-section')");
     expect(source).toContain('await waitForWorkspace(page);');
   });
+
+  it('reaches the inspector and More triggers through natural keyboard navigation', () => {
+    const source = qaScriptSource();
+    const interactionBlock = source.slice(
+      source.indexOf('async function exerciseInspector'),
+      source.indexOf('async function runRouteCase'),
+    );
+
+    expect(source).toContain('async function tabToTarget');
+    expect(interactionBlock).toContain(
+      'await tabToTarget(page, inspectorTrigger)',
+    );
+    expect(interactionBlock).toContain('await tabToTarget(page, moreTrigger)');
+    expect(interactionBlock).not.toContain('await inspectorTrigger.focus()');
+    expect(interactionBlock).not.toContain('await moreTrigger.focus()');
+  });
+
+  it('rejects a More state whose focused controls are obscured or outside the viewport', () => {
+    const source = qaScriptSource();
+    const moreBlock = source.slice(
+      source.indexOf('async function exerciseMoreDrawer'),
+      source.indexOf('async function runRouteCase'),
+    );
+
+    for (const contractMarker of [
+      "matches(':focus-visible')",
+      'elementFromPoint',
+      'openStateUnnamedControls',
+      'openStateDocumentOverflowPx',
+      'drawerGeometry',
+      'headerGeometry',
+      'bodyGeometry',
+      'lastControlGeometry',
+      'overlayTopmost',
+      'closeTopmost',
+      'lowerEdgeTopmost',
+      'focusIndicatorVisible',
+      'modalFocusLoop',
+      'lastFocusableOnBackwardTab',
+      'focusLoopedToClose',
+      "page.keyboard.press('Escape')",
+    ]) {
+      expect(moreBlock).toContain(contractMarker);
+    }
+  });
 });

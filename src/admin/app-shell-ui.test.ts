@@ -346,7 +346,9 @@ describe('App shell accessibility UI', () => {
     expect(showShellSource).toContain(
       'onclick="navigate(\'${item.id}\'); return false;"',
     );
-    expect(appSource).toContain('id="more-drawer" aria-hidden="true" inert');
+    expect(appSource).toContain(
+      'id="more-drawer" role="dialog" aria-modal="true" aria-labelledby="more-drawer-title" aria-hidden="true" inert',
+    );
     expect(appSource).toContain("drawer.toggleAttribute('inert', !isOpen)");
     expect(appSource).toContain('title="${esc(cfg.guidance || \'\')}"');
     expect(appSource).toContain('function shellModeCue(mode)');
@@ -512,6 +514,25 @@ describe('App shell accessibility UI', () => {
     expect(source).toContain('aria-label="Close workspace details"');
   });
 
+  it('keeps keyboard focus inside the modal More drawer and supports Escape', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const initStart = source.indexOf('function initMoreDrawer()');
+    const initEnd = source.indexOf(
+      'window.toggleWorkspaceInspector',
+      initStart,
+    );
+    const initSource = source.slice(initStart, initEnd);
+
+    expect(initStart).toBeGreaterThanOrEqual(0);
+    expect(initSource).toContain("if (event.key === 'Escape')");
+    expect(initSource).toContain("if (event.key !== 'Tab') return;");
+    expect(initSource).toContain('drawer.querySelectorAll(');
+    expect(initSource).toContain('event.shiftKey');
+    expect(initSource).toContain('last.focus()');
+    expect(initSource).toContain('first.focus()');
+    expect(source).toContain('initMoreDrawer();');
+  });
+
   it('renders four mobile actions and a fixed inspector across the full collapsed range', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
@@ -544,6 +565,33 @@ describe('App shell accessibility UI', () => {
       '@media (max-width: 720px) {\n  .focus-stack-shell',
     );
     expect(styleSource).toContain('overflow-x: clip;');
+  });
+
+  it('keeps the modal More header, focused close control, and final tools above mobile chrome', () => {
+    const appSource = fs.readFileSync(appPath, 'utf8');
+    const styleSource = fs.readFileSync(stylePath, 'utf8');
+    const focusMobileStart = styleSource.lastIndexOf(
+      '@media (max-width: 768px)',
+    );
+    const focusMobile = styleSource.slice(focusMobileStart);
+
+    expect(appSource).toContain(
+      'class="more-drawer" id="more-drawer" role="dialog" aria-modal="true" aria-labelledby="more-drawer-title" aria-hidden="true" inert',
+    );
+    expect(appSource).toContain(
+      '<span id="more-drawer-title">Workspace tools</span>',
+    );
+    expect(focusMobile).toContain('.more-overlay');
+    expect(focusMobile).toContain('z-index: 1190;');
+    expect(focusMobile).toContain('.more-drawer');
+    expect(focusMobile).toContain('inset: 0 auto 0 0;');
+    expect(focusMobile).toContain('z-index: 1200;');
+    expect(focusMobile).toContain('height: 100dvh;');
+    expect(focusMobile).toContain('.more-drawer-body');
+    expect(focusMobile).toContain('min-height: 0;');
+    expect(focusMobile).toContain('env(safe-area-inset-bottom, 0px)');
+    expect(styleSource).toContain('.more-close:focus-visible');
+    expect(styleSource).toContain('outline: 2px solid var(--accent);');
   });
 
   it('keeps the optional inspector from collapsing the canvas at intermediate widths', () => {
@@ -806,7 +854,7 @@ describe('App shell accessibility UI', () => {
     }
     expect(shellNavigationSource).toContain('function moreDrawerSections(ids)');
     expect(appSource).toContain(
-      '<div class="more-drawer-header"><span>Workspace tools</span>',
+      '<div class="more-drawer-header"><span id="more-drawer-title">Workspace tools</span>',
     );
     expect(appSource).toContain('more-drawer-route-map');
     expect(appSource).toContain('Where to configure work');

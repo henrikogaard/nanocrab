@@ -234,6 +234,45 @@ function initWorkspaceInspector() {
   });
 }
 
+function initMoreDrawer() {
+  const drawer = document.getElementById('more-drawer');
+  if (!drawer || drawer.dataset.keyboardReady === 'true') return;
+  drawer.dataset.keyboardReady = 'true';
+  drawer.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setMoreDrawerState(false);
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusable = Array.from(
+      drawer.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden'
+      );
+    });
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+}
+
 window.toggleWorkspaceInspector = function (trigger) {
   const inspector = document.getElementById('workspace-inspector');
   if (!inspector) return;
@@ -960,8 +999,8 @@ function showShell(page) {
     <div class="app focus-stack-shell" data-workspace-mode="${esc(displayedMode)}" data-workspace-section="${esc(routeContext.section)}">
       <a class="skip-link" href="#page-content">Skip to content</a>
       <div class="more-overlay" onclick="closeMoreDrawer()" aria-hidden="true"></div>
-      <div class="more-drawer" id="more-drawer" aria-hidden="true" inert>
-        <div class="more-drawer-header"><span>Workspace tools</span><button class="more-close" onclick="closeMoreDrawer()" aria-label="Close workspace tools">✕</button></div>
+      <div class="more-drawer" id="more-drawer" role="dialog" aria-modal="true" aria-labelledby="more-drawer-title" aria-hidden="true" inert>
+        <div class="more-drawer-header"><span id="more-drawer-title">Workspace tools</span><button class="more-close" onclick="closeMoreDrawer()" aria-label="Close workspace tools">✕</button></div>
         <div class="more-drawer-body">
           <div class="more-drawer-route-map" aria-label="Where to configure work">
             <button type="button" onclick="closeMoreDrawer(); navigate('settings')"><span>Personal</span><small>Memory, skills, identity</small></button>
@@ -1058,6 +1097,7 @@ function showShell(page) {
     </div>`;
   initSidebarResize();
   initWorkspaceInspector();
+  initMoreDrawer();
   loadMetricsBar();
   loadAlerts();
   // Hydrate chat-mode thread sidebar

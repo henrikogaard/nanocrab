@@ -43,9 +43,10 @@ On desktop, the narrow rail selects Today or a global mode. The context column
 shows navigation for the current route, the canvas contains the page's single
 main work area, and **Details** opens the optional workspace inspector. The
 inspector and More drawer cannot be open together. Close either one with its
-close control; the inspector also closes with `Escape`. Focus returns to the
-control that opened the layer, and all rail, bottom-bar, drawer, and inspector
-controls are keyboard reachable with a visible focus indicator.
+close control or `Escape`; the modal More drawer also contains Tab focus until
+it closes. Focus returns to the control that opened the layer, and all rail,
+bottom-bar, drawer, and inspector controls are keyboard reachable with a visible
+focus indicator.
 
 Direct links continue to work. The current hash determines the visible context:
 for example, `#/reports` and `#/source-collections` open in Cowork, `#/devhub`

@@ -1,0 +1,2500 @@
+{
+  "generatedAt": "2026-07-20T13:55:44.215Z",
+  "baseUrl": "http://127.0.0.1:5187",
+  "screenshotRoot": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final",
+  "summaryPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/summary.json",
+  "routeCount": 7,
+  "viewportCount": 3,
+  "expectedCaseCount": 21,
+  "completedCaseCount": 21,
+  "interactionCaseCount": 6,
+  "capturedScreenshotCount": 33,
+  "routeContract": [
+    {
+      "name": "dashboard",
+      "hash": "#/dashboard",
+      "mode": "today",
+      "section": "overview"
+    },
+    {
+      "name": "reports",
+      "hash": "#/reports",
+      "mode": "cowork",
+      "section": "report"
+    },
+    {
+      "name": "source-collections",
+      "hash": "#/source-collections",
+      "mode": "cowork",
+      "section": "source"
+    },
+    {
+      "name": "tasks",
+      "hash": "#/tasks",
+      "mode": "cowork",
+      "section": "routine"
+    },
+    {
+      "name": "sessions",
+      "hash": "#/sessions",
+      "mode": "code",
+      "section": "session"
+    },
+    {
+      "name": "devhub",
+      "hash": "#/devhub",
+      "mode": "code",
+      "section": "terminal"
+    },
+    {
+      "name": "security",
+      "hash": "#/security",
+      "mode": "more",
+      "section": "security"
+    }
+  ],
+  "viewportContract": [
+    {
+      "name": "desktop",
+      "width": 1440,
+      "height": 1000
+    },
+    {
+      "name": "tablet",
+      "width": 768,
+      "height": 1000
+    },
+    {
+      "name": "mobile",
+      "width": 390,
+      "height": 844
+    }
+  ],
+  "cases": [
+    {
+      "viewport": "desktop",
+      "route": "dashboard",
+      "hash": "#/dashboard",
+      "expectedMode": "today",
+      "expectedSection": "overview",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-dashboard.png",
+      "evidence": {
+        "dataWorkspaceMode": "today",
+        "dataWorkspaceSection": "overview",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Today",
+          "selected": "Open Today",
+          "selectedCount": 0,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Chat",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork",
+              "visible": true
+            },
+            {
+              "descriptor": "Code",
+              "visible": true
+            },
+            {
+              "descriptor": "More",
+              "visible": true
+            },
+            {
+              "descriptor": "Chat",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork Projects",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 0,
+        "storedActiveMode": null,
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "desktop",
+      "route": "reports",
+      "hash": "#/reports",
+      "expectedMode": "cowork",
+      "expectedSection": "report",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-reports.png",
+      "evidence": {
+        "dataWorkspaceMode": "cowork",
+        "dataWorkspaceSection": "report",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Cowork",
+          "selected": "Cowork",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Chat",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork",
+              "visible": true
+            },
+            {
+              "descriptor": "Code",
+              "visible": true
+            },
+            {
+              "descriptor": "More",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork Projects",
+              "visible": true
+            },
+            {
+              "descriptor": "Reports",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 0,
+        "storedActiveMode": "cowork",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "desktop",
+      "route": "source-collections",
+      "hash": "#/source-collections",
+      "expectedMode": "cowork",
+      "expectedSection": "source",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-source-collections.png",
+      "evidence": {
+        "dataWorkspaceMode": "cowork",
+        "dataWorkspaceSection": "source",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Cowork",
+          "selected": "Cowork",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Chat",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork",
+              "visible": true
+            },
+            {
+              "descriptor": "Code",
+              "visible": true
+            },
+            {
+              "descriptor": "More",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork Projects",
+              "visible": true
+            },
+            {
+              "descriptor": "Source Collections",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 0,
+        "storedActiveMode": "cowork",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "desktop",
+      "route": "tasks",
+      "hash": "#/tasks",
+      "expectedMode": "cowork",
+      "expectedSection": "routine",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-tasks.png",
+      "evidence": {
+        "dataWorkspaceMode": "cowork",
+        "dataWorkspaceSection": "routine",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Cowork",
+          "selected": "Cowork",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Chat",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork",
+              "visible": true
+            },
+            {
+              "descriptor": "Code",
+              "visible": true
+            },
+            {
+              "descriptor": "More",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork Projects",
+              "visible": true
+            },
+            {
+              "descriptor": "Tasks",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 0,
+        "storedActiveMode": "cowork",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "desktop",
+      "route": "sessions",
+      "hash": "#/sessions",
+      "expectedMode": "code",
+      "expectedSection": "session",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-sessions.png",
+      "evidence": {
+        "dataWorkspaceMode": "code",
+        "dataWorkspaceSection": "session",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Code",
+          "selected": "Code",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Chat",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork",
+              "visible": true
+            },
+            {
+              "descriptor": "Code",
+              "visible": true
+            },
+            {
+              "descriptor": "More",
+              "visible": true
+            },
+            {
+              "descriptor": "Git & Code",
+              "visible": true
+            },
+            {
+              "descriptor": "Sessions",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 0,
+        "storedActiveMode": "code",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "desktop",
+      "route": "devhub",
+      "hash": "#/devhub",
+      "expectedMode": "code",
+      "expectedSection": "terminal",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-devhub.png",
+      "evidence": {
+        "dataWorkspaceMode": "code",
+        "dataWorkspaceSection": "terminal",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Code",
+          "selected": "Code",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Chat",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork",
+              "visible": true
+            },
+            {
+              "descriptor": "Code",
+              "visible": true
+            },
+            {
+              "descriptor": "More",
+              "visible": true
+            },
+            {
+              "descriptor": "Git & Code",
+              "visible": true
+            },
+            {
+              "descriptor": "Terminal",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 0,
+        "storedActiveMode": "code",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "desktop",
+      "route": "security",
+      "hash": "#/security",
+      "expectedMode": "more",
+      "expectedSection": "security",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-security.png",
+      "evidence": {
+        "dataWorkspaceMode": "more",
+        "dataWorkspaceSection": "security",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "More",
+          "selected": "More",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Chat",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork",
+              "visible": true
+            },
+            {
+              "descriptor": "Code",
+              "visible": true
+            },
+            {
+              "descriptor": "More",
+              "visible": true
+            },
+            {
+              "descriptor": "Security",
+              "visible": true
+            },
+            {
+              "descriptor": "BUTTON",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 0,
+        "storedActiveMode": null,
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "tablet",
+      "route": "dashboard",
+      "hash": "#/dashboard",
+      "expectedMode": "today",
+      "expectedSection": "overview",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-dashboard.png",
+      "evidence": {
+        "dataWorkspaceMode": "today",
+        "dataWorkspaceSection": "overview",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Today",
+          "selected": "Open Today",
+          "selectedCount": 0,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy brief",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy kickoff prompt",
+              "visible": true
+            },
+            {
+              "descriptor": "Review",
+              "visible": true
+            },
+            {
+              "descriptor": "Review",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": null,
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "tablet",
+      "route": "reports",
+      "hash": "#/reports",
+      "expectedMode": "cowork",
+      "expectedSection": "report",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-reports.png",
+      "evidence": {
+        "dataWorkspaceMode": "cowork",
+        "dataWorkspaceSection": "report",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Cowork",
+          "selected": "Cowork",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy production brief",
+              "visible": true
+            },
+            {
+              "descriptor": "Review approvals",
+              "visible": true
+            },
+            {
+              "descriptor": "Open artifacts",
+              "visible": true
+            },
+            {
+              "descriptor": "Use project context",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": "cowork",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "tablet",
+      "route": "source-collections",
+      "hash": "#/source-collections",
+      "expectedMode": "cowork",
+      "expectedSection": "source",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-source-collections.png",
+      "evidence": {
+        "dataWorkspaceMode": "cowork",
+        "dataWorkspaceSection": "source",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Cowork",
+          "selected": "Cowork",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Retry failed sources",
+              "visible": true
+            },
+            {
+              "descriptor": "https://mail.google.com/mail/u/0/#inbox/mock-thread",
+              "visible": true
+            },
+            {
+              "descriptor": "Chat",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": "cowork",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "tablet",
+      "route": "tasks",
+      "hash": "#/tasks",
+      "expectedMode": "cowork",
+      "expectedSection": "routine",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-tasks.png",
+      "evidence": {
+        "dataWorkspaceMode": "cowork",
+        "dataWorkspaceSection": "routine",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Cowork",
+          "selected": "Cowork",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Export",
+              "visible": true
+            },
+            {
+              "descriptor": "New routine",
+              "visible": true
+            },
+            {
+              "descriptor": "routine-search",
+              "visible": true
+            },
+            {
+              "descriptor": "Draft routine",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": "cowork",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "tablet",
+      "route": "sessions",
+      "hash": "#/sessions",
+      "expectedMode": "code",
+      "expectedSection": "session",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-sessions.png",
+      "evidence": {
+        "dataWorkspaceMode": "code",
+        "dataWorkspaceSection": "session",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Code",
+          "selected": "Code",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Approvals0needs review",
+              "visible": true
+            },
+            {
+              "descriptor": "Artifacts03 file trails",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy continuity brief",
+              "visible": true
+            },
+            {
+              "descriptor": "Copilot Resume the conversation Use for pure conversation, drafting, quick reaso",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": "code",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "tablet",
+      "route": "devhub",
+      "hash": "#/devhub",
+      "expectedMode": "code",
+      "expectedSection": "terminal",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-devhub.png",
+      "evidence": {
+        "dataWorkspaceMode": "code",
+        "dataWorkspaceSection": "terminal",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Code",
+          "selected": "Code",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Overview",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy engineering brief",
+              "visible": true
+            },
+            {
+              "descriptor": "Code workspace Inspect branches, diffs, snippets, and review rules.",
+              "visible": true
+            },
+            {
+              "descriptor": "Test loop Run focused verification before handoff.",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": "code",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "tablet",
+      "route": "security",
+      "hash": "#/security",
+      "expectedMode": "more",
+      "expectedSection": "security",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-security.png",
+      "evidence": {
+        "dataWorkspaceMode": "more",
+        "dataWorkspaceSection": "security",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "More",
+          "selected": "More",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy posture brief",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy hardening plan",
+              "visible": true
+            },
+            {
+              "descriptor": "Audit Log",
+              "visible": true
+            },
+            {
+              "descriptor": "Credentials",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": null,
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "mobile",
+      "route": "dashboard",
+      "hash": "#/dashboard",
+      "expectedMode": "today",
+      "expectedSection": "overview",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-dashboard.png",
+      "evidence": {
+        "dataWorkspaceMode": "today",
+        "dataWorkspaceSection": "overview",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Today",
+          "selected": "Open Today",
+          "selectedCount": 0,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy brief",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy kickoff prompt",
+              "visible": true
+            },
+            {
+              "descriptor": "Review",
+              "visible": true
+            },
+            {
+              "descriptor": "Review",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": null,
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "mobile",
+      "route": "reports",
+      "hash": "#/reports",
+      "expectedMode": "cowork",
+      "expectedSection": "report",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-reports.png",
+      "evidence": {
+        "dataWorkspaceMode": "cowork",
+        "dataWorkspaceSection": "report",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Cowork",
+          "selected": "Cowork",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy production brief",
+              "visible": true
+            },
+            {
+              "descriptor": "Review approvals",
+              "visible": true
+            },
+            {
+              "descriptor": "Open artifacts",
+              "visible": true
+            },
+            {
+              "descriptor": "Use project context",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": "cowork",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "mobile",
+      "route": "source-collections",
+      "hash": "#/source-collections",
+      "expectedMode": "cowork",
+      "expectedSection": "source",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-source-collections.png",
+      "evidence": {
+        "dataWorkspaceMode": "cowork",
+        "dataWorkspaceSection": "source",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Cowork",
+          "selected": "Cowork",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Retry failed sources",
+              "visible": true
+            },
+            {
+              "descriptor": "https://mail.google.com/mail/u/0/#inbox/mock-thread",
+              "visible": true
+            },
+            {
+              "descriptor": "Chat",
+              "visible": true
+            },
+            {
+              "descriptor": "Cowork",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": "cowork",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "mobile",
+      "route": "tasks",
+      "hash": "#/tasks",
+      "expectedMode": "cowork",
+      "expectedSection": "routine",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-tasks.png",
+      "evidence": {
+        "dataWorkspaceMode": "cowork",
+        "dataWorkspaceSection": "routine",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Cowork",
+          "selected": "Cowork",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Export",
+              "visible": true
+            },
+            {
+              "descriptor": "New routine",
+              "visible": true
+            },
+            {
+              "descriptor": "routine-search",
+              "visible": true
+            },
+            {
+              "descriptor": "Draft routine",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": "cowork",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "mobile",
+      "route": "sessions",
+      "hash": "#/sessions",
+      "expectedMode": "code",
+      "expectedSection": "session",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-sessions.png",
+      "evidence": {
+        "dataWorkspaceMode": "code",
+        "dataWorkspaceSection": "session",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Code",
+          "selected": "Code",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Approvals0needs review",
+              "visible": true
+            },
+            {
+              "descriptor": "Artifacts03 file trails",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy continuity brief",
+              "visible": true
+            },
+            {
+              "descriptor": "Copilot Resume the conversation Use for pure conversation, drafting, quick reaso",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": "code",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "mobile",
+      "route": "devhub",
+      "hash": "#/devhub",
+      "expectedMode": "code",
+      "expectedSection": "terminal",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-devhub.png",
+      "evidence": {
+        "dataWorkspaceMode": "code",
+        "dataWorkspaceSection": "terminal",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "Code",
+          "selected": "Code",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Overview",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy engineering brief",
+              "visible": true
+            },
+            {
+              "descriptor": "Code workspace Inspect branches, diffs, snippets, and review rules.",
+              "visible": true
+            },
+            {
+              "descriptor": "Test loop Run focused verification before handoff.",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": "code",
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    },
+    {
+      "viewport": "mobile",
+      "route": "security",
+      "hash": "#/security",
+      "expectedMode": "more",
+      "expectedSection": "security",
+      "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-security.png",
+      "evidence": {
+        "dataWorkspaceMode": "more",
+        "dataWorkspaceSection": "security",
+        "mainCount": 1,
+        "visibleMainCount": 1,
+        "documentOverflowPx": 0,
+        "unnamedVisibleControls": [],
+        "selectedWorkspaceControl": {
+          "expected": "More",
+          "selected": "More",
+          "selectedCount": 1,
+          "issues": []
+        },
+        "layoutIssues": [],
+        "keyboardReachability": {
+          "reached": [
+            {
+              "descriptor": "Skip to content",
+              "visible": true
+            },
+            {
+              "descriptor": "Open Today",
+              "visible": true
+            },
+            {
+              "descriptor": "Open menu",
+              "visible": true
+            },
+            {
+              "descriptor": "Show workspace details",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy posture brief",
+              "visible": true
+            },
+            {
+              "descriptor": "Copy hardening plan",
+              "visible": true
+            },
+            {
+              "descriptor": "Audit Log",
+              "visible": true
+            },
+            {
+              "descriptor": "Credentials",
+              "visible": true
+            }
+          ],
+          "issue": ""
+        },
+        "mobileBottomBarActionCount": 4,
+        "storedActiveMode": null,
+        "issues": []
+      },
+      "pageErrors": [],
+      "consoleErrors": [],
+      "issues": []
+    }
+  ],
+  "interactions": [
+    {
+      "viewport": "desktop",
+      "route": "dashboard",
+      "inspector": {
+        "keyboardNavigation": {
+          "reached": true,
+          "steps": 7,
+          "seededAtSkipLink": false
+        },
+        "opened": {
+          "ariaHidden": "false",
+          "inert": false,
+          "expanded": "true",
+          "focusOnClose": true,
+          "closeRendered": true,
+          "closeWithinViewport": true,
+          "closeTopmost": true,
+          "focusIndicatorVisible": true
+        },
+        "closed": {
+          "ariaHidden": "true",
+          "inert": true,
+          "expanded": "false",
+          "focusReturned": true
+        },
+        "errors": [],
+        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-dashboard-inspector-open.png"
+      },
+      "more": {
+        "inspectorKeyboardNavigation": {
+          "reached": true,
+          "steps": 0
+        },
+        "moreKeyboardNavigation": {
+          "reached": true,
+          "steps": 5,
+          "seededAtSkipLink": true
+        },
+        "opened": {
+          "ariaHidden": "false",
+          "inert": false,
+          "role": "dialog",
+          "ariaModal": "true",
+          "labelledBy": "more-drawer-title",
+          "labelledByText": "Workspace tools",
+          "inspectorOpen": false,
+          "inspectorInert": true,
+          "expandedValues": [
+            "true",
+            "true",
+            "true"
+          ],
+          "focusOnClose": true,
+          "drawerGeometry": {
+            "left": 0,
+            "right": 320,
+            "top": 0,
+            "bottom": 1000,
+            "width": 320,
+            "height": 1000,
+            "display": "flex",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "headerGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 0,
+            "bottom": 57.796875,
+            "width": 319,
+            "height": 57.796875,
+            "display": "flex",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "bodyGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 57.796875,
+            "bottom": 1000,
+            "width": 319,
+            "height": 942.203125,
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "closeGeometry": {
+            "left": 287.265625,
+            "right": 301,
+            "top": 19.390625,
+            "bottom": 37.390625,
+            "width": 13.734375,
+            "height": 18,
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "drawerWithinViewport": true,
+          "headerWithinViewport": true,
+          "bodyWithinViewport": true,
+          "closeWithinViewport": true,
+          "closeTopmost": true,
+          "headerTopmost": true,
+          "overlayTopmost": true,
+          "overlayInteractive": true,
+          "focusVisible": true,
+          "focusIndicatorVisible": true,
+          "openStateUnnamedControls": [],
+          "openStateDocumentOverflowPx": 0
+        },
+        "modalFocusLoop": {
+          "lastFocusableOnBackwardTab": true,
+          "lastFocusableName": "Audit",
+          "focusLoopedToClose": true
+        },
+        "scrolled": {
+          "drawerGeometry": {
+            "left": 0,
+            "right": 320,
+            "top": 0,
+            "bottom": 1000,
+            "width": 320,
+            "height": 1000
+          },
+          "headerGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 0,
+            "bottom": 57.796875,
+            "width": 319,
+            "height": 57.796875
+          },
+          "bodyGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 57.796875,
+            "bottom": 1000,
+            "width": 319,
+            "height": 942.203125
+          },
+          "lastControlGeometry": {
+            "left": 16,
+            "right": 303,
+            "top": 948.078125,
+            "bottom": 978.671875,
+            "width": 287,
+            "height": 30.59375
+          },
+          "bodyScrollTop": 718,
+          "bodyScrollHeight": 1660,
+          "bodyClientHeight": 942,
+          "lastControlName": "Audit",
+          "headerWithinViewport": true,
+          "lastControlWithinBody": true,
+          "lastControlTopmost": true,
+          "lowerEdgeTopmost": true
+        },
+        "closed": {
+          "ariaHidden": "true",
+          "inert": true,
+          "expanded": "false",
+          "focusReturned": true
+        },
+        "errors": [],
+        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-dashboard-more-open.png"
+      }
+    },
+    {
+      "viewport": "desktop",
+      "route": "reports",
+      "inspector": {
+        "keyboardNavigation": {
+          "reached": true,
+          "steps": 5,
+          "seededAtSkipLink": false
+        },
+        "opened": {
+          "ariaHidden": "false",
+          "inert": false,
+          "expanded": "true",
+          "focusOnClose": true,
+          "closeRendered": true,
+          "closeWithinViewport": true,
+          "closeTopmost": true,
+          "focusIndicatorVisible": true
+        },
+        "closed": {
+          "ariaHidden": "true",
+          "inert": true,
+          "expanded": "false",
+          "focusReturned": true
+        },
+        "errors": [],
+        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-reports-inspector-open.png"
+      },
+      "more": {
+        "inspectorKeyboardNavigation": {
+          "reached": true,
+          "steps": 0
+        },
+        "moreKeyboardNavigation": {
+          "reached": true,
+          "steps": 5,
+          "seededAtSkipLink": true
+        },
+        "opened": {
+          "ariaHidden": "false",
+          "inert": false,
+          "role": "dialog",
+          "ariaModal": "true",
+          "labelledBy": "more-drawer-title",
+          "labelledByText": "Workspace tools",
+          "inspectorOpen": false,
+          "inspectorInert": true,
+          "expandedValues": [
+            "true",
+            "true"
+          ],
+          "focusOnClose": true,
+          "drawerGeometry": {
+            "left": 0,
+            "right": 320,
+            "top": 0,
+            "bottom": 1000,
+            "width": 320,
+            "height": 1000,
+            "display": "flex",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "headerGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 0,
+            "bottom": 57.796875,
+            "width": 319,
+            "height": 57.796875,
+            "display": "flex",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "bodyGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 57.796875,
+            "bottom": 1000,
+            "width": 319,
+            "height": 942.203125,
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "closeGeometry": {
+            "left": 287.265625,
+            "right": 301,
+            "top": 19.390625,
+            "bottom": 37.390625,
+            "width": 13.734375,
+            "height": 18,
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "drawerWithinViewport": true,
+          "headerWithinViewport": true,
+          "bodyWithinViewport": true,
+          "closeWithinViewport": true,
+          "closeTopmost": true,
+          "headerTopmost": true,
+          "overlayTopmost": true,
+          "overlayInteractive": true,
+          "focusVisible": true,
+          "focusIndicatorVisible": true,
+          "openStateUnnamedControls": [],
+          "openStateDocumentOverflowPx": 0
+        },
+        "modalFocusLoop": {
+          "lastFocusableOnBackwardTab": true,
+          "lastFocusableName": "Audit",
+          "focusLoopedToClose": true
+        },
+        "scrolled": {
+          "drawerGeometry": {
+            "left": 0,
+            "right": 320,
+            "top": 0,
+            "bottom": 1000,
+            "width": 320,
+            "height": 1000
+          },
+          "headerGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 0,
+            "bottom": 57.796875,
+            "width": 319,
+            "height": 57.796875
+          },
+          "bodyGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 57.796875,
+            "bottom": 1000,
+            "width": 319,
+            "height": 942.203125
+          },
+          "lastControlGeometry": {
+            "left": 16,
+            "right": 303,
+            "top": 948.078125,
+            "bottom": 978.671875,
+            "width": 287,
+            "height": 30.59375
+          },
+          "bodyScrollTop": 718,
+          "bodyScrollHeight": 1660,
+          "bodyClientHeight": 942,
+          "lastControlName": "Audit",
+          "headerWithinViewport": true,
+          "lastControlWithinBody": true,
+          "lastControlTopmost": true,
+          "lowerEdgeTopmost": true
+        },
+        "closed": {
+          "ariaHidden": "true",
+          "inert": true,
+          "expanded": "false",
+          "focusReturned": true
+        },
+        "errors": [],
+        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-reports-more-open.png"
+      }
+    },
+    {
+      "viewport": "tablet",
+      "route": "dashboard",
+      "inspector": {
+        "keyboardNavigation": {
+          "reached": true,
+          "steps": 3,
+          "seededAtSkipLink": true
+        },
+        "opened": {
+          "ariaHidden": "false",
+          "inert": false,
+          "expanded": "true",
+          "focusOnClose": true,
+          "closeRendered": true,
+          "closeWithinViewport": true,
+          "closeTopmost": true,
+          "focusIndicatorVisible": true
+        },
+        "closed": {
+          "ariaHidden": "true",
+          "inert": true,
+          "expanded": "false",
+          "focusReturned": true
+        },
+        "errors": [],
+        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-dashboard-inspector-open.png"
+      },
+      "more": {
+        "inspectorKeyboardNavigation": {
+          "reached": true,
+          "steps": 0
+        },
+        "moreKeyboardNavigation": {
+          "reached": true,
+          "steps": 5,
+          "seededAtSkipLink": false
+        },
+        "opened": {
+          "ariaHidden": "false",
+          "inert": false,
+          "role": "dialog",
+          "ariaModal": "true",
+          "labelledBy": "more-drawer-title",
+          "labelledByText": "Workspace tools",
+          "inspectorOpen": false,
+          "inspectorInert": true,
+          "expandedValues": [
+            "true",
+            "true",
+            "true"
+          ],
+          "focusOnClose": true,
+          "drawerGeometry": {
+            "left": 0,
+            "right": 320,
+            "top": 0,
+            "bottom": 1000,
+            "width": 320,
+            "height": 1000,
+            "display": "flex",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "headerGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 0,
+            "bottom": 57.796875,
+            "width": 319,
+            "height": 57.796875,
+            "display": "flex",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "bodyGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 57.796875,
+            "bottom": 1000,
+            "width": 319,
+            "height": 942.203125,
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "closeGeometry": {
+            "left": 287.265625,
+            "right": 301,
+            "top": 19.390625,
+            "bottom": 37.390625,
+            "width": 13.734375,
+            "height": 18,
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "drawerWithinViewport": true,
+          "headerWithinViewport": true,
+          "bodyWithinViewport": true,
+          "closeWithinViewport": true,
+          "closeTopmost": true,
+          "headerTopmost": true,
+          "overlayTopmost": true,
+          "overlayInteractive": true,
+          "focusVisible": true,
+          "focusIndicatorVisible": true,
+          "openStateUnnamedControls": [],
+          "openStateDocumentOverflowPx": 0
+        },
+        "modalFocusLoop": {
+          "lastFocusableOnBackwardTab": true,
+          "lastFocusableName": "Audit",
+          "focusLoopedToClose": true
+        },
+        "scrolled": {
+          "drawerGeometry": {
+            "left": 0,
+            "right": 320,
+            "top": 0,
+            "bottom": 1000,
+            "width": 320,
+            "height": 1000
+          },
+          "headerGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 0,
+            "bottom": 57.796875,
+            "width": 319,
+            "height": 57.796875
+          },
+          "bodyGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 57.796875,
+            "bottom": 1000,
+            "width": 319,
+            "height": 942.203125
+          },
+          "lastControlGeometry": {
+            "left": 16,
+            "right": 303,
+            "top": 948.078125,
+            "bottom": 978.671875,
+            "width": 287,
+            "height": 30.59375
+          },
+          "bodyScrollTop": 718,
+          "bodyScrollHeight": 1660,
+          "bodyClientHeight": 942,
+          "lastControlName": "Audit",
+          "headerWithinViewport": true,
+          "lastControlWithinBody": true,
+          "lastControlTopmost": true,
+          "lowerEdgeTopmost": true
+        },
+        "closed": {
+          "ariaHidden": "true",
+          "inert": true,
+          "expanded": "false",
+          "focusReturned": true
+        },
+        "errors": [],
+        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-dashboard-more-open.png"
+      }
+    },
+    {
+      "viewport": "tablet",
+      "route": "reports",
+      "inspector": {
+        "keyboardNavigation": {
+          "reached": true,
+          "steps": 3,
+          "seededAtSkipLink": true
+        },
+        "opened": {
+          "ariaHidden": "false",
+          "inert": false,
+          "expanded": "true",
+          "focusOnClose": true,
+          "closeRendered": true,
+          "closeWithinViewport": true,
+          "closeTopmost": true,
+          "focusIndicatorVisible": true
+        },
+        "closed": {
+          "ariaHidden": "true",
+          "inert": true,
+          "expanded": "false",
+          "focusReturned": true
+        },
+        "errors": [],
+        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-reports-inspector-open.png"
+      },
+      "more": {
+        "inspectorKeyboardNavigation": {
+          "reached": true,
+          "steps": 0
+        },
+        "moreKeyboardNavigation": {
+          "reached": true,
+          "steps": 5,
+          "seededAtSkipLink": false
+        },
+        "opened": {
+          "ariaHidden": "false",
+          "inert": false,
+          "role": "dialog",
+          "ariaModal": "true",
+          "labelledBy": "more-drawer-title",
+          "labelledByText": "Workspace tools",
+          "inspectorOpen": false,
+          "inspectorInert": true,
+          "expandedValues": [
+            "true",
+            "true"
+          ],
+          "focusOnClose": true,
+          "drawerGeometry": {
+            "left": 0,
+            "right": 320,
+            "top": 0,
+            "bottom": 1000,
+            "width": 320,
+            "height": 1000,
+            "display": "flex",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "headerGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 0,
+            "bottom": 57.796875,
+            "width": 319,
+            "height": 57.796875,
+            "display": "flex",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "bodyGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 57.796875,
+            "bottom": 1000,
+            "width": 319,
+            "height": 942.203125,
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "closeGeometry": {
+            "left": 287.265625,
+            "right": 301,
+            "top": 19.390625,
+            "bottom": 37.390625,
+            "width": 13.734375,
+            "height": 18,
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "drawerWithinViewport": true,
+          "headerWithinViewport": true,
+          "bodyWithinViewport": true,
+          "closeWithinViewport": true,
+          "closeTopmost": true,
+          "headerTopmost": true,
+          "overlayTopmost": true,
+          "overlayInteractive": true,
+          "focusVisible": true,
+          "focusIndicatorVisible": true,
+          "openStateUnnamedControls": [],
+          "openStateDocumentOverflowPx": 0
+        },
+        "modalFocusLoop": {
+          "lastFocusableOnBackwardTab": true,
+          "lastFocusableName": "Audit",
+          "focusLoopedToClose": true
+        },
+        "scrolled": {
+          "drawerGeometry": {
+            "left": 0,
+            "right": 320,
+            "top": 0,
+            "bottom": 1000,
+            "width": 320,
+            "height": 1000
+          },
+          "headerGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 0,
+            "bottom": 57.796875,
+            "width": 319,
+            "height": 57.796875
+          },
+          "bodyGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 57.796875,
+            "bottom": 1000,
+            "width": 319,
+            "height": 942.203125
+          },
+          "lastControlGeometry": {
+            "left": 16,
+            "right": 303,
+            "top": 948.078125,
+            "bottom": 978.671875,
+            "width": 287,
+            "height": 30.59375
+          },
+          "bodyScrollTop": 718,
+          "bodyScrollHeight": 1660,
+          "bodyClientHeight": 942,
+          "lastControlName": "Audit",
+          "headerWithinViewport": true,
+          "lastControlWithinBody": true,
+          "lastControlTopmost": true,
+          "lowerEdgeTopmost": true
+        },
+        "closed": {
+          "ariaHidden": "true",
+          "inert": true,
+          "expanded": "false",
+          "focusReturned": true
+        },
+        "errors": [],
+        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-reports-more-open.png"
+      }
+    },
+    {
+      "viewport": "mobile",
+      "route": "dashboard",
+      "inspector": {
+        "keyboardNavigation": {
+          "reached": true,
+          "steps": 3,
+          "seededAtSkipLink": true
+        },
+        "opened": {
+          "ariaHidden": "false",
+          "inert": false,
+          "expanded": "true",
+          "focusOnClose": true,
+          "closeRendered": true,
+          "closeWithinViewport": true,
+          "closeTopmost": true,
+          "focusIndicatorVisible": true
+        },
+        "closed": {
+          "ariaHidden": "true",
+          "inert": true,
+          "expanded": "false",
+          "focusReturned": true
+        },
+        "errors": [],
+        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-dashboard-inspector-open.png"
+      },
+      "more": {
+        "inspectorKeyboardNavigation": {
+          "reached": true,
+          "steps": 0
+        },
+        "moreKeyboardNavigation": {
+          "reached": true,
+          "steps": 5,
+          "seededAtSkipLink": false
+        },
+        "opened": {
+          "ariaHidden": "false",
+          "inert": false,
+          "role": "dialog",
+          "ariaModal": "true",
+          "labelledBy": "more-drawer-title",
+          "labelledByText": "Workspace tools",
+          "inspectorOpen": false,
+          "inspectorInert": true,
+          "expandedValues": [
+            "true",
+            "true",
+            "true"
+          ],
+          "focusOnClose": true,
+          "drawerGeometry": {
+            "left": 0,
+            "right": 320,
+            "top": 0,
+            "bottom": 844,
+            "width": 320,
+            "height": 844,
+            "display": "flex",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "headerGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 0,
+            "bottom": 57.796875,
+            "width": 319,
+            "height": 57.796875,
+            "display": "flex",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "bodyGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 57.796875,
+            "bottom": 844,
+            "width": 319,
+            "height": 786.203125,
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "closeGeometry": {
+            "left": 287.265625,
+            "right": 301,
+            "top": 19.390625,
+            "bottom": 37.390625,
+            "width": 13.734375,
+            "height": 18,
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "drawerWithinViewport": true,
+          "headerWithinViewport": true,
+          "bodyWithinViewport": true,
+          "closeWithinViewport": true,
+          "closeTopmost": true,
+          "headerTopmost": true,
+          "overlayTopmost": true,
+          "overlayInteractive": true,
+          "focusVisible": true,
+          "focusIndicatorVisible": true,
+          "openStateUnnamedControls": [],
+          "openStateDocumentOverflowPx": 0
+        },
+        "modalFocusLoop": {
+          "lastFocusableOnBackwardTab": true,
+          "lastFocusableName": "Audit",
+          "focusLoopedToClose": true
+        },
+        "scrolled": {
+          "drawerGeometry": {
+            "left": 0,
+            "right": 320,
+            "top": 0,
+            "bottom": 844,
+            "width": 320,
+            "height": 844
+          },
+          "headerGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 0,
+            "bottom": 57.796875,
+            "width": 319,
+            "height": 57.796875
+          },
+          "bodyGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 57.796875,
+            "bottom": 844,
+            "width": 319,
+            "height": 786.203125
+          },
+          "lastControlGeometry": {
+            "left": 16,
+            "right": 303,
+            "top": 792.078125,
+            "bottom": 822.671875,
+            "width": 287,
+            "height": 30.59375
+          },
+          "bodyScrollTop": 874,
+          "bodyScrollHeight": 1660,
+          "bodyClientHeight": 786,
+          "lastControlName": "Audit",
+          "headerWithinViewport": true,
+          "lastControlWithinBody": true,
+          "lastControlTopmost": true,
+          "lowerEdgeTopmost": true
+        },
+        "closed": {
+          "ariaHidden": "true",
+          "inert": true,
+          "expanded": "false",
+          "focusReturned": true
+        },
+        "errors": [],
+        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-dashboard-more-open.png"
+      }
+    },
+    {
+      "viewport": "mobile",
+      "route": "reports",
+      "inspector": {
+        "keyboardNavigation": {
+          "reached": true,
+          "steps": 3,
+          "seededAtSkipLink": true
+        },
+        "opened": {
+          "ariaHidden": "false",
+          "inert": false,
+          "expanded": "true",
+          "focusOnClose": true,
+          "closeRendered": true,
+          "closeWithinViewport": true,
+          "closeTopmost": true,
+          "focusIndicatorVisible": true
+        },
+        "closed": {
+          "ariaHidden": "true",
+          "inert": true,
+          "expanded": "false",
+          "focusReturned": true
+        },
+        "errors": [],
+        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-reports-inspector-open.png"
+      },
+      "more": {
+        "inspectorKeyboardNavigation": {
+          "reached": true,
+          "steps": 0
+        },
+        "moreKeyboardNavigation": {
+          "reached": true,
+          "steps": 5,
+          "seededAtSkipLink": false
+        },
+        "opened": {
+          "ariaHidden": "false",
+          "inert": false,
+          "role": "dialog",
+          "ariaModal": "true",
+          "labelledBy": "more-drawer-title",
+          "labelledByText": "Workspace tools",
+          "inspectorOpen": false,
+          "inspectorInert": true,
+          "expandedValues": [
+            "true",
+            "true"
+          ],
+          "focusOnClose": true,
+          "drawerGeometry": {
+            "left": 0,
+            "right": 320,
+            "top": 0,
+            "bottom": 844,
+            "width": 320,
+            "height": 844,
+            "display": "flex",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "headerGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 0,
+            "bottom": 57.796875,
+            "width": 319,
+            "height": 57.796875,
+            "display": "flex",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "bodyGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 57.796875,
+            "bottom": 844,
+            "width": 319,
+            "height": 786.203125,
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "closeGeometry": {
+            "left": 287.265625,
+            "right": 301,
+            "top": 19.390625,
+            "bottom": 37.390625,
+            "width": 13.734375,
+            "height": 18,
+            "display": "block",
+            "visibility": "visible",
+            "opacity": 1
+          },
+          "drawerWithinViewport": true,
+          "headerWithinViewport": true,
+          "bodyWithinViewport": true,
+          "closeWithinViewport": true,
+          "closeTopmost": true,
+          "headerTopmost": true,
+          "overlayTopmost": true,
+          "overlayInteractive": true,
+          "focusVisible": true,
+          "focusIndicatorVisible": true,
+          "openStateUnnamedControls": [],
+          "openStateDocumentOverflowPx": 0
+        },
+        "modalFocusLoop": {
+          "lastFocusableOnBackwardTab": true,
+          "lastFocusableName": "Audit",
+          "focusLoopedToClose": true
+        },
+        "scrolled": {
+          "drawerGeometry": {
+            "left": 0,
+            "right": 320,
+            "top": 0,
+            "bottom": 844,
+            "width": 320,
+            "height": 844
+          },
+          "headerGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 0,
+            "bottom": 57.796875,
+            "width": 319,
+            "height": 57.796875
+          },
+          "bodyGeometry": {
+            "left": 0,
+            "right": 319,
+            "top": 57.796875,
+            "bottom": 844,
+            "width": 319,
+            "height": 786.203125
+          },
+          "lastControlGeometry": {
+            "left": 16,
+            "right": 303,
+            "top": 792.078125,
+            "bottom": 822.671875,
+            "width": 287,
+            "height": 30.59375
+          },
+          "bodyScrollTop": 874,
+          "bodyScrollHeight": 1660,
+          "bodyClientHeight": 786,
+          "lastControlName": "Audit",
+          "headerWithinViewport": true,
+          "lastControlWithinBody": true,
+          "lastControlTopmost": true,
+          "lowerEdgeTopmost": true
+        },
+        "closed": {
+          "ariaHidden": "true",
+          "inert": true,
+          "expanded": "false",
+          "focusReturned": true
+        },
+        "errors": [],
+        "screenshotPath": "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-reports-more-open.png"
+      }
+    }
+  ],
+  "screenshots": [
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-dashboard.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-dashboard-inspector-open.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-dashboard-more-open.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-reports.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-reports-inspector-open.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-reports-more-open.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-source-collections.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-tasks.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-sessions.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-devhub.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/desktop-security.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-dashboard.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-dashboard-inspector-open.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-dashboard-more-open.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-reports.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-reports-inspector-open.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-reports-more-open.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-source-collections.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-tasks.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-sessions.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-devhub.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/tablet-security.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-dashboard.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-dashboard-inspector-open.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-dashboard-more-open.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-reports.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-reports-inspector-open.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-reports-more-open.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-source-collections.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-tasks.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-sessions.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-devhub.png",
+    "/private/tmp/nanocrab-focus-stack-foundation/artifacts/admin-workspace-qa/task4-review-final/mobile-security.png"
+  ],
+  "issueCount": 0,
+  "issues": [],
+  "passed": true
+}

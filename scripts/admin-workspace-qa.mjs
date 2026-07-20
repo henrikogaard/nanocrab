@@ -432,6 +432,45 @@ async function firstVisible(locator) {
   return null;
 }
 
+async function tabToTarget(page, target, maxSteps = 200) {
+  const activeIsTarget = () =>
+    target.evaluate((element) => document.activeElement === element);
+  if (await activeIsTarget()) return { reached: true, steps: 0 };
+
+  const initialSteps = Math.min(40, maxSteps);
+  for (let steps = 1; steps <= initialSteps; steps += 1) {
+    await page.keyboard.press('Tab');
+    if (await activeIsTarget())
+      return { reached: true, steps, seededAtSkipLink: false };
+  }
+
+  const skipLink = page.locator('.skip-link');
+  if (await skipLink.isVisible()) await skipLink.focus();
+  for (let steps = 1; steps <= maxSteps; steps += 1) {
+    await page.keyboard.press('Tab');
+    if (await activeIsTarget())
+      return { reached: true, steps, seededAtSkipLink: true };
+  }
+
+  const activeDescriptor = await page.evaluate(() => {
+    const element = document.activeElement;
+    if (!(element instanceof HTMLElement) || element === document.body)
+      return '';
+    return (
+      element.getAttribute('aria-label') ||
+      element.textContent?.trim().replace(/\s+/g, ' ').slice(0, 80) ||
+      element.id ||
+      element.tagName
+    );
+  });
+  return {
+    reached: false,
+    steps: initialSteps + maxSteps,
+    seededAtSkipLink: true,
+    activeDescriptor,
+  };
+}
+
 async function exerciseInspector(page, screenshotPath = '') {
   const errors = [];
   const trigger = await firstVisible(
@@ -439,7 +478,17 @@ async function exerciseInspector(page, screenshotPath = '') {
   );
   if (!trigger) return { errors: ['Inspector trigger is not visible'] };
 
-  await trigger.focus();
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement)
+      document.activeElement.blur();
+  });
+  const keyboardNavigation = await tabToTarget(page, trigger);
+  if (!keyboardNavigation.reached) {
+    return {
+      keyboardNavigation,
+      errors: ['Tab did not reach the visible inspector trigger'],
+    };
+  }
   await page.keyboard.press('Enter');
   await page.waitForFunction(() =>
     document
@@ -449,12 +498,46 @@ async function exerciseInspector(page, screenshotPath = '') {
   const opened = await page.evaluate(() => {
     const inspector = document.getElementById('workspace-inspector');
     const trigger = document.querySelector('.focus-stack-inspector-trigger');
+    const close = inspector?.querySelector('.focus-stack-inspector-close');
+    const closeRect = close?.getBoundingClientRect();
+    const closeStyle = close ? window.getComputedStyle(close) : null;
+    const closeHit = closeRect
+      ? document.elementFromPoint(
+          closeRect.left + closeRect.width / 2,
+          closeRect.top + closeRect.height / 2,
+        )
+      : null;
     return {
       ariaHidden: inspector?.getAttribute('aria-hidden'),
       inert: inspector?.hasAttribute('inert'),
       expanded: trigger?.getAttribute('aria-expanded'),
-      focusOnClose: document.activeElement?.classList.contains(
-        'focus-stack-inspector-close',
+      focusOnClose: document.activeElement === close,
+      closeRendered: Boolean(
+        closeRect &&
+        closeStyle &&
+        closeRect.width > 0 &&
+        closeRect.height > 0 &&
+        closeStyle.display !== 'none' &&
+        closeStyle.visibility !== 'hidden' &&
+        Number(closeStyle.opacity || 1) > 0,
+      ),
+      closeWithinViewport: Boolean(
+        closeRect &&
+        closeRect.left >= 0 &&
+        closeRect.top >= 0 &&
+        closeRect.right <= window.innerWidth &&
+        closeRect.bottom <= window.innerHeight,
+      ),
+      closeTopmost: Boolean(
+        close && closeHit && (close === closeHit || close.contains(closeHit)),
+      ),
+      focusIndicatorVisible: Boolean(
+        close &&
+        closeStyle &&
+        close.matches(':focus-visible') &&
+        ((closeStyle.outlineStyle !== 'none' &&
+          Number.parseFloat(closeStyle.outlineWidth) > 0) ||
+          closeStyle.boxShadow !== 'none'),
       ),
     };
   });
@@ -464,6 +547,12 @@ async function exerciseInspector(page, screenshotPath = '') {
     errors.push('Inspector trigger did not expose aria-expanded=true');
   if (!opened.focusOnClose)
     errors.push('Inspector did not move focus to its close control');
+  if (!opened.closeRendered || !opened.closeWithinViewport)
+    errors.push('Inspector close control is not visibly inside the viewport');
+  if (!opened.closeTopmost)
+    errors.push('Inspector close control is geometrically occluded');
+  if (!opened.focusIndicatorVisible)
+    errors.push('Inspector close control lacks visible keyboard focus');
   if (screenshotPath) await page.screenshot({ path: screenshotPath });
 
   await page.keyboard.press('Escape');
@@ -490,7 +579,13 @@ async function exerciseInspector(page, screenshotPath = '') {
   if (!closed.focusReturned)
     errors.push('Inspector did not return focus to its trigger');
 
-  return { opened, closed, errors, screenshotPath };
+  return {
+    keyboardNavigation,
+    opened,
+    closed,
+    errors,
+    screenshotPath,
+  };
 }
 
 async function exerciseMoreDrawer(page, screenshotPath = '') {
@@ -507,14 +602,27 @@ async function exerciseMoreDrawer(page, screenshotPath = '') {
     return { errors: ['Inspector or More trigger is not visible'] };
   }
 
-  await inspectorTrigger.focus();
+  const inspectorKeyboardNavigation = await tabToTarget(page, inspectorTrigger);
+  if (!inspectorKeyboardNavigation.reached) {
+    return {
+      inspectorKeyboardNavigation,
+      errors: ['Tab did not reach the visible inspector trigger'],
+    };
+  }
   await page.keyboard.press('Enter');
   await page.waitForFunction(() =>
     document
       .getElementById('workspace-inspector')
       ?.classList.contains('is-open'),
   );
-  await moreTrigger.focus();
+  const moreKeyboardNavigation = await tabToTarget(page, moreTrigger);
+  if (!moreKeyboardNavigation.reached) {
+    return {
+      inspectorKeyboardNavigation,
+      moreKeyboardNavigation,
+      errors: ['Tab did not reach the visible More trigger'],
+    };
+  }
   await page.keyboard.press('Enter');
   await page.waitForFunction(() =>
     document.getElementById('more-drawer')?.classList.contains('open'),
@@ -523,18 +631,138 @@ async function exerciseMoreDrawer(page, screenshotPath = '') {
   const opened = await page.evaluate(() => {
     const drawer = document.getElementById('more-drawer');
     const inspector = document.getElementById('workspace-inspector');
+    const overlay = document.querySelector('.more-overlay');
+    const header = drawer?.querySelector('.more-drawer-header');
+    const body = drawer?.querySelector('.more-drawer-body');
+    const close = drawer?.querySelector('.more-close');
     const expandedValues = Array.from(
       document.querySelectorAll('[aria-controls="more-drawer"]'),
     ).map((element) => element.getAttribute('aria-expanded'));
+    const geometry = (element) => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+        display: style.display,
+        visibility: style.visibility,
+        opacity: Number(style.opacity || 1),
+      };
+    };
+    const rendered = (rect) =>
+      Boolean(
+        rect &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.display !== 'none' &&
+        rect.visibility !== 'hidden' &&
+        rect.opacity > 0,
+      );
+    const withinViewport = (rect) =>
+      Boolean(
+        rect &&
+        rect.left >= -1 &&
+        rect.top >= -1 &&
+        rect.right <= window.innerWidth + 1 &&
+        rect.bottom <= window.innerHeight + 1,
+      );
+    const hitBelongsTo = (element, x, y) => {
+      if (!element || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+      const hit = document.elementFromPoint(x, y);
+      return Boolean(hit && (hit === element || element.contains(hit)));
+    };
+    const drawerGeometry = geometry(drawer);
+    const headerGeometry = geometry(header);
+    const bodyGeometry = geometry(body);
+    const closeGeometry = geometry(close);
+    const closeStyle = close ? window.getComputedStyle(close) : null;
+    const overlayStyle = overlay ? window.getComputedStyle(overlay) : null;
+    const overlayPoint = drawerGeometry
+      ? {
+          x: Math.min(
+            window.innerWidth - 2,
+            drawerGeometry.right +
+              Math.max(2, (window.innerWidth - drawerGeometry.right) / 2),
+          ),
+          y: Math.min(window.innerHeight - 2, window.innerHeight / 2),
+        }
+      : null;
     return {
       ariaHidden: drawer?.getAttribute('aria-hidden'),
       inert: drawer?.hasAttribute('inert'),
+      role: drawer?.getAttribute('role'),
+      ariaModal: drawer?.getAttribute('aria-modal'),
+      labelledBy: drawer?.getAttribute('aria-labelledby'),
+      labelledByText: drawer?.getAttribute('aria-labelledby')
+        ? document
+            .getElementById(drawer.getAttribute('aria-labelledby'))
+            ?.textContent?.trim() || ''
+        : '',
       inspectorOpen: inspector?.classList.contains('is-open'),
       inspectorInert: inspector?.hasAttribute('inert'),
       expandedValues,
-      focusOnClose: document.activeElement?.classList.contains('more-close'),
+      focusOnClose: document.activeElement === close,
+      drawerGeometry,
+      headerGeometry,
+      bodyGeometry,
+      closeGeometry,
+      drawerWithinViewport:
+        rendered(drawerGeometry) && withinViewport(drawerGeometry),
+      headerWithinViewport:
+        rendered(headerGeometry) && withinViewport(headerGeometry),
+      bodyWithinViewport:
+        rendered(bodyGeometry) && withinViewport(bodyGeometry),
+      closeWithinViewport:
+        rendered(closeGeometry) && withinViewport(closeGeometry),
+      closeTopmost: Boolean(
+        closeGeometry &&
+        hitBelongsTo(
+          close,
+          closeGeometry.left + closeGeometry.width / 2,
+          closeGeometry.top + closeGeometry.height / 2,
+        ),
+      ),
+      headerTopmost: Boolean(
+        headerGeometry &&
+        hitBelongsTo(
+          header,
+          headerGeometry.left + Math.min(24, headerGeometry.width / 2),
+          headerGeometry.top + headerGeometry.height / 2,
+        ),
+      ),
+      overlayTopmost: Boolean(
+        overlayPoint &&
+        drawerGeometry &&
+        overlayPoint.x > drawerGeometry.right &&
+        hitBelongsTo(overlay, overlayPoint.x, overlayPoint.y),
+      ),
+      overlayInteractive: Boolean(
+        overlayStyle &&
+        overlayStyle.pointerEvents !== 'none' &&
+        overlay?.getAttribute('aria-hidden') === 'false',
+      ),
+      focusVisible: Boolean(close?.matches(':focus-visible')),
+      focusIndicatorVisible: Boolean(
+        close &&
+        closeStyle &&
+        close.matches(':focus-visible') &&
+        ((closeStyle.outlineStyle !== 'none' &&
+          Number.parseFloat(closeStyle.outlineWidth) > 0) ||
+          closeStyle.boxShadow !== 'none'),
+      ),
     };
   });
+  const openStateUnnamedControls = await unnamedVisibleControls(page);
+  const openStateDocumentOverflowPx = await page.evaluate(
+    () =>
+      document.documentElement.scrollWidth -
+      document.documentElement.clientWidth,
+  );
   if (opened.ariaHidden !== 'false' || opened.inert)
     errors.push(
       'More drawer open state is not exposed to assistive technology',
@@ -545,9 +773,169 @@ async function exerciseMoreDrawer(page, screenshotPath = '') {
     errors.push('More controls did not synchronize aria-expanded=true');
   if (!opened.focusOnClose)
     errors.push('More drawer did not move focus to its close control');
+  if (
+    opened.role !== 'dialog' ||
+    opened.ariaModal !== 'true' ||
+    !opened.labelledBy ||
+    !opened.labelledByText
+  ) {
+    errors.push('More drawer lacks a labelled modal dialog contract');
+  }
+  if (!opened.drawerWithinViewport)
+    errors.push('More drawer extends outside the viewport');
+  if (!opened.headerWithinViewport || !opened.headerTopmost)
+    errors.push('More drawer header is outside the viewport or occluded');
+  if (!opened.bodyWithinViewport)
+    errors.push('More drawer scroll body extends outside the viewport');
+  if (!opened.closeWithinViewport || !opened.closeTopmost)
+    errors.push(
+      'More drawer close control is outside the viewport or occluded',
+    );
+  if (!opened.focusVisible || !opened.focusIndicatorVisible)
+    errors.push('More drawer close control lacks visible keyboard focus');
+  if (!opened.overlayInteractive || !opened.overlayTopmost)
+    errors.push('More drawer modal overlay is not the topmost outside layer');
+  if (openStateUnnamedControls.length > 0) {
+    errors.push(
+      `${openStateUnnamedControls.length} open-state control(s) lack accessible names`,
+    );
+  }
+  if (openStateDocumentOverflowPx > 2) {
+    errors.push(
+      `More drawer open state has ${openStateDocumentOverflowPx}px horizontal overflow`,
+    );
+  }
+  await page.keyboard.press('Shift+Tab');
+  const modalFocusLoop = await page.evaluate(() => {
+    const drawer = document.getElementById('more-drawer');
+    const controls = Array.from(
+      drawer?.querySelectorAll(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) || [],
+    ).filter((element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden'
+      );
+    });
+    const last = controls.at(-1) || null;
+    return {
+      lastFocusableOnBackwardTab: document.activeElement === last,
+      lastFocusableName:
+        last?.getAttribute('aria-label') ||
+        last?.textContent?.trim().replace(/\s+/g, ' ') ||
+        '',
+      focusLoopedToClose: false,
+    };
+  });
+  await page.keyboard.press('Tab');
+  modalFocusLoop.focusLoopedToClose = await page.evaluate(
+    () => document.activeElement === document.querySelector('.more-close'),
+  );
+  if (!modalFocusLoop.lastFocusableOnBackwardTab)
+    errors.push('More drawer did not wrap backward focus to its final control');
+  if (!modalFocusLoop.focusLoopedToClose)
+    errors.push('More drawer did not contain forward keyboard focus');
+  await page.locator('.more-drawer-body').evaluate((body) => {
+    body.scrollTop = body.scrollHeight;
+  });
+  await page.waitForTimeout(50);
+  const scrolled = await page.evaluate(() => {
+    const drawer = document.getElementById('more-drawer');
+    const header = drawer?.querySelector('.more-drawer-header');
+    const body = drawer?.querySelector('.more-drawer-body');
+    const controls = Array.from(
+      drawer?.querySelectorAll(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) || [],
+    ).filter((element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden'
+      );
+    });
+    const lastControl = controls.at(-1) || null;
+    const rectOf = (element) => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      };
+    };
+    const drawerGeometry = rectOf(drawer);
+    const headerGeometry = rectOf(header);
+    const bodyGeometry = rectOf(body);
+    const lastControlGeometry = rectOf(lastControl);
+    const hitBelongsTo = (element, x, y) => {
+      if (!element || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+      const hit = document.elementFromPoint(x, y);
+      return Boolean(hit && (hit === element || element.contains(hit)));
+    };
+    return {
+      drawerGeometry,
+      headerGeometry,
+      bodyGeometry,
+      lastControlGeometry,
+      bodyScrollTop: body?.scrollTop || 0,
+      bodyScrollHeight: body?.scrollHeight || 0,
+      bodyClientHeight: body?.clientHeight || 0,
+      lastControlName:
+        lastControl?.getAttribute('aria-label') ||
+        lastControl?.textContent?.trim().replace(/\s+/g, ' ') ||
+        '',
+      headerWithinViewport: Boolean(
+        headerGeometry &&
+        headerGeometry.top >= -1 &&
+        headerGeometry.bottom <= window.innerHeight + 1,
+      ),
+      lastControlWithinBody: Boolean(
+        lastControlGeometry &&
+        bodyGeometry &&
+        lastControlGeometry.top >= bodyGeometry.top - 1 &&
+        lastControlGeometry.bottom <= bodyGeometry.bottom + 1,
+      ),
+      lastControlTopmost: Boolean(
+        lastControlGeometry &&
+        hitBelongsTo(
+          lastControl,
+          lastControlGeometry.left + lastControlGeometry.width / 2,
+          lastControlGeometry.top + lastControlGeometry.height / 2,
+        ),
+      ),
+      lowerEdgeTopmost: Boolean(
+        drawerGeometry &&
+        hitBelongsTo(
+          drawer,
+          drawerGeometry.left + drawerGeometry.width / 2,
+          Math.min(window.innerHeight - 2, drawerGeometry.bottom - 2),
+        ),
+      ),
+    };
+  });
+  if (!scrolled.headerWithinViewport)
+    errors.push('More drawer header did not remain visible while scrolling');
+  if (!scrolled.lastControlName || !scrolled.lastControlWithinBody)
+    errors.push('More drawer final control is not visible after scrolling');
+  if (!scrolled.lastControlTopmost)
+    errors.push('More drawer final control is geometrically occluded');
+  if (!scrolled.lowerEdgeTopmost)
+    errors.push('More drawer lower edge is hidden behind fixed page chrome');
   if (screenshotPath) await page.screenshot({ path: screenshotPath });
 
-  await page.keyboard.press('Enter');
+  await page.keyboard.press('Escape');
   await page.waitForFunction(
     () => !document.getElementById('more-drawer')?.classList.contains('open'),
   );
@@ -567,7 +955,20 @@ async function exerciseMoreDrawer(page, screenshotPath = '') {
   if (!closed.focusReturned)
     errors.push('More drawer did not return focus to its trigger');
 
-  return { opened, closed, errors, screenshotPath };
+  return {
+    inspectorKeyboardNavigation,
+    moreKeyboardNavigation,
+    opened: {
+      ...opened,
+      openStateUnnamedControls,
+      openStateDocumentOverflowPx,
+    },
+    modalFocusLoop,
+    scrolled,
+    closed,
+    errors,
+    screenshotPath,
+  };
 }
 
 async function runRouteCase(
