@@ -120,55 +120,61 @@ export function createHostGitRunner(
         }
       };
 
-      const child = execFile(
-        'git',
-        [...actualArgs],
-        {
-          cwd: actualCwd,
-          env: actualEnv,
-          encoding: 'utf8',
-          detached: true,
-        },
-        (error, stdout, stderr) => {
-          if (lease) {
-            registry.compareAndDelete(lease);
-            lease = undefined;
-          }
-          cleanup();
+      let child: ChildProcess;
+      try {
+        child = execFile(
+          'git',
+          [...actualArgs],
+          {
+            cwd: actualCwd,
+            env: actualEnv,
+            encoding: 'utf8',
+            detached: true,
+          },
+          (error, stdout, stderr) => {
+            if (lease) {
+              registry.compareAndDelete(lease);
+              lease = undefined;
+            }
+            cleanup();
 
-          if (error) {
-            const execError = error as {
-              killed?: boolean;
-              code?: string | number | null;
-              signal?: NodeJS.Signals;
-            };
-            if (execError.killed) {
-              if (timedOut) {
-                reject(new HostGitTimeoutError());
-              } else {
-                reject(new HostGitCancelledError());
+            if (error) {
+              const execError = error as {
+                killed?: boolean;
+                code?: string | number | null;
+                signal?: NodeJS.Signals;
+              };
+              if (execError.killed) {
+                if (timedOut) {
+                  reject(new HostGitTimeoutError());
+                } else {
+                  reject(new HostGitCancelledError());
+                }
+                return;
               }
+              if (typeof execError.code === 'number') {
+                resolve({
+                  stdout: String(stdout ?? ''),
+                  stderr: String(stderr ?? ''),
+                  exitCode: execError.code,
+                });
+                return;
+              }
+              reject(error);
               return;
             }
-            if (typeof execError.code === 'number') {
-              resolve({
-                stdout: String(stdout ?? ''),
-                stderr: String(stderr ?? ''),
-                exitCode: execError.code,
-              });
-              return;
-            }
-            reject(error);
-            return;
-          }
 
-          resolve({
-            stdout: String(stdout ?? ''),
-            stderr: String(stderr ?? ''),
-            exitCode: 0,
-          });
-        },
-      );
+            resolve({
+              stdout: String(stdout ?? ''),
+              stderr: String(stderr ?? ''),
+              exitCode: 0,
+            });
+          },
+        );
+      } catch (error) {
+        cleanup();
+        throw error;
+      }
 
       if (jobId && attemptId) {
         lease = registry.register({

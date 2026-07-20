@@ -90,9 +90,7 @@ export async function openStableDirectory(
     // Linux exposes the already-open descriptor through a kernel-owned symlink.
     // O_NOFOLLOW still applies to every caller-provided directory and child.
     const stablePathFlags =
-      process.platform === 'linux'
-        ? flags & ~fs.constants.O_NOFOLLOW
-        : flags;
+      process.platform === 'linux' ? flags & ~fs.constants.O_NOFOLLOW : flags;
     const stableHandle = await deps.open(stablePath, stablePathFlags);
     try {
       const stableStat = await stableHandle.statBigInt();

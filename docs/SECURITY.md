@@ -234,7 +234,9 @@ in the attempt-aware `codingProcessRegistry` under the exact job/attempt lease.
 macOS uses the descriptor's inode-addressed `/.vol/<device>/<inode>` path. The
 stable path is reopened and checked against the descriptor identity before use,
 so the same-UID TOCTOU window between path validation and `execFile` is closed
-for host Git. The spawned `git` process runs in a new process group;
+for host Git. Darwin mounted filesystems must support that `/.vol` identity
+namespace; unsupported filesystems fail closed, and NanoCrab never falls back
+to a mutable pathname. The spawned `git` process runs in a new process group;
 cancellation/timeout escalate from `SIGTERM` to `SIGKILL` against the negative
 PID, tearing down `git` and any credential or SSH children it spawned.
 `terminateAll` cancels every active host Git attempt for a job when the whole
