@@ -424,9 +424,9 @@ describe('App shell accessibility UI', () => {
     expect(bottomTabs).toContain('${primaryModeIds.map((m) => {');
     expect(bottomTabs).not.toContain('MODE_ORDER.map');
     expect(bottomTabs.match(/<span>More<\/span>/g)).toHaveLength(1);
-    expect(bottomTabs.match(/onclick="toggleMoreDrawer\(this\)"/g)).toHaveLength(
-      1,
-    );
+    expect(
+      bottomTabs.match(/onclick="toggleMoreDrawer\(this\)"/g),
+    ).toHaveLength(1);
     expect(bottomTabs).toContain("displayedMode === 'more' ? ' active' : ''");
 
     const specialActionIndex = appSource.indexOf("if (mode === 'more') {");

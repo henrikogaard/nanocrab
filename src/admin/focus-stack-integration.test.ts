@@ -21,7 +21,8 @@ class FakeClassList {
 
   reset(value: string) {
     this.values.clear();
-    for (const item of value.split(/\s+/).filter(Boolean)) this.values.add(item);
+    for (const item of value.split(/\s+/).filter(Boolean))
+      this.values.add(item);
   }
 
   add(...values: string[]) {
@@ -126,7 +127,14 @@ class FakeElement {
   }
 
   getBoundingClientRect() {
-    return { width: 280, height: 800, top: 0, right: 280, bottom: 800, left: 0 };
+    return {
+      width: 280,
+      height: 800,
+      top: 0,
+      right: 280,
+      bottom: 800,
+      left: 0,
+    };
   }
 
   setPointerCapture() {}
@@ -150,7 +158,11 @@ class FakeDocument {
     if (selector.startsWith('#')) return this.getElementById(selector.slice(1));
     if (selector.startsWith('.')) {
       const className = selector.slice(1);
-      return this.elements.find((element) => element.classList.contains(className)) || null;
+      return (
+        this.elements.find((element) =>
+          element.classList.contains(className),
+        ) || null
+      );
     }
     return null;
   }
@@ -164,7 +176,9 @@ class FakeDocument {
     }
     if (selector.startsWith('.')) {
       const className = selector.slice(1);
-      return this.elements.filter((element) => element.classList.contains(className));
+      return this.elements.filter((element) =>
+        element.classList.contains(className),
+      );
     }
     return [];
   }
@@ -176,7 +190,10 @@ class FakeDocument {
   addEventListener() {}
 
   queryWithin(parent: FakeElement, selector: string) {
-    if (parent.id === 'workspace-inspector' && selector === '.focus-stack-inspector-close') {
+    if (
+      parent.id === 'workspace-inspector' &&
+      selector === '.focus-stack-inspector-close'
+    ) {
       return this.querySelector(selector);
     }
     if (parent.id === 'more-drawer' && selector === '.more-close') {
@@ -190,7 +207,9 @@ class FakeDocument {
     const attr = (tag: string, name: string) =>
       tag.match(new RegExp(`${name}="([^"]*)"`))?.[1] || '';
     const tagForClass = (className: string) =>
-      html.match(new RegExp(`<[^>]+class="[^"]*${className}[^"]*"[^>]*>`))?.[0] || '';
+      html.match(
+        new RegExp(`<[^>]+class="[^"]*${className}[^"]*"[^>]*>`),
+      )?.[0] || '';
     const add = (tagName: string, id: string, className: string, tag = '') => {
       const element = new FakeElement(this, tagName, id, className);
       for (const name of [
@@ -211,7 +230,12 @@ class FakeDocument {
     const shell = add('DIV', '', 'app focus-stack-shell', shellTag);
     shell.dataset.workspaceMode = attr(shellTag, 'data-workspace-mode');
     shell.dataset.workspaceSection = attr(shellTag, 'data-workspace-section');
-    add('NAV', '', 'sidebar focus-stack-context', tagForClass('focus-stack-context'));
+    add(
+      'NAV',
+      '',
+      'sidebar focus-stack-context',
+      tagForClass('focus-stack-context'),
+    );
     add('DIV', 'sidebar-resize-handle', 'sidebar-resize-handle');
     add('DIV', 'page-content', '');
     add('DIV', 'metrics-bar', 'metrics-bar');
@@ -219,12 +243,7 @@ class FakeDocument {
     add('DIV', '', 'more-overlay', tagForClass('more-overlay'));
     add('DIV', 'more-drawer', 'more-drawer', tagForClass('more-drawer'));
     add('BUTTON', '', 'more-close', tagForClass('more-close'));
-    add(
-      'BUTTON',
-      '',
-      'focus-stack-more',
-      tagForClass('focus-stack-more'),
-    );
+    add('BUTTON', '', 'focus-stack-more', tagForClass('focus-stack-more'));
     add(
       'BUTTON',
       '',
@@ -286,7 +305,8 @@ function loadShellHarness(): ShellHarness {
       copyTextWithFallback: async () => true,
     },
     NanoShell: {
-      renderShellLoadingState: () => '<div class="shell-loading-state">Loading</div>',
+      renderShellLoadingState: () =>
+        '<div class="shell-loading-state">Loading</div>',
       renderTabs: () => '',
     },
     NanoDataHealth: {
@@ -314,7 +334,9 @@ function loadShellHarness(): ShellHarness {
     app: document.app,
     document,
     showShell: context.showShell as (pageId: string) => void,
-    toggleInspector: context.toggleWorkspaceInspector as (trigger?: FakeElement) => void,
+    toggleInspector: context.toggleWorkspaceInspector as (
+      trigger?: FakeElement,
+    ) => void,
     toggleMore: context.toggleMoreDrawer as (trigger?: FakeElement) => void,
   };
 }
