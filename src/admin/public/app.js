@@ -344,11 +344,13 @@ function renderRoute(el, renderFn, afterRender) {
 function stopPolling() {
   pollTimers.forEach((t) => clearInterval(t));
   pollTimers = [];
-  activeTerminal = null;
-  if (window._chatWsRestore) {
-    handleWsMessage = window._chatWsRestore;
-    delete window._chatWsRestore;
+  if (activeTerminal && activeTerminal.attachTimer) {
+    clearTimeout(activeTerminal.attachTimer);
   }
+  clearTerminalReconnectCapability();
+  activeTerminal = null;
+  setWsMessageSubscriber('web-chat-thread', null);
+  setWsMessageSubscriber('group-chat', null);
 }
 function poll(fn, ms) {
   fn();
@@ -356,12 +358,46 @@ function poll(fn, ms) {
 }
 
 // --- WebSocket ---
-function connectWs() {
+const wsMessageSubscribers = new Map();
+
+function setWsMessageSubscriber(id, subscriber) {
+  if (typeof subscriber === 'function') wsMessageSubscribers.set(id, subscriber);
+  else wsMessageSubscribers.delete(id);
+}
+
+function dispatchWsMessageSubscribers(msg) {
+  for (const subscriber of wsMessageSubscribers.values()) {
+    try {
+      subscriber(msg);
+    } catch (error) {
+      console.error('WS subscriber failed:', error);
+    }
+  }
+}
+
+function detachWebSocketCallbacks(socket) {
+  if (!socket) return;
+  socket.onopen = null;
+  socket.onmessage = null;
+  socket.onclose = null;
+  socket.onerror = null;
+}
+
+function connectWs(options = {}) {
+  const replace = options.replace === true;
   if (wsReconnectTimer) {
     clearTimeout(wsReconnectTimer);
     wsReconnectTimer = null;
   }
-  if (ws && ws.readyState <= 1) ws.close();
+  const existingSocket = ws;
+  if (existingSocket && existingSocket.readyState <= 1 && !replace) {
+    return existingSocket;
+  }
+  if (existingSocket) {
+    detachWebSocketCallbacks(existingSocket);
+    if (ws === existingSocket) ws = null;
+    if (existingSocket.readyState <= 1) existingSocket.close();
+  }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const match = document.cookie.match(/nanocrab_session=([^;]+)/);
   const token = match?.[1] || '';
@@ -371,41 +407,115 @@ function connectWs() {
     } else {
       console.warn('WS: no session cookie found');
     }
-    return;
+    return null;
   }
   const url = `${proto}://${location.host}/ws?token=${token}`;
   console.log(
     'WS connecting to:',
     url.replace(token, token.slice(0, 8) + '...'),
   );
-  ws = new WebSocket(url);
-  ws.onopen = () => {
+  const socket = new WebSocket(url);
+  ws = socket;
+  socket.onopen = () => {
+    if (ws !== socket) return;
     console.log('WS connected');
-    const savedSessionId = localStorage.getItem('terminal_session_id');
-    if (savedSessionId) {
-      ws.send(
-        JSON.stringify({ type: 'terminal_attach', sessionId: savedSessionId }),
-      );
-    }
+    handleTerminalSocketOpen();
   };
-  ws.onmessage = (e) => {
+  socket.onmessage = (e) => {
+    if (ws !== socket) return;
+    let message;
     try {
-      handleWsMessage(JSON.parse(e.data));
+      message = JSON.parse(e.data);
+    } catch {
+      return;
+    }
+    try {
+      handleWsMessage(message);
     } catch {}
+    dispatchWsMessageSubscribers(message);
   };
-  ws.onclose = (e) => {
+  socket.onclose = (e) => {
+    if (ws !== socket) return;
     console.log('WS closed:', e.code, e.reason);
     ws = null;
     if (!window._mockMode) {
       wsReconnectTimer = setTimeout(connectWs, 5000);
     }
+    if (activeTerminal) {
+      setTerminalSessionState(wsReconnectTimer ? 'reconnecting' : 'unavailable', activeTerminal.sessionId);
+    }
   };
-  ws.onerror = (e) => {
+  socket.onerror = (e) => {
+    if (ws !== socket) return;
     console.debug('WS error:', e);
   };
+  return socket;
 }
 
 let activeTerminal = null; // { sessionId, term }
+
+function activeTerminalId() {
+  return activeTerminal && activeTerminal.sessionId
+    ? activeTerminal.sessionId
+    : '';
+}
+
+function clearTerminalReconnectCapability() {
+  if (activeTerminal) activeTerminal.reconnectCapability = '';
+}
+
+function sendTerminalAttach(sessionId) {
+  if (!sessionId || ws?.readyState !== 1) return false;
+  const message = { type: 'terminal_attach', sessionId };
+  if (
+    activeTerminal?.sessionId === sessionId &&
+    typeof activeTerminal.reconnectCapability === 'string' &&
+    activeTerminal.reconnectCapability
+  ) {
+    message.sessionToken = activeTerminal.reconnectCapability;
+  }
+  ws.send(JSON.stringify(message));
+  return true;
+}
+
+function handleTerminalSocketOpen() {
+  if (!activeTerminal) return false;
+  if (activeTerminal.attachTimer) {
+    clearTimeout(activeTerminal.attachTimer);
+    activeTerminal.attachTimer = null;
+  }
+  setTerminalSessionState('reconnecting', activeTerminal.sessionId);
+  return sendTerminalAttach(activeTerminalId());
+}
+
+function requestTerminalAttach() {
+  const requestedSessionId = activeTerminalId();
+  if (!requestedSessionId || !activeTerminal) return false;
+  if (activeTerminal.attachTimer) {
+    clearTimeout(activeTerminal.attachTimer);
+    activeTerminal.attachTimer = null;
+  }
+  if (ws?.readyState === 1) {
+    return sendTerminalAttach(requestedSessionId);
+  }
+  activeTerminal.term?.write('Connecting...\r\n');
+  connectWs();
+  const attachTimer = setTimeout(() => {
+    if (!activeTerminal || activeTerminal.sessionId !== requestedSessionId) {
+      return;
+    }
+    activeTerminal.attachTimer = null;
+    if (ws?.readyState === 1) return;
+    setTerminalSessionState('unavailable', requestedSessionId);
+    activeTerminal.term?.write(
+      '\r\nFailed to connect. Check WebSocket.\r\n',
+    );
+  }, 10500);
+  if (activeTerminal?.sessionId === requestedSessionId) {
+    activeTerminal.attachTimer = attachTimer;
+  }
+  return true;
+}
 
 const PAGE_ALIASES = {
   terminal: 'devhub',
@@ -455,15 +565,63 @@ function activatePageTabAlias(alias) {
 
 let handleWsMessage = function (msg) {
   if (
+    msg.type === 'terminal_session' &&
+    activeTerminal &&
+    msg.sessionId === activeTerminal.sessionId
+  ) {
+    const reconnectCapability = msg.data?.sessionToken;
+    clearTerminalReconnectCapability();
+    if (typeof reconnectCapability === 'string' && reconnectCapability) {
+      activeTerminal.reconnectCapability = reconnectCapability;
+    }
+    return;
+  }
+  if (
     msg.type === 'terminal_attach_result' &&
     activeTerminal &&
     msg.sessionId === activeTerminal.sessionId
   ) {
     activeTerminal.readOnly = msg.data.status === 'historical';
+    if (msg.data.status === 'historical') {
+      clearTerminalReconnectCapability();
+    }
+    if (msg.data.status === 'not-found') {
+      setTerminalSessionState('reconnecting', msg.sessionId);
+    }
     if (msg.data.status === 'not-found' && ws?.readyState === 1) {
       ws.send(
         JSON.stringify({ type: 'terminal_spawn', data: msg.sessionId }),
       );
+    }
+    return;
+  }
+  if (
+    msg.type === 'terminal_lifecycle' &&
+    activeTerminal &&
+    msg.sessionId === activeTerminal.sessionId
+  ) {
+    if (
+      msg.data.state === 'historical' ||
+      msg.data.state === 'ended' ||
+      msg.data.state === 'exited' ||
+      msg.data.state === 'idle-timeout' ||
+      msg.data.state === 'unavailable'
+    ) {
+      clearTerminalReconnectCapability();
+    }
+    if (msg.data.state === 'ready') {
+      activeTerminal.readOnly = false;
+      setTerminalSessionState('ready', msg.sessionId);
+    } else if (
+      msg.data.state === 'historical' ||
+      msg.data.state === 'exited' ||
+      msg.data.state === 'idle-timeout'
+    ) {
+      activeTerminal.readOnly = true;
+      setTerminalSessionState('interrupted', msg.sessionId);
+    } else if (msg.data.state === 'unavailable') {
+      activeTerminal.readOnly = true;
+      setTerminalSessionState('unavailable', msg.sessionId);
     }
     return;
   }
@@ -1356,6 +1514,50 @@ const pages = new Proxy(_pageMap, {
 
 // --- Consolidated render functions ---
 
+function consumeWorkSessionPromotion(destination) {
+  let raw = null;
+  try {
+    raw = sessionStorage.getItem('work_session_promotion');
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  let promotion = null;
+  try {
+    promotion = JSON.parse(raw);
+  } catch {
+    sessionStorage.removeItem('work_session_promotion');
+    return null;
+  }
+  if (
+    !promotion ||
+    promotion.destination !== destination ||
+    typeof promotion.threadId !== 'string' ||
+    typeof promotion.brief !== 'string'
+  ) {
+    return null;
+  }
+  sessionStorage.removeItem('work_session_promotion');
+  return {
+    destination,
+    threadId: promotion.threadId.slice(0, 512),
+    brief: promotion.brief.slice(0, 20000),
+  };
+}
+
+function renderWorkSessionPromotion(promotion) {
+  if (!promotion) return '';
+  return `<section class="work-session-promotion-handoff" data-work-session-promotion data-promotion-destination="${esc(promotion.destination)}" data-promotion-thread-id="${esc(promotion.threadId)}">
+    <span class="report-kicker">Chat handoff</span>
+    <h2>Continue this Chat thread in ${promotion.destination === 'cowork' ? 'Cowork' : 'Code'}</h2>
+    <p>Thread <code>${esc(promotion.threadId)}</code> remains in Chat. Use this brief as context; no messages were moved.</p>
+    <pre>${esc(promotion.brief)}</pre>
+  </section>`;
+}
+
+window.consumeWorkSessionPromotion = consumeWorkSessionPromotion;
+window.renderWorkSessionPromotion = renderWorkSessionPromotion;
+
 async function renderMemoryConsolidated(el) {
   el.innerHTML = `<div class="page-header"><h2>Memory & Knowledge</h2></div>
     <div id="mem-tabs">${renderTabs(
@@ -1424,6 +1626,7 @@ async function renderDevHubConsolidated(el) {
 }
 
 async function renderGitCodeConsolidated(el) {
+  const promotion = consumeWorkSessionPromotion('code');
   window._gitCodeWorkspaceState = {
     lanes: [
       ['Git Ops', 'Review working tree, branches, diffs, and commits.'],
@@ -1433,7 +1636,7 @@ async function renderGitCodeConsolidated(el) {
       ['Review Rules', 'Keep review expectations close to the work.'],
     ],
   };
-  el.innerHTML = `
+  el.innerHTML = `${renderWorkSessionPromotion(promotion)}
     <section class="gitcode-command-center">
       <div class="gitcode-command-copy">
         <span class="report-kicker">Code workspace</span>
@@ -3450,9 +3653,7 @@ async function renderChat(el) {
   };
 
   // Listen for WebSocket new_message events
-  const origHandler = handleWsMessage;
   const chatWsHandler = (msg) => {
-    origHandler(msg);
     if (msg.type === 'task_progress') {
       const activeGroup = document.getElementById('chat-group-select')?.value;
       if (msg.data.groupJid !== activeGroup) return;
@@ -3497,9 +3698,7 @@ async function renderChat(el) {
       }
     }
   };
-  // Patch the global handler while on chat page
-  window._chatWsRestore = handleWsMessage;
-  handleWsMessage = chatWsHandler;
+  setWsMessageSubscriber('group-chat', chatWsHandler);
 
   // Check for fork prompt from session branching
   const forkPrompt = sessionStorage.getItem('fork_prompt');
@@ -12927,6 +13126,47 @@ function terminalHandoffPromptText(state) {
   ].join('\n');
 }
 
+function terminalSessionViewModel(kind, sessionId) {
+  const states = {
+    loading: { status: 'running', step: 'Loading terminal session' },
+    ready: { status: 'running', step: 'Terminal ready' },
+    interrupted: {
+      status: 'interrupted',
+      step: 'Interrupted session · transcript only',
+    },
+    unavailable: { status: 'failed', step: 'Terminal unavailable' },
+    reconnecting: { status: 'running', step: 'Reconnecting terminal' },
+  };
+  const state = states[kind] || states.unavailable;
+  const model = window.NanoWorkSession.normalize({
+    id: 'terminal:' + (sessionId || 'pending'),
+    status: state.status,
+    currentStep: state.step,
+    isReadOnly: kind === 'interrupted',
+    canCancel: false,
+    canResume: false,
+    canRetry: false,
+  });
+  model.isReadOnly = kind === 'interrupted';
+  model.canCancel = false;
+  model.canResume = false;
+  model.canRetry = false;
+  return model;
+}
+
+function renderTerminalSessionState(kind, sessionId) {
+  return window.NanoWorkSession.renderRunStrip(
+    terminalSessionViewModel(kind, sessionId),
+  );
+}
+
+function setTerminalSessionState(kind, sessionId) {
+  const container = document.getElementById('terminal-session-state');
+  if (!container) return;
+  container.dataset.terminalState = kind;
+  container.innerHTML = renderTerminalSessionState(kind, sessionId);
+}
+
 async function renderTerminal(el) {
   if ((window._userRole || 'owner') !== 'owner') {
     el.innerHTML = renderTerminalAccessState();
@@ -13007,6 +13247,7 @@ async function renderTerminal(el) {
           </div>
           <div class="pane-content" id="pane-left-content">
             <div class="tab-content active" id="left-terminal">
+              <div id="terminal-session-state" data-terminal-state="loading">${renderTerminalSessionState('loading', localStorage.getItem('terminal_session_id') || '')}</div>
               <div id="terminal-container" class="terminal-xterm-container"></div>
             </div>
             <div class="tab-content is-hidden" id="left-files">
@@ -13145,7 +13386,13 @@ async function renderTerminal(el) {
 
   const sessionId = document.getElementById('terminal-session-id').value;
   localStorage.setItem('terminal_session_id', sessionId);
-  activeTerminal = { sessionId, term, transcript: '', readOnly: false };
+  activeTerminal = {
+    sessionId,
+    term,
+    transcript: '',
+    readOnly: false,
+    reconnectCapability: '',
+  };
   window._terminalOperatorState = {
     ...(window._terminalOperatorState || {}),
     sessionId,
@@ -13155,30 +13402,21 @@ async function renderTerminal(el) {
 
   // Spawn or attach terminal session
   const initTerminal = () => {
-    if (ws?.readyState === 1) {
-      ws.send(JSON.stringify({ type: 'terminal_attach', sessionId }));
-      return;
-    }
-    term.write('Connecting...\r\n');
-    connectWs();
-    let attempts = 0;
-    const check = setInterval(() => {
-      attempts++;
-      if (ws?.readyState === 1) {
-        clearInterval(check);
-        ws.send(JSON.stringify({ type: 'terminal_attach', sessionId }));
-      } else if (attempts > 20) {
-        clearInterval(check);
-        term.write('\r\nFailed to connect. Check WebSocket.\r\n');
-      }
-    }, 500);
+    requestTerminalAttach();
   };
   window._spawnTerminalSession = initTerminal;
   initTerminal();
 
   term.onData((data) => {
-    if (ws?.readyState === 1 && !activeTerminal.readOnly) {
-      ws.send(JSON.stringify({ type: 'terminal_input', sessionId, data }));
+    const currentSessionId = activeTerminalId();
+    if (currentSessionId && ws?.readyState === 1 && !activeTerminal.readOnly) {
+      ws.send(
+        JSON.stringify({
+          type: 'terminal_input',
+          sessionId: currentSessionId,
+          data,
+        }),
+      );
     }
   });
 
@@ -13526,6 +13764,7 @@ window.spawnNewTerminal = function () {
     window._terminalOperatorState.sessionId = newId;
     window._terminalOperatorState.transcript = '';
   }
+  clearTerminalReconnectCapability();
   if (activeTerminal && activeTerminal.term) {
     activeTerminal.term.dispose();
     activeTerminal = null;
@@ -13576,6 +13815,7 @@ window.loadTerminalSessions = async function () {
 };
 
 window.loadTerminalSession = function (sessionId) {
+  clearTerminalReconnectCapability();
   const input = document.getElementById('terminal-session-id');
   if (input) input.value = sessionId;
   localStorage.setItem('terminal_session_id', sessionId);
@@ -13617,6 +13857,10 @@ window.reconnectTerminal = function () {
   const input = document.getElementById('terminal-session-id');
   const sessionId = input?.value;
   if (!sessionId || !activeTerminal) return;
+  if (sessionId !== activeTerminal.sessionId) {
+    clearTerminalReconnectCapability();
+  }
+  setTerminalSessionState('reconnecting', sessionId);
   localStorage.setItem('terminal_session_id', sessionId);
   if (activeTerminal.term) {
     activeTerminal.sessionId = sessionId;
@@ -17085,10 +17329,49 @@ function renderSessionLoadingState(kind = 'cockpit') {
     </section>`;
 }
 
+function createSessionRenderGuard(
+  getCurrentElement = () => document.getElementById('page-content'),
+  getCurrentPage = () => currentPage,
+) {
+  let generation = 0;
+  return {
+    begin() {
+      generation += 1;
+      return generation;
+    },
+    isCurrent(token, element, expectedPage) {
+      return (
+        token === generation &&
+        element?.isConnected !== false &&
+        getCurrentElement() === element &&
+        getCurrentPage() === expectedPage
+      );
+    },
+  };
+}
+
+const sessionRenderGuard = createSessionRenderGuard();
+
+function sessionAttentionTotals(sessions) {
+  const count = (value) =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0
+      ? value
+      : 0;
+  return sessions.reduce(
+    (totals, session) => ({
+      approvals: totals.approvals + count(session.approvalCount),
+      artifacts: totals.artifacts + count(session.artifactCount),
+    }),
+    { approvals: 0, artifacts: 0 },
+  );
+}
+
 async function renderSessions(el) {
+  const renderToken = sessionRenderGuard.begin();
   el.innerHTML = renderSessionLoadingState('cockpit');
   try {
-    const sessions = await api('/sessions');
+    const sessions = await api('/sessions/cockpit');
+    if (!sessionRenderGuard.isCurrent(renderToken, el, 'sessions')) return;
     if (sessions.length === 0) {
       el.innerHTML = renderSessionsEmptyState();
       return;
@@ -17100,10 +17383,7 @@ async function renderSessions(el) {
       if (!grouped[s.group]) grouped[s.group] = [];
       grouped[s.group].push(s);
     }
-    const approvals = sessions.filter((session) => (session.approvals || 0) > 0);
-    const artifactRuns = sessions.filter(
-      (session) => (session.artifacts || []).length,
-    );
+    const attention = sessionAttentionTotals(sessions);
     const fileRuns = sessions.filter(
       (session) => sessionChangedFiles(session).length,
     );
@@ -17116,9 +17396,10 @@ async function renderSessions(el) {
           <p>See what agents are doing, what needs you, and what can be reused across Copilot, Cowork, Code, and routines.</p>
         </div>
         <div class="sessions-command-stats">
-          <div class="sessions-command-stat"><span>Runs</span><strong>${sessions.length}</strong><small>${Object.keys(grouped).length} groups</small></div>
-          <button type="button" class="sessions-command-stat" onclick="navigate('approvals')"><span>Approvals</span><strong>${approvals.length}</strong><small>needs review</small></button>
-          <button type="button" class="sessions-command-stat" onclick="navigate('artifacts')"><span>Artifacts</span><strong>${artifactRuns.length}</strong><small>${fileRuns.length} file trails</small></button>
+          <div class="sessions-command-stat"><span>Runs</span><strong>${sessions.length}</strong><small>recorded sessions</small></div>
+          <div class="sessions-command-stat"><span>Groups</span><strong>${Object.keys(grouped).length}</strong><small>active contexts</small></div>
+          <button type="button" class="sessions-command-stat" onclick="navigate('approvals')"><span>Approvals</span><strong>${attention.approvals}</strong><small>needs review</small></button>
+          <button type="button" class="sessions-command-stat" onclick="navigate('artifacts')"><span>Artifacts</span><strong>${attention.artifacts}</strong><small>${fileRuns.length} file trails</small></button>
         </div>
         <div class="sessions-command-actions">
           <button class="btn btn-sm btn-ghost" onclick="copySessionContinuityBrief()">Copy continuity brief</button>
@@ -17127,35 +17408,54 @@ async function renderSessions(el) {
       ${renderSessionContinuationGuide()}
       <div class="sessions-layout">
         <aside class="sessions-rail">
-          <input id="session-search" class="search-input" aria-label="Search sessions" placeholder="Search runs..." oninput="filterSessions(window._sessionGroupFilter || 'all')">
+          <div class="sessions-contextual-column">
+          <input id="session-search" class="search-input" data-session-search aria-label="Search sessions" placeholder="Search runs...">
           <div class="sessions-filter-card">
             <div class="card-title">Groups</div>
             ${Object.keys(grouped)
               .map(
                 (g) => `
-              <button class="sessions-handoff-item session-group-link" data-group="${esc(g)}" onclick="filterSessions('${esc(g)}')">
+              <button type="button" class="sessions-handoff-item session-group-link" data-session-group="${esc(g)}">
                 <span>${esc(g)}</span>
                 <span class="badge badge-muted">${grouped[g].length}</span>
               </button>`,
               )
               .join('')}
-            <button class="sessions-handoff-item session-group-link active" data-group="all" onclick="filterSessions('all')">
+            <button type="button" class="sessions-handoff-item session-group-link active" data-session-group="all">
               <span>All</span>
               <span class="badge badge-muted">${sessions.length}</span>
             </button>
           </div>
-        </aside>
-        <section>
           <div id="session-list" class="sessions-handoff-list"></div>
-          <div id="session-viewer"></div>
+          </div>
+        </aside>
+        <section class="sessions-primary-canvas">
+          <div id="session-viewer">${renderSessionLoadingState('viewer')}</div>
         </section>
       </div>`;
 
     window._allSessions = sessions;
     window._sessionContinuityBrief = sessionContinuityBriefText(sessions);
     window._sessionGroupFilter = 'all';
+    const preferred =
+      sessions.find(
+        (session) => session.id === window._sessionDetailParams?.cockpitId,
+      ) || sessions[0];
+    const state = {
+      activeTab: 'overview',
+      el,
+      model: null,
+      selectedId: preferred.id,
+      summaries: sessions,
+      renderPage: 'sessions',
+      renderToken,
+    };
+    window._unifiedSessionsState = state;
     renderSessionList(sessions);
+    bindUnifiedSessionActions(el, state);
+    await refreshUnifiedSessionDetail(state);
   } catch (err) {
+    if (!sessionRenderGuard.isCurrent(renderToken, el, 'sessions')) return;
     el.innerHTML = renderSessionRecoveryState('loadError');
   }
 }
@@ -17169,54 +17469,281 @@ function renderSessionList(sessions) {
       ? renderSessionListEmptyState()
       : sessions
           .map((s) => {
-            const changedFiles = sessionChangedFiles(s);
-            const currentStep = sessionCurrentStep(s);
-            const target = sessionWorkspaceTarget(s);
             if (s.sessionId) window._sessionById[s.sessionId] = s;
-            return `
-        <article class="session-run-card">
-          <div class="session-run-head">
-            <div>
-              <span class="messages-kicker">${esc(sessionPriorityLabel(s))}</span>
-              <h3>${esc((s.title || s.sessionId || '').slice(0, 48))}${s.title ? '' : '...'}</h3>
-            </div>
-            ${sessionStatusBadge(s)}
-          </div>
-          <div class="session-run-facts">
-            <div><span>Group</span><strong>${esc(s.group)}</strong></div>
-            <div><span>Current step</span><strong>${esc(currentStep)}</strong></div>
-            <div><span>Messages</span><strong>${esc(String(s.messageCount || 0))}</strong></div>
-            <div><span>Handoff</span><strong>${sessionHandoffScore(s)}%</strong></div>
-          </div>
-          <div class="session-file-strip">
-            ${
-              changedFiles.length
-                ? changedFiles
-                    .slice(0, 5)
-                    .map((file) => `<code>${esc(file)}</code>`)
-                    .join('')
-                : '<span>No changed files recorded</span>'
-            }
-          </div>
-          <div class="session-reuse-strip">
-            <div>
-              <span>Reuse path</span>
-              <strong>${esc(target.label)}</strong>
-              <small>Copy a handoff prompt or reopen the workspace that fits this run.</small>
-            </div>
-            <div class="session-reuse-actions">
-              <button class="btn btn-sm btn-ghost" onclick="copySessionHandoff('${esc(s.sessionId)}')">Copy handoff</button>
-              <button class="btn btn-sm btn-ghost" onclick="copySessionReviewPrompt('${esc(s.sessionId)}')">Review prompt</button>
-              <button class="btn btn-sm btn-ghost" onclick="resumeSessionWorkspace('${esc(s.sessionId)}')">Resume in ${esc(target.label)}</button>
-            </div>
-          </div>
-          <div class="session-run-actions">
-            <span>${s.startedAt ? formatTime(s.startedAt) : '-'} / ${s.lastActivity ? timeAgo(s.lastActivity) : '-'}</span>
-            <button class="btn btn-sm btn-primary" onclick="window._sessionDetailParams={group:'${esc(s.group)}',sessionId:'${esc(s.sessionId)}'};navigate('session-detail')">View</button>
-          </div>
-        </article>`;
+            return renderSessionRow(
+              s,
+              window._unifiedSessionsState?.selectedId ===
+                (s.id || s.sessionId),
+            );
           })
           .join('');
+}
+
+function renderSessionRow(
+  session,
+  selected,
+  dependencies = { esc, formatTime, sessionStatusBadge, timeAgo },
+) {
+  const id = session.id || session.sessionId;
+  const title = session.title || session.sessionId || 'Untitled run';
+  const activity = session.lastActivity
+    ? dependencies.timeAgo(session.lastActivity)
+    : session.startedAt
+      ? dependencies.formatTime(session.startedAt)
+      : 'Time unavailable';
+  return `
+        <button type="button" class="sessions-handoff-item session-run-row" data-session-select="${dependencies.esc(id)}" aria-current="${selected ? 'true' : 'false'}" aria-pressed="${selected ? 'true' : 'false'}">
+          <span class="session-run-row-main">
+            <strong>${dependencies.esc(title.slice(0, 52))}</strong>
+            <small>${dependencies.esc(session.group || 'Unknown group')}</small>
+          </span>
+          <span class="session-run-row-state">
+            ${dependencies.sessionStatusBadge(session)}
+            <small>${dependencies.esc(activity)}</small>
+          </span>
+        </button>`;
+}
+
+function unifiedSessionWarning(failures) {
+  const labels = failures.map((failure) => failure.label);
+  const unique = [...new Set(labels)];
+  if (!unique.length) return '';
+  return `<div class="work-session-partial-warning" role="status"><strong>Partial session data</strong><p>${esc(unique.join(', '))} ${unique.length === 1 ? 'is' : 'are'} unavailable. Available run evidence remains visible.</p></div>`;
+}
+
+function renderUnifiedSessionCanvas(state) {
+  const viewer = state.el.querySelector('#session-viewer');
+  if (!viewer || !state.model) return;
+  const warning = unifiedSessionWarning(state.failures || []);
+  let inspector = NanoWorkSession.renderInspector(state.model, state.activeTab);
+  if (warning) {
+    inspector = inspector.replace(
+      '<div class="work-session-tabs"',
+      `${warning}<div class="work-session-tabs"`,
+    );
+  }
+  viewer.innerHTML = `
+    <div class="session-viewer-card" data-unified-session-id="${esc(state.model.id)}">
+      ${NanoWorkSession.renderRunStrip(state.model)}
+      <div class="session-detail-actions">
+        <button type="button" class="btn btn-sm btn-ghost" data-work-session-action="handoff" data-session-id="${esc(state.model.id)}">Copy handoff</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-open-session-detail="${esc(state.model.id)}">Open detail</button>
+      </div>
+      ${inspector}
+    </div>`;
+}
+
+async function captureSessionSurface(label, request) {
+  try {
+    return { data: await request, error: null, label };
+  } catch (error) {
+    return { data: null, error, label };
+  }
+}
+
+async function loadUnifiedSessionDetail(state, params) {
+  const selectedSummary = state.summaries.find(
+    (session) =>
+      session.id === state.selectedId || session.sessionId === state.selectedId,
+  );
+  const cockpitId =
+    params.cockpitId ||
+    selectedSummary?.id ||
+    params.sessionId ||
+    state.selectedId;
+  const requests = await Promise.all([
+    captureSessionSurface('summary', api('/sessions/cockpit')),
+    captureSessionSurface(
+      'cockpit detail',
+      api(`/sessions/cockpit/${encodeURIComponent(cockpitId)}`),
+    ),
+    captureSessionSurface(
+      'stream',
+      api(`/sessions/cockpit/${encodeURIComponent(cockpitId)}/stream`),
+    ),
+    captureSessionSurface(
+      'structured detail',
+      api(
+        `/sessions/${encodeURIComponent(params.group)}/${encodeURIComponent(params.sessionId)}/detail`,
+      ),
+    ),
+  ]);
+  const summaryList = requests[0].data;
+  const summary =
+    (Array.isArray(summaryList)
+      ? summaryList.find(
+          (session) =>
+            session.id === cockpitId ||
+            (session.group === params.group &&
+              session.sessionId === params.sessionId),
+        )
+      : null) || selectedSummary;
+  const cockpit = requests[1].data;
+  const stream = requests[2].data;
+  const structured = requests[3].data;
+  const model = NanoWorkSession.normalize(summary, cockpit, structured, stream);
+  if (summary?.source !== 'coding-job') {
+    model.canCancel = false;
+    model.canRetry = false;
+  }
+  return {
+    cockpit,
+    failures: requests.filter((result) => result.error),
+    model,
+    structured,
+    summary,
+  };
+}
+
+async function refreshUnifiedSessionDetail(state) {
+  if (
+    !sessionRenderGuard.isCurrent(state.renderToken, state.el, state.renderPage)
+  )
+    return;
+  const summary = state.summaries.find(
+    (session) =>
+      session.id === state.selectedId || session.sessionId === state.selectedId,
+  );
+  if (!summary) return;
+  const params = {
+    cockpitId: summary.id,
+    group: summary.group,
+    sessionId: summary.sessionId,
+  };
+  const loadToken = Symbol('session-detail-load');
+  state.loadToken = loadToken;
+  const viewer = state.el.querySelector('#session-viewer');
+  if (viewer) viewer.innerHTML = renderSessionLoadingState('viewer');
+  const result = await loadUnifiedSessionDetail(state, params);
+  if (
+    state.loadToken !== loadToken ||
+    window._unifiedSessionsState !== state ||
+    !sessionRenderGuard.isCurrent(state.renderToken, state.el, state.renderPage)
+  )
+    return;
+  state.model = result.model;
+  state.summary = result.summary || summary;
+  if (result.summary) {
+    state.summaries = state.summaries.map((candidate) =>
+      candidate.id === result.summary.id ? result.summary : candidate,
+    );
+    const visibleSummaries =
+      window._sessionGroupFilter === 'all'
+        ? state.summaries
+        : state.summaries.filter(
+            (candidate) => candidate.group === window._sessionGroupFilter,
+          );
+    renderSessionList(visibleSummaries);
+  }
+  state.failures = result.failures;
+  state.structured = result.structured;
+  window._sessionDetailParams = params;
+  window._sessionDetailContinuationState = {
+    params,
+    messages: result.structured?.messages || [],
+    stats: result.structured?.stats || {},
+  };
+  renderUnifiedSessionCanvas(state);
+}
+
+async function performUnifiedSessionMutation(state, action, dependencies) {
+  const session = state.summary;
+  const allowed =
+    session?.source === 'coding-job' &&
+    ((action === 'cancel' && state.model.canCancel) ||
+      (action === 'retry' && state.model.canRetry));
+  if (!allowed) {
+    dependencies.toast('This run cannot be changed from Sessions', 'warning');
+    return false;
+  }
+  try {
+    await dependencies.api(
+      `/agents/coding/jobs/${encodeURIComponent(session.id)}/${action}`,
+      { method: 'POST' },
+    );
+    await dependencies.refresh(state);
+    dependencies.toast(`Session ${action} request accepted`, 'success');
+    return true;
+  } catch (error) {
+    dependencies.toast(
+      error?.message || `Could not ${action} session`,
+      'error',
+    );
+    return false;
+  }
+}
+
+function bindUnifiedSessionActions(root, state) {
+  const delegatedHandler = async function (event) {
+    if (
+      event.type === 'input' &&
+      event.target.matches('[data-session-search]')
+    ) {
+      filterSessions(window._sessionGroupFilter || 'all');
+      return;
+    }
+    const groupButton = event.target.closest('[data-session-group]');
+    if (groupButton && root.contains(groupButton)) {
+      filterSessions(groupButton.dataset.sessionGroup);
+      return;
+    }
+    const selection = event.target.closest('[data-session-select]');
+    if (selection && root.contains(selection)) {
+      state.selectedId = selection.dataset.sessionSelect;
+      state.activeTab = 'overview';
+      renderSessionList(
+        window._sessionGroupFilter === 'all'
+          ? state.summaries
+          : state.summaries.filter(
+              (session) => session.group === window._sessionGroupFilter,
+            ),
+      );
+      await refreshUnifiedSessionDetail(state);
+      return;
+    }
+    const detailLink = event.target.closest('[data-open-session-detail]');
+    if (detailLink && root.contains(detailLink)) {
+      navigate('session-detail');
+      return;
+    }
+    const tab = event.target.closest('[data-work-session-tab]');
+    if (tab && root.contains(tab)) {
+      state.activeTab = tab.dataset.workSessionTab;
+      renderUnifiedSessionCanvas(state);
+      state.el.querySelector('[aria-selected="true"]')?.focus();
+      return;
+    }
+    const actionButton = event.target.closest('[data-work-session-action]');
+    if (!actionButton || !root.contains(actionButton) || !state.model) return;
+    const action = actionButton.dataset.workSessionAction;
+    const session = state.summary;
+    if (action === 'review_approvals') {
+      if (state.model.status === 'waiting_approval') navigate('approvals');
+      return;
+    }
+    if (action === 'handoff') {
+      await copyTextWithFallback(
+        sessionHandoffPrompt(session),
+        'Session handoff copied',
+        'Copy session handoff',
+      );
+      return;
+    }
+    if (action === 'resume') {
+      if (state.model.canResume) navigate(sessionWorkspaceTarget(session).page);
+      return;
+    }
+    if (!['cancel', 'retry'].includes(action)) return;
+    actionButton.disabled = true;
+    const succeeded = await performUnifiedSessionMutation(state, action, {
+      api,
+      refresh: refreshUnifiedSessionDetail,
+      toast,
+    });
+    if (!succeeded) actionButton.disabled = false;
+  };
+  root.onclick = delegatedHandler;
+  root.oninput = delegatedHandler;
 }
 
 window.copySessionHandoff = async function (sessionId) {
@@ -17226,7 +17753,11 @@ window.copySessionHandoff = async function (sessionId) {
     return;
   }
   const prompt = sessionHandoffPrompt(session);
-  await copyTextWithFallback(prompt, 'Session handoff copied', 'Copy session handoff');
+  await copyTextWithFallback(
+    prompt,
+    'Session handoff copied',
+    'Copy session handoff',
+  );
 };
 
 window.copySessionReviewPrompt = async function (sessionId) {
@@ -17268,19 +17799,24 @@ window.filterSessions = function (group) {
   window._sessionGroupFilter = group;
   document
     .querySelectorAll('.session-group-link')
-    .forEach((el) => el.classList.remove('active'));
-  const active = document.querySelector(
-    `.session-group-link[data-group="${group}"]`,
-  );
-  if (active) active.classList.add('active');
+    .forEach((el) =>
+      el.classList.toggle('active', el.dataset.sessionGroup === group),
+    );
   const filtered =
     group === 'all'
       ? window._allSessions
       : window._allSessions.filter((s) => s.group === group);
-  const query = document.getElementById('session-search')?.value?.toLowerCase() || '';
+  const query =
+    document.getElementById('session-search')?.value?.toLowerCase() || '';
   renderSessionList(
     filtered.filter((s) =>
-      [s.sessionId, s.group, s.title, sessionCurrentStep(s), sessionPriorityLabel(s)]
+      [
+        s.sessionId,
+        s.group,
+        s.title,
+        sessionCurrentStep(s),
+        sessionPriorityLabel(s),
+      ]
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
@@ -17335,7 +17871,9 @@ function sessionDetailContinuationBriefText(state = {}) {
   const stats = state.stats || {};
   const messages = Array.isArray(state.messages) ? state.messages : [];
   const userMessages = messages.filter((message) => message.role === 'user');
-  const assistantMessages = messages.filter((message) => message.role === 'assistant');
+  const assistantMessages = messages.filter(
+    (message) => message.role === 'assistant',
+  );
   const toolMessages = messages.filter(
     (message) =>
       message.toolUse ||
@@ -17356,10 +17894,14 @@ function sessionDetailContinuationBriefText(state = {}) {
     stats.duration ? `Duration: ${formatDuration(stats.duration)}` : null,
     '',
     'Latest user request',
-    lastUser?.content ? truncate(lastUser.content, 1200) : 'No user message found in this transcript.',
+    lastUser?.content
+      ? truncate(lastUser.content, 1200)
+      : 'No user message found in this transcript.',
     '',
     'Latest assistant result',
-    lastAssistant?.content ? truncate(lastAssistant.content, 1600) : 'No assistant result found in this transcript.',
+    lastAssistant?.content
+      ? truncate(lastAssistant.content, 1600)
+      : 'No assistant result found in this transcript.',
     '',
     'Continue in the right workspace',
     '- Copilot: use when this only needs a quick explanation, rewrite, or plain chat follow-up.',
@@ -17378,6 +17920,7 @@ function sessionDetailContinuationBriefText(state = {}) {
 
 /* Session detail page */
 window.renderSessionDetail = async function (el) {
+  const renderToken = sessionRenderGuard.begin();
   const params = window._sessionDetailParams;
   if (!params || !params.group || !params.sessionId) {
     el.innerHTML = renderSessionRecoveryState('missing');
@@ -17396,29 +17939,27 @@ window.renderSessionDetail = async function (el) {
         <button class="btn btn-sm btn-ghost" onclick="navigate('sessions')">Back</button>
       </div>
     </div>
-    <div id="session-stats-bar"></div>
-    <div id="session-transcript" class="card session-transcript-card">
+    <div id="session-viewer" class="session-transcript-card">
       ${renderSessionLoadingState('detail')}
     </div>
   `;
-
-  try {
-    const data = await api(
-      `/sessions/${encodeURIComponent(params.group)}/${encodeURIComponent(params.sessionId)}/detail`,
-    );
-    const transcriptEl = document.getElementById('session-transcript');
-    if (transcriptEl) transcriptEl.dataset.stats = JSON.stringify(data.stats);
-    window._sessionDetailContinuationState = {
-      params,
-      messages: data.messages || [],
-      stats: data.stats || {},
-    };
-    renderSessionStats(data.stats);
-    renderSessionTranscript(data.messages, data.stats);
-  } catch (e) {
-    const t = document.getElementById('session-transcript');
-    if (t) t.innerHTML = renderSessionRecoveryState('loadError');
-  }
+  const summary = {
+    id: params.cockpitId || params.sessionId,
+    sessionId: params.sessionId,
+    group: params.group,
+  };
+  const state = {
+    activeTab: 'overview',
+    el,
+    model: null,
+    selectedId: summary.id,
+    summaries: [summary],
+    renderPage: 'session-detail',
+    renderToken,
+  };
+  window._unifiedSessionsState = state;
+  bindUnifiedSessionActions(el, state);
+  await refreshUnifiedSessionDetail(state);
 };
 
 window.copySessionDetailContinuationBrief = async function () {

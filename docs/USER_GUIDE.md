@@ -63,6 +63,30 @@ menu for route navigation, and **Details** for the bottom-sheet inspector. The
 page remains the only main landmark and scrolls vertically without horizontal
 overflow.
 
+### Following active work
+
+Open **Sessions** to monitor the persisted agent and routine runs exposed by the
+Sessions APIs. Select a run to see its shared status/progress strip and inspect
+the timeline, tools, changed files, proposals, approvals, and artifacts.
+Terminal transcripts stay in the Terminal session browser rather than appearing
+as Sessions-cockpit records.
+
+In a Chat thread, the run strip appears only after live progress or approval
+evidence arrives for that exact thread. Sending a message does not by itself
+show Running, and reloading the page does not reconstruct a run until new live
+evidence arrives. Use
+**Promote to Cowork** when the next step needs an existing project, files,
+approved MCP tools, or durable artifacts. Use **Promote to Code** when it needs
+a repository, diff, tests, or PR handoff. Promotion records the destination and
+opens the existing workspace, where the destination displays and consumes the
+thread brief. It does not automatically move or copy the plain chat messages.
+
+In **Code -> Terminal**, the strip below the Terminal tab reports loading,
+ready, reconnecting, unavailable, or interrupted. An interrupted transcript
+recovered after a NanoCrab restart is read-only. Start a new terminal session
+to continue; a Resume action is intentionally not shown because the old shell
+process no longer exists.
+
 ### Capability overview
 
 See [CAPABILITIES.md](CAPABILITIES.md) for the current feature matrix, including

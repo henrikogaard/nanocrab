@@ -43,15 +43,20 @@ describe('mock admin data', () => {
       expect(sessions.map((session) => session.status).sort()).toEqual([
         'completed',
         'failed',
+        'interrupted',
         'running',
         'waiting_approval',
       ]);
       expect(
         sessions.every((session) => Number.isInteger(session.artifactCount)),
       ).toBe(true);
+      const approvalSession = sessions.find(
+        (session) => session.status === 'waiting_approval',
+      );
+      expect(approvalSession).toBeTruthy();
 
       const detailResponse = await fetch(
-        `${baseUrl}/api/sessions/cockpit/cockpit-approval-002`,
+        `${baseUrl}/api/sessions/cockpit/${encodeURIComponent(approvalSession!.id)}`,
       );
       const detail = (await detailResponse.json()) as {
         timeline: unknown[];
@@ -88,7 +93,7 @@ describe('mock admin data', () => {
       );
 
       const streamResponse = await fetch(
-        `${baseUrl}/api/sessions/cockpit/cockpit-approval-002/stream`,
+        `${baseUrl}/api/sessions/cockpit/${encodeURIComponent(approvalSession!.id)}/stream`,
       );
       const stream = (await streamResponse.json()) as {
         events: Array<{ type: string; pct?: number; toolName?: string }>;
@@ -106,10 +111,59 @@ describe('mock admin data', () => {
     });
   });
 
+  it('serves production-shaped coding-job, transcript, and interrupted fixtures', async () => {
+    await withServer(async (baseUrl) => {
+      const listResponse = await fetch(`${baseUrl}/api/sessions/cockpit`);
+      const sessions = (await listResponse.json()) as Array<{
+        id: string;
+        source: string;
+        status: string;
+      }>;
+      const interrupted = sessions.find(
+        (session) => session.status === 'interrupted',
+      );
+
+      expect(sessions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'code-mock-1',
+            sessionId: 'code-mock-1',
+            source: 'coding-job',
+          }),
+          expect.objectContaining({
+            id: 'transcript:scouts:cockpit-failed-003',
+            sessionId: 'cockpit-failed-003',
+            source: 'transcript',
+          }),
+        ]),
+      );
+
+      expect(interrupted).toMatchObject({
+        source: 'transcript',
+        status: 'interrupted',
+      });
+
+      const detailResponse = await fetch(
+        `${baseUrl}/api/sessions/cockpit/${encodeURIComponent(interrupted!.id)}`,
+      );
+      expect(detailResponse.status).toBe(200);
+      expect(await detailResponse.json()).toMatchObject({
+        id: interrupted!.id,
+        status: 'interrupted',
+      });
+    });
+  });
+
   it('serves session detail stats and tool calls for cockpit-linked sessions', async () => {
     await withServer(async (baseUrl) => {
+      const sessions = (await (
+        await fetch(`${baseUrl}/api/sessions/cockpit`)
+      ).json()) as Array<{ group: string; sessionId: string; status: string }>;
+      const approvalSession = sessions.find(
+        (session) => session.status === 'waiting_approval',
+      );
       const response = await fetch(
-        `${baseUrl}/api/sessions/operations/cockpit-approval-002/detail`,
+        `${baseUrl}/api/sessions/${encodeURIComponent(approvalSession!.group)}/${encodeURIComponent(approvalSession!.sessionId)}/detail`,
       );
       const detail = (await response.json()) as {
         stats: {
@@ -136,7 +190,7 @@ describe('mock admin data', () => {
   it('keeps mock write requests read-safe', async () => {
     await withServer(async (baseUrl) => {
       const response = await fetch(
-        `${baseUrl}/api/sessions/cockpit/cockpit-approval-002`,
+        `${baseUrl}/api/agents/coding/jobs/code-mock-1/cancel`,
         { method: 'POST' },
       );
       const body = (await response.json()) as {

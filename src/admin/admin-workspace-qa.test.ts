@@ -67,6 +67,149 @@ describe('Focus Stack rendered QA contract', () => {
     expect(source).toContain(`{ name: 'mobile', width: 390, height: 844 }`);
   });
 
+  it('exercises scoped Chat progress, promotion handoff, and terminal recovery states at desktop and mobile widths', () => {
+    const source = qaScriptSource();
+
+    for (const contractMarker of [
+      'async function exerciseChatRunFlow',
+      'async function exercisePromotionHandoff',
+      'async function exerciseTerminalSessionStates',
+      "name: 'desktop'",
+      "name: 'mobile'",
+      '#/chat',
+      '#/terminal',
+      '#thread-run-strip',
+      '.work-session-run-strip',
+      'data-work-session-promotion',
+      '#terminal-session-state',
+      'data-terminal-state',
+      "'loading'",
+      "'ready'",
+      "'reconnecting'",
+      "'interrupted'",
+      'Resume',
+      'chat-run-before-progress',
+      'chat-run-progress-active',
+      'promotion-handoff',
+      'terminal-session-',
+    ]) {
+      expect(source).toContain(contractMarker);
+    }
+
+    expect(source).toContain('await exerciseChatRunFlow(page, viewport');
+    expect(source).toContain(
+      'record.promotion = await exercisePromotionHandoff(',
+    );
+    expect(source).toContain('await exerciseTerminalSessionStates(');
+  });
+
+  it('drives targeted Chat and Terminal evidence through the captured mock WebSocket callbacks', () => {
+    const source = qaScriptSource();
+
+    for (const contractMarker of [
+      '__qaWebSockets',
+      'async function deliverMockWebSocketMessage',
+      'socket.__qaOnMessage',
+      'terminal_lifecycle',
+      "'[Process exited]'",
+      'socket.__qaOnClose',
+      'socket.__qaOnOpen',
+      'scrollIntoViewIfNeeded',
+      'withinViewport',
+    ]) {
+      expect(source).toContain(contractMarker);
+    }
+
+    expect(source).not.toContain('WebChat.processRunEvent');
+    expect(source).not.toContain('setTerminalSessionState');
+    expect(source).not.toContain('window.eval');
+  });
+
+  it('keeps the synthetic terminal capability in runtime memory while proving the reconnect attach payload', () => {
+    const source = qaScriptSource();
+
+    for (const contractMarker of [
+      'function createSyntheticTerminalCapability',
+      'async function deliverMockWebSocketMessage',
+      "type: 'terminal_session'",
+      'async function inspectTerminalAttachFrameWindow',
+      '__qaWebSocketSends',
+      "type === 'terminal_attach'",
+      'payload.sessionToken === capability',
+      'async function assertSyntheticCapabilityPrivate',
+      'window.localStorage',
+      'window.sessionStorage',
+      'document.documentElement.textContent',
+      'window.__qaWebSocketSends = []',
+    ]) {
+      expect(source).toContain(contractMarker);
+    }
+
+    expect(source).not.toContain(
+      "localStorage.setItem('terminal_session_capability'",
+    );
+    expect(source).not.toContain(
+      "sessionStorage.setItem('terminal_session_capability'",
+    );
+  });
+
+  it('counts bounded initial and recovery terminal-attach frame windows without selecting a latest frame', () => {
+    const source = qaScriptSource();
+
+    for (const contractMarker of [
+      'async function capturedOutboundFrameCount',
+      'async function inspectTerminalAttachFrameWindow',
+      'slice(frameStart)',
+      'attachCount',
+      'initialAttach',
+      'automaticReconnectAttach',
+      'manualReconnectAttach',
+      'repeatedReconnectAttach',
+      'initialAttach.attachCount !== 1',
+      'automaticReconnectAttach.attachCount !== 1',
+      'manualReconnectAttach.attachCount !== 1',
+      'repeatedReconnectAttach.attachCount !== 1',
+      'initialAttach.sessionIdsMatch',
+      'automaticReconnectAttach.sessionIdsMatch',
+      'automaticReconnectAttach.capabilitiesMatch',
+      'manualReconnectAttach.sessionIdsMatch',
+      'manualReconnectAttach.capabilitiesMatch',
+      'repeatedReconnectAttach.sessionIdsMatch',
+      'repeatedReconnectAttach.capabilitiesMatch',
+    ]) {
+      expect(source).toContain(contractMarker);
+    }
+
+    expect(source).not.toContain('.reverse()\n      .map((entry) =>');
+    expect(source).not.toContain('.find((entry) => entry && entry.type');
+  });
+
+  it('drives a connecting terminal socket through replacement, manual reconnect, and stale callback races', () => {
+    const source = qaScriptSource();
+
+    for (const contractMarker of [
+      '__qaForceConnecting',
+      'async function forceLatestMockSocketConnecting',
+      'async function driveMockSocketOpen',
+      'async function waitForRecreatedMockSocket',
+      'socket.__qaOnError',
+      "callback === 'onerror'",
+      'automaticReconnectAttach',
+      'manualReconnectAttach',
+      'repeatedReconnectAttach',
+      'staleSocketState',
+      'staleSocketFrameCount',
+      'Initial terminal attach count',
+      'Repeated automatic terminal attach count',
+    ]) {
+      expect(source).toContain(contractMarker);
+    }
+
+    expect(source).not.toContain('WebChat.processRunEvent');
+    expect(source).not.toContain('setTerminalSessionState');
+    expect(source).not.toContain('window.eval');
+  });
+
   it('records the route, landmark, overflow, accessibility, selection, layout, error, interaction, screenshot, and summary evidence', () => {
     const source = qaScriptSource();
 

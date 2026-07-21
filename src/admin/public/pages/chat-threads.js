@@ -9,6 +9,7 @@
   var _threadListHandlersInstalled = false;
   var _webChatActionHandlersInstalled = false;
   var _chatProjects = [];
+  var _activeChatRun = null;
   function setProgressFill(el, pct) {
     if (!el) return;
     el.style.setProperty('--progress-pct', Math.min(Number(pct) || 0, 100) + '%');
@@ -260,6 +261,130 @@
     });
   }
 
+  function isActiveChatRun(session) {
+    return Boolean(
+      session &&
+        (session.status === 'running' || session.status === 'waiting_approval'),
+    );
+  }
+
+  function renderActiveChatRun(session) {
+    var container = document.getElementById('thread-run-strip');
+    if (!container) return;
+    if (!isActiveChatRun(session) || !window.NanoWorkSession) {
+      container.replaceChildren();
+      return;
+    }
+    container.innerHTML = window.NanoWorkSession.renderRunStrip(session);
+    container.onclick = function (event) {
+      var action = event.target.closest('[data-work-session-action]');
+      if (!action || action.dataset.workSessionAction !== 'review_approvals') return;
+      var approval = document.querySelector('.chat-approval-card button');
+      if (approval) approval.focus();
+    };
+  }
+
+  function updateActiveChatRun(patch) {
+    if (!patch) {
+      _activeChatRun = null;
+      renderActiveChatRun(null);
+      return;
+    }
+    var normalized = window.NanoWorkSession.normalize({
+      id: 'chat:' + (_activeThreadId || 'pending'),
+      status: 'running',
+      currentStep: 'Agent is working',
+      canCancel: false,
+      canResume: false,
+      canRetry: false,
+      ...(_activeChatRun || {}),
+      ...patch,
+    });
+    normalized.progressPct =
+      typeof patch.progressPct === 'number'
+        ? Math.min(100, Math.max(0, patch.progressPct))
+        : _activeChatRun && typeof _activeChatRun.progressPct === 'number'
+          ? _activeChatRun.progressPct
+          : null;
+    normalized.canCancel = false;
+    normalized.canResume = false;
+    normalized.canRetry = false;
+    _activeChatRun = normalized;
+    renderActiveChatRun(_activeChatRun);
+  }
+
+  function isTerminalTaskProgress(data) {
+    var phase = String((data && data.phase) || '').trim().toLowerCase();
+    return (
+      Number(data && data.pct) >= 100 ||
+      ['done', 'complete', 'completed', 'failed', 'error', 'cancelled'].includes(
+        phase,
+      )
+    );
+  }
+
+  function applyChatRunEvent(msg, threadId) {
+    var evJid = msg.data ? (msg.data.chat_jid ?? msg.data.groupJid) : undefined;
+    if (evJid !== threadId) return false;
+    if (msg.type === 'task_progress') {
+      if (isTerminalTaskProgress(msg.data)) updateActiveChatRun(null);
+      else {
+        updateActiveChatRun({
+          status: 'running',
+          currentStep:
+            msg.data.message || msg.data.phase || 'Agent is working',
+          progressPct: msg.data.pct,
+        });
+      }
+      return true;
+    }
+    if (msg.type === 'approval_request') {
+      updateActiveChatRun({
+        status: 'waiting_approval',
+        currentStep: 'Waiting for approval',
+        approvals: [msg.data],
+      });
+      return true;
+    }
+    if (msg.type === 'new_message' && msg.data.is_bot_message) {
+      updateActiveChatRun(null);
+      return true;
+    }
+    return false;
+  }
+
+  function clearWebChatThreadState() {
+    _activeChatRun = null;
+    window._webchatThreadBriefState = null;
+    setWsMessageSubscriber('web-chat-thread', null);
+    try {
+      sessionStorage.removeItem('work_session_promotion');
+    } catch (_) {
+      // Private-mode storage failures do not block opening a thread.
+    }
+  }
+
+  function promoteThread(destination) {
+    if (destination !== 'cowork' && destination !== 'code') return;
+    var state = window._webchatThreadBriefState || {};
+    var threadMeta = state.threadMeta || {};
+    try {
+      sessionStorage.setItem('work_session_promotion', JSON.stringify({
+        destination: destination,
+        threadId: _activeThreadId || '',
+        brief: chatThreadBriefText(state),
+      }));
+    } catch (_) {
+      // Navigation remains available when session storage is unavailable.
+    }
+    if (destination === 'cowork') {
+      if (threadMeta.projectId) openProjectContext(threadMeta.projectId);
+      else navigate('projects');
+      return;
+    }
+    navigate('gitcode');
+  }
+
   function installWebChatActionHandlers() {
     if (_webChatActionHandlersInstalled) return;
     _webChatActionHandlersInstalled = true;
@@ -287,6 +412,8 @@
         if (input) input.focus();
       } else if (action === 'open-projects') {
         navigate('projects');
+      } else if (action === 'promote-thread') {
+        promoteThread(target.dataset.promotionDestination);
       } else if (action === 'retry-thread') {
         var el = conversationRoot();
         if (el) renderConversation(el, target.dataset.threadId || _activeThreadId);
@@ -1368,6 +1495,7 @@
   // the full thread list. Deep-link/reload paths pass no title → fallback fetch.
   async function renderConversation(el, threadId, title) {
     installWebChatActionHandlers();
+    clearWebChatThreadState();
     // Clean up any leftover progress timer from a previous page
     if (window._progressTimeout) {
       clearTimeout(window._progressTimeout);
@@ -1410,10 +1538,13 @@
       '<h2 class="webchat-thread-title" id="thread-title">Loading…</h2>' +
       '<div class="webchat-thread-actions">' +
       '<button class="btn btn-sm btn-ghost webchat-thread-action" id="thread-copy-brief-btn">Copy chat brief</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost webchat-thread-action" data-webchat-action="promote-thread" data-promotion-destination="cowork">Promote to Cowork</button>' +
+      '<button type="button" class="btn btn-sm btn-ghost webchat-thread-action" data-webchat-action="promote-thread" data-promotion-destination="code">Promote to Code</button>' +
       '<button class="btn btn-sm btn-ghost webchat-thread-action" id="thread-rename-btn">Rename</button>' +
       '<button class="btn btn-sm btn-danger webchat-thread-action" id="thread-delete-btn">Delete</button>' +
       '</div>' +
       '</div>' +
+      '<div id="thread-run-strip"></div>' +
       '<div class="webchat-chatgpt-context" id="thread-context-banner"></div>' +
       '<div class="webchat-thread-card">' +
       '<div class="chat-messages" id="chat-messages-area">' +
@@ -1597,6 +1728,7 @@
           body: JSON.stringify({ message: msg }),
         });
       } catch (e) {
+        updateActiveChatRun(null);
         if (window._progressTimeout) {
           clearTimeout(window._progressTimeout);
           window._progressTimeout = null;
@@ -1696,17 +1828,15 @@
       };
     }
 
-    // Patch WebSocket handler — filter all events to this thread's jid
-    var origHandler = handleWsMessage;
+    // Register one stable WebSocket subscriber for the active thread.
     var threadWsHandler = function (msg) {
-      // Always call the original for non-chat events (notifications, terminal etc.)
-      origHandler(msg);
-
       // Only handle chat events that belong to this thread.
       // new_message uses data.chat_jid; task_progress/tool_call/tool_result/
       // approval_request are broadcast with data.groupJid — accept either.
       var evJid = msg.data ? (msg.data.chat_jid ?? msg.data.groupJid) : undefined;
       if (evJid !== undefined && evJid !== threadId) return;
+
+      applyChatRunEvent(msg, threadId);
 
       if (msg.type === 'task_progress') {
         if (window._progressTimeout) {
@@ -1851,9 +1981,7 @@
       }
     };
 
-    // Save original and install patched handler
-    window._chatWsRestore = handleWsMessage;
-    handleWsMessage = threadWsHandler;
+    setWsMessageSubscriber('web-chat-thread', threadWsHandler);
   }
 
   async function openNewConversationModal(starter) {
@@ -2147,6 +2275,8 @@
     openProjectContext: openProjectContext,
     chatThreadBriefText: chatThreadBriefText,
     copyThreadBrief: copyThreadBrief,
+    processRunEvent: applyChatRunEvent,
+    promoteThread: promoteThread,
     get activeThreadId() { return _activeThreadId; },
   };
 })();

@@ -6,6 +6,21 @@ const htmlPath = path.join(process.cwd(), 'src/admin/public/index.html');
 const manifestPath = path.join(process.cwd(), 'src/admin/public/manifest.json');
 
 describe('Admin HTML entry metadata', () => {
+  it('loads the work-session adapter after UI prerequisites and before the app coordinator', () => {
+    const source = fs.readFileSync(htmlPath, 'utf8');
+    const sharedIndex = source.indexOf('/ui/shared.js');
+    const workspaceShellIndex = source.indexOf('/ui/workspace-shell.js');
+    const workSessionIndex = source.indexOf('/ui/work-session.js');
+    const appIndex = source.indexOf('/app.js');
+
+    expect(workSessionIndex).toBeGreaterThan(sharedIndex);
+    expect(workSessionIndex).toBeGreaterThan(workspaceShellIndex);
+    expect(workSessionIndex).toBeLessThan(appIndex);
+    expect(source).toContain(
+      '<script defer src="/ui/work-session.js?v=2.0.0-rc.8"></script>',
+    );
+  });
+
   it('loads route context after shell navigation and before the app coordinator', () => {
     const source = fs.readFileSync(htmlPath, 'utf8');
     const navigationIndex = source.indexOf('/ui/shell-navigation.js');

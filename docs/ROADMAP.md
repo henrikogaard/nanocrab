@@ -18,7 +18,7 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 - Issue #129's Devin host-runner implementation is present locally on its feature branch with automated unit/integration evidence: verified host readiness context, exact credential metadata checks, fail-closed whole-process `.git` isolation, constrained workspace-only command execution, approval-gated complete runtime fallback, attempt-owned cancellation, stateful redaction, hardened host Git/evidence, and operator/security documentation. The coding path now fails closed because no sandbox-safe authentication handoff exists; no workspace mutation or process spawn is possible. It is not deployed, released, live-tested, merged, closed, or `Done`; a ready-for-review PR remains contingent on the final full repository verification.
 - LIVE OPERATOR ROLLOUT: blocked until a reviewed sandbox-safe Devin authentication handoff exists. Do not authenticate Devin for NanoCrab, assign implementation work, or run a paid/external-processing smoke test.
 - Better terminal controls exist in the dashboard: named shell session id, reconnect, clear, copy transcript, and xterm output.
-- Focus Stack Slice 1 is implemented on the current review branch: Today plus the four stable Chat/Cowork/Code/More modes, route-derived context, preserved deep links, a rail/context/canvas/inspector shell, responsive mobile navigation, and the repaired Source Collections mock contract. This foundation is the only Focus Stack slice represented as implemented; unified-session, knowledge-production, and personal-operations slices remain future work.
+- Focus Stack Slices 1 and 2 are implemented on the current review branch. Slice 1 provides Today, the four stable Chat/Cowork/Code/More modes, route-derived context, preserved deep links, the layered shell, responsive navigation, and the repaired Source Collections mock contract. Slice 2 provides a normalized work-session model, shared run strip/timeline/inspector, a unified cockpit for its persisted agent/routine sources, live-evidence-only Chat run state, consumed promotion handoffs, and separate Terminal loading/ready/reconnecting/unavailable/interrupted state. Terminal history is not represented as a Sessions-cockpit source. Knowledge-production and personal-operations slices remain future work.
 - Cowork/provider milestone slice is implemented: project-scoped Cowork run/context/capability APIs expose active skills, plugins, connectors, readiness states, reusable complexity/budget estimates, run stats, canonical provenance/sensitivity labels, action workflow previews, approval-gated external writes, research-job source ledgers, citation coverage, local artifacts, and selected context notebook injection. Channel prompts now receive workspace intent context before generic agent execution, and Code/Autofix provider selectors use provider/model coding capability metadata rather than provider-name exceptions.
 - Admin frontend decomposition is in progress: page-level modules already carry major surfaces, shared UI helpers cover data health, feedback, shell states, recovery, provider parity, routine states, and file-vault states, and shell navigation metadata now lives in `ui/shell-navigation.js` instead of the large app shell.
 - Standalone cleanup is implemented: NanoCrab is treated as its own product with NanoCrab-first code, plugins, skills, MCP names, container names, docs, and migration tooling.
@@ -296,18 +296,15 @@ Goal: give agents a durable research/reporting workflow without making the core 
   - DONE: responsive split panes pair terminal/files with chat/diff/logs/search, persist the selected tabs and divider position, and support arrow-key tab navigation.
   - DONE: copyable terminal transcript
   - DONE: searchable transcript
+  - DONE: shared work-session vocabulary in Chat and Terminal, with Chat state driven only by live thread-scoped lifecycle evidence and Terminal state driven by typed ready, exited, idle-timeout, historical, and unavailable events rather than transcript text.
+  - DONE: explicit consumed Chat promotion briefs in the existing Cowork projects or Code workspace; plain messages are never moved automatically.
   - provider/model selector per chat/task
   - tool-call timeline
   - approve/deny prompts inline
   - live task progress and cancel/retry controls
 - Add a "Hermes-style" agent session page:
-  - conversation
-  - plan/tasks
-  - files changed
-  - memories proposed
-  - skills proposed
-  - journal events extracted
-  - approvals pending
+  - DONE: unified run selection, status/progress strip, timeline, tools, changed files, proposals, approvals, and artifacts.
+  - NEXT: richer conversation, plan/task, memory, skill, and journal-event projections when producers expose those fields consistently.
 - Add a polished scheduled-task setup flow:
   - DONE: routine blueprints and quick-start prompts
   - DONE: freeform routine drafting from natural-language automation goals
@@ -343,8 +340,8 @@ These rules are non-negotiable:
 
 1. **Provider Router v1** - DONE
    - Add provider registry, capability probes, routing profiles, and provider/model selection on tasks and workflows.
-2. **Better Web Chat/Terminal v1** - PARTIAL
-   - Build the session surface needed to monitor long-running coding and automation work.
+2. **Better Web Chat/Terminal v1** - DONE
+   - Shared session monitoring, explicit Chat handoffs, and typed terminal lifecycle states are wired across the dashboard.
 3. **Memory v1** - DONE
    - Structured memory DB, review queue, and generated `MEMORY.md`.
 4. **Journal v1** - DONE

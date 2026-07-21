@@ -4,6 +4,7 @@
   var activeProjectRunId = null;
   var activeProjectDetail = null;
   var projectProviderState = null;
+  var activeWorkSessionPromotion = null;
   var PROJECT_ACTIONS = [
     {
       label: 'Email summary',
@@ -1691,6 +1692,7 @@
     }
 
     el.innerHTML =
+      window.renderWorkSessionPromotion(activeWorkSessionPromotion) +
       '<div class="projects-page">' +
       '<aside class="projects-sidebar">' +
       '<div class="projects-sidebar-head">' +
@@ -1731,6 +1733,7 @@
   }
 
   window.renderProjects = function (el) {
+    activeWorkSessionPromotion = window.consumeWorkSessionPromotion('cowork');
     el.innerHTML = renderProjectLoadingState();
     refreshProjects().catch(function (err) {
       renderPageError(el, err, 'Could not load projects');

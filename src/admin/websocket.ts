@@ -34,6 +34,23 @@ interface WsMessage {
   group?: string;
 }
 
+type TerminalLifecycleState =
+  | 'ready'
+  | 'historical'
+  | 'exited'
+  | 'idle-timeout'
+  | 'unavailable';
+
+type TerminalLifecycleReason =
+  | 'session-ended'
+  | 'process-exit'
+  | 'operator-terminated'
+  | 'idle-timeout'
+  | 'spawn-failed'
+  | 'max-terminals'
+  | 'invalid-session-id'
+  | 'denied';
+
 let wss: WebSocketServer | null = null;
 type WatchFileListener = (curr: fs.Stats, prev: fs.Stats) => void;
 
@@ -54,6 +71,7 @@ const terminals = new Map<
     owner: string;
     sessionToken: string;
     group: string;
+    ended: boolean;
   }
 >();
 const MAX_TERMINALS = 3;
@@ -118,6 +136,52 @@ function denyTerminalOperation(
     sessionId,
     data: { operation, reason },
   });
+  sendTerminalLifecycle(ws, sessionId, 'unavailable', true, 'denied');
+}
+
+function sendTerminalLifecycle(
+  ws: WebSocket,
+  sessionId: string,
+  state: TerminalLifecycleState,
+  readOnly: boolean,
+  reason?: TerminalLifecycleReason,
+): void {
+  send(ws, {
+    type: 'terminal_lifecycle',
+    sessionId,
+    data: { state, readOnly, ...(reason ? { reason } : {}) },
+  });
+}
+
+function broadcastTerminalLifecycle(
+  sessionId: string,
+  state: TerminalLifecycleState,
+  readOnly: boolean,
+  reason?: TerminalLifecycleReason,
+): void {
+  const term = terminals.get(sessionId);
+  if (!term) return;
+  for (const client of term.clients) {
+    sendTerminalLifecycle(client, sessionId, state, readOnly, reason);
+  }
+}
+
+function finishTerminalSession(
+  sessionId: string,
+  state: 'exited' | 'idle-timeout' | 'unavailable',
+  terminationReason: SessionMetadata['terminationReason'],
+  lifecycleReason: TerminalLifecycleReason,
+  killProcess: boolean,
+): boolean {
+  const term = terminals.get(sessionId);
+  if (!term || term.ended) return false;
+  term.ended = true;
+  clearTimeout(term.idleTimer);
+  broadcastTerminalLifecycle(sessionId, state, true, lifecycleReason);
+  finalizeSessionFile(sessionId, terminationReason);
+  terminals.delete(sessionId);
+  if (killProcess) term.process.kill();
+  return true;
 }
 
 function authorizeTerminalOperation(
@@ -553,12 +617,16 @@ export function initWebSocket(server: HttpServer): void {
             // Reset idle timer
             clearTimeout(term.idleTimer);
             term.idleTimer = setTimeout(() => {
-              finalizeSessionFile(msg.sessionId!, 'idle-timeout');
-              term.process.kill();
-              terminals.delete(msg.sessionId!);
               broadcastTerminal(
                 msg.sessionId!,
                 '\r\n[Session timed out after 30 minutes of inactivity]\r\n',
+              );
+              finishTerminalSession(
+                msg.sessionId!,
+                'idle-timeout',
+                'idle-timeout',
+                'idle-timeout',
+                true,
               );
             }, TERMINAL_IDLE_TIMEOUT_MS);
           }
@@ -585,6 +653,7 @@ export function initWebSocket(server: HttpServer): void {
               data: { status: 'active', readOnly: false },
               sessionId: sid,
             });
+            sendTerminalLifecycle(ws, sid, 'ready', false);
             send(ws, {
               type: 'terminal_output',
               data: term.transcript.slice(-50000),
@@ -598,6 +667,13 @@ export function initWebSocket(server: HttpServer): void {
                 data: { status: 'historical', readOnly: true },
                 sessionId: sid,
               });
+              sendTerminalLifecycle(
+                ws,
+                sid,
+                'historical',
+                true,
+                'session-ended',
+              );
               send(ws, {
                 type: 'terminal_output',
                 data: attachment.transcript.slice(-50000),
@@ -646,6 +722,7 @@ export function initWebSocket(server: HttpServer): void {
             data: { status: 'active', readOnly: false },
             sessionId: sid,
           });
+          sendTerminalLifecycle(ws, sid, 'ready', false);
           send(ws, {
             type: 'terminal_output',
             data: term.transcript.slice(-50000),
@@ -760,17 +837,20 @@ export function stopLogStream(ws: WebSocket): void {
 
 function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
   if (!isSafeTerminalSessionId(sessionId)) {
-    send(ws, {
-      type: 'terminal_output',
-      data: 'Invalid terminal session id.\r\n',
+    sendTerminalLifecycle(
+      ws,
       sessionId,
-    });
+      'unavailable',
+      true,
+      'invalid-session-id',
+    );
     return;
   }
 
   const existing = terminals.get(sessionId);
   if (existing) {
     existing.clients.add(ws);
+    sendTerminalLifecycle(ws, sessionId, 'ready', false);
     send(ws, {
       type: 'terminal_output',
       data: existing.transcript.slice(-50000),
@@ -793,19 +873,21 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
   }
 
   if (terminals.size >= MAX_TERMINALS) {
-    send(ws, {
-      type: 'terminal_output',
-      data: 'Max terminal sessions reached.\r\n',
-      sessionId,
-    });
+    sendTerminalLifecycle(ws, sessionId, 'unavailable', true, 'max-terminals');
     return;
   }
 
-  const proc = spawn('bash', ['-i'], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, TERM: 'xterm-256color' },
-    cwd: process.cwd(),
-  });
+  let proc: ChildProcess;
+  try {
+    proc = spawn('bash', ['-i'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, TERM: 'xterm-256color' },
+      cwd: process.cwd(),
+    });
+  } catch {
+    sendTerminalLifecycle(ws, sessionId, 'unavailable', true, 'spawn-failed');
+    return;
+  }
 
   const sessionToken = generateSessionToken();
   const group = owner;
@@ -820,9 +902,13 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
       sessionId,
       '\r\n[Session timed out after 30 minutes of inactivity]\r\n',
     );
-    finalizeSessionFile(sessionId, 'idle-timeout');
-    proc.kill();
-    terminals.delete(sessionId);
+    finishTerminalSession(
+      sessionId,
+      'idle-timeout',
+      'idle-timeout',
+      'idle-timeout',
+      true,
+    );
   }, TERMINAL_IDLE_TIMEOUT_MS);
 
   terminals.set(sessionId, {
@@ -834,6 +920,7 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
     owner,
     sessionToken,
     group,
+    ended: false,
   });
 
   // Hand the reconnect token to the spawning client only; it is never
@@ -843,6 +930,7 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
     sessionId,
     data: { sessionToken },
   });
+  sendTerminalLifecycle(ws, sessionId, 'ready', false);
 
   proc.stdout?.on('data', (data: Buffer) => {
     broadcastTerminal(sessionId, data.toString());
@@ -850,10 +938,23 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
   proc.stderr?.on('data', (data: Buffer) => {
     broadcastTerminal(sessionId, data.toString());
   });
+  proc.on('error', () => {
+    finishTerminalSession(
+      sessionId,
+      'unavailable',
+      'process-exit',
+      'spawn-failed',
+      false,
+    );
+  });
   proc.on('close', () => {
-    broadcastTerminal(sessionId, '\r\n[Process exited]\r\n');
-    finalizeSessionFile(sessionId, 'process-exit');
-    terminals.delete(sessionId);
+    finishTerminalSession(
+      sessionId,
+      'exited',
+      'process-exit',
+      'process-exit',
+      false,
+    );
   });
 
   logger.info({ sessionId }, 'Terminal session spawned');
@@ -863,13 +964,13 @@ function spawnTerminal(ws: WebSocket, sessionId: string, owner: string): void {
 // and kill the process. Returns true if a live session was closed. The process
 // 'close' handler removes it from the terminals map.
 export function closeTerminalSession(sessionId: string): boolean {
-  const term = terminals.get(sessionId);
-  if (!term) return false;
-  clearTimeout(term.idleTimer);
-  finalizeSessionFile(sessionId, 'operator-terminated');
-  term.process.kill();
-  terminals.delete(sessionId);
-  return true;
+  return finishTerminalSession(
+    sessionId,
+    'exited',
+    'operator-terminated',
+    'operator-terminated',
+    true,
+  );
 }
 
 function broadcastTerminal(sessionId: string, data: string): void {
