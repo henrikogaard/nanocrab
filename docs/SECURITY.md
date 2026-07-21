@@ -313,6 +313,15 @@ exceptions.
 
 - OpenCode coding jobs may receive `OPENCODE_API_KEY` because the OpenCode CLI reads its own credential environment.
 - GitHub coding jobs may receive `GITHUB_TOKEN` through an env file plus `GIT_ASKPASS` so clone/fetch/PR flows can run without interactive prompts. Dashboard issue and project-board browsing uses the same host-side token for read-only GitHub API calls.
+
+**NotebookLM Enterprise:** NanoCrab stores only the provider-neutral Enterprise
+contract metadata (project ID, MCP server name, credential-proxy route, and
+capability allowlist). The connector is disabled and fail-closed by default;
+consumer NotebookLM scraping and unofficial APIs are not supported. Declaring a
+contract does not verify a runtime adapter or make an external call. Operations
+remain explicit approval-gated scaffolding until an official Enterprise adapter
+and credential-proxy route are verified by the deployment.
+
 - Custom MCP servers receive only the env vars listed on that server and only when the connector is inside the agent boundary; scoped connectors are additionally filtered through the MCP tool proxy.
 - Google Workspace OAuth vars are forwarded only when a mail, calendar, docs, or drive connector is inside the active boundary.
 - Image-generation helpers may receive provider keys such as `FAL_KEY`, `LEONARDO_API_KEY`, or `OPENAI_API_KEY` when those helpers are enabled.

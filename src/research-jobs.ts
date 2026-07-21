@@ -2,13 +2,63 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
+import { redactAuditValue } from './audit-log.js';
 import { STORE_DIR } from './config.js';
+
+export const NOTEBOOKLM_CONNECTOR_ID = 'notebooklm-enterprise';
+export const NOTEBOOKLM_CONTRACT_VERSION = 'enterprise-mcp-v1';
+
+export const NOTEBOOKLM_CAPABILITIES = [
+  'create-notebook',
+  'add-source',
+  'list-notebooks',
+  'retrieve-notebook',
+  'share-notebook',
+  'link-output',
+] as const;
+
+export type NotebookLmCapability = (typeof NOTEBOOKLM_CAPABILITIES)[number];
 
 export interface NotebookLmConfig {
   enabled: boolean;
   provider: 'google-enterprise';
   projectId: string;
+  contractVersion: typeof NOTEBOOKLM_CONTRACT_VERSION;
+  connectorId: typeof NOTEBOOKLM_CONNECTOR_ID;
+  serverName: string;
+  credentialProxyRoute: string;
+  allowedOperations: NotebookLmCapability[];
   notes: string;
+}
+
+export type NotebookLmReadinessStatus = 'ready' | 'attention' | 'blocked';
+
+export interface NotebookLmReadiness {
+  status: NotebookLmReadinessStatus;
+  configured: boolean;
+  connectorId: typeof NOTEBOOKLM_CONNECTOR_ID;
+  provider: 'google-enterprise';
+  contractVersion: typeof NOTEBOOKLM_CONTRACT_VERSION;
+  capabilities: NotebookLmCapability[];
+  missing: string[];
+  detail: string;
+}
+
+export interface NotebookLmProvenance {
+  connectorId: typeof NOTEBOOKLM_CONNECTOR_ID;
+  operation: NotebookLmCapability;
+  status: 'requested' | 'approved' | 'blocked' | 'completed';
+  sourceRefs: string[];
+  recordedAt: string;
+}
+
+export interface NotebookLmOperationResult {
+  connectorId: typeof NOTEBOOKLM_CONNECTOR_ID;
+  operation: NotebookLmCapability;
+  status: 'requires_approval' | 'blocked';
+  executed: false;
+  researchJobId: string | null;
+  reason: string;
 }
 
 export interface ResearchJob {
@@ -22,6 +72,7 @@ export interface ResearchJob {
   notesPath: string | null;
   screenshots: string[];
   sourceLedgerPath?: string | null;
+  notebookLmProvenance?: NotebookLmProvenance | null;
   createdAt: string;
   completedAt: string | null;
   error: string | null;
@@ -29,6 +80,39 @@ export interface ResearchJob {
 
 const RESEARCH_JOBS_PATH = path.join(STORE_DIR, 'research-jobs.json');
 const NOTEBOOKLM_CONFIG_PATH = path.join(STORE_DIR, 'notebooklm-config.json');
+
+const DEFAULT_NOTEBOOKLM_CONFIG: NotebookLmConfig = {
+  enabled: false,
+  provider: 'google-enterprise',
+  projectId: '',
+  contractVersion: NOTEBOOKLM_CONTRACT_VERSION,
+  connectorId: NOTEBOOKLM_CONNECTOR_ID,
+  serverName: NOTEBOOKLM_CONNECTOR_ID,
+  credentialProxyRoute: 'notebooklm.enterprise',
+  allowedOperations: [...NOTEBOOKLM_CAPABILITIES],
+  notes:
+    'NotebookLM support is official/Enterprise-only. Consumer scraping is intentionally not included.',
+};
+
+function normalizeNotes(value: unknown): string {
+  const redacted = redactAuditValue(typeof value === 'string' ? value : '');
+  return String(redacted).slice(0, 2000);
+}
+
+function validateIdentifier(value: string, label: string): string {
+  const trimmed = value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(trimmed)) {
+    throw new Error(`${label} must be a non-secret identifier`);
+  }
+  return trimmed;
+}
+
+function normalizeOperations(value: unknown): NotebookLmCapability[] {
+  if (!Array.isArray(value)) return [...NOTEBOOKLM_CAPABILITIES];
+  return NOTEBOOKLM_CAPABILITIES.filter((operation) =>
+    value.some((candidate) => candidate === operation),
+  );
+}
 
 function readJobs(): ResearchJob[] {
   try {
@@ -55,38 +139,166 @@ function upsertJob(job: ResearchJob): void {
 
 export function loadNotebookLmConfig(): NotebookLmConfig {
   try {
-    return {
-      enabled: false,
-      provider: 'google-enterprise',
-      projectId: '',
-      notes: '',
-      ...JSON.parse(fs.readFileSync(NOTEBOOKLM_CONFIG_PATH, 'utf-8')),
-    };
+    const raw = JSON.parse(
+      fs.readFileSync(NOTEBOOKLM_CONFIG_PATH, 'utf-8'),
+    ) as Partial<NotebookLmConfig> | null;
+    return normalizeNotebookLmConfig(raw || {});
   } catch {
-    return {
-      enabled: false,
-      provider: 'google-enterprise',
-      projectId: '',
-      notes:
-        'NotebookLM support is official/Enterprise-only. Consumer scraping is intentionally not included.',
-    };
+    return { ...DEFAULT_NOTEBOOKLM_CONFIG };
   }
+}
+
+function normalizeNotebookLmConfig(
+  config: Partial<NotebookLmConfig>,
+): NotebookLmConfig {
+  if (config.provider && config.provider !== 'google-enterprise') {
+    throw new Error('NotebookLM connector is Enterprise-only');
+  }
+  if (
+    config.contractVersion &&
+    config.contractVersion !== NOTEBOOKLM_CONTRACT_VERSION
+  ) {
+    throw new Error(
+      `Unsupported NotebookLM contract: ${config.contractVersion}`,
+    );
+  }
+  const serverName = validateIdentifier(
+    config.serverName || DEFAULT_NOTEBOOKLM_CONFIG.serverName,
+    'serverName',
+  );
+  const credentialProxyRoute = validateIdentifier(
+    config.credentialProxyRoute ||
+      DEFAULT_NOTEBOOKLM_CONFIG.credentialProxyRoute,
+    'credentialProxyRoute',
+  );
+  const projectId = String(config.projectId || '').trim();
+  if (projectId.length > 100 || /\s/.test(projectId)) {
+    throw new Error('projectId must be a non-secret identifier');
+  }
+  return {
+    ...DEFAULT_NOTEBOOKLM_CONFIG,
+    enabled: config.enabled === true,
+    projectId,
+    serverName,
+    credentialProxyRoute,
+    allowedOperations: normalizeOperations(config.allowedOperations),
+    notes:
+      config.notes === undefined
+        ? DEFAULT_NOTEBOOKLM_CONFIG.notes
+        : normalizeNotes(config.notes),
+  };
 }
 
 export function saveNotebookLmConfig(
   config: Partial<NotebookLmConfig>,
 ): NotebookLmConfig {
-  const next: NotebookLmConfig = {
+  const next = normalizeNotebookLmConfig({
     ...loadNotebookLmConfig(),
     ...config,
-    provider: 'google-enterprise',
-  };
+  });
   fs.mkdirSync(path.dirname(NOTEBOOKLM_CONFIG_PATH), { recursive: true });
   fs.writeFileSync(
     NOTEBOOKLM_CONFIG_PATH,
     `${JSON.stringify(next, null, 2)}\n`,
   );
   return next;
+}
+
+export function getNotebookLmCapabilities(
+  config = loadNotebookLmConfig(),
+): NotebookLmCapability[] {
+  return NOTEBOOKLM_CAPABILITIES.filter((operation) =>
+    config.allowedOperations.includes(operation),
+  );
+}
+
+export function getNotebookLmReadiness(
+  config = loadNotebookLmConfig(),
+): NotebookLmReadiness {
+  const missing: string[] = [];
+  if (!config.enabled) missing.push('enabled');
+  if (!config.projectId) missing.push('projectId');
+  if (!config.serverName) missing.push('serverName');
+  if (!config.credentialProxyRoute) missing.push('credentialProxyRoute');
+  const capabilities = getNotebookLmCapabilities(config);
+  if (capabilities.length === 0) missing.push('allowedOperations');
+
+  if (missing.length > 0) {
+    return {
+      status: 'blocked',
+      configured: false,
+      connectorId: NOTEBOOKLM_CONNECTOR_ID,
+      provider: 'google-enterprise',
+      contractVersion: NOTEBOOKLM_CONTRACT_VERSION,
+      capabilities,
+      missing,
+      detail:
+        'NotebookLM Enterprise is disabled or missing its non-secret contract metadata.',
+    };
+  }
+
+  return {
+    status: 'attention',
+    configured: true,
+    connectorId: NOTEBOOKLM_CONNECTOR_ID,
+    provider: 'google-enterprise',
+    contractVersion: NOTEBOOKLM_CONTRACT_VERSION,
+    capabilities,
+    missing: [],
+    detail:
+      'Enterprise contract declared. Runtime adapter and credential-proxy verification are required before any external call.',
+  };
+}
+
+export function requestNotebookLmOperation(input: {
+  operation: NotebookLmCapability;
+  approved?: boolean;
+  researchJobId?: string;
+  config?: NotebookLmConfig;
+}): NotebookLmOperationResult {
+  const config = input.config || loadNotebookLmConfig();
+  const readiness = getNotebookLmReadiness(config);
+  const base = {
+    connectorId: NOTEBOOKLM_CONNECTOR_ID as typeof NOTEBOOKLM_CONNECTOR_ID,
+    operation: input.operation,
+    executed: false as const,
+    researchJobId: input.researchJobId || null,
+  };
+  if (!readiness.capabilities.includes(input.operation)) {
+    return {
+      ...base,
+      status: 'blocked',
+      reason: `NotebookLM operation is not allowed: ${input.operation}`,
+    };
+  }
+  if (!readiness.configured) {
+    return {
+      ...base,
+      status: 'blocked',
+      reason: readiness.detail,
+    };
+  }
+  if (input.researchJobId) {
+    linkResearchJobToNotebookLm(input.researchJobId, {
+      operation: input.operation,
+      status: input.approved ? 'approved' : 'requested',
+      sourceRefs: [],
+    });
+  }
+  if (!input.approved) {
+    return {
+      ...base,
+      status: 'requires_approval',
+      reason:
+        'NotebookLM Enterprise operations require explicit owner approval.',
+    };
+  }
+  return {
+    ...base,
+    status: 'blocked',
+    reason:
+      'No official NotebookLM Enterprise runtime adapter is registered; no external call was made.',
+  };
 }
 
 export function listResearchJobs(): ResearchJob[] {
@@ -120,6 +332,7 @@ export function createResearchJob(input: {
     notesPath: null,
     screenshots: input.screenshots || [],
     sourceLedgerPath: input.sourceLedgerPath || null,
+    notebookLmProvenance: null,
     createdAt: now,
     completedAt: null,
     error: null,
@@ -144,7 +357,12 @@ export function updateResearchJobMetadata(
   patch: Partial<
     Pick<
       ResearchJob,
-      'projectId' | 'runId' | 'notesPath' | 'screenshots' | 'sourceLedgerPath'
+      | 'projectId'
+      | 'runId'
+      | 'notesPath'
+      | 'screenshots'
+      | 'sourceLedgerPath'
+      | 'notebookLmProvenance'
     >
   >,
 ): ResearchJob | undefined {
@@ -153,6 +371,25 @@ export function updateResearchJobMetadata(
   const updated = { ...job, ...patch };
   upsertJob(updated);
   return updated;
+}
+
+export function linkResearchJobToNotebookLm(
+  id: string,
+  input: {
+    operation: NotebookLmCapability;
+    status: NotebookLmProvenance['status'];
+    sourceRefs?: string[];
+  },
+): ResearchJob | undefined {
+  return updateResearchJobMetadata(id, {
+    notebookLmProvenance: {
+      connectorId: NOTEBOOKLM_CONNECTOR_ID,
+      operation: input.operation,
+      status: input.status,
+      sourceRefs: (input.sourceRefs || []).map(String).slice(0, 50),
+      recordedAt: new Date().toISOString(),
+    },
+  });
 }
 
 async function runResearchJob(job: ResearchJob): Promise<void> {

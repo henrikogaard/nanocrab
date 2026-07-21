@@ -4861,8 +4861,38 @@ function routeJson(pathname: string, req: Request): JsonValue | undefined {
       enabled: false,
       provider: 'google-enterprise',
       projectId: '',
+      contractVersion: 'enterprise-mcp-v1',
+      connectorId: 'notebooklm-enterprise',
+      serverName: 'notebooklm-enterprise',
+      credentialProxyRoute: 'notebooklm.enterprise',
+      allowedOperations: [
+        'create-notebook',
+        'add-source',
+        'list-notebooks',
+        'retrieve-notebook',
+        'share-notebook',
+        'link-output',
+      ],
       notes:
         'Official NotebookLM Enterprise connector placeholder. Consumer scraping is not included.',
+      readiness: {
+        status: 'blocked',
+        configured: false,
+        connectorId: 'notebooklm-enterprise',
+        provider: 'google-enterprise',
+        contractVersion: 'enterprise-mcp-v1',
+        capabilities: [
+          'create-notebook',
+          'add-source',
+          'list-notebooks',
+          'retrieve-notebook',
+          'share-notebook',
+          'link-output',
+        ],
+        missing: ['enabled'],
+        detail:
+          'NotebookLM Enterprise is disabled or missing its non-secret contract metadata.',
+      },
     };
   }
   if (pathname === '/sessions/terminal/active') {

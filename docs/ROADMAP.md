@@ -280,7 +280,8 @@ Goal: give agents a durable research/reporting workflow without making the core 
   - write Markdown/HTML/PDF artifacts
   - optionally send artifacts back to the requesting channel
 - NotebookLM integration:
-  - support NotebookLM Enterprise as an optional connector/MCP server where the deployment has Google Cloud access.
+  - PARTIAL: define an official Enterprise-only connector contract with readiness, capabilities, redacted diagnostics, approval-gated operation scaffolding, and research-job provenance links.
+  - runtime adapter/MCP wiring remains gated on a verified deployment contract and Google Cloud access.
   - target official operations first: create notebook, add source URLs/files, list/retrieve/share notebooks, and link generated outputs when supported.
   - keep consumer NotebookLM browser-scraping or unofficial APIs out of the core repo; they can live as private plugins when explicitly enabled.
 

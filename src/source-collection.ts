@@ -998,6 +998,22 @@ async function collectSourceDescriptor(
           label: `Research: ${job.query.slice(0, 80)}`,
           source: `research:${job.id}`,
         });
+        if (job.notebookLmProvenance) {
+          const provenance = job.notebookLmProvenance;
+          const source = `notebooklm:${job.id}:${provenance.operation}`;
+          addLedgerEntry(
+            record.id,
+            'research',
+            `NotebookLM Enterprise: ${provenance.operation}`,
+            `NotebookLM Enterprise operation status: ${provenance.status}`,
+            source,
+            provenance.connectorId,
+          );
+          citations.push({
+            label: `NotebookLM Enterprise: ${provenance.operation}`,
+            source,
+          });
+        }
       }
       markScopeCollected(
         record.id,
