@@ -76,6 +76,7 @@ import {
   hasApprovedTarget,
   listApprovals,
   reviewApproval,
+  revertApprovalToPending,
 } from './approvals.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
 import { logAuditEvent } from './audit-log.js';
@@ -1323,11 +1324,12 @@ function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
       'fi',
       'cd "$REPO_DIR"',
       'git config --global --add safe.directory "$PWD" 2>/dev/null || true',
+      'chmod -R u+w . 2>/dev/null || true',
       'git fetch origin "$DEFAULT_BRANCH" --depth 50',
       'git checkout -B "$DEFAULT_BRANCH" "origin/$DEFAULT_BRANCH"',
       'git checkout -B "$JOB_BRANCH"',
       'if [ "$CODING_JOB_MODE" = "review" ]; then',
-      '  chmod -R a-w "$REPO_DIR"',
+      '  chmod -R a-w .',
       'fi',
       'PROMPT="$(cat /workspace/coding-job/.nanocrab/prompt.txt)"',
       'case "$JOB_PROVIDER" in',
@@ -2568,11 +2570,19 @@ export async function approveAndCloseCodingPullRequest(
   if (policy.decision === 'denied') {
     throw new Error(`PR close denied by policy: ${policy.explanation}`);
   }
-  await githubApi(`/repos/${ref.repo}/pulls/${ref.number}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ state: 'closed' }),
-  });
   reviewApproval(approval.id, 'approved', by);
+  try {
+    await githubApi(`/repos/${ref.repo}/pulls/${ref.number}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ state: 'closed' }),
+    });
+  } catch (err) {
+    revertApprovalToPending(
+      approval.id,
+      `GitHub PR close failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    throw err;
+  }
   return { ...ref, approvalId: approval.id };
 }
 

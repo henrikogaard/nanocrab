@@ -10,8 +10,13 @@ vi.mock('./config.js', () => ({
   STORE_DIR,
 }));
 
-const { createApproval, hasApprovedTarget, listApprovals, reviewApproval } =
-  await import('./approvals.js');
+const {
+  createApproval,
+  hasApprovedTarget,
+  listApprovals,
+  reviewApproval,
+  revertApprovalToPending,
+} = await import('./approvals.js');
 
 function writeApprovals(records: Array<Record<string, unknown>>): void {
   fs.mkdirSync(STORE_DIR, { recursive: true });
@@ -228,5 +233,54 @@ describe('approval store', () => {
       reviewedBy: 'system',
       decisionNote: 'Expired before review',
     });
+  });
+
+  it('reverts an approved approval to pending so a failed downstream action can be retried', () => {
+    const approval = createApproval({
+      kind: 'coding-close-pr',
+      title: 'Close PR owner/repo#1',
+      summary: 'Close without merge.',
+      targetType: 'github-pr',
+      targetId: 'owner/repo#1',
+      risk: 'medium',
+      requester: 'owner',
+    });
+    reviewApproval(approval.id, 'approved', 'owner');
+    expect(
+      hasApprovedTarget('coding-close-pr', 'github-pr', 'owner/repo#1'),
+    ).toBe(true);
+
+    const reverted = revertApprovalToPending(
+      approval.id,
+      'GitHub PR close failed: 500',
+    );
+    expect(reverted.status).toBe('pending');
+    expect(reverted.reviewedAt).toBeNull();
+    expect(reverted.reviewedBy).toBeNull();
+    expect(
+      hasApprovedTarget('coding-close-pr', 'github-pr', 'owner/repo#1'),
+    ).toBe(false);
+    const pending = listApprovals({
+      status: 'pending',
+      kind: 'coding-close-pr',
+      targetType: 'github-pr',
+      targetId: 'owner/repo#1',
+    });
+    expect(pending.map((a) => a.id)).toContain(approval.id);
+  });
+
+  it('refuses to revert a pending approval', () => {
+    const approval = createApproval({
+      kind: 'coding-close-pr',
+      title: 'Close PR owner/repo#2',
+      summary: 'Close without merge.',
+      targetType: 'github-pr',
+      targetId: 'owner/repo#2',
+      risk: 'medium',
+      requester: 'owner',
+    });
+    expect(() => revertApprovalToPending(approval.id, 'noop')).toThrow(
+      /pending, cannot revert/,
+    );
   });
 });

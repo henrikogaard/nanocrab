@@ -928,6 +928,87 @@ describe('coding jobs', () => {
     expect(job.prompt).toContain('@@ -1 +1 @@');
   });
 
+  it('writes a review run.sh that chmods the checkout directory and restores write bits before fetch', async () => {
+    vi.useRealTimers();
+    let capturedRunScript: string | null = null;
+    mockGitHubFetch((url) => {
+      if (url.endsWith('/pulls/42')) {
+        return {
+          title: 'Fix scheduler',
+          body: 'Description',
+          state: 'open',
+          head: { ref: 'fix/scheduler', sha: 'abc123' },
+          base: { ref: 'main' },
+        };
+      }
+      if (url.includes('/pulls/42/files')) {
+        return [
+          {
+            filename: 'src/scheduler.ts',
+            status: 'modified',
+            additions: 3,
+            deletions: 1,
+            patch: '@@ -1 +1 @@\n-old\n+new',
+          },
+        ];
+      }
+      return { default_branch: 'main' };
+    });
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      const metadataDir = `${jobRoot}/.nanocrab`;
+      capturedRunScript = fs.readFileSync(`${metadataDir}/run.sh`, 'utf-8');
+      setImmediate(() => {
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, 'src/a.ts | 1 +\n');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.stdout.push('review output\n');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingPullRequestReview({
+      repo: 'owner/repo',
+      pullRequestNumber: 42,
+      requestedBy: 'dashboard',
+    });
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('completed');
+    });
+
+    expect(capturedRunScript).not.toBeNull();
+    const runScript = capturedRunScript!;
+    // P1 fix: chmod must target the current directory, not a nested
+    // $REPO_DIR/$REPO_DIR path that does not exist.
+    expect(runScript).toContain('chmod -R a-w .');
+    expect(runScript).not.toContain('chmod -R a-w "$REPO_DIR"');
+    // P2 fix: write bits must be restored before git fetch on retry so a
+    // previously read-only review workspace can be re-fetched.
+    expect(runScript).toContain('chmod -R u+w . 2>/dev/null || true');
+    // The restore must happen before the fetch, and the read-only chmod
+    // must happen after the checkout.
+    const restoreIndex = runScript.indexOf('chmod -R u+w .');
+    const fetchIndex = runScript.indexOf('git fetch origin');
+    const checkoutIndex = runScript.indexOf('git checkout -B "$JOB_BRANCH"');
+    const readOnlyIndex = runScript.indexOf('chmod -R a-w .');
+    expect(restoreIndex).toBeGreaterThan(-1);
+    expect(fetchIndex).toBeGreaterThan(restoreIndex);
+    expect(checkoutIndex).toBeGreaterThan(fetchIndex);
+    expect(readOnlyIndex).toBeGreaterThan(checkoutIndex);
+  });
+
   it('keeps close approval pending when GitHub close fails', async () => {
     const fetchMock = vi.fn(
       async (
@@ -966,6 +1047,64 @@ describe('coding jobs', () => {
       approveAndCloseCodingPullRequest('owner/repo#42', undefined, 'owner'),
     ).rejects.toThrow();
 
+    expect(
+      listApprovals({
+        status: 'pending',
+        kind: 'coding-close-pr',
+        targetType: 'github-pr',
+        targetId: 'owner/repo#42',
+      }).map((approval) => approval.id),
+    ).toContain(requested.approvalId);
+  });
+
+  it('reserves the close approval before the GitHub PATCH so concurrent denials cannot race', async () => {
+    let approvalDuringPatch: string | undefined;
+    const fetchMock = vi.fn(
+      async (
+        _url: string | URL,
+        options?: RequestInit,
+      ): Promise<{
+        ok: boolean;
+        status: number;
+        json: () => Promise<unknown>;
+        text: () => Promise<string>;
+      }> => {
+        if (options?.method === 'PATCH') {
+          approvalDuringPatch = listApprovals({
+            kind: 'coding-close-pr',
+            targetType: 'github-pr',
+            targetId: 'owner/repo#42',
+          }).find((a) => a.status === 'approved')?.id;
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({ message: 'temporary failure' }),
+            text: async () => 'temporary failure',
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ title: 'Fix scheduler', state: 'open' }),
+          text: async () => '',
+        };
+      },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const requested = await requestCodingPullRequestClose(
+      'owner/repo#42',
+      undefined,
+      'owner',
+    );
+    await expect(
+      approveAndCloseCodingPullRequest('owner/repo#42', undefined, 'owner'),
+    ).rejects.toThrow();
+
+    // The approval must be approved while the PATCH is in flight so a
+    // concurrent deny cannot consume the pending approval.
+    expect(approvalDuringPatch).toBe(requested.approvalId);
+    // After the PATCH fails, the approval reverts to pending for retry.
     expect(
       listApprovals({
         status: 'pending',

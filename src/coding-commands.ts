@@ -25,7 +25,12 @@ type CodingCommandAction =
   | 'approve-close-pr';
 
 export interface CodingCommandRunOptions {
-  /** Prefix used to keep read-only job metadata within the originating channel. */
+  /**
+   * Prefix used to keep read-only job listings and show metadata within the
+   * originating channel. Write actions (approve, cancel, open-pr, refresh-ci)
+   * are not filtered so authorized operators can act on jobs created by the
+   * dashboard, control-plane, or autofix.
+   */
   visibilityScope?: string;
 }
 
@@ -149,6 +154,10 @@ function summarizeJob(
     .join('\n');
 }
 
+/**
+ * Read-only visibility check used by list/show only. Write actions bypass
+ * this so authorized operators can act on jobs created outside their channel.
+ */
 function isVisibleCodingJob(
   job: NonNullable<ReturnType<typeof getCodingJob>>,
   visibilityScope?: string,
@@ -254,11 +263,14 @@ export async function runCodingCommand(
 
   if (!command.jobId) return 'A coding job id is required.';
   const existing = getCodingJob(command.jobId);
-  if (!existing || !isVisibleCodingJob(existing, options.visibilityScope)) {
-    return `Coding job not found: ${command.jobId}`;
-  }
+  if (!existing) return `Coding job not found: ${command.jobId}`;
 
-  if (command.action === 'show') return summarizeJob(existing);
+  if (command.action === 'show') {
+    if (!isVisibleCodingJob(existing, options.visibilityScope)) {
+      return `Coding job not found: ${command.jobId}`;
+    }
+    return summarizeJob(existing);
+  }
   if (command.action === 'approve') {
     return summarizeJob(approveCodingJob(command.jobId, actor));
   }

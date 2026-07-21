@@ -290,6 +290,43 @@ export function reviewApproval(
   return approval;
 }
 
+/**
+ * Revert an approval from approved/denied back to pending. Used when an
+ * approved action fails downstream (e.g. GitHub API error) so the approval
+ * can be retried. Throws if the approval is not in a reviewed state.
+ */
+export function revertApprovalToPending(
+  id: string,
+  reason: string,
+): ApprovalRequest {
+  const approvals = readApprovals();
+  const approval = approvals.find((item) => item.id === id);
+  if (!approval) throw new Error(`Approval not found: ${id}`);
+  if (approval.status !== 'approved' && approval.status !== 'denied') {
+    throw new Error(`Approval is ${approval.status}, cannot revert`);
+  }
+  const previousStatus = approval.status;
+  approval.status = 'pending';
+  approval.reviewedAt = null;
+  approval.reviewedBy = null;
+  approval.decisionNote = null;
+  writeApprovals(approvals);
+  logAuditEvent({
+    actor: 'system',
+    actionType: `approval.${approval.kind}.reverted`,
+    resource: `${approval.targetType || approval.kind}/${approval.targetId || approval.id}`,
+    decision: 'reverted',
+    correlationId: approval.correlationId,
+    context: {
+      approvalId: approval.id,
+      kind: approval.kind,
+      previousStatus,
+      reason,
+    },
+  });
+  return approval;
+}
+
 export function hasApprovedTarget(
   kind: ApprovalKind,
   targetType: string,
