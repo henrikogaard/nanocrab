@@ -30,6 +30,15 @@ import {
 import { probeCodingRunnerReadiness } from '../../coding-runner-readiness.js';
 import type { AgentRuntimeHealth, AgentRuntimeSelection } from '../../types.js';
 import {
+  buildCodingRuntimeProfile,
+  deleteCodingRuntimeProfile,
+  getCodingRuntimeProfile,
+  listCodingRuntimeProfiles,
+  resolveCodingRuntimeProfile,
+  saveCodingRuntimeProfile,
+  type CodingRuntimeProfile,
+} from '../../coding-runtime-profiles.js';
+import {
   getAllRegisteredGroups as _getAllRegisteredGroups,
   getNonWebRegisteredGroups,
 } from '../../db.js';
@@ -286,6 +295,96 @@ router.get('/coding/runtimes', async (_req: Request, res: Response) => {
     res.status(500).json({
       error: err instanceof Error ? err.message : String(err),
     });
+  }
+});
+
+async function runtimeProfileResponse(
+  profile: CodingRuntimeProfile,
+): Promise<Record<string, unknown>> {
+  const readiness = await probeCodingRunnerReadiness(profile.runtime.cli);
+  return {
+    ...profile,
+    available: readiness.status === 'healthy',
+    readiness,
+  };
+}
+
+router.get('/coding/runtime-profiles', async (_req: Request, res: Response) => {
+  try {
+    res.json(
+      await Promise.all(
+        listCodingRuntimeProfiles().map(runtimeProfileResponse),
+      ),
+    );
+  } catch (err) {
+    res
+      .status(500)
+      .json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.post('/coding/runtime-profiles', async (req: Request, res: Response) => {
+  try {
+    const profile = buildCodingRuntimeProfile({
+      id: req.body?.id,
+      label: req.body?.label,
+      description: req.body?.description,
+      runtime: req.body?.runtime,
+      enabled: req.body?.enabled,
+    });
+    const saved = saveCodingRuntimeProfile(profile);
+    auditLog(req, 'coding_runtime_profile_created', saved.id);
+    res.json({ ok: true, profile: await runtimeProfileResponse(saved) });
+  } catch (err) {
+    res
+      .status(400)
+      .json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+router.put(
+  '/coding/runtime-profiles/:id',
+  async (req: Request, res: Response) => {
+    try {
+      const id = Array.isArray(req.params.id)
+        ? req.params.id[0]
+        : req.params.id;
+      const existing = getCodingRuntimeProfile(id);
+      if (!existing) {
+        res.status(404).json({ error: 'Coding runtime profile not found' });
+        return;
+      }
+      const profile = buildCodingRuntimeProfile({
+        id: existing.id,
+        label: req.body?.label ?? existing.label,
+        description: req.body?.description ?? existing.description,
+        runtime: req.body?.runtime ?? existing.runtime,
+        enabled: req.body?.enabled ?? existing.enabled,
+      });
+      const saved = saveCodingRuntimeProfile({
+        ...profile,
+        createdAt: existing.createdAt,
+      });
+      auditLog(req, 'coding_runtime_profile_updated', saved.id);
+      res.json({ ok: true, profile: await runtimeProfileResponse(saved) });
+    } catch (err) {
+      res
+        .status(400)
+        .json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+);
+
+router.delete('/coding/runtime-profiles/:id', (req: Request, res: Response) => {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    deleteCodingRuntimeProfile(id);
+    auditLog(req, 'coding_runtime_profile_deleted', id);
+    res.json({ ok: true });
+  } catch (err) {
+    res
+      .status(400)
+      .json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
 
@@ -646,9 +745,12 @@ router.get('/coding/issues', async (req: Request, res: Response) => {
 
 router.post('/coding/jobs', async (req: Request, res: Response) => {
   try {
-    const actualRuntime = await parseCodingRuntimeSelection(
-      req.body.actualRuntime,
-    );
+    const selectedRuntime =
+      typeof req.body.runtimeProfileId === 'string' &&
+      req.body.runtimeProfileId.trim()
+        ? resolveCodingRuntimeProfile(req.body.runtimeProfileId.trim())
+        : req.body.actualRuntime;
+    const actualRuntime = await parseCodingRuntimeSelection(selectedRuntime);
     const job = await startCodingJob({
       repo: req.body.repo,
       prompt: req.body.prompt,
@@ -672,9 +774,12 @@ router.post('/coding/jobs', async (req: Request, res: Response) => {
 
 router.post('/coding/pick-issue', async (req: Request, res: Response) => {
   try {
-    const actualRuntime = await parseCodingRuntimeSelection(
-      req.body.actualRuntime,
-    );
+    const selectedRuntime =
+      typeof req.body.runtimeProfileId === 'string' &&
+      req.body.runtimeProfileId.trim()
+        ? resolveCodingRuntimeProfile(req.body.runtimeProfileId.trim())
+        : req.body.actualRuntime;
+    const actualRuntime = await parseCodingRuntimeSelection(selectedRuntime);
     const result = await pickGitHubIssue({
       repo: req.body.repo,
       labels: Array.isArray(req.body.labels) ? req.body.labels : undefined,

@@ -20,6 +20,15 @@ const readinessByCli = new Map<string, 'healthy' | 'missing'>([
   ['pi', 'healthy'],
   ['mistral', 'healthy'],
 ]);
+const namedRuntime = {
+  id: 'codex-default',
+  label: 'Codex default',
+  description: null,
+  runtime: { cli: 'codex', provider: 'codex', model: 'gpt-5.4' },
+  enabled: true,
+  createdAt: new Date(0).toISOString(),
+  updatedAt: new Date(0).toISOString(),
+};
 
 vi.mock('../../config.js', () => ({
   STORE_DIR: '/tmp/nanocrab-agents-runtime-route-test/store',
@@ -27,6 +36,14 @@ vi.mock('../../config.js', () => ({
     'claude/claude-sonnet-4-6': 'claude-sonnet-4',
     'claude/claude-opus-4-6': 'claude-opus-4.6',
   },
+}));
+vi.mock('../../coding-runtime-profiles.js', () => ({
+  buildCodingRuntimeProfile: vi.fn(),
+  deleteCodingRuntimeProfile: vi.fn(),
+  getCodingRuntimeProfile: vi.fn(() => namedRuntime),
+  listCodingRuntimeProfiles: vi.fn(() => [namedRuntime]),
+  resolveCodingRuntimeProfile: vi.fn(() => namedRuntime.runtime),
+  saveCodingRuntimeProfile: vi.fn((profile) => profile),
 }));
 
 vi.mock('../../logger.js', () => ({
@@ -275,6 +292,19 @@ describe('coding runtime selection routes', () => {
     expect(response.status).toBe(200);
     expect(pickGitHubIssue).toHaveBeenCalledWith(
       expect.objectContaining({ actualRuntime }),
+    );
+  });
+
+  it('resolves a named runtime profile before starting a coding job', async () => {
+    const response = await post('/api/agents/coding/jobs', {
+      repo: 'owner/repo',
+      prompt: 'Implement issue 129',
+      runtimeProfileId: 'codex-default',
+    });
+
+    expect(response.status).toBe(200);
+    expect(startCodingJob).toHaveBeenCalledWith(
+      expect.objectContaining({ actualRuntime: namedRuntime.runtime }),
     );
   });
 });

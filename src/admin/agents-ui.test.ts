@@ -893,6 +893,9 @@ describe('Agents launcher UI', () => {
     const source = fs.readFileSync(agentsPagePath, 'utf8');
 
     expect(source).toContain("api('/agents/coding/runtimes')");
+    expect(source).toContain("api('/agents/coding/runtime-profiles')");
+    expect(source).toContain('codingRuntimeProfileOptions');
+    expect(source).toContain('selectCodingRuntimeProfile');
     expect(source).toContain('normalizeCodingRuntimeCatalog');
     expect(source).toContain('loadIssues.push(runtimeCatalog.error)');
     expect(source).toContain('Runner CLI');
@@ -931,6 +934,7 @@ describe('Agents launcher UI', () => {
     expect(source).toContain('assign-coding-issue-number');
     expect(source).toContain('assign-coding-prompt');
     expect(source).toContain('assign-coding-plan-mode');
+    expect(source).toContain('assign-coding-profile-select');
     expect(source).toContain('value="plan-first"');
     expect(source).toContain('value="implement-now"');
     expect(source).toContain('startAssignedCodingJob');

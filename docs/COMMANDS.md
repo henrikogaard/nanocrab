@@ -54,6 +54,13 @@ runtime is specified, the configured coding profile is used; an unavailable
 fallback is never silent and requires approval. Every container-backed coding
 or review job receives a fresh workspace under `data/coding-workspaces/jobs/`.
 
+Named runtime profiles are selectable in the **Agents → Coding** assignment
+controls and through `/api/agents/coding/runtime-profiles`. Built-in profiles
+for Claude Code, Codex CLI, OpenCode CLI, Pi, Mistral Vibe, and readiness-gated
+Devin are available immediately. Custom profiles are managed through that API
+or `store/coding-runtime-profiles.json`; Cursor CLI remains unlisted until its
+invocation, credential handoff, and isolation contract are verified.
+
 The default trigger is `@` plus the configured `ASSISTANT_NAME`, for example `@NanoCrab`. Group-specific triggers are stored in group configuration and can be changed from the dashboard. Examples such as `!wolfclaw` or `!wolfie` are group triggers, not Discord Developer Portal commands.
 
 Agent Profile mentions come after the group trigger. They are natural-language

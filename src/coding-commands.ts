@@ -10,6 +10,7 @@ import {
   requestCodingPullRequestClose,
   startCodingPullRequestReview,
 } from './coding-jobs.js';
+import { resolveCodingRuntimeProfile } from './coding-runtime-profiles.js';
 
 type CodingCommandAction =
   | 'help'
@@ -36,6 +37,7 @@ export interface ParsedCodingCommand {
   cli?: string;
   provider?: string;
   model?: string;
+  runtimeProfileId?: string;
   createPr?: boolean;
 }
 
@@ -111,6 +113,8 @@ export function parseCodingCommand(input: string): ParsedCodingCommand | null {
       parsed.provider = value;
     } else if (key === 'model' && value) {
       parsed.model = value;
+    } else if ((key === 'profile' || key === 'runtime-profile') && value) {
+      parsed.runtimeProfileId = value;
     } else if (key === 'assignee' && value) {
       parsed.assignee = value;
     } else if (key === 'milestone' && value) {
@@ -153,7 +157,8 @@ export async function runCodingCommand(
       'Coding commands:',
       '/coding-jobs',
       '/coding-job <jobId>',
-      '/coding-pick owner/repo labels=a,b tool=codex provider=codex model=gpt-5.4 [no-pr]',
+      '/coding-pick owner/repo labels=a,b profile=codex-default [no-pr]',
+      '  (or tool=codex provider=codex model=gpt-5.4)',
       '/coding-approve <jobId>',
       '/coding-pr <jobId>',
       '/coding-review-pr owner/repo#<pr> tool=codex provider=codex model=gpt-5.4',
@@ -174,12 +179,17 @@ export async function runCodingCommand(
 
   if (command.action === 'pick') {
     if (!command.repo) return 'Usage: /coding-pick owner/repo labels=a,b';
+    const actualRuntime = command.runtimeProfileId
+      ? resolveCodingRuntimeProfile(command.runtimeProfileId)
+      : undefined;
     const result = await pickGitHubIssue({
       repo: command.repo,
       labels: command.labels,
       cli: command.cli,
       provider: command.provider,
       model: command.model,
+      actualRuntime,
+      runtimeProfileId: command.runtimeProfileId,
       assignee: command.assignee,
       milestone: command.milestone,
       issueNumber: command.issueNumber,

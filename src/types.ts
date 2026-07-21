@@ -7,6 +7,7 @@ export const AGENT_CLI_IDS = [
   'opencode',
   'devin',
   'mistral',
+  'cursor',
 ] as const;
 export type AgentCliId = (typeof AGENT_CLI_IDS)[number];
 export type AgentStageRole = 'planning' | 'implement' | 'review';

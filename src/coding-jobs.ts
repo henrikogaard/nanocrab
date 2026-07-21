@@ -45,6 +45,7 @@ import type {
   CodingRunnerResult,
 } from './coding-runners/types.js';
 import { createProductionDevinHostRunner } from './coding-runners/devin-host.js';
+import { createProductionCursorHostRunner } from './coding-runners/cursor-host.js';
 import { codingProcessRegistry } from './coding-runners/process-registry.js';
 import {
   HostGitCancelledError,
@@ -79,6 +80,7 @@ import {
   reviewApproval,
 } from './approvals.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
+import { resolveCodingRuntimeProfile } from './coding-runtime-profiles.js';
 import { logAuditEvent } from './audit-log.js';
 import { evaluatePolicy } from './policy-engine.js';
 import { buildRepoRulesContext } from './repo-preferences.js';
@@ -109,6 +111,7 @@ export interface CodingJobExecutionDependencies {
     attemptId?: string;
   }): Promise<void>;
   devinRunner: CodingRunnerAdapter;
+  cursorRunner: CodingRunnerAdapter;
   /** True only when the host sandbox has a credential handoff it can safely expose. */
   devinSandboxAuthHandoffAvailable(): boolean;
   runContainer(
@@ -133,6 +136,7 @@ const CODING_JOB_PROVIDERS = new Set<AgentProvider>([
   'openrouter',
   'ollama',
   'openai-compatible',
+  'cursor',
 ]);
 type CodingProvider = Extract<
   AgentProvider,
@@ -144,6 +148,7 @@ type CodingProvider = Extract<
   | 'openrouter'
   | 'ollama'
   | 'openai-compatible'
+  | 'cursor'
 >;
 
 export type CodingJobStatus =
@@ -249,6 +254,7 @@ export interface CodingJob {
   /** Runtime explicitly requested by the caller, before fallback/readiness selection. */
   requestedRuntime?: AgentRuntimeSelection | null;
   actualRuntime?: AgentRuntimeSelection | null;
+  runtimeProfileId?: string | null;
   runnerCli: AgentCliId;
   activeAttemptId: string | null;
   executionAttempts: CodingExecutionAttempt[];
@@ -281,6 +287,7 @@ export interface StartCodingJobInput {
   stageId?: string | null;
   decisionId?: string | null;
   actualRuntime?: AgentRuntimeSelection | null;
+  runtimeProfileId?: string | null;
   runId?: string | null;
   stageKind?: PipelineStageKind | null;
   stageEvidence?: StageRunEvidence | null;
@@ -1539,12 +1546,14 @@ const CODING_SECRET_KEYS = [
   'OPENCODE_API_KEY',
   'OPENROUTER_API_KEY',
   'MISTRAL_API_KEY',
+  'CURSOR_API_KEY',
   'OLLAMA_API_KEY',
   'AGENT_PROVIDER_API_KEY',
   'NANOCRAB_API_KEY',
 ] as const;
 
 let productionDevinRunner: CodingRunnerAdapter | null = null;
+let productionCursorRunner: CodingRunnerAdapter | null = null;
 let codingJobExecutionOverrides: Partial<CodingJobExecutionDependencies> | null =
   null;
 
@@ -1598,6 +1607,41 @@ const productionDevinRunnerProxy: CodingRunnerAdapter = {
       : false,
 };
 
+function getProductionCursorRunner(): CodingRunnerAdapter {
+  if (productionCursorRunner) return productionCursorRunner;
+  productionCursorRunner = createProductionCursorHostRunner({
+    spawn,
+    registry: codingProcessRegistry,
+    timers: {
+      setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+      clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
+    },
+    environmentSource: process.env,
+    authAvailable: () =>
+      Boolean(
+        process.env.CURSOR_API_KEY ||
+        readEnvFile(['CURSOR_API_KEY']).CURSOR_API_KEY,
+      ),
+    isolationAvailable: () =>
+      process.env.NANOCRAB_CURSOR_ISOLATION_VERIFIED === '1' &&
+      (process.platform === 'darwin'
+        ? fs.existsSync('/usr/bin/sandbox-exec')
+        : fs.existsSync('/usr/bin/bwrap')),
+    sandboxExecutable:
+      process.platform === 'darwin'
+        ? '/usr/bin/sandbox-exec'
+        : '/usr/bin/bwrap',
+    platform: process.platform,
+  });
+  return productionCursorRunner;
+}
+
+const productionCursorRunnerProxy: CodingRunnerAdapter = {
+  run: (input) => getProductionCursorRunner().run(input),
+  cancel: (jobId, attemptId) =>
+    getProductionCursorRunner().cancel(jobId, attemptId),
+};
+
 const runGit = runHostGit;
 
 function productionCodingJobExecutionDependencies(): CodingJobExecutionDependencies {
@@ -1618,6 +1662,7 @@ function productionCodingJobExecutionDependencies(): CodingJobExecutionDependenc
     deleteWorkspaceBranch: (input) =>
       deleteCodingWorkspaceBranch(input, { git: runGit }),
     devinRunner: productionDevinRunnerProxy,
+    cursorRunner: productionCursorRunnerProxy,
     devinSandboxAuthHandoffAvailable: isDevinSandboxAuthHandoffAvailable,
     runContainer: runCodingContainer,
     now: nowIso,
@@ -2043,6 +2088,26 @@ async function runCodingJob(
       if (runnerResult.state === 'succeeded') {
         hostEvidence = await deps.collectWorkspaceEvidence(prepared.workspace);
       }
+    } else if (job.runnerCli === 'cursor') {
+      runnerResult = await deps.cursorRunner.run({
+        jobId: job.id,
+        attemptId,
+        cli: 'cursor',
+        model: selectedRuntime.model,
+        stageKind: job.stageKind || null,
+        workspace: prepared.workspace,
+        promptFile: path.join(prepared.metadataDir, 'prompt.txt'),
+        timeoutMs: CODING_JOB_RUNNER_TIMEOUT_MS,
+        onOutput: (chunk) => {
+          const currentAttempt = getCodingJob(job.id);
+          if (currentAttempt?.activeAttemptId === attemptId) {
+            updateJobOutput(currentAttempt, chunk.text);
+          }
+        },
+      });
+      if (runnerResult.state === 'succeeded') {
+        hostEvidence = await deps.collectWorkspaceEvidence(prepared.workspace);
+      }
     } else {
       const exitCode = await deps.runContainer(job, repo, attemptId);
       runnerResult = {
@@ -2235,7 +2300,9 @@ export async function startCodingJob(
         }
         return { ...input.actualRuntime! };
       })()
-    : null;
+    : input.runtimeProfileId
+      ? resolveCodingRuntimeProfile(input.runtimeProfileId)
+      : null;
   const requestedRuntime =
     explicitRuntime ||
     resolveCodingRuntimeSelection({
@@ -2326,6 +2393,7 @@ export async function startCodingJob(
     stageId: input.stageId || null,
     decisionId: input.decisionId || null,
     requestedRuntime,
+    runtimeProfileId: input.runtimeProfileId || null,
     // An explicit runtime is the selected runtime until the execution probe
     // proves it unavailable and the owner approves a complete fallback.
     actualRuntime: requestedRuntime,
@@ -2366,6 +2434,7 @@ export async function pickGitHubIssue(input: {
   provider?: string;
   model?: string;
   actualRuntime?: AgentRuntimeSelection | null;
+  runtimeProfileId?: string | null;
   assignee?: string;
   milestone?: string;
   issueNumber?: number;
@@ -2390,6 +2459,7 @@ export async function pickGitHubIssue(input: {
     cli: input.cli,
     tool: input.tool,
     actualRuntime: input.actualRuntime,
+    runtimeProfileId: input.runtimeProfileId,
     createPr: input.createPr,
     requestedBy: input.requestedBy,
   });
@@ -2622,6 +2692,8 @@ export function cancelCodingJob(jobId: string, by = 'dashboard'): CodingJob {
     }
     if (job.runnerCli === 'devin') {
       codingJobExecutionDependencies().devinRunner.cancel(job.id, attemptId);
+    } else if (job.runnerCli === 'cursor') {
+      codingJobExecutionDependencies().cursorRunner.cancel(job.id, attemptId);
     } else {
       cancelContainerProcess(job.id, 'cancel coding job', attemptId);
     }

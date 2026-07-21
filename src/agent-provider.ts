@@ -13,6 +13,7 @@ export const AGENT_PROVIDERS = [
   'claude',
   'codex',
   'opencode',
+  'cursor',
   'pi',
   'ollama',
   'openrouter',
@@ -30,6 +31,7 @@ export type AgentProviderRuntime =
   | 'claude-agent-sdk'
   | 'codex-cli'
   | 'opencode-cli'
+  | 'cursor-agent-cli'
   | 'pi-cli'
   | 'vibe-cli'
   | 'openai-compatible'
@@ -80,6 +82,17 @@ export const AGENT_PROVIDER_DEFINITIONS: Record<
       'OpenCode CLI coding-agent runtime. Uses OpenCode provider config/auth.',
     selectable: true,
     requiresCli: 'opencode',
+    requiresAuth: true,
+  },
+  cursor: {
+    id: 'cursor',
+    name: 'Cursor Agent CLI',
+    runtime: 'cursor-agent-cli',
+    description:
+      'Cursor Agent CLI in a verified isolated host workspace. Credentials never enter containers.',
+    envKey: 'CURSOR_API_KEY',
+    selectable: true,
+    requiresCli: 'agent',
     requiresAuth: true,
   },
   pi: {
@@ -211,6 +224,7 @@ export const AGENT_PROVIDER_MODELS: Record<AgentProvider, string[]> = {
     'anthropic/claude-sonnet-4-6',
     'openai/gpt-5.4',
   ],
+  cursor: ['gpt-5', 'claude-sonnet-4-6', 'composer-1'],
   pi: ['gemini-2.5-pro', 'claude-sonnet-4-6', 'gpt-5.4'],
   ollama: ['llama3', 'llama3.1', 'mistral', 'codestral', 'gemma4:e2b'],
   openrouter: [
@@ -241,6 +255,7 @@ export const DEFAULT_AGENT_MODELS: Record<AgentProvider, string> = {
   claude: 'claude-sonnet-4-6',
   codex: 'gpt-5.4',
   opencode: 'opencode/grok-code-fast-1',
+  cursor: 'gpt-5',
   pi: 'gemini-2.5-pro',
   ollama: 'llama3',
   openrouter: 'openrouter/auto',
@@ -257,6 +272,7 @@ export const CODING_PROVIDER_IDS = new Set<AgentProvider>([
   'claude',
   'codex',
   'opencode',
+  'cursor',
   'pi',
   'mistral',
   'openrouter',
@@ -469,6 +485,15 @@ export function getProviderAvailability(
 
   for (const provider of AGENT_PROVIDERS) {
     const definition = AGENT_PROVIDER_DEFINITIONS[provider];
+    if (provider === 'cursor') {
+      // Cursor is host-isolated only; do not advertise it from the generic
+      // provider catalog unless both the executable and API key are present.
+      availability.cursor =
+        hasCommand('agent') &&
+        hasCredential('CURSOR_API_KEY') &&
+        process.env.NANOCRAB_CURSOR_ISOLATION_VERIFIED === '1';
+      continue;
+    }
     if (provider === 'pi') {
       availability.pi =
         hasContainerImage() && hasCredential('OPENROUTER_API_KEY');
