@@ -67,6 +67,20 @@ export interface CodingWorkspacePublicationInput {
   assertOwnership(): void;
   jobId?: string;
   attemptId?: string;
+  commitSigningPolicy?: 'off' | 'prefer' | 'require';
+  /** A key id in the host keyring; never a private key or credential. */
+  signingKey?: string;
+}
+
+export type CodingCommitSigningStatus =
+  | 'unsigned'
+  | 'signed'
+  | 'preferred-unsigned';
+
+export interface CodingWorkspacePublicationResult {
+  commitSha: string;
+  signingStatus?: CodingCommitSigningStatus;
+  signingWarning?: string;
 }
 
 type AskpassFactory = (
@@ -702,7 +716,7 @@ export async function publishCodingWorkspace(
   deps: Pick<CodingWorkspaceDeps, 'git' | 'createAskpass'> & {
     validateGitMetadata?(workspace: string): Promise<void>;
   },
-): Promise<{ commitSha: string }> {
+): Promise<CodingWorkspacePublicationResult> {
   if (
     !path.isAbsolute(input.workspace) ||
     path.normalize(input.workspace) !== input.workspace
@@ -753,23 +767,99 @@ export async function publishCodingWorkspace(
     throw new Error('Git parent revision lookup returned an invalid commit');
   }
   input.assertOwnership();
-  const commit = await runLocalGit(
-    deps.git,
-    [
-      'commit-tree',
-      treeId,
-      '-p',
-      parentSha,
-      '--no-gpg-sign',
-      '-m',
-      input.commitMessage,
-    ],
-    input.workspace,
-    'Git commit creation',
-  );
-  const commitSha = commit.stdout.trim();
+  const signingPolicy = input.commitSigningPolicy || 'off';
+  const signingKey = input.signingKey?.trim();
+  if (signingPolicy === 'require' && !signingKey) {
+    throw new Error(
+      'Commit signing is required but no host signing key is configured',
+    );
+  }
+  if (signingKey && !/^[A-Za-z0-9_.@:+/-]{1,128}$/.test(signingKey)) {
+    throw new Error('Configured commit signing key id is invalid');
+  }
+  const commitArgs = [
+    'commit-tree',
+    treeId,
+    '-p',
+    parentSha,
+    ...(signingPolicy === 'off'
+      ? ['--no-gpg-sign']
+      : [signingKey ? `--gpg-sign=${signingKey}` : '--gpg-sign']),
+    '-m',
+    input.commitMessage,
+  ];
+  let signingStatus: CodingCommitSigningStatus =
+    signingPolicy === 'off' ? 'unsigned' : 'signed';
+  let signingWarning: string | undefined;
+  let commit;
+  try {
+    commit = await runLocalGit(
+      deps.git,
+      commitArgs,
+      input.workspace,
+      'Git commit creation',
+    );
+  } catch (err) {
+    if (signingPolicy !== 'prefer') throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    signingStatus = 'preferred-unsigned';
+    signingWarning = message.slice(0, 240);
+    commit = await runLocalGit(
+      deps.git,
+      [
+        'commit-tree',
+        treeId,
+        '-p',
+        parentSha,
+        '--no-gpg-sign',
+        '-m',
+        input.commitMessage,
+      ],
+      input.workspace,
+      'Git unsigned fallback commit creation',
+    );
+  }
+  let commitSha = commit.stdout.trim();
   if (!/^[0-9a-f]{40,64}$/i.test(commitSha)) {
     throw new Error('Git commit creation returned an invalid commit');
+  }
+  if (signingStatus === 'signed') {
+    try {
+      await runLocalGit(
+        deps.git,
+        ['verify-commit', commitSha],
+        input.workspace,
+        'Git commit signature verification',
+      );
+    } catch (err) {
+      if (signingPolicy === 'require') {
+        throw new Error('Required commit signature verification failed', {
+          cause: err,
+        });
+      }
+      signingStatus = 'preferred-unsigned';
+      signingWarning = 'commit signature verification failed';
+      const fallbackCommit = await runLocalGit(
+        deps.git,
+        [
+          'commit-tree',
+          treeId,
+          '-p',
+          parentSha,
+          '--no-gpg-sign',
+          '-m',
+          input.commitMessage,
+        ],
+        input.workspace,
+        'Git unsigned fallback commit creation',
+      );
+      commitSha = fallbackCommit.stdout.trim();
+      if (!/^[0-9a-f]{40,64}$/i.test(commitSha)) {
+        throw new Error('Git unsigned fallback returned an invalid commit', {
+          cause: err,
+        });
+      }
+    }
   }
   input.assertOwnership();
   await runLocalGit(
@@ -796,7 +886,11 @@ export async function publishCodingWorkspace(
     },
   );
   requireGitSuccess(push, 'Approved Git push');
-  return { commitSha };
+  return {
+    commitSha,
+    signingStatus,
+    ...(signingWarning ? { signingWarning } : {}),
+  };
 }
 
 export async function deleteCodingWorkspaceBranch(
