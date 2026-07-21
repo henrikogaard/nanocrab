@@ -444,7 +444,58 @@ describe('source-collection', () => {
         sourceLabel: 'Mounted note',
         citationText: expect.stringContaining('Mounted source content.'),
       });
-      expect(collected.citations[0].source).toMatch(/^file:\/\//);
+      expect(collected.citations[0].source).toBe('file:Mounted note');
+      expect(collected.citations[0].source).not.toContain(filePath);
+    });
+
+    it('preserves leading source content while bounding and rejecting unsafe files', async () => {
+      const indentedPath = path.join(STORE_DIR, 'indented-note.md');
+      fs.writeFileSync(indentedPath, '  keep this indentation\n\n');
+      const collected = await collectReportSources(
+        'report-mounted-content',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [{ scope: 'file', mountedPath: indentedPath }],
+      );
+
+      expect(collected.sections.join('\n')).toContain(
+        '  keep this indentation',
+      );
+      expect(
+        getSourceCollection(collected.sourceCollectionId)?.items[0],
+      ).toMatchObject({
+        itemCount: 1,
+        status: 'completed',
+      });
+    });
+
+    it('rejects oversized and binary mounted sources before reading report content', async () => {
+      const oversizedPath = path.join(STORE_DIR, 'oversized-note.md');
+      fs.writeFileSync(oversizedPath, Buffer.alloc(128 * 1024 + 1, 'x'));
+      const oversized = await collectReportSources(
+        'report-mounted-oversized',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [{ scope: 'file', mountedPath: oversizedPath }],
+      );
+      expect(
+        getSourceCollection(oversized.sourceCollectionId)?.items[0],
+      ).toMatchObject({
+        status: 'failed',
+        failureReason: expect.stringContaining('byte limit'),
+      });
+
+      const binaryPath = path.join(STORE_DIR, 'binary-note.txt');
+      fs.writeFileSync(binaryPath, Buffer.from([0, 1, 2]));
+      const binary = await collectReportSources(
+        'report-mounted-binary',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [{ scope: 'file', mountedPath: binaryPath }],
+      );
+      expect(
+        getSourceCollection(binary.sourceCollectionId)?.items[0],
+      ).toMatchObject({
+        status: 'failed',
+        failureReason: 'Binary content is not supported',
+      });
     });
 
     it('rejects mounted files outside allowed roots', async () => {
@@ -464,7 +515,7 @@ describe('source-collection', () => {
       const collection = getSourceCollection(collected.sourceCollectionId)!;
       expect(collection.status).toBe('failed');
       expect(collection.items[0].failureReason).toContain(
-        'outside allowed local roots',
+        'outside approved mounted roots',
       );
     });
 
