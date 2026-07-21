@@ -496,7 +496,11 @@ export interface ChannelStatusSnapshot {
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
+  sendMessage(
+    jid: string,
+    text: string,
+    options?: ChannelSendOptions,
+  ): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
@@ -507,6 +511,14 @@ export interface Channel {
   syncGroups?(force: boolean): Promise<void>;
   // Optional: richer runtime health for dashboard and diagnostics.
   getStatus?(): ChannelStatusSnapshot;
+}
+
+/** Optional platform-native reply context for outbound channel messages. */
+export interface ChannelSendOptions {
+  /** Slack thread timestamp, Telegram forum topic id, or equivalent. */
+  threadId?: string;
+  /** Platform message id for adapters that support direct replies. */
+  replyToMessageId?: string;
 }
 
 export interface ChannelHealth {

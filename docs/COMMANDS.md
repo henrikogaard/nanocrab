@@ -13,19 +13,25 @@ common work, see [USER_GUIDE.md](USER_GUIDE.md).
 
 These are exact text commands intercepted by the NanoCrab host before they are stored as normal messages.
 
-| Command                                           | Where              | Who                            | What It Does                                                                                                                          |
-| ------------------------------------------------- | ------------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `/update-nanocrab`                                | Main control group | Main group only                | Starts the host-side updater from the latest NanoCrab GitHub release. Writes logs under `store/updates/` and may restart the service. |
-| `/remote-control`                                 | Main control group | Main group only                | Starts Claude Remote Control and replies with the remote-control URL.                                                                 |
-| `/remote-control-end`                             | Main control group | Main group only                | Stops the active Claude Remote Control session.                                                                                       |
-| `/code`                                           | Main control group | Main group only                | Shows mobile coding-job command help.                                                                                                 |
-| `/code repos`                                     | Main control group | Main group only                | Lists registered coding repositories.                                                                                                 |
-| `/code start owner/repo describe change --pr`     | Main control group | Main group only                | Starts a host-managed coding job from chat. `--pr` requests a draft PR after approvals.                                               |
-| `/code pick owner/repo --labels=bug,autofix --pr` | Main control group | Main group only                | Picks a matching GitHub issue from a registered repo and starts a coding job.                                                         |
-| `/code status [jobId]`                            | Main control group | Main group only                | Shows recent coding jobs or a specific job.                                                                                           |
-| `/code approve\|cancel\|retry\|open-pr jobId`     | Main control group | Main group only                | Controls an existing coding job through the same approval-gated lifecycle as the dashboard.                                           |
-| `/chatid`                                         | Telegram           | Any Telegram chat with the bot | Replies with the Telegram registration id, name, and chat type. Useful when registering Telegram groups.                              |
-| `/ping`                                           | Telegram           | Any Telegram chat with the bot | Replies with a short online status message.                                                                                           |
+| Command                                                                                                    | Where               | Who                            | What It Does                                                                                                                          |
+| ---------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `/update-nanocrab`                                                                                         | Main control group  | Main group only                | Starts the host-side updater from the latest NanoCrab GitHub release. Writes logs under `store/updates/` and may restart the service. |
+| `/remote-control`                                                                                          | Main control group  | Main group only                | Starts Claude Remote Control and replies with the remote-control URL.                                                                 |
+| `/remote-control-end`                                                                                      | Main control group  | Main group only                | Stops the active Claude Remote Control session.                                                                                       |
+| `/code`                                                                                                    | Main control group  | Main group only                | Shows mobile coding-job command help.                                                                                                 |
+| `/code repos`                                                                                              | Main control group  | Main group only                | Lists registered coding repositories.                                                                                                 |
+| `/code start owner/repo describe change --pr`                                                              | Main control group  | Main group only                | Starts a host-managed coding job from chat. `--pr` requests a draft PR after approvals.                                               |
+| `/code pick owner/repo --labels=bug,autofix --pr`                                                          | Main control group  | Main group only                | Picks a matching GitHub issue from a registered repo and starts a coding job.                                                         |
+| `/code status [jobId]`                                                                                     | Main control group  | Main group only                | Shows recent coding jobs or a specific job.                                                                                           |
+| `/code approve\|cancel\|retry\|open-pr jobId`                                                              | Main control group  | Main group only                | Controls an existing coding job through the same approval-gated lifecycle as the dashboard.                                           |
+| `/coding-jobs`                                                                                             | Registered channels | Authorized operators           | Lists recent coding jobs. In non-main groups, prefix with the configured group trigger.                                               |
+| `/coding-pick owner/repo labels=a,b assignee=@me issue=42 tool=codex provider=codex model=gpt-5.4 [no-pr]` | Registered channels | Authorized operators           | Picks a matching open/assigned issue and starts an isolated coding job with an explicit validated runtime.                            |
+| `/coding-approve\|/coding-pr\|/coding-ci\|/coding-cancel jobId`                                            | Registered channels | Authorized operators           | Approves implementation, opens the approved PR, refreshes CI, or cancels a coding job.                                                |
+| `/coding-review-pr owner/repo#42 tool=codex provider=codex model=gpt-5.4`                                  | Registered channels | Authorized operators           | Reviews a PR in a per-job isolated workspace using the selected coding runtime; review jobs cannot publish changes.                   |
+| `/coding-close-pr owner/repo#42`                                                                           | Registered channels | Authorized operators           | Creates an audited, high-risk close approval. It does not merge the PR or delete its branch.                                          |
+| `/coding-approve-close-pr owner/repo#42`                                                                   | Registered channels | Authorized operators           | Approves and closes the requested PR; the separate approval is required before the GitHub state changes to `closed`.                  |
+| `/chatid`                                                                                                  | Telegram            | Any Telegram chat with the bot | Replies with the Telegram registration id, name, and chat type. Useful when registering Telegram groups.                              |
+| `/ping`                                                                                                    | Telegram            | Any Telegram chat with the bot | Replies with a short online status message.                                                                                           |
 
 Most user requests are not hard-coded slash commands. In registered non-main groups, users normally address the bot with the configured trigger, for example:
 
@@ -34,6 +40,19 @@ Most user requests are not hard-coded slash commands. In registered non-main gro
 @NanoCrab when did we discuss the fleet crash?
 @NanoCrab create a report about this operation
 ```
+
+The `/coding-*` commands are parsed by the shared host dispatcher, so the same
+syntax works in Telegram, WhatsApp, Signal, Slack, Discord, and web chat. Slack
+native `<@bot>` mentions and thread replies are normalized to the same command
+path. Coding write and review commands require the channel sender allowlist;
+the legacy `/code` commands remain main-control-group-only for compatibility.
+
+Provider selection is explicit when requested with `tool=` (or `cli=`),
+`provider=`, and `model=`. NanoCrab validates the tuple against its runtime
+registry and records both the requested and actual runtime on the job. If no
+runtime is specified, the configured coding profile is used; an unavailable
+fallback is never silent and requires approval. Every container-backed coding
+or review job receives a fresh workspace under `data/coding-workspaces/jobs/`.
 
 The default trigger is `@` plus the configured `ASSISTANT_NAME`, for example `@NanoCrab`. Group-specific triggers are stored in group configuration and can be changed from the dashboard. Examples such as `!wolfclaw` or `!wolfie` are group triggers, not Discord Developer Portal commands.
 

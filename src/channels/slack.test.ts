@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { parseControlPlaneCommand } from '../control-plane/commands.js';
-import { createSlackChannel, splitSlackText } from './slack.js';
+import {
+  createSlackChannel,
+  normalizeSlackBotMention,
+  splitSlackText,
+} from './slack.js';
 import type { ChannelOpts } from './registry.js';
 
 function opts(groups: ChannelOpts['registeredGroups']): ChannelOpts {
@@ -200,6 +204,41 @@ describe('SlackChannel', () => {
     });
   });
 
+  it('normalizes native Slack bot mentions for trigger matching', async () => {
+    const app = fakeSlackApp();
+    const groups = {
+      'slack:C123': {
+        name: 'Engineering',
+        folder: 'slack_engineering',
+        trigger: '@NanoCrab',
+        added_at: '2026-07-09T00:00:00.000Z',
+      },
+    };
+    const channelOpts = opts(() => groups);
+    const channel = createSlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      channelOpts,
+      () => app,
+    );
+
+    await channel.connect();
+    await app.handlers.get('message')?.({
+      event: {
+        channel: 'C123',
+        ts: '1783611000.123',
+        user: 'U123',
+        text: '<@UBOT|nanocrab> status #128',
+      },
+      client: app.client,
+    });
+
+    expect(channelOpts.onMessage).toHaveBeenCalledWith(
+      'slack:C123',
+      expect.objectContaining({ content: '@NanoCrab status #128' }),
+    );
+  });
+
   it('sends long Slack replies in bounded chunks', async () => {
     const app = fakeSlackApp();
     const channel = createSlackChannel(
@@ -218,6 +257,27 @@ describe('SlackChannel', () => {
       expect.objectContaining({ channel: 'C123', text: 'x'.repeat(4000) }),
     );
   });
+
+  it('preserves Slack thread context for outbound replies', async () => {
+    const app = fakeSlackApp();
+    const channel = createSlackChannel(
+      'xoxb-token',
+      'xapp-token',
+      opts(() => ({})),
+      () => app,
+    );
+    await channel.connect();
+
+    await channel.sendMessage('slack:C123', 'reply', {
+      threadId: '1783611000.123',
+    });
+
+    expect(app.client.chat.postMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      text: 'reply',
+      thread_ts: '1783611000.123',
+    });
+  });
 });
 
 describe('splitSlackText', () => {
@@ -225,5 +285,34 @@ describe('splitSlackText', () => {
     expect(
       splitSlackText('x'.repeat(8001)).map((chunk) => chunk.length),
     ).toEqual([4000, 4000, 1]);
+  });
+});
+
+describe('normalizeSlackBotMention', () => {
+  it('handles bare and display-name Slack mention forms', () => {
+    expect(
+      normalizeSlackBotMention(
+        '<@UBOT> @RepoFixer inspect issue #123',
+        'UBOT',
+        '@NanoCrab',
+      ),
+    ).toBe('@NanoCrab @RepoFixer inspect issue #123');
+    expect(
+      normalizeSlackBotMention(
+        '<@OTHER> leave this alone',
+        'UBOT',
+        '@NanoCrab',
+      ),
+    ).toBe('<@OTHER> leave this alone');
+  });
+
+  it('collapses platform whitespace after mention replacement', () => {
+    expect(
+      normalizeSlackBotMention(
+        '<@UBOT|nanocrab>\n\t/coding-jobs',
+        'UBOT',
+        '@NanoCrab',
+      ),
+    ).toBe('@NanoCrab /coding-jobs');
   });
 });

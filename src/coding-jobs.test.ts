@@ -78,6 +78,7 @@ import {
   openCodingJobPr,
   pickGitHubIssue,
   refreshCodingJobCi,
+  resolveCodingRuntimeSelection,
   registerCodingRepo,
   retryCodingJob,
   startCodingJob,
@@ -593,6 +594,70 @@ describe('coding jobs', () => {
     expect(job.model).toBe('openrouter/auto');
     expect(job.status).toBe('queued');
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('rejects incompatible CLI/provider runtime tuples before queueing', async () => {
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    expect(() =>
+      resolveCodingRuntimeSelection({
+        cli: 'codex',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+      }),
+    ).toThrow('not compatible');
+    await expect(
+      startCodingJob({
+        repo: 'owner/repo',
+        prompt: 'Reject an incompatible runtime.',
+        cli: 'codex',
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+        requestedBy: 'whatsapp_main',
+      }),
+    ).rejects.toThrow('not compatible');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('resolves and records an explicit coding CLI/provider/model triple', async () => {
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Use the selected coding runtime.',
+      tool: 'opencode',
+      provider: 'openrouter',
+      model: 'qwen/qwen3-coder',
+      requestedBy: 'slack:main:henrik',
+    });
+
+    const runtime = {
+      cli: 'opencode' as const,
+      provider: 'openrouter' as const,
+      model: 'qwen/qwen3-coder',
+    };
+    expect(job.requestedRuntime).toEqual(runtime);
+    expect(job.actualRuntime).toEqual(runtime);
+    expect(job.runnerCli).toBe('opencode');
+    expect(loadCodingJobs()[0]).toMatchObject({
+      requestedRuntime: runtime,
+      actualRuntime: runtime,
+      workspace: expect.stringMatching(
+        /data\/coding-workspaces\/jobs\/[^/]+\/owner__repo$/,
+      ),
+    });
+  });
+
+  it('keeps Devin fail-closed when its configured CLI alias is unavailable', () => {
+    expect(() =>
+      resolveCodingRuntimeSelection({
+        cli: 'devin',
+        provider: 'claude',
+        model: 'catalog-only-model',
+      }),
+    ).toThrow('no configured Devin CLI model alias');
   });
 
   it('rejects Ollama coding jobs unless the selected model is code-capable', async () => {

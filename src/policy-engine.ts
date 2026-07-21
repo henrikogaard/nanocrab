@@ -50,7 +50,12 @@ const POLICIES_PATH = path.join(STORE_DIR, 'policies.json');
 const DEFAULT_RULES: PolicyRule[] = [
   {
     id: 'coding-writes',
-    actionPattern: ['coding.implement', 'coding.open_pr', 'coding.revert'],
+    actionPattern: [
+      'coding.implement',
+      'coding.open_pr',
+      'coding.close_pr',
+      'coding.revert',
+    ],
     risk: 'high',
     requireApproval: true,
     allowDryRun: true,

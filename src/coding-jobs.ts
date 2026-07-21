@@ -34,6 +34,7 @@ import {
   getVerifiedDevinAliases,
   getVerifiedDevinRuntimeContext,
   inferLegacyRunnerCli,
+  isAgentCliId,
   isDevinSandboxAuthHandoffAvailable,
   resolveDevinCliModelAlias,
   validateCodingRuntimeSelection,
@@ -73,6 +74,7 @@ import {
   createApproval,
   findPendingApprovalForTarget,
   hasApprovedTarget,
+  listApprovals,
   reviewApproval,
 } from './approvals.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
@@ -202,10 +204,12 @@ export interface GitHubProjectBoardSummary {
 export interface CodingJob {
   id: string;
   repo: string;
-  type: 'prompt' | 'issue';
+  type: 'prompt' | 'issue' | 'review';
   prompt: string;
   issueNumber: number | null;
   issueTitle: string | null;
+  pullRequestNumber?: number | null;
+  pullRequestUrl?: string | null;
   provider: CodingProvider;
   model: string;
   status: CodingJobStatus;
@@ -237,6 +241,8 @@ export interface CodingJob {
   pipelineId?: string | null;
   stageId?: string | null;
   decisionId?: string | null;
+  /** Runtime explicitly requested by the caller, before fallback/readiness selection. */
+  requestedRuntime?: AgentRuntimeSelection | null;
   actualRuntime?: AgentRuntimeSelection | null;
   runnerCli: AgentCliId;
   activeAttemptId: string | null;
@@ -253,8 +259,13 @@ export interface StartCodingJobInput {
   repo: string;
   prompt?: string;
   issueNumber?: number;
+  jobType?: 'prompt' | 'issue' | 'review';
+  pullRequestNumber?: number;
+  pullRequestUrl?: string;
   provider?: string;
   model?: string;
+  cli?: string;
+  tool?: string;
   createPr?: boolean;
   dryRun?: boolean;
   branchName?: string;
@@ -268,6 +279,13 @@ export interface StartCodingJobInput {
   runId?: string | null;
   stageKind?: PipelineStageKind | null;
   stageEvidence?: StageRunEvidence | null;
+}
+
+export interface CodingRuntimeRequest {
+  cli?: string;
+  tool?: string;
+  provider?: string;
+  model?: string;
 }
 
 function readJsonFile<T>(filePath: string, fallback: T): T {
@@ -387,6 +405,7 @@ function ensureJobDefaults(job: CodingJob): CodingJob {
     pipelineId: null,
     stageId: null,
     decisionId: null,
+    requestedRuntime: null,
     actualRuntime: null,
     runId: null,
     stageKind: null,
@@ -755,7 +774,10 @@ function codingProvider(
   inputProvider?: string,
   inputModel?: string,
 ): CodingProvider {
-  if (inputProvider && isAgentProvider(inputProvider)) {
+  if (inputProvider !== undefined && inputProvider.trim()) {
+    if (!isAgentProvider(inputProvider)) {
+      throw new Error(`Unknown coding provider: ${inputProvider}`);
+    }
     if (isCodingProvider(inputProvider, inputModel)) return inputProvider;
     throw new Error(
       codingProviderUnavailableReason(inputProvider, inputModel) ||
@@ -772,6 +794,115 @@ function codingProvider(
 function defaultModelForProvider(provider: CodingProvider): string {
   const config = getAgentProviderConfig();
   return config.modelsByProvider[provider] || DEFAULT_AGENT_MODELS[provider];
+}
+
+const DEFAULT_PROVIDER_FOR_CLI: Partial<Record<AgentCliId, CodingProvider>> = {
+  claude: 'claude',
+  codex: 'codex',
+  opencode: 'opencode',
+  pi: 'pi',
+  mistral: 'mistral',
+  // Devin executes a verified provider/model pair through its isolated host
+  // runner. Claude is the safe default when no provider profile is explicit.
+  devin: 'claude',
+};
+
+function normalizeRuntimePart(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+function validateCodingModel(model: string): void {
+  if (
+    model.length > 256 ||
+    Array.from(model).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 0x20 || code === 0x7f;
+    })
+  ) {
+    throw new Error('Coding model contains unsupported control characters');
+  }
+}
+
+/**
+ * Resolve the canonical CLI/provider/model tuple for a coding job.  This is
+ * intentionally synchronous: startup only records the requested runtime;
+ * execution performs the authoritative host/container readiness probe before
+ * any workspace mutation or provider process starts.
+ */
+export function resolveCodingRuntimeSelection(
+  request: CodingRuntimeRequest,
+): AgentRuntimeSelection | null {
+  const cliInput = normalizeRuntimePart(request.cli);
+  const toolInput = normalizeRuntimePart(request.tool);
+  if (
+    cliInput &&
+    toolInput &&
+    cliInput.toLowerCase() !== toolInput.toLowerCase()
+  ) {
+    throw new Error(
+      `Conflicting coding runtime CLI/tool: ${cliInput} vs ${toolInput}`,
+    );
+  }
+  const cliValue = (cliInput || toolInput)?.toLowerCase();
+  const providerValue = normalizeRuntimePart(request.provider)?.toLowerCase();
+  const modelValue = normalizeRuntimePart(request.model);
+
+  if (!cliValue && !providerValue && !modelValue) return null;
+
+  let cli: AgentCliId | undefined;
+  if (cliValue) {
+    if (!isAgentCliId(cliValue)) {
+      throw new Error(`Unknown coding runtime CLI: ${cliValue}`);
+    }
+    cli = cliValue;
+  }
+
+  let provider: CodingProvider | undefined;
+  if (providerValue) {
+    if (!isAgentProvider(providerValue)) {
+      throw new Error(`Unknown coding provider: ${providerValue}`);
+    }
+    if (!isCodingProvider(providerValue, modelValue)) {
+      throw new Error(
+        codingProviderUnavailableReason(providerValue, modelValue) ||
+          `${providerValue} is not a coding-job runtime`,
+      );
+    }
+    provider = providerValue;
+  }
+
+  if (!provider && cli) {
+    provider = DEFAULT_PROVIDER_FOR_CLI[cli];
+  }
+  if (!provider) {
+    const config = getAgentProviderConfig();
+    const configuredModel =
+      config.modelsByProvider[config.provider] ||
+      DEFAULT_AGENT_MODELS[config.provider];
+    if (isCodingProvider(config.provider, modelValue || configuredModel)) {
+      provider = config.provider;
+    } else {
+      provider = 'claude';
+    }
+  }
+
+  const model = modelValue || defaultModelForProvider(provider);
+  validateCodingModel(model);
+  if (!isCodingProvider(provider, model)) {
+    throw new Error(
+      codingProviderUnavailableReason(provider, model) ||
+        `${provider} is not a coding-job runtime`,
+    );
+  }
+  const resolvedCli = cli || inferLegacyRunnerCli(provider);
+  const runtime: AgentRuntimeSelection = {
+    cli: resolvedCli,
+    provider,
+    model,
+  };
+  validateCodingRuntimeSelection(runtime);
+  return runtime;
 }
 
 const CODING_JOB_TRANSITIONS: Record<CodingJobStatus, CodingJobStatus[]> = {
@@ -1745,13 +1876,14 @@ async function runCodingJob(
     upsertCodingJob(job);
     return;
   }
-  if (fallback.provider && fallback.provider !== job.provider) {
-    if (!isCodingProvider(fallback.provider, fallback.model)) {
-      throw new Error(
-        codingProviderUnavailableReason(fallback.provider, fallback.model) ||
-          `${fallback.provider} is not a coding-job runtime`,
-      );
-    }
+  if (
+    fallback.provider &&
+    !isCodingProvider(fallback.provider, fallback.model)
+  ) {
+    throw new Error(
+      codingProviderUnavailableReason(fallback.provider, fallback.model) ||
+        `${fallback.provider} is not a coding-job runtime`,
+    );
   }
 
   const runtimeChanged =
@@ -2071,20 +2203,36 @@ export async function startCodingJob(
     throw new Error(`Repo ${input.repo} is not registered for coding jobs`);
   }
 
-  const actualRuntime = input.actualRuntime || null;
-  if (actualRuntime) validateCodingRuntimeSelection(actualRuntime);
-  const requestedProvider =
-    actualRuntime?.provider ||
-    (input.provider && isAgentProvider(input.provider)
-      ? input.provider
-      : undefined);
-  const requestedModel =
-    actualRuntime?.model ||
-    input.model ||
-    (requestedProvider
-      ? getAgentProviderConfig().modelsByProvider[requestedProvider] ||
-        DEFAULT_AGENT_MODELS[requestedProvider]
-      : undefined);
+  const explicitRuntime = input.actualRuntime
+    ? (() => {
+        validateCodingRuntimeSelection(input.actualRuntime!);
+        validateCodingModel(input.actualRuntime!.model);
+        if (
+          !isCodingProvider(
+            input.actualRuntime!.provider,
+            input.actualRuntime!.model,
+          )
+        ) {
+          throw new Error(
+            codingProviderUnavailableReason(
+              input.actualRuntime!.provider,
+              input.actualRuntime!.model,
+            ) || `${input.actualRuntime!.provider} is not a coding-job runtime`,
+          );
+        }
+        return { ...input.actualRuntime! };
+      })()
+    : null;
+  const requestedRuntime =
+    explicitRuntime ||
+    resolveCodingRuntimeSelection({
+      cli: input.cli,
+      tool: input.tool,
+      provider: input.provider,
+      model: input.model,
+    });
+  const requestedProvider = requestedRuntime?.provider;
+  const requestedModel = requestedRuntime?.model;
   const provider = codingProvider(requestedProvider, requestedModel);
   const model = requestedModel || defaultModelForProvider(provider);
   let prompt = input.prompt || '';
@@ -2130,10 +2278,12 @@ export async function startCodingJob(
   const job: CodingJob = {
     id,
     repo: input.repo,
-    type: issueNumber ? 'issue' : 'prompt',
+    type: input.jobType || (issueNumber ? 'issue' : 'prompt'),
     prompt,
     issueNumber,
     issueTitle,
+    pullRequestNumber: input.pullRequestNumber || null,
+    pullRequestUrl: input.pullRequestUrl || null,
     provider,
     model,
     status: 'queued',
@@ -2159,8 +2309,11 @@ export async function startCodingJob(
     pipelineId: input.pipelineId || null,
     stageId: input.stageId || null,
     decisionId: input.decisionId || null,
-    actualRuntime,
-    runnerCli: actualRuntime?.cli ?? inferLegacyRunnerCli(provider),
+    requestedRuntime,
+    // An explicit runtime is the selected runtime until the execution probe
+    // proves it unavailable and the owner approves a complete fallback.
+    actualRuntime: requestedRuntime,
+    runnerCli: requestedRuntime?.cli ?? inferLegacyRunnerCli(provider),
     activeAttemptId: null,
     executionAttempts: [],
     runId: input.runId || id,
@@ -2192,6 +2345,8 @@ export async function startCodingJob(
 export async function pickGitHubIssue(input: {
   repo: string;
   labels?: string[];
+  cli?: string;
+  tool?: string;
   provider?: string;
   model?: string;
   actualRuntime?: AgentRuntimeSelection | null;
@@ -2216,11 +2371,179 @@ export async function pickGitHubIssue(input: {
     issueNumber: issue.number,
     provider: input.provider,
     model: input.model,
+    cli: input.cli,
+    tool: input.tool,
     actualRuntime: input.actualRuntime,
     createPr: input.createPr,
     requestedBy: input.requestedBy,
   });
   return { issue, job };
+}
+
+function parsePullRequestRef(
+  repoOrRef: string,
+  number?: number,
+): {
+  repo: string;
+  number: number;
+} {
+  const match = repoOrRef.match(/^([^#]+)#(\d+)$/);
+  const repo = match?.[1] || repoOrRef;
+  const parsedNumber = number || (match ? Number(match[2]) : NaN);
+  assertRepoFullName(repo);
+  if (!Number.isInteger(parsedNumber) || parsedNumber < 1) {
+    throw new Error('A pull request number is required');
+  }
+  return { repo, number: parsedNumber };
+}
+
+export async function startCodingPullRequestReview(input: {
+  repo: string;
+  pullRequestNumber: number;
+  cli?: string;
+  tool?: string;
+  provider?: string;
+  model?: string;
+  requestedBy: string;
+}): Promise<CodingJob> {
+  const ref = parsePullRequestRef(input.repo, input.pullRequestNumber);
+  const pull = (await githubApi(`/repos/${ref.repo}/pulls/${ref.number}`)) as {
+    title?: string;
+    body?: string | null;
+    html_url?: string;
+    state?: string;
+    base?: { ref?: string };
+    head?: { ref?: string; sha?: string };
+  };
+  const filesPayload = (await githubApi(
+    `/repos/${ref.repo}/pulls/${ref.number}/files?per_page=100`,
+  )) as {
+    files?: Array<{
+      filename?: string;
+      status?: string;
+      additions?: number;
+      deletions?: number;
+      patch?: string;
+    }>;
+  };
+  const fileSummary = (filesPayload.files || [])
+    .map((file) => {
+      const patch = file.patch || '(binary or unavailable diff)';
+      return [
+        `${file.status || 'modified'} ${file.filename || '(unknown file)'} (+${file.additions || 0}/-${file.deletions || 0})`,
+        patch,
+      ].join('\n');
+    })
+    .join('\n\n')
+    .slice(0, 120_000);
+  const prompt = [
+    `Review GitHub pull request ${ref.repo}#${ref.number}.`,
+    `Title: ${pull.title || '(untitled)'}`,
+    `State: ${pull.state || 'unknown'}`,
+    `Base: ${pull.base?.ref || '(unknown)'}; head: ${pull.head?.ref || '(unknown)'} (${pull.head?.sha || 'unknown'})`,
+    `Description:\n${pull.body || '(no description)'}`,
+    '',
+    'Perform a read-only code review. Do not edit files, commit, push, open, merge, or close any pull request.',
+    'Return concise findings first with severity (P0-P3), file and line where possible, then a short approval/risk summary.',
+    '',
+    'Changed files and patches:',
+    fileSummary || '(no changed files returned)',
+  ].join('\n');
+  return startCodingJob({
+    repo: ref.repo,
+    prompt,
+    jobType: 'review',
+    pullRequestNumber: ref.number,
+    pullRequestUrl: pull.html_url,
+    cli: input.cli,
+    tool: input.tool,
+    provider: input.provider,
+    model: input.model,
+    createPr: false,
+    requestedBy: input.requestedBy,
+  });
+}
+
+export async function requestCodingPullRequestClose(
+  repoOrRef: string,
+  pullRequestNumber: number | undefined,
+  by: string,
+): Promise<{ repo: string; number: number; approvalId: string }> {
+  const ref = parsePullRequestRef(repoOrRef, pullRequestNumber);
+  const pull = (await githubApi(`/repos/${ref.repo}/pulls/${ref.number}`)) as {
+    title?: string;
+    html_url?: string;
+    state?: string;
+  };
+  if (pull.state === 'closed') {
+    throw new Error(`${ref.repo}#${ref.number} is already closed`);
+  }
+  const targetId = `${ref.repo}#${ref.number}`;
+  const existing = listApprovals({
+    status: 'pending',
+    kind: 'coding-close-pr',
+    targetType: 'github-pr',
+    targetId,
+    limit: 1,
+  })[0];
+  const approval =
+    existing ||
+    createApproval({
+      kind: 'coding-close-pr',
+      title: `Close ${targetId}`,
+      summary: `Close pull request ${pull.title || targetId}. This does not merge the PR or delete its branch.`,
+      risk: 'high',
+      requester: by,
+      targetType: 'github-pr',
+      targetId,
+      resourceSummary: pull.html_url || targetId,
+      payload: { repo: ref.repo, pullRequestNumber: ref.number },
+    });
+  return { ...ref, approvalId: approval.id };
+}
+
+export async function approveAndCloseCodingPullRequest(
+  repoOrRef: string,
+  pullRequestNumber: number | undefined,
+  by: string,
+): Promise<{ repo: string; number: number; approvalId: string }> {
+  const ref = parsePullRequestRef(repoOrRef, pullRequestNumber);
+  const targetId = `${ref.repo}#${ref.number}`;
+  const approval = listApprovals({
+    status: 'pending',
+    kind: 'coding-close-pr',
+    targetType: 'github-pr',
+    targetId,
+    limit: 1,
+  })[0];
+  if (!approval) {
+    throw new Error(`No pending close approval for ${targetId}`);
+  }
+  const policy = evaluatePolicy({
+    actor: by,
+    actorId: targetId,
+    actionType: 'coding.close_pr',
+    resource: ref.repo,
+    context: { pullRequestNumber: ref.number },
+  });
+  logAuditEvent({
+    actor: by,
+    actorId: targetId,
+    actionType: 'coding.close_pr',
+    resource: targetId,
+    decision: policy.decision === 'denied' ? 'denied' : 'approved',
+    correlationId: approval.id,
+    context: policy,
+  });
+  if (policy.decision === 'denied') {
+    throw new Error(`PR close denied by policy: ${policy.explanation}`);
+  }
+  reviewApproval(approval.id, 'approved', by);
+  await githubApi(`/repos/${ref.repo}/pulls/${ref.number}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ state: 'closed' }),
+  });
+  return { ...ref, approvalId: approval.id };
 }
 
 export function getCodingJob(jobId: string): CodingJob | undefined {
