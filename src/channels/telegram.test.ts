@@ -989,6 +989,22 @@ describe('TelegramChannel', () => {
       );
     });
 
+    it('accepts the shared outbound thread context', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendMessage('tg:100200300', 'Thread reply', {
+        threadId: '42',
+      });
+
+      expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
+        '100200300',
+        'Thread reply',
+        { parse_mode: 'Markdown', message_thread_id: 42 },
+      );
+    });
+
     it('splits messages exceeding 4096 characters', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);

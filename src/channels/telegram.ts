@@ -16,6 +16,7 @@ import {
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
+  ChannelSendOptions,
 } from '../types.js';
 
 export interface TelegramChannelOpts {
@@ -415,7 +416,7 @@ export class TelegramChannel implements Channel {
   async sendMessage(
     jid: string,
     text: string,
-    threadId?: string,
+    options?: ChannelSendOptions | string,
   ): Promise<void> {
     if (!this.bot) {
       logger.warn('Telegram bot not initialized');
@@ -424,21 +425,25 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
-      const options = threadId
+      // Keep the historical third-argument string form for callers outside
+      // the Channel interface while accepting the shared send context.
+      const threadId =
+        typeof options === 'string' ? options : options?.threadId;
+      const sendOptions = threadId
         ? { message_thread_id: parseInt(threadId, 10) }
         : {};
 
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
       if (text.length <= MAX_LENGTH) {
-        await sendTelegramMessage(this.bot.api, numericId, text, options);
+        await sendTelegramMessage(this.bot.api, numericId, text, sendOptions);
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
           await sendTelegramMessage(
             this.bot.api,
             numericId,
             text.slice(i, i + MAX_LENGTH),
-            options,
+            sendOptions,
           );
         }
       }

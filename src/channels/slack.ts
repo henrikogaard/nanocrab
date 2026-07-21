@@ -6,12 +6,27 @@ import type {
   Channel,
   ChannelHealth,
   ChannelStatusSnapshot,
+  ChannelSendOptions,
   NewMessage,
 } from '../types.js';
 import { registerChannel, type ChannelOpts } from './registry.js';
 
 const SLACK_JID_PREFIX = 'slack:';
 const SLACK_MESSAGE_LIMIT = 4000;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function normalizeSlackBotMention(
+  text: string,
+  botUserId: string | undefined | null,
+  trigger: string,
+): string {
+  if (!botUserId) return text;
+  const mention = new RegExp(`<@${escapeRegExp(botUserId)}(?:\\|[^>]+)?>`, 'g');
+  return text.replace(mention, trigger).replace(/\s+/g, ' ').trim();
+}
 
 type SlackEventHandler = (payload: {
   event: any;
@@ -21,7 +36,11 @@ type SlackEventHandler = (payload: {
 interface SlackClientLike {
   auth?: { test?: () => Promise<{ user_id?: string }> };
   chat?: {
-    postMessage?: (args: { channel: string; text: string }) => Promise<unknown>;
+    postMessage?: (args: {
+      channel: string;
+      text: string;
+      thread_ts?: string;
+    }) => Promise<unknown>;
   };
   conversations?: {
     info?: (args: { channel: string }) => Promise<{
@@ -178,7 +197,11 @@ export class SlackChannel implements Channel {
     return jid.startsWith(SLACK_JID_PREFIX);
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    options?: ChannelSendOptions,
+  ): Promise<void> {
     const channel = jid.replace(SLACK_JID_PREFIX, '');
     if (!channel) throw new Error(`Invalid Slack JID: ${jid}`);
     const postMessage = this.app.client.chat?.postMessage;
@@ -186,7 +209,11 @@ export class SlackChannel implements Channel {
       throw new Error('Slack chat.postMessage API is unavailable');
 
     for (const chunk of splitSlackText(text)) {
-      await postMessage({ channel, text: chunk });
+      await postMessage({
+        channel,
+        text: chunk,
+        ...(options?.threadId ? { thread_ts: options.threadId } : {}),
+      });
     }
   }
 
@@ -243,7 +270,12 @@ export class SlackChannel implements Channel {
       return;
     }
 
-    const text = typeof event.text === 'string' ? event.text.trim() : '';
+    const trigger = group.trigger || '@NanoCrab';
+    const text = normalizeSlackBotMention(
+      typeof event.text === 'string' ? event.text : '',
+      this.botUserId,
+      trigger,
+    );
     const fileLines = formatSlackFiles(event.files);
     const content = [text, ...fileLines].filter(Boolean).join('\n');
     if (!content) return;
