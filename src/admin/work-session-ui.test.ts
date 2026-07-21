@@ -23,6 +23,7 @@ type WorkSessionViewModel = {
   changedFiles: string[];
   artifacts: Array<Record<string, unknown>>;
   proposals: Array<Record<string, unknown>>;
+  projections?: Record<string, unknown>;
   approvals: Array<Record<string, unknown>>;
   canCancel: boolean;
   canRetry: boolean;
@@ -140,6 +141,33 @@ describe('NanoWorkSession status and action normalization', () => {
 });
 
 describe('NanoWorkSession surface merging', () => {
+  it('normalizes typed projections and keeps unavailable states explicit', () => {
+    const adapter = loadWorkSession();
+    const session = adapter.normalize(
+      {},
+      {
+        projections: {
+          conversation: {
+            available: true,
+            reason: 'recorded',
+            items: [{ role: 'user', content: 'Hello' }],
+          },
+          plan: { available: false, reason: 'not_recorded', items: [] },
+        },
+      },
+    );
+
+    expect(session.projections).toMatchObject({
+      conversation: {
+        available: true,
+        items: [{ role: 'user', content: 'Hello' }],
+      },
+      plan: { available: false, reason: 'not_recorded', items: [] },
+    });
+    expect(adapter.renderInspector(session, 'conversation')).toContain('Hello');
+    expect(adapter.renderInspector(session, 'plan')).toContain('Unavailable');
+  });
+
   it('prefers cockpit fields, then summary fields, then structured fallback fields', () => {
     const session = loadWorkSession().normalize(
       {
@@ -765,8 +793,8 @@ describe('NanoWorkSession shared views', () => {
     expect(html).not.toContain('aria-modal');
     expect(html).toContain('tabindex="-1"');
     expect(html).toContain('role="tablist"');
-    expect((html.match(/role="tab"/g) || []).length).toBe(7);
-    expect((html.match(/data-work-session-tab=/g) || []).length).toBe(7);
+    expect((html.match(/role="tab"/g) || []).length).toBe(10);
+    expect((html.match(/data-work-session-tab=/g) || []).length).toBe(10);
     expect(html).toContain('data-work-session-tab="approvals"');
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('role="tabpanel"');

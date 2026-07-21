@@ -33,8 +33,11 @@ const config = vi.mocked(await import('../../config.js'));
 const SESSIONS_DIR = config.SESSIONS_DIR as string;
 const DATA_DIR = config.DATA_DIR as string;
 const STORE_DIR = config.STORE_DIR as string;
-const { default: sessionsRouter, listCockpitSessions } =
-  await import('./sessions.js');
+const {
+  default: sessionsRouter,
+  listCockpitSessions,
+  buildCockpitDetail,
+} = await import('./sessions.js');
 const { broadcastTaskProgress, loadHistoricalSessions, listTerminalSessions } =
   await import('../websocket.js');
 
@@ -460,6 +463,58 @@ describe('terminal session API', () => {
     expect(session?.changedFiles).toEqual([
       'src/admin/public/pages/dashboard.js',
     ]);
+  });
+
+  it('projects conversation, plan, and normalized timeline metadata in cockpit detail', () => {
+    writeTranscript('main', 'projection-run', [
+      {
+        type: 'user',
+        timestamp: '2026-06-01T12:00:00Z',
+        content: 'Please make the change',
+      },
+      {
+        type: 'task',
+        timestamp: '2026-06-01T12:01:00Z',
+        title: 'Implement projection API',
+        status: 'running',
+      },
+      {
+        type: 'assistant',
+        timestamp: '2026-06-01T12:02:00Z',
+        content: 'The change is underway.',
+      },
+    ]);
+
+    const detail = buildCockpitDetail(transcriptId('main', 'projection-run'));
+
+    expect(detail?.projections).toMatchObject({
+      conversation: { available: true },
+      plan: { available: true },
+      memoryProposals: { available: false, reason: 'not_recorded' },
+      skillProposals: { available: false, reason: 'not_recorded' },
+    });
+    expect(detail?.projections.conversation.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'user',
+          content: 'Please make the change',
+        }),
+      ]),
+    );
+    expect(detail?.projections.plan.items).toEqual([
+      expect.objectContaining({
+        title: 'Implement projection API',
+        status: 'running',
+      }),
+    ]);
+    expect(detail?.timeline).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provenance: 'transcript',
+          sensitivity: 'normal',
+        }),
+      ]),
+    );
   });
 
   it('GET /cockpit/:id/stream returns recent progress events for the session group', async () => {

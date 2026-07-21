@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import readline from 'readline';
+import type { JournalEntryRecord } from '../../types.js';
 
 import { DATA_DIR, SESSIONS_DIR } from '../../config.js';
 import { requireRole } from '../middleware.js';
@@ -16,6 +17,13 @@ import {
 import { getAgentProviderConfig } from '../../agent-provider.js';
 import { listApprovals } from '../../approvals.js';
 import { loadCodingJobs } from '../../coding-jobs.js';
+import { listLearningProposals } from '../../learning-loop.js';
+import { listJournalEntryRecords } from '../../journal-store.js';
+import {
+  buildSessionProjections,
+  type SessionProjections,
+  type SessionProjectionSensitivity,
+} from '../../session-projections.js';
 import { getState } from '../state.js';
 
 const router = Router();
@@ -57,6 +65,8 @@ interface CockpitTimelineEvent {
   type: string;
   title: string;
   detail: string;
+  provenance?: string;
+  sensitivity?: SessionProjectionSensitivity;
 }
 
 interface CockpitArtifact {
@@ -89,6 +99,7 @@ interface CockpitDeliverable {
 
 interface CockpitSessionDetail extends SessionInfo {
   timeline: CockpitTimelineEvent[];
+  projections: SessionProjections;
   artifacts: CockpitArtifact[];
   deliverables: CockpitDeliverable[];
   approvals: Array<{
@@ -514,62 +525,98 @@ export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
   const artifacts: CockpitSessionDetail['artifacts'] = [];
   const deliverables: CockpitSessionDetail['deliverables'] = [];
   const filePath = transcriptPath(summary.group, summary.sessionId);
+  const transcriptEvents = filePath ? readJsonLines(filePath).slice(-80) : [];
   if (filePath) {
-    readJsonLines(filePath)
-      .map(asRecord)
-      .slice(-80)
-      .forEach((obj, index) => {
-        const ts = obj.timestamp || summary.lastEventAt;
-        const text = extractText(obj);
-        const toolBlocks = contentBlocks(obj).filter(
-          (block) => block.type === 'tool_use',
-        );
-        timeline.push({
-          id: `${summary.id}-${index}`,
-          timestamp: ts,
-          type: String(obj.type || 'event'),
-          title:
-            toolBlocks.length > 0
-              ? `${toolBlocks.length} tool call${toolBlocks.length === 1 ? '' : 's'}`
-              : String(obj.type || 'event'),
-          detail: compactStep(
-            text,
-            toolBlocks.map((block) => block.name).join(', '),
-          ),
-        });
-        for (const block of toolBlocks) {
-          const inputRecord = asRecord(block.input);
-          const maybePath =
-            inputRecord.file_path || inputRecord.path || inputRecord.filename;
-          if (typeof maybePath === 'string' && maybePath.trim()) {
-            const artifactPath = maybePath.trim();
-            artifacts.push({
-              id: `${summary.id}-artifact-${artifacts.length}`,
-              name: path.basename(artifactPath),
-              path: artifactPath,
-              kind: String(block.name || 'file'),
-              status: 'ready',
-              sizeBytes: fileSizeBytes(artifactPath) || undefined,
-              createdAt: ts,
-            });
-            if (/write|edit|patch|artifact|create/i.test(String(block.name))) {
-              deliverables.push(
-                deliverableFromPath({
-                  id: `${summary.id}-deliverable-${deliverables.length}`,
-                  title: path.basename(artifactPath),
-                  path: artifactPath,
-                  sourceType: 'transcript',
-                  sourceId: summary.id,
-                  status: 'ready',
-                  createdAt: ts,
-                  summary: `Produced by ${String(block.name || 'tool')} during the agent run.`,
-                }),
-              );
-            }
+    transcriptEvents.map(asRecord).forEach((obj, index) => {
+      const ts = obj.timestamp || summary.lastEventAt;
+      const text = extractText(obj);
+      const toolBlocks = contentBlocks(obj).filter(
+        (block) => block.type === 'tool_use',
+      );
+      timeline.push({
+        id: `${summary.id}-${index}`,
+        timestamp: ts,
+        type: String(obj.type || 'event'),
+        title:
+          toolBlocks.length > 0
+            ? `${toolBlocks.length} tool call${toolBlocks.length === 1 ? '' : 's'}`
+            : String(obj.type || 'event'),
+        detail: compactStep(
+          text,
+          toolBlocks.map((block) => block.name).join(', '),
+        ),
+        provenance: 'transcript',
+        sensitivity:
+          obj.sensitivity === 'sensitive' || obj.sensitivity === 'secret-note'
+            ? obj.sensitivity
+            : 'normal',
+      });
+      for (const block of toolBlocks) {
+        const inputRecord = asRecord(block.input);
+        const maybePath =
+          inputRecord.file_path || inputRecord.path || inputRecord.filename;
+        if (typeof maybePath === 'string' && maybePath.trim()) {
+          const artifactPath = maybePath.trim();
+          artifacts.push({
+            id: `${summary.id}-artifact-${artifacts.length}`,
+            name: path.basename(artifactPath),
+            path: artifactPath,
+            kind: String(block.name || 'file'),
+            status: 'ready',
+            sizeBytes: fileSizeBytes(artifactPath) || undefined,
+            createdAt: ts,
+          });
+          if (/write|edit|patch|artifact|create/i.test(String(block.name))) {
+            deliverables.push(
+              deliverableFromPath({
+                id: `${summary.id}-deliverable-${deliverables.length}`,
+                title: path.basename(artifactPath),
+                path: artifactPath,
+                sourceType: 'transcript',
+                sourceId: summary.id,
+                status: 'ready',
+                createdAt: ts,
+                summary: `Produced by ${String(block.name || 'tool')} during the agent run.`,
+              }),
+            );
           }
         }
-      });
+      }
+    });
   }
+
+  let journalEntries: JournalEntryRecord[] = [];
+  try {
+    journalEntries = listJournalEntryRecords({
+      groupFolder: summary.group,
+      limit: 24,
+    });
+  } catch {
+    // Journal storage is optional for older installations and isolated tests.
+  }
+  const projections = buildSessionProjections({
+    sessionId: summary.sessionId,
+    events: transcriptEvents,
+    learningProposals: listLearningProposals({
+      sourceRunId: summary.sessionId,
+      limit: 24,
+    }),
+    journalEntries,
+  });
+  timeline.push(
+    ...projections.timeline
+      .filter((event) => event.provenance !== 'conversation')
+      .map((event) => ({
+        id: `${summary.id}-${event.id}`,
+        timestamp: event.timestamp,
+        type: event.type,
+        title: event.title,
+        detail: event.detail,
+        provenance: event.provenance,
+        sensitivity: event.sensitivity,
+      })),
+  );
+  timeline.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
   if (codingJob) {
     for (const file of codingJob.changedFiles || []) {
@@ -655,12 +702,15 @@ export function buildCockpitDetail(id: string): CockpitSessionDetail | null {
       type: summary.status,
       title: summary.status.replace(/_/g, ' '),
       detail: summary.currentStep,
+      provenance: 'summary',
+      sensitivity: 'normal',
     });
   }
 
   return {
     ...summary,
-    timeline,
+    timeline: timeline.slice(-120),
+    projections,
     artifacts: artifacts.slice(0, 24),
     deliverables: deliverables.slice(0, 24),
     approvals,

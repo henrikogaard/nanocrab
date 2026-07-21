@@ -22372,6 +22372,34 @@ button.sessions-command-stat:active {
   font-size: 11px;
 }
 
+.work-session-projection-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.work-session-projection {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.work-session-projection-unavailable {
+  border: 1px dashed var(--border-subtle, var(--border));
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  color: var(--text-muted);
+}
+
+.work-session-projection-unavailable strong,
+.work-session-projection-unavailable span,
+.work-session-projection-unavailable small {
+  display: block;
+}
+
+.work-session-projection-unavailable small {
+  margin-top: 4px;
+  text-transform: capitalize;
+}
+
 .work-session-empty {
   padding: 18px;
   border: 1px dashed var(--border);

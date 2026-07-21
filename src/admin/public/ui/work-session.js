@@ -221,6 +221,41 @@
     return files;
   }
 
+  function projectionValue(value) {
+    var record = asRecord(value);
+    var items = Array.isArray(record.items)
+      ? record.items.filter(isRecord).map(cloneValue)
+      : [];
+    return {
+      available: record.available === true && items.length > 0,
+      reason:
+        typeof record.reason === 'string' && record.reason.trim()
+          ? record.reason
+          : items.length > 0
+            ? 'recorded'
+            : 'not_recorded',
+      items: items,
+    };
+  }
+
+  function sessionProjections(values) {
+    var source = {};
+    values.forEach(function (value) {
+      var record = asRecord(value);
+      var projections = asRecord(record.projections);
+      Object.keys(projections).forEach(function (key) {
+        if (source[key] === undefined) source[key] = projections[key];
+      });
+    });
+    return {
+      conversation: projectionValue(source.conversation),
+      plan: projectionValue(source.plan),
+      memoryProposals: projectionValue(source.memoryProposals),
+      skillProposals: projectionValue(source.skillProposals),
+      journalEvents: projectionValue(source.journalEvents),
+    };
+  }
+
   function structuredToolCalls(structured) {
     if (!Array.isArray(structured.messages)) return [];
     var toolCalls = [];
@@ -370,6 +405,7 @@
         structured.artifacts,
         structured.deliverables,
       ]),
+      projections: sessionProjections([cockpit, summaryRecord, structured]),
       proposals: collectRecords([
         cockpit.proposals,
         summaryRecord.proposals,
@@ -622,6 +658,57 @@
     );
   }
 
+  function projectionPanel(projection, emptyMessage, className) {
+    var model = asRecord(projection);
+    var items = Array.isArray(model.items) ? model.items.filter(isRecord) : [];
+    if (model.available !== true || items.length === 0) {
+      var reason = stringValue(model.reason || 'not_recorded').replace(
+        /_/g,
+        ' ',
+      );
+      return (
+        '<div class="work-session-projection work-session-projection-unavailable ' +
+        esc(className) +
+        '"><strong>Unavailable</strong><span>' +
+        esc(emptyMessage) +
+        '</span><small>Reason: ' +
+        esc(reason) +
+        '</small></div>'
+      );
+    }
+    return (
+      '<div class="work-session-projection ' +
+      esc(className) +
+      '"><ul class="work-session-records">' +
+      items
+        .map(function (item) {
+          var title = stringValue(
+            firstValue([item.title, item.role, item.type, item.id]),
+          );
+          var detail = stringValue(
+            firstValue([item.content, item.summary, item.detail, item.status]),
+          );
+          var timestamp = stringValue(item.timestamp || item.createdAt);
+          return (
+            '<li><strong>' +
+            esc(title || 'Recorded item') +
+            '</strong>' +
+            (detail ? '<span>' + esc(detail) + '</span>' : '') +
+            (timestamp
+              ? '<time datetime="' +
+                esc(timestamp) +
+                '">' +
+                esc(timestamp) +
+                '</time>'
+              : '') +
+            '</li>'
+          );
+        })
+        .join('') +
+      '</ul></div>'
+    );
+  }
+
   function fileList(files) {
     var entries = Array.isArray(files)
       ? files.filter(function (file) {
@@ -644,10 +731,13 @@
 
   var inspectorTabs = [
     { id: 'overview', label: 'Overview' },
+    { id: 'conversation', label: 'Conversation' },
+    { id: 'plan', label: 'Plan & tasks' },
     { id: 'timeline', label: 'Timeline' },
     { id: 'tools', label: 'Tools' },
     { id: 'files', label: 'Files' },
     { id: 'proposals', label: 'Proposals' },
+    { id: 'journal', label: 'Journal' },
     { id: 'approvals', label: 'Approvals' },
     { id: 'artifacts', label: 'Artifacts' },
   ];
@@ -663,6 +753,21 @@
   }
 
   function inspectorPanel(session, activeTab) {
+    var projections = asRecord(session.projections);
+    if (activeTab === 'conversation') {
+      return projectionPanel(
+        projections.conversation,
+        'No conversation transcript was recorded for this session.',
+        'conversation',
+      );
+    }
+    if (activeTab === 'plan') {
+      return projectionPanel(
+        projections.plan,
+        'No plan or task projection is available for this session.',
+        'plan',
+      );
+    }
     if (activeTab === 'timeline') return renderTimeline(session);
     if (activeTab === 'tools') {
       return recordList(
@@ -673,10 +778,34 @@
     }
     if (activeTab === 'files') return fileList(session.changedFiles);
     if (activeTab === 'proposals') {
-      return recordList(
+      var memory = projectionPanel(
+        projections.memoryProposals,
+        'No memory proposals were recorded for this session.',
+        'memory-proposals',
+      );
+      var skills = projectionPanel(
+        projections.skillProposals,
+        'No skill proposals were recorded for this session.',
+        'skill-proposals',
+      );
+      var legacy = recordList(
         session.proposals,
         'No proposals recorded',
         'work-session-proposals',
+      );
+      return (
+        '<div class="work-session-projection-stack">' +
+        memory +
+        skills +
+        legacy +
+        '</div>'
+      );
+    }
+    if (activeTab === 'journal') {
+      return projectionPanel(
+        projections.journalEvents,
+        'No journal events were recorded for this session.',
+        'journal-events',
       );
     }
     if (activeTab === 'approvals') {
