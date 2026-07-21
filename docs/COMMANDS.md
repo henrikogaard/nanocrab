@@ -168,7 +168,7 @@ The agent sees these as `mcp__nanocrab__*` tools. You usually do not type these 
 
 | Tool                                | What It Does                                                            |
 | ----------------------------------- | ----------------------------------------------------------------------- |
-| `mcp__nanocrab__request_report`     | Requests a report/document job with sources and output formats.         |
+| `mcp__nanocrab__request_report`     | Requests a report/document job with sources and output formats. Sources may include approved memory, journal, research, artifacts, GitHub connectors, or mounted text files. |
 | `mcp__nanocrab__list_report_jobs`   | Main group only. Lists report/document jobs.                            |
 | `mcp__nanocrab__request_research`   | Requests a host-managed Playwright-backed research job.                 |
 | `mcp__nanocrab__list_research_jobs` | Main group only. Lists research jobs.                                   |
@@ -187,6 +187,7 @@ These are normal chat requests, not literal commands:
 @NanoCrab register henrikogaard/nanocrab as a coding repo with the autofix label.
 @NanoCrab pick an autofix issue from henrikogaard/nanocrab and open a PR.
 @NanoCrab create a report about the last week of operations as Markdown and PDF.
+@NanoCrab create a report from the approved mounted project files as Markdown.
 @NanoCrab make a reusable skill for writing alliance operation summaries.
 @NanoCrab @RepoFixer inspect henrikogaard/nanocrab issue 123 and prepare a safe plan.
 @NanoCrab @ManualHost review the pending approvals and explain what needs owner action.

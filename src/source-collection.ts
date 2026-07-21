@@ -2,12 +2,14 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-import { STORE_DIR } from './config.js';
+import { GROUPS_DIR, STORE_DIR } from './config.js';
 import { logAuditEvent } from './audit-log.js';
 import { listJournalEntryRecords, findJournalEvents } from './journal-store.js';
 import { listMemoryRecords } from './memory-store.js';
 import { listResearchJobs } from './research-jobs.js';
 import { listArtifactVault } from './artifact-vault.js';
+import { getAllRegisteredGroups } from './db.js';
+import { resolveGroupFolderPath } from './group-folder.js';
 import {
   DEFAULT_CONNECTOR_CATALOG,
   buildConnectorCatalog,
@@ -20,6 +22,8 @@ import {
 } from './connector-permissions.js';
 import { readEnvFile } from './env.js';
 import { githubApi } from './coding-jobs.js';
+import { validateMount } from './mount-security.js';
+import type { RegisteredGroup } from './types.js';
 
 export type SourceCollectionStatus =
   | 'pending'
@@ -539,6 +543,270 @@ interface SourceCollectionDependencies {
   authorizeConnectorAction?: typeof authorizeConnectorAction;
   githubApi?: typeof githubApi;
   listMemoryRecords?: typeof listMemoryRecords;
+  listFileSourceRoots?: typeof listFileSourceRoots;
+}
+
+interface FileSourceRoot {
+  rootPath: string;
+  label: string;
+  provenance: string[];
+}
+
+interface CollectedFile {
+  label: string;
+  content: string;
+  provenance: string[];
+}
+
+const FILE_SOURCE_MAX_FILES = 32;
+const FILE_SOURCE_MAX_FILE_BYTES = 128 * 1024;
+const FILE_SOURCE_MAX_TOTAL_BYTES = 512 * 1024;
+const FILE_SOURCE_MAX_DEPTH = 5;
+const FILE_SOURCE_EXTENSIONS = new Set([
+  '.csv',
+  '.htm',
+  '.html',
+  '.ini',
+  '.js',
+  '.jsx',
+  '.json',
+  '.log',
+  '.md',
+  '.py',
+  '.sql',
+  '.toml',
+  '.ts',
+  '.tsx',
+  '.txt',
+  '.xml',
+  '.yaml',
+  '.yml',
+]);
+const FILE_SOURCE_BLOCKED_NAMES = new Set([
+  '.env',
+  '.env.local',
+  '.env.production',
+  '.env.development',
+  'credentials.json',
+  'secrets.json',
+  'memory.md',
+]);
+
+function isSafeFileName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    !FILE_SOURCE_BLOCKED_NAMES.has(lower) &&
+    !lower.includes('credential') &&
+    !lower.includes('secret') &&
+    !lower.includes('token') &&
+    !lower.includes('password')
+  );
+}
+
+function rootWithin(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return (
+    relative === '' ||
+    (!relative.startsWith('..') && !path.isAbsolute(relative))
+  );
+}
+
+function realPathWithin(root: string, candidate: string): string | null {
+  try {
+    const realRoot = fs.realpathSync(root);
+    const realCandidate = fs.realpathSync(candidate);
+    return rootWithin(realRoot, realCandidate) ? realCandidate : null;
+  } catch {
+    return null;
+  }
+}
+
+function realPathUnder(parent: string, candidate: string): string | null {
+  try {
+    const realParent = fs.realpathSync(parent);
+    const realCandidate = fs.realpathSync(candidate);
+    return rootWithin(realParent, realCandidate) ? realCandidate : null;
+  } catch {
+    return null;
+  }
+}
+
+function findGroupByFolder(folder: string): RegisteredGroup | undefined {
+  return Object.values(getAllRegisteredGroups()).find(
+    (group) => group.folder === folder,
+  );
+}
+
+function listFileSourceRoots(
+  context: SourceCollectionActorContext,
+): FileSourceRoot[] {
+  const roots: FileSourceRoot[] = [];
+  let groupRoot: string;
+  try {
+    groupRoot = resolveGroupFolderPath(context.groupFolder);
+  } catch {
+    return roots;
+  }
+
+  if (realPathUnder(GROUPS_DIR, groupRoot)) {
+    roots.push({
+      rootPath: groupRoot,
+      label: `group/${context.groupFolder}`,
+      provenance: [`group:${context.groupFolder}`],
+    });
+  }
+
+  const group = findGroupByFolder(context.groupFolder);
+  const additionalMounts = group?.containerConfig?.additionalMounts || [];
+  for (const mount of additionalMounts) {
+    const validated = validateMount(mount, context.isMain === true);
+    if (!validated.allowed || !validated.realHostPath) continue;
+    roots.push({
+      rootPath: validated.realHostPath,
+      label: `mount/${path.basename(validated.resolvedContainerPath || mount.hostPath)}`,
+      provenance: ['mount:allowlisted'],
+    });
+  }
+
+  if (group?.kind === 'web' && group.projectSlug) {
+    const projectsDir = path.join(STORE_DIR, 'projects');
+    const projectRoot = path.join(projectsDir, group.projectSlug);
+    if (realPathUnder(projectsDir, projectRoot)) {
+      roots.push({
+        rootPath: projectRoot,
+        label: `project/${group.projectSlug}`,
+        provenance: [`project:${group.projectSlug}`],
+      });
+    }
+  }
+
+  return roots;
+}
+
+function collectTextFiles(roots: FileSourceRoot[]): CollectedFile[] {
+  const collected: CollectedFile[] = [];
+  let totalBytes = 0;
+
+  const visit = (
+    root: FileSourceRoot,
+    current: string,
+    depth: number,
+  ): void => {
+    if (
+      collected.length >= FILE_SOURCE_MAX_FILES ||
+      totalBytes >= FILE_SOURCE_MAX_TOTAL_BYTES
+    )
+      return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (
+        collected.length >= FILE_SOURCE_MAX_FILES ||
+        totalBytes >= FILE_SOURCE_MAX_TOTAL_BYTES
+      )
+        return;
+      if (entry.name.startsWith('.') || !isSafeFileName(entry.name)) continue;
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (depth < FILE_SOURCE_MAX_DEPTH) visit(root, fullPath, depth + 1);
+        continue;
+      }
+      if (
+        !entry.isFile() ||
+        !FILE_SOURCE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())
+      )
+        continue;
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(fullPath);
+      } catch {
+        continue;
+      }
+      if (
+        stat.size > FILE_SOURCE_MAX_FILE_BYTES ||
+        totalBytes + stat.size > FILE_SOURCE_MAX_TOTAL_BYTES
+      )
+        continue;
+      let buffer: Buffer;
+      try {
+        buffer = fs.readFileSync(fullPath);
+      } catch {
+        continue;
+      }
+      if (buffer.includes(0)) continue;
+      const relative = path.relative(root.rootPath, fullPath);
+      collected.push({
+        label: `${root.label}/${relative.split(path.sep).join('/')}`,
+        content: buffer.toString('utf8'),
+        provenance: root.provenance,
+      });
+      totalBytes += buffer.byteLength;
+    }
+  };
+
+  for (const root of roots) {
+    if (
+      collected.length >= FILE_SOURCE_MAX_FILES ||
+      totalBytes >= FILE_SOURCE_MAX_TOTAL_BYTES
+    )
+      break;
+    const safeRoot = realPathWithin(root.rootPath, root.rootPath);
+    if (safeRoot) visit({ ...root, rootPath: safeRoot }, safeRoot, 0);
+  }
+  return collected;
+}
+
+function collectMountedFileSources(
+  collectionId: string,
+  context: SourceCollectionActorContext,
+  sections: string[],
+  citations: Array<{ label: string; source: string }>,
+  rootsProvider: typeof listFileSourceRoots,
+): void {
+  const roots = rootsProvider(context);
+  if (roots.length === 0) {
+    markScopeFailed(
+      collectionId,
+      'file',
+      'No approved mounted file roots are available for this group',
+    );
+    return;
+  }
+  const files = collectTextFiles(roots);
+  if (files.length === 0) {
+    sections.push(
+      '## Mounted Files\n\nNo readable text files found in approved roots.',
+    );
+  } else {
+    sections.push(
+      `## Mounted Files\n\n${files
+        .map(
+          (file) =>
+            `### ${file.label}\n\n\`\`\`text\n${file.content.replace(/\r\n/g, '\n').replace(/\n+$/, '')}\n\`\`\``,
+        )
+        .join('\n\n')}`,
+    );
+    for (const file of files) {
+      addLedgerEntry(
+        collectionId,
+        'file',
+        file.label,
+        `Mounted file: ${file.label}`,
+        `file:${file.label}`,
+      );
+      citations.push({ label: file.label, source: `file:${file.label}` });
+    }
+  }
+  markScopeCollected(
+    collectionId,
+    'file',
+    files.length,
+    Array.from(new Set(files.flatMap((file) => file.provenance))),
+  );
 }
 
 function connectorReadAction(connectorId: string): string {
@@ -597,6 +865,7 @@ export async function collectSources(
     dependencies.authorizeConnectorAction ?? authorizeConnectorAction;
   const githubFetch = dependencies.githubApi ?? githubApi;
   const listMemories = dependencies.listMemoryRecords ?? listMemoryRecords;
+  const listFiles = dependencies.listFileSourceRoots ?? listFileSourceRoots;
   const record = startSourceCollection(reportJobId, requestedScopes, {
     availableConnectors,
   });
@@ -709,6 +978,16 @@ export async function collectSources(
             });
           }
           markScopeCollected(record.id, 'artifact', artifacts.length);
+          break;
+        }
+        case 'file': {
+          collectMountedFileSources(
+            record.id,
+            actorContext,
+            sections,
+            citations,
+            listFiles,
+          );
           break;
         }
         case 'connector': {

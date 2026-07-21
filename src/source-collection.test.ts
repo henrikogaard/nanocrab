@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -375,6 +376,115 @@ describe('source-collection', () => {
 
     it('returns empty array for report job with no entries', () => {
       expect(getSourceLedger('non-existent')).toEqual([]);
+    });
+  });
+
+  describe('collectSources file scope', () => {
+    it('collects bounded text files from approved mounted roots with provenance', async () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nanocrab-files-'));
+      fs.mkdirSync(path.join(root, 'nested'));
+      fs.writeFileSync(
+        path.join(root, 'brief.md'),
+        '# Brief\n\nUse the approved source ledger.\n',
+      );
+      fs.writeFileSync(
+        path.join(root, 'nested', 'data.json'),
+        '{"status":"ready"}\n',
+      );
+      fs.writeFileSync(
+        path.join(root, 'notes.txt'),
+        '  preserve indentation\n',
+      );
+      fs.writeFileSync(path.join(root, 'ignored.bin'), Buffer.from([0, 1, 2]));
+
+      const collectWithFiles = collectSources as unknown as (
+        reportJobId: string,
+        scopes: string[],
+        query: string,
+        context: { actor: string; groupFolder: string },
+        dependencies: {
+          availableConnectors: string[];
+          listFileSourceRoots: ReturnType<typeof vi.fn>;
+        },
+      ) => ReturnType<typeof collectSources>;
+
+      try {
+        const collected = await collectWithFiles(
+          'report-files',
+          ['file'],
+          'summarize the mounted files',
+          { actor: 'henrik', groupFolder: 'main' },
+          {
+            availableConnectors: [],
+            listFileSourceRoots: vi.fn().mockReturnValue([
+              {
+                rootPath: root,
+                label: 'project-docs',
+                provenance: ['mount:allowlisted'],
+              },
+            ]),
+          },
+        );
+
+        expect(collected.sections.join('\n')).toContain(
+          'project-docs/brief.md',
+        );
+        expect(collected.sections.join('\n')).toContain('"status":"ready"');
+        expect(collected.sections.join('\n')).not.toContain('ignored.bin');
+        expect(collected.citations).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              label: 'project-docs/brief.md',
+              source: 'file:project-docs/brief.md',
+            }),
+          ]),
+        );
+        const collection = getSourceCollection(collected.sourceCollectionId)!;
+        expect(collection.status).toBe('completed');
+        expect(collected.sections.join('\n')).toContain(
+          '  preserve indentation',
+        );
+        expect(collection.items[0]).toMatchObject({
+          scope: 'file',
+          status: 'completed',
+          itemCount: 3,
+          provenance: ['mount:allowlisted'],
+        });
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('fails closed when no approved mounted roots are available', async () => {
+      const collectWithFiles = collectSources as unknown as (
+        reportJobId: string,
+        scopes: string[],
+        query: string,
+        context: { actor: string; groupFolder: string },
+        dependencies: {
+          availableConnectors: string[];
+          listFileSourceRoots: ReturnType<typeof vi.fn>;
+        },
+      ) => ReturnType<typeof collectSources>;
+
+      const collected = await collectWithFiles(
+        'report-files-denied',
+        ['file'],
+        'summarize mounted files',
+        { actor: 'henrik', groupFolder: 'main' },
+        {
+          availableConnectors: [],
+          listFileSourceRoots: vi.fn().mockReturnValue([]),
+        },
+      );
+
+      expect(getSourceCollection(collected.sourceCollectionId)?.status).toBe(
+        'failed',
+      );
+      expect(
+        getSourceCollection(collected.sourceCollectionId)?.items[0]
+          .failureReason,
+      ).toMatch(/approved mounted file roots/i);
     });
   });
 });

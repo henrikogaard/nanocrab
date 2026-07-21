@@ -452,7 +452,9 @@ Use Report Studio or natural language requests when you need a document.
 
 Typical flow:
 
-1. Request a report with topic, sources, and output formats.
+1. Request a report with topic, sources, and output formats. Select `file` to
+   collect readable text files from the requesting group's folder and its
+   allowlisted additional mounts.
 2. Review and approve the outline.
 3. Let NanoCrab draft the document.
 4. Review Markdown/HTML/DOCX/PDF outputs.
@@ -460,6 +462,13 @@ Typical flow:
 
 Generated artifacts should keep citations, source links, and provenance where
 possible. External uploads, shares, and messages remain approval-gated.
+
+Mounted file collection is deliberately bounded and read-only: NanoCrab scans
+only allowlisted roots, skips hidden/credential-like files and binary content,
+and caps the collection at 32 files and 512 KiB. Each included file is recorded
+in the report source ledger as a `file:<relative-path>` citation. If a group has
+no approved root, the `file` source scope fails closed instead of reading an
+arbitrary host path.
 
 ## Backups And Updates
 
