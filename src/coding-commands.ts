@@ -7,6 +7,7 @@ import {
   pickGitHubIssue,
   refreshCodingJobCi,
 } from './coding-jobs.js';
+import { resolveCodingRuntimeProfile } from './coding-runtime-profiles.js';
 
 type CodingCommandAction =
   | 'help'
@@ -25,6 +26,7 @@ export interface ParsedCodingCommand {
   labels?: string[];
   provider?: string;
   model?: string;
+  runtimeProfileId?: string;
   createPr?: boolean;
 }
 
@@ -67,6 +69,8 @@ export function parseCodingCommand(input: string): ParsedCodingCommand | null {
       parsed.provider = value;
     } else if (key === 'model' && value) {
       parsed.model = value;
+    } else if ((key === 'profile' || key === 'runtime-profile') && value) {
+      parsed.runtimeProfileId = value;
     } else if (key === 'no-pr') {
       parsed.createPr = false;
     } else if (key === 'pr') {
@@ -99,7 +103,8 @@ export async function runCodingCommand(
       'Coding commands:',
       '/coding-jobs',
       '/coding-job <jobId>',
-      '/coding-pick owner/repo labels=a,b provider=codex model=gpt-5.4 [no-pr]',
+      '/coding-pick owner/repo labels=a,b profile=codex-default [no-pr]',
+      '  (or provider=codex model=gpt-5.4)',
       '/coding-approve <jobId>',
       '/coding-pr <jobId>',
       '/coding-ci <jobId>',
@@ -117,11 +122,15 @@ export async function runCodingCommand(
 
   if (command.action === 'pick') {
     if (!command.repo) return 'Usage: /coding-pick owner/repo labels=a,b';
+    const actualRuntime = command.runtimeProfileId
+      ? resolveCodingRuntimeProfile(command.runtimeProfileId)
+      : undefined;
     const result = await pickGitHubIssue({
       repo: command.repo,
       labels: command.labels,
       provider: command.provider,
       model: command.model,
+      actualRuntime,
       createPr: command.createPr,
       requestedBy: actor,
     });

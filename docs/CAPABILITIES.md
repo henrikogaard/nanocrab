@@ -26,7 +26,7 @@ NanoCrab is organized around four operator entry points:
 | GitHub Autofix | `#/autofix` | `/api/autofix/*`, GitHub webhook route | GitHub issue label or dashboard workbench | Ready |
 | GitHub Copilot | `#/copilot` | `/api/copilot/*`, OAuth callback | Dashboard assignment flow | Ready |
 | AI Coding Control Plane | `#/control-plane` | `/api/control-plane/*` | Main group `status #n`, `approve #n`, `reject #n`, `revise #n`, `reassign #n`, `pause #n`, `cancel #n`, `follow #n` | Ready |
-| Provider profiles | `#/integrations`, `#/settings` | `/api/providers`, `/api/system/provider`, `/api/system/provider/profiles` | Provider/profile/model selection on chat, tasks, reports, and coding jobs | Ready |
+| Provider profiles and coding runtime profiles | `#/integrations`, `#/settings`, `#/agents` | `/api/providers`, `/api/system/provider`, `/api/system/provider/profiles`, `/api/agents/coding/runtime-profiles` | Named `Runner CLI + provider + model` selection for coding jobs, with readiness and compatibility validation | Ready |
 | Memory, Journal, and Skills | `#/memory`, `#/skills`, `#/timeline` | `/api/memory`, `/api/journal`, `/api/skills` | `propose_memory`, `record_journal_event`, `propose_skill_draft`, `list_skills`, `search_skills` | Ready |
 | Reports, Research, and Artifacts | `#/reports`, `#/artifacts`, Cowork run detail | `/api/reports`, `/api/research`, `/api/artifacts`, `/api/projects/:id/runs/*` | `request_report`, `request_research`, `create_artifact`, `list_artifacts` | Ready |
 | Tasks, Workflows, Missions, and Briefings | `#/tasks`, `#/workflows`, `#/reports` | `/api/tasks`, `/api/workflows`, `/api/missions`, `/api/briefings` | `schedule_task`, `list_tasks`, `pause_task`, `resume_task`, `cancel_task`, `update_task` | Ready |

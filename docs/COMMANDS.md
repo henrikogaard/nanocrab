@@ -24,6 +24,21 @@ These are exact text commands intercepted by the NanoCrab host before they are s
 | `/code pick owner/repo --labels=bug,autofix --pr` | Main control group | Main group only                | Picks a matching GitHub issue from a registered repo and starts a coding job.                                                         |
 | `/code status [jobId]`                            | Main control group | Main group only                | Shows recent coding jobs or a specific job.                                                                                           |
 | `/code approve\|cancel\|retry\|open-pr jobId`     | Main control group | Main group only                | Controls an existing coding job through the same approval-gated lifecycle as the dashboard.                                           |
+| `/coding-pick owner/repo profile=codex-default`    | Registered channels | Authorized trigger sender     | Picks an issue using a named coding runtime profile. `profile=` can be replaced with `provider=` plus `model=`. |
+| `/coding-jobs` / `/coding-job <jobId>`             | Registered channels | Authorized trigger sender     | Lists or inspects host-managed coding jobs without changing repository state. |
+| `/coding-approve\|/coding-pr\|/coding-ci\|/coding-cancel <jobId>` | Registered channels | Authorized sender for writes | Runs the existing approval-gated coding lifecycle from Telegram, WhatsApp, Signal, Slack, Discord, web, or the main group. |
+
+Coding runtime profiles are selectable in the **Agents → Coding** assignment
+controls or through `/api/agents/coding/runtime-profiles`. Built-in profiles are
+available immediately; custom profiles are managed through that API and the
+`store/coding-runtime-profiles.json` operator file. Each profile names a complete
+`Runner CLI + provider + model` tuple (for example `codex / codex / gpt-5.4`
+or `opencode / ollama / qwen3-coder`). The dashboard validates compatibility
+and readiness before dispatch; every coding job still runs in its own isolated
+workspace under `data/coding-workspaces/jobs/`. The built-in `default` profile
+follows the `default_coding` provider settings. Cursor CLI is intentionally not
+listed until its supported invocation, credential handoff, and isolation
+contract are verified.
 | `/chatid`                                         | Telegram           | Any Telegram chat with the bot | Replies with the Telegram registration id, name, and chat type. Useful when registering Telegram groups.                              |
 | `/ping`                                           | Telegram           | Any Telegram chat with the bot | Replies with a short online status message.                                                                                           |
 

@@ -71,6 +71,7 @@ import {
   reviewApproval,
 } from './approvals.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
+import { resolveCodingRuntimeProfile } from './coding-runtime-profiles.js';
 import { logAuditEvent } from './audit-log.js';
 import { evaluatePolicy } from './policy-engine.js';
 import { buildRepoRulesContext } from './repo-preferences.js';
@@ -258,6 +259,7 @@ export interface StartCodingJobInput {
   stageId?: string | null;
   decisionId?: string | null;
   actualRuntime?: AgentRuntimeSelection | null;
+  runtimeProfileId?: string | null;
   runId?: string | null;
   stageKind?: PipelineStageKind | null;
   stageEvidence?: StageRunEvidence | null;
@@ -2072,7 +2074,11 @@ export async function startCodingJob(
     throw new Error(`Repo ${input.repo} is not registered for coding jobs`);
   }
 
-  const actualRuntime = input.actualRuntime || null;
+  const actualRuntime =
+    input.actualRuntime ||
+    (input.runtimeProfileId
+      ? resolveCodingRuntimeProfile(input.runtimeProfileId)
+      : null);
   if (actualRuntime) validateCodingRuntimeSelection(actualRuntime);
   const requestedProvider =
     actualRuntime?.provider ||
@@ -2196,6 +2202,7 @@ export async function pickGitHubIssue(input: {
   provider?: string;
   model?: string;
   actualRuntime?: AgentRuntimeSelection | null;
+  runtimeProfileId?: string | null;
   assignee?: string;
   milestone?: string;
   issueNumber?: number;
@@ -2218,6 +2225,7 @@ export async function pickGitHubIssue(input: {
     provider: input.provider,
     model: input.model,
     actualRuntime: input.actualRuntime,
+    runtimeProfileId: input.runtimeProfileId,
     createPr: input.createPr,
     requestedBy: input.requestedBy,
   });

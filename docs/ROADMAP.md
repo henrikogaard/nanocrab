@@ -221,7 +221,9 @@ GitHub Project workflow with approval gates and isolated worktrees.
 - Agent profiles:
   - DONE: `primaryRuntime`, `fallbackRuntimes`, `stageRoles`, and `repositoryScopes` fields.
   - DONE: runtime health probes (`claude`, `codex`, `devin`, `opencode`, `pi`, `mistral`) with healthy/missing/unsupported/unauthenticated/error states.
+  - DONE: named coding runtime profiles expose a simple `Runner CLI + provider + model` choice in the Agents dashboard and channel `/coding-pick` command; profiles are compatibility-validated and preserve isolated coding workspaces.
   - DONE: runtime fallback for write-capable stages requires approval.
+  - PENDING: Cursor CLI support remains gated on a verified executable invocation, credential handoff, readiness probe, and isolated-workspace adapter; do not expose an unverified runtime as selectable.
 - Stage dispatch and evidence:
   - DONE: `syncPipeline` reads the GitHub Project state and produces dispatch candidates.
   - DONE: each stage dispatches to an isolated `data/coding-workspaces/jobs/` worktree.

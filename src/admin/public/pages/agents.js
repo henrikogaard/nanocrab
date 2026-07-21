@@ -1067,6 +1067,7 @@ async function renderAgents(el) {
       codingRepoRules,
       codingJobs,
       codingRuntimes,
+      codingRuntimeProfiles,
       agentProviders,
       pendingQuestions,
       agentMsgs,
@@ -1124,6 +1125,10 @@ async function renderAgents(el) {
           loadIssues.push('Coding runtime catalog unavailable');
           return [];
         }),
+      api('/agents/coding/runtime-profiles').catch(() => {
+        loadIssues.push('Coding runtime profiles unavailable');
+        return [];
+      }),
       api('/agents/providers').catch(() => {
         loadIssues.push('Agent provider catalog unavailable');
         return [];
@@ -1329,6 +1334,15 @@ async function renderAgents(el) {
     const enabledPlugins = plugins.filter((p) => p.enabled);
     const codingCliOptions = [...new Set(codingRuntimes.map((runtime) => runtime.cli))]
       .map((cli) => `<option value="${esc(cli)}">${esc(cli)}</option>`)
+      .join('');
+    const codingRuntimeProfileOptions = (Array.isArray(codingRuntimeProfiles)
+      ? codingRuntimeProfiles
+      : []
+    )
+      .map(
+        (profile) =>
+          `<option value="${esc(profile.id)}">${esc(profile.label)}${profile.available === false ? ' (unavailable)' : ''}</option>`,
+      )
       .join('');
     const codingProvidersById = {};
     agentProviders.forEach((p) => {
@@ -1696,6 +1710,7 @@ async function renderAgents(el) {
               <option value="freeform">Freeform task</option>
             </select></div>
             <div class="form-group"><label>Issue #</label><input class="search-input" id="assign-coding-issue-number" placeholder="optional"></div>
+            <div class="form-group"><label>Runtime profile</label><select class="search-input" id="assign-coding-profile-select" onchange="selectCodingRuntimeProfile('assign-coding')"><option value="">Choose a named profile</option>${codingRuntimeProfileOptions}</select></div>
             <div class="form-group"><label>Runner CLI</label><select class="search-input" id="assign-coding-cli-select" onchange="updateAssignCodingRuntime()" ${codingRuntimes.length ? '' : 'disabled'}>${codingCliOptions || '<option value="">Runtime catalog unavailable</option>'}</select></div>
             <div class="form-group"><label>Provider</label><select class="search-input" id="assign-coding-provider-select" onchange="updateAssignCodingRuntimeProvider()" ${codingRuntimes.length ? '' : 'disabled'}></select></div>
             <div class="form-group"><label>Model</label><select class="search-input" id="assign-coding-model-select" onchange="updateAssignCodingRuntimeState()" ${codingRuntimes.length ? '' : 'disabled'}></select></div>
@@ -1728,6 +1743,7 @@ async function renderAgents(el) {
             <div class="form-group"><label>Provider</label><select class="search-input" id="assign-af-provider" onchange="updateAssignAutofixRuntimeProvider()" ${codingRuntimes.length ? '' : 'disabled'}></select></div>
             <div class="form-group"><label>Model</label><select class="search-input" id="assign-af-model" onchange="updateAssignAutofixRuntimeState()" ${codingRuntimes.length ? '' : 'disabled'}></select></div>
             <div class="form-group"><label>Max active jobs</label><input class="search-input" id="assign-af-max-active" type="number" min="1" step="1" value="1"></div>
+            <div class="form-group"><label>Runtime profile</label><select class="search-input" id="assign-af-profile-select" onchange="selectCodingRuntimeProfile('assign-af')"><option value="">Choose a named profile</option>${codingRuntimeProfileOptions}</select></div>
           </div>
           <label class="assign-check"><input type="checkbox" id="assign-af-create-pr" checked> Open PR flow after implementation</label>
           <div class="field-hint" id="assign-af-runtime-readiness" role="status" aria-live="polite">Select a complete coding runtime.</div>
@@ -1777,6 +1793,7 @@ async function renderAgents(el) {
             <div class="agent-coding-pick-grid">
               <select class="search-input" id="coding-repo-select">${codingRepoOptions || '<option value="">No repos registered</option>'}</select>
               <label>Runner CLI<select class="search-input" id="coding-cli-select" onchange="updateCodingRuntime()" ${codingRuntimes.length ? '' : 'disabled'}>${codingCliOptions || '<option value="">Runtime catalog unavailable</option>'}</select></label>
+              <label>Runtime profile<select class="search-input" id="coding-profile-select" onchange="selectCodingRuntimeProfile('coding')"><option value="">Choose a named profile</option>${codingRuntimeProfileOptions}</select></label>
               <label>Provider<select class="search-input" id="coding-provider-select" onchange="updateCodingRuntimeProvider()" ${codingRuntimes.length ? '' : 'disabled'}></select></label>
               <label>Model<select class="search-input" id="coding-model-select" onchange="updateCodingRuntimeState()" ${codingRuntimes.length ? '' : 'disabled'}></select></label>
               <input class="search-input" id="coding-labels" placeholder="labels, comma-separated">
@@ -2005,6 +2022,9 @@ async function renderAgents(el) {
     window._toolModels = JSON.parse(modelOptionsJson);
     updateTaskModels();
     window._codingRuntimeOptions = codingRuntimes;
+    window._codingRuntimeProfiles = Array.isArray(codingRuntimeProfiles)
+      ? codingRuntimeProfiles
+      : [];
     window._codingProvidersById = codingProvidersById;
     updateCodingRuntime();
     updateAssignCodingRuntime();
@@ -2398,6 +2418,27 @@ function codingRuntimeSelection(prefix) {
   );
 }
 
+function codingRuntimeProfileSelection(prefix) {
+  return document.getElementById(`${prefix}-profile-select`)?.value || '';
+}
+
+window.selectCodingRuntimeProfile = function (prefix) {
+  const profileId = codingRuntimeProfileSelection(prefix);
+  const profile = (window._codingRuntimeProfiles || []).find(
+    (candidate) => candidate.id === profileId,
+  );
+  if (!profile?.runtime) return updateCodingRuntimeFor(prefix);
+  const cliEl = document.getElementById(`${prefix}-cli-select`);
+  if (cliEl) cliEl.value = profile.runtime.cli;
+  updateCodingRuntimeFor(prefix);
+  const providerEl = document.getElementById(`${prefix}-provider-select`);
+  if (providerEl) providerEl.value = profile.runtime.provider;
+  updateCodingRuntimeProviderFor(prefix);
+  const modelEl = document.getElementById(`${prefix}-model-select`);
+  if (modelEl) modelEl.value = profile.runtime.model;
+  updateCodingRuntimeStateFor(prefix);
+};
+
 function updateCodingRuntimeStateFor(prefix) {
   const runtime = codingRuntimeSelection(prefix);
   const readiness = document.getElementById(`${prefix}-runtime-readiness`);
@@ -2533,6 +2574,7 @@ window.pickCodingIssue = async function () {
     return;
   }
   const { cli, provider, model } = selectedRuntime;
+  const runtimeProfileId = codingRuntimeProfileSelection('coding');
   try {
     const r = await api('/agents/coding/pick-issue', {
       method: 'POST',
@@ -2540,6 +2582,7 @@ window.pickCodingIssue = async function () {
         repo,
         labels,
         actualRuntime: { cli, provider, model },
+        ...(runtimeProfileId ? { runtimeProfileId } : {}),
         createPr,
       }),
     });
@@ -2576,6 +2619,7 @@ window.startAssignedCodingJob = async function () {
   const targetType =
     document.getElementById('assign-coding-target-type')?.value || 'auto';
   const selectedRuntime = codingRuntimeSelection('assign-coding');
+  const runtimeProfileId = codingRuntimeProfileSelection('assign-coding');
   const prompt =
     document.getElementById('assign-coding-prompt')?.value?.trim() || '';
   const planMode =
@@ -2619,6 +2663,7 @@ window.startAssignedCodingJob = async function () {
               repo,
               labels,
               actualRuntime: { cli, provider, model },
+              ...(runtimeProfileId ? { runtimeProfileId } : {}),
               createPr,
             }),
           })
@@ -2630,6 +2675,7 @@ window.startAssignedCodingJob = async function () {
                 targetType === 'issue-number' ? issueNumber : undefined,
               prompt: assignedCodingPrompt(prompt, planMode),
               actualRuntime: { cli, provider, model },
+              ...(runtimeProfileId ? { runtimeProfileId } : {}),
               createPr,
             }),
           });

@@ -92,6 +92,12 @@ describe('coding chat commands', () => {
       action: 'approve',
       jobId: 'code-123',
     });
+    expect(
+      parseCodingCommand('/coding-pick owner/repo profile=local-opencode'),
+    ).toMatchObject({
+      action: 'pick',
+      runtimeProfileId: 'local-opencode',
+    });
   });
 
   it('picks an issue and returns approval instructions', async () => {
