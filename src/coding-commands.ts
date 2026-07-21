@@ -30,6 +30,9 @@ export interface ParsedCodingCommand {
   repo?: string;
   pullRequestNumber?: number;
   labels?: string[];
+  assignee?: string;
+  milestone?: string;
+  issueNumber?: number;
   cli?: string;
   provider?: string;
   model?: string;
@@ -108,6 +111,12 @@ export function parseCodingCommand(input: string): ParsedCodingCommand | null {
       parsed.provider = value;
     } else if (key === 'model' && value) {
       parsed.model = value;
+    } else if (key === 'assignee' && value) {
+      parsed.assignee = value;
+    } else if (key === 'milestone' && value) {
+      parsed.milestone = value;
+    } else if (key === 'issue' && /^\d+$/.test(value)) {
+      parsed.issueNumber = Number(value);
     } else if (key === 'no-pr') {
       parsed.createPr = false;
     } else if (key === 'pr') {
@@ -171,6 +180,9 @@ export async function runCodingCommand(
       cli: command.cli,
       provider: command.provider,
       model: command.model,
+      assignee: command.assignee,
+      milestone: command.milestone,
+      issueNumber: command.issueNumber,
       createPr: command.createPr,
       requestedBy: actor,
     });
