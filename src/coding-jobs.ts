@@ -78,6 +78,7 @@ import {
   reviewApproval,
 } from './approvals.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
+import { resolveCodingRuntimeProfile } from './coding-runtime-profiles.js';
 import { logAuditEvent } from './audit-log.js';
 import { evaluatePolicy } from './policy-engine.js';
 import { buildRepoRulesContext } from './repo-preferences.js';
@@ -244,6 +245,7 @@ export interface CodingJob {
   /** Runtime explicitly requested by the caller, before fallback/readiness selection. */
   requestedRuntime?: AgentRuntimeSelection | null;
   actualRuntime?: AgentRuntimeSelection | null;
+  runtimeProfileId?: string | null;
   runnerCli: AgentCliId;
   activeAttemptId: string | null;
   executionAttempts: CodingExecutionAttempt[];
@@ -276,6 +278,7 @@ export interface StartCodingJobInput {
   stageId?: string | null;
   decisionId?: string | null;
   actualRuntime?: AgentRuntimeSelection | null;
+  runtimeProfileId?: string | null;
   runId?: string | null;
   stageKind?: PipelineStageKind | null;
   stageEvidence?: StageRunEvidence | null;
@@ -2222,7 +2225,9 @@ export async function startCodingJob(
         }
         return { ...input.actualRuntime! };
       })()
-    : null;
+    : input.runtimeProfileId
+      ? resolveCodingRuntimeProfile(input.runtimeProfileId)
+      : null;
   const requestedRuntime =
     explicitRuntime ||
     resolveCodingRuntimeSelection({
@@ -2310,6 +2315,7 @@ export async function startCodingJob(
     stageId: input.stageId || null,
     decisionId: input.decisionId || null,
     requestedRuntime,
+    runtimeProfileId: input.runtimeProfileId || null,
     // An explicit runtime is the selected runtime until the execution probe
     // proves it unavailable and the owner approves a complete fallback.
     actualRuntime: requestedRuntime,
@@ -2350,6 +2356,7 @@ export async function pickGitHubIssue(input: {
   provider?: string;
   model?: string;
   actualRuntime?: AgentRuntimeSelection | null;
+  runtimeProfileId?: string | null;
   assignee?: string;
   milestone?: string;
   issueNumber?: number;
@@ -2374,6 +2381,7 @@ export async function pickGitHubIssue(input: {
     cli: input.cli,
     tool: input.tool,
     actualRuntime: input.actualRuntime,
+    runtimeProfileId: input.runtimeProfileId,
     createPr: input.createPr,
     requestedBy: input.requestedBy,
   });

@@ -94,6 +94,12 @@ describe('coding chat commands', () => {
       action: 'approve',
       jobId: 'code-123',
     });
+    expect(
+      parseCodingCommand('/coding-pick owner/repo profile=local-opencode'),
+    ).toMatchObject({
+      action: 'pick',
+      runtimeProfileId: 'local-opencode',
+    });
   });
 
   it('accepts cli as an alias for tool in coding commands', () => {
