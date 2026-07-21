@@ -46,6 +46,17 @@ const CAPABILITIES: Record<AgentProvider, ProviderCapabilitiesResult> = {
     privacyTier: 'high',
     supportsMcpStrategy: true,
   },
+  cursor: {
+    toolCalls: true,
+    structuredOutput: false,
+    streaming: true,
+    vision: false,
+    codeStrength: 'high',
+    contextWindow: 128000,
+    costTier: 'high',
+    privacyTier: 'high',
+    supportsMcpStrategy: true,
+  },
   pi: {
     toolCalls: true,
     structuredOutput: false,

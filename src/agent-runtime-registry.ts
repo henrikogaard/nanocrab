@@ -5,6 +5,7 @@ import { promisify } from 'util';
 
 import type { AgentProvider } from './agent-provider.js';
 import { DEVIN_CLI_MODEL_ALIASES, DEVIN_CREDENTIAL_PATH } from './config.js';
+import { readEnvFile } from './env.js';
 import {
   buildDevinChildEnvironment,
   DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
@@ -34,6 +35,9 @@ const DEVIN_REQUIRED_CAPABILITIES = [
   '--respect-workspace-trust',
   '-p',
 ] as const;
+
+export const CURSOR_ISOLATION_DETAIL =
+  'Cursor CLI requires an explicitly verified host isolation adapter; it is not exposed through a container or raw credential handoff';
 
 export interface VerifiedDevinRuntimeContext {
   readonly executable: string;
@@ -131,6 +135,15 @@ export interface DevinProbeDependencies {
   trustedRuntimeReadFileCandidates?: readonly string[];
 }
 
+export interface CursorProbeDependencies {
+  execFile: (
+    executable: string,
+    args: readonly string[],
+    options: { env: NodeJS.ProcessEnv; timeout: number },
+  ) => Promise<{ stdout: string; stderr: string }>;
+  credentialAvailable: () => boolean;
+}
+
 export function getVerifiedDevinAliases(): ReadonlySet<string> {
   return new Set(verifiedDevinState?.aliases ?? []);
 }
@@ -153,6 +166,7 @@ export function inferLegacyRunnerCli(provider: AgentProvider): AgentCliId {
     return provider;
   }
   if (provider === 'mistral') return 'mistral';
+  if (provider === 'cursor') return 'cursor';
   return 'opencode';
 }
 
@@ -183,6 +197,7 @@ const COMPATIBLE_CODING_PROVIDERS: Readonly<
     'ollama',
     'openai-compatible',
   ]),
+  cursor: new Set<AgentProvider>(['cursor']),
   pi: new Set<AgentProvider>(['pi']),
   mistral: new Set<AgentProvider>(['mistral']),
 });
@@ -243,6 +258,14 @@ const RUNTIMES: Record<AgentCliId, AgentRuntimeDefinition> = {
     versionArgs: Object.freeze(['--version']),
     codingRunnerSupported: true,
   },
+  cursor: Object.freeze({
+    cli: 'cursor',
+    executable: 'agent',
+    versionArgs: Object.freeze(['--version']),
+    codingRunnerSupported: true,
+    detail:
+      'Cursor Agent CLI uses the host-isolated workspace adapter; container execution is not supported',
+  }),
   devin: Object.freeze({
     cli: 'devin',
     executable: 'devin',
@@ -288,6 +311,7 @@ export async function probeAgentRuntime(
   options?: {
     execFile?: typeof execFileAsync;
     devinDependencies?: DevinProbeDependencies;
+    cursorDependencies?: CursorProbeDependencies;
   },
 ): Promise<AgentRuntimeHealth> {
   const definition = RUNTIMES[cli];
@@ -313,6 +337,12 @@ export async function probeAgentRuntime(
     }
     return probeDevinRuntime(
       options?.devinDependencies ?? defaultDevinProbeDependencies(),
+    );
+  }
+
+  if (cli === 'cursor') {
+    return probeCursorRuntime(
+      options?.cursorDependencies ?? defaultCursorProbeDependencies(),
     );
   }
 
@@ -383,6 +413,81 @@ export async function probeAgentRuntime(
       checkedAt,
       detail: error.message || String(err),
     };
+  }
+}
+
+function cursorHealth(
+  status: AgentRuntimeHealth['status'],
+  detail: string,
+  checkedAt: string,
+  version: string | null = null,
+): AgentRuntimeHealth {
+  return {
+    cli: 'cursor',
+    executable: 'agent',
+    status,
+    version,
+    checkedAt,
+    detail,
+  };
+}
+
+function defaultCursorProbeDependencies(): CursorProbeDependencies {
+  return {
+    execFile: execFileAsync,
+    credentialAvailable: () =>
+      Boolean(
+        process.env.CURSOR_API_KEY ||
+        readEnvFile(['CURSOR_API_KEY']).CURSOR_API_KEY,
+      ),
+  };
+}
+
+/** Verify host prerequisites without ever passing the API key to the probe. */
+export async function probeCursorRuntime(
+  deps: CursorProbeDependencies,
+): Promise<AgentRuntimeHealth> {
+  const checkedAt = new Date().toISOString();
+  if (!deps.credentialAvailable()) {
+    return cursorHealth(
+      'unauthenticated',
+      'CURSOR_API_KEY is not configured for the NanoCrab service user',
+      checkedAt,
+    );
+  }
+  try {
+    const { stdout } = await deps.execFile('agent', ['--version'], {
+      env: {
+        PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
+        TERM: 'dumb',
+        NO_COLOR: '1',
+      },
+      timeout: 10000,
+    });
+    const version = parseVersion(stdout.trim());
+    return cursorHealth(
+      'healthy',
+      `version ${version || 'unknown'}; API key configured`,
+      checkedAt,
+      version,
+    );
+  } catch (err: unknown) {
+    const error = err as { code?: string; message?: string };
+    if (error.code === 'ENOENT') {
+      return cursorHealth(
+        'missing',
+        'Cursor Agent executable agent was not found',
+        checkedAt,
+      );
+    }
+    if (error.code === 'EACCES') {
+      return cursorHealth(
+        'error',
+        'permission denied for Cursor Agent executable agent',
+        checkedAt,
+      );
+    }
+    return cursorHealth('error', error.message || String(err), checkedAt);
   }
 }
 

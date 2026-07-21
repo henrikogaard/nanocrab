@@ -96,4 +96,22 @@ describe('coding runtime profiles', () => {
       /disabled/i,
     );
   });
+
+  it('does not expose an unverified Cursor profile by default', () => {
+    expect(
+      listCodingRuntimeProfiles().map((profile) => profile.id),
+    ).not.toContain('cursor-default');
+  });
+
+  it('accepts an explicitly configured Cursor profile without making it healthy', () => {
+    const profile = buildCodingRuntimeProfile({
+      id: 'cursor-host',
+      label: 'Cursor Agent (host isolated)',
+      runtime: { cli: 'cursor', provider: 'cursor', model: 'gpt-5' },
+    });
+    expect(saveCodingRuntimeProfile(profile)).toMatchObject({
+      id: 'cursor-host',
+      runtime: { cli: 'cursor', provider: 'cursor', model: 'gpt-5' },
+    });
+  });
 });
