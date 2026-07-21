@@ -198,4 +198,108 @@ describe('coding chat commands', () => {
     expect(response).toContain('Picked owner/repo#7');
     expect(response).toContain('Approve with /coding-approve code-');
   });
+
+  it('scopes read-only job listings to the originating channel', async () => {
+    fs.mkdirSync(`${TEST_ROOT}/store`, { recursive: true });
+    fs.writeFileSync(
+      `${TEST_ROOT}/store/coding-jobs.json`,
+      JSON.stringify([
+        {
+          id: 'code-channel-1',
+          repo: 'owner/repo',
+          type: 'prompt',
+          prompt: 'Private channel task',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+          status: 'queued',
+          branch: 'nanocrab/private',
+          workspace: '/tmp/workspace',
+          createPr: false,
+          prUrl: null,
+          requestedBy: 'channel:slack:C123:U123',
+          createdAt: new Date(0).toISOString(),
+          completedAt: null,
+        },
+      ]),
+    );
+
+    const hidden = await runCodingCommand(
+      parseCodingCommand('/coding-jobs')!,
+      'channel:slack:C999:U999',
+      { visibilityScope: 'channel:slack:C999:' },
+    );
+    expect(hidden).toBe('No coding jobs yet.');
+
+    const visible = await runCodingCommand(
+      parseCodingCommand('/coding-jobs')!,
+      'channel:slack:C123:U123',
+      { visibilityScope: 'channel:slack:C123:' },
+    );
+    expect(visible).toContain('code-channel-1');
+  });
+
+  it('allows write actions on jobs created by other channels or the dashboard', async () => {
+    fs.mkdirSync(`${TEST_ROOT}/store`, { recursive: true });
+    fs.writeFileSync(
+      `${TEST_ROOT}/store/coding-jobs.json`,
+      JSON.stringify([
+        {
+          id: 'code-dashboard-1',
+          repo: 'owner/repo',
+          type: 'prompt',
+          prompt: 'Dashboard task',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+          status: 'queued',
+          branch: 'nanocrab/dashboard',
+          workspace: '/tmp/workspace',
+          createPr: false,
+          prUrl: null,
+          requestedBy: 'dashboard',
+          createdAt: new Date(0).toISOString(),
+          completedAt: null,
+        },
+      ]),
+    );
+
+    const cancelled = await runCodingCommand(
+      parseCodingCommand('/coding-cancel code-dashboard-1')!,
+      'channel:slack:C123:U123',
+      { visibilityScope: 'channel:slack:C123:' },
+    );
+    expect(cancelled).toContain('code-dashboard-1');
+    expect(cancelled).not.toContain('not found');
+  });
+
+  it('hides show metadata for jobs outside the channel scope', async () => {
+    fs.mkdirSync(`${TEST_ROOT}/store`, { recursive: true });
+    fs.writeFileSync(
+      `${TEST_ROOT}/store/coding-jobs.json`,
+      JSON.stringify([
+        {
+          id: 'code-dashboard-2',
+          repo: 'owner/repo',
+          type: 'prompt',
+          prompt: 'Dashboard task',
+          provider: 'claude',
+          model: 'claude-sonnet-4-6',
+          status: 'queued',
+          branch: 'nanocrab/dashboard',
+          workspace: '/tmp/workspace',
+          createPr: false,
+          prUrl: null,
+          requestedBy: 'dashboard',
+          createdAt: new Date(0).toISOString(),
+          completedAt: null,
+        },
+      ]),
+    );
+
+    const hidden = await runCodingCommand(
+      parseCodingCommand('/coding-job code-dashboard-2')!,
+      'channel:slack:C123:U123',
+      { visibilityScope: 'channel:slack:C123:' },
+    );
+    expect(hidden).toBe('Coding job not found: code-dashboard-2');
+  });
 });

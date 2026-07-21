@@ -78,6 +78,7 @@ import {
   hasApprovedTarget,
   listApprovals,
   reviewApproval,
+  revertApprovalToPending,
 } from './approvals.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
 import { resolveCodingRuntimeProfile } from './coding-runtime-profiles.js';
@@ -1043,6 +1044,21 @@ function updateJobOutput(job: CodingJob, text: string): void {
 
 export function buildCodingPrompt(job: CodingJob): string {
   const repoRules = buildRepoRulesContext(job.repo);
+  if (job.type === 'review') {
+    return [
+      `You are reviewing the cloned repository ${job.repo}.`,
+      job.pullRequestNumber
+        ? `Review GitHub pull request #${job.pullRequestNumber}.`
+        : 'Perform a read-only code review.',
+      job.prompt,
+      repoRules || '',
+      'Instructions:',
+      '1. Inspect the repository and changed files before forming conclusions.',
+      '2. Do not edit files, create files, commit, push, or run commands that mutate the workspace.',
+      '3. Run only read-only checks when practical; do not alter dependencies or generated files.',
+      '4. Return concise findings first with severity (P0-P3), file and line where possible, then a short approval/risk summary.',
+    ].join('\n\n');
+  }
   const prompt = [
     `You are working in the cloned repository ${job.repo}.`,
     job.issueNumber
@@ -1122,6 +1138,7 @@ function buildCodingContainerEnv(
     JOB_BRANCH: job.branch,
     JOB_PROVIDER: job.provider,
     JOB_MODEL: job.model,
+    CODING_JOB_MODE: job.type,
     CREATE_PR: 'false',
     CODING_JOB_MAX_BUDGET_USD:
       envValue(envFileValues, 'CODING_JOB_MAX_BUDGET_USD') || '5',
@@ -1327,9 +1344,13 @@ function writeCodingJobFiles(job: CodingJob, repo: CodingRepo): string {
       'fi',
       'cd "$REPO_DIR"',
       'git config --global --add safe.directory "$PWD" 2>/dev/null || true',
+      'chmod -R u+w . 2>/dev/null || true',
       'git fetch origin "$DEFAULT_BRANCH" --depth 50',
       'git checkout -B "$DEFAULT_BRANCH" "origin/$DEFAULT_BRANCH"',
       'git checkout -B "$JOB_BRANCH"',
+      'if [ "$CODING_JOB_MODE" = "review" ]; then',
+      '  chmod -R a-w .',
+      'fi',
       'PROMPT="$(cat /workspace/coding-job/.nanocrab/prompt.txt)"',
       'case "$JOB_PROVIDER" in',
       '  codex)',
@@ -2503,16 +2524,27 @@ export async function startCodingPullRequestReview(input: {
   };
   const filesPayload = (await githubApi(
     `/repos/${ref.repo}/pulls/${ref.number}/files?per_page=100`,
-  )) as {
-    files?: Array<{
-      filename?: string;
-      status?: string;
-      additions?: number;
-      deletions?: number;
-      patch?: string;
-    }>;
-  };
-  const fileSummary = (filesPayload.files || [])
+  )) as
+    | Array<{
+        filename?: string;
+        status?: string;
+        additions?: number;
+        deletions?: number;
+        patch?: string;
+      }>
+    | {
+        files?: Array<{
+          filename?: string;
+          status?: string;
+          additions?: number;
+          deletions?: number;
+          patch?: string;
+        }>;
+      };
+  const files = Array.isArray(filesPayload)
+    ? filesPayload
+    : filesPayload.files || [];
+  const fileSummary = files
     .map((file) => {
       const patch = file.patch || '(binary or unavailable diff)';
       return [
@@ -2625,10 +2657,18 @@ export async function approveAndCloseCodingPullRequest(
     throw new Error(`PR close denied by policy: ${policy.explanation}`);
   }
   reviewApproval(approval.id, 'approved', by);
-  await githubApi(`/repos/${ref.repo}/pulls/${ref.number}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ state: 'closed' }),
-  });
+  try {
+    await githubApi(`/repos/${ref.repo}/pulls/${ref.number}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ state: 'closed' }),
+    });
+  } catch (err) {
+    revertApprovalToPending(
+      approval.id,
+      `GitHub PR close failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    throw err;
+  }
   return { ...ref, approvalId: approval.id };
 }
 

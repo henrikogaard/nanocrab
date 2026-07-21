@@ -25,7 +25,7 @@ export function normalizeSlackBotMention(
 ): string {
   if (!botUserId) return text;
   const mention = new RegExp(`<@${escapeRegExp(botUserId)}(?:\\|[^>]+)?>`, 'g');
-  return text.replace(mention, trigger).replace(/\s+/g, ' ').trim();
+  return text.replace(mention, trigger).trim();
 }
 
 type SlackEventHandler = (payload: {

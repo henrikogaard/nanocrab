@@ -195,6 +195,7 @@ describe('processChannelCodingCommand', () => {
     expect(runCodingCommand).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'pick', repo: 'owner/repo' }),
       'channel:test:test:123:u1',
+      { visibilityScope: 'channel:test:test:123:' },
     );
     expect(channel.sendMessage).toHaveBeenCalledWith(
       'test:123',
@@ -217,6 +218,40 @@ describe('processChannelCodingCommand', () => {
     expect(channel.sendMessage).toHaveBeenCalledWith(
       'test:123',
       expect.stringContaining('Unauthorized'),
+    );
+  });
+
+  it('replies with a channel-scoped failure when coding execution errors', async () => {
+    vi.mocked(isSenderAllowed).mockReturnValue(true);
+    vi.mocked(runCodingCommand).mockRejectedValueOnce(
+      new Error('provider unavailable'),
+    );
+    const channel = fakeChannel();
+    const result = await processChannelCodingCommand(
+      channel,
+      'test:123',
+      fakeGroup('@Andy'),
+      [fakeMessage('@Andy /coding-jobs')],
+    );
+
+    expect(result).toBe(true);
+    expect(channel.sendMessage).toHaveBeenCalledWith(
+      'test:123',
+      expect.stringContaining('Command failed: provider unavailable'),
+    );
+  });
+
+  it('passes a channel visibility scope for read-only coding metadata', async () => {
+    vi.mocked(isSenderAllowed).mockReturnValue(true);
+    const channel = fakeChannel();
+    await processChannelCodingCommand(channel, 'test:123', fakeGroup('@Andy'), [
+      fakeMessage('@Andy /coding-jobs'),
+    ]);
+
+    expect(runCodingCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'list' }),
+      'channel:test:test:123:u1',
+      { visibilityScope: 'channel:test:test:123:' },
     );
   });
 });
