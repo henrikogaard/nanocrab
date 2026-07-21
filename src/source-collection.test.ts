@@ -519,6 +519,59 @@ describe('source-collection', () => {
       );
     });
 
+    it('does not block legitimate filenames that contain a keyword substring', async () => {
+      const tokenizerPath = path.join(STORE_DIR, 'tokenizer.ts');
+      fs.writeFileSync(tokenizerPath, 'export function tokenize() {}');
+      const secretaryPath = path.join(STORE_DIR, 'secretary-notes.md');
+      fs.writeFileSync(secretaryPath, 'Meeting notes from the secretary.');
+      const secretsManagerPath = path.join(
+        STORE_DIR,
+        'secrets-manager-design.md',
+      );
+      fs.writeFileSync(
+        secretsManagerPath,
+        '# Secrets Manager Design\n\nThis document describes the design.',
+      );
+
+      for (const filePath of [
+        tokenizerPath,
+        secretaryPath,
+        secretsManagerPath,
+      ]) {
+        const collected = await collectReportSources(
+          `report-keyword-false-positive-${path.basename(filePath)}`,
+          { actor: 'henrik', groupFolder: 'main-group' },
+          [{ scope: 'file', mountedPath: filePath }],
+        );
+        expect(
+          getSourceCollection(collected.sourceCollectionId)?.items[0],
+        ).toMatchObject({
+          status: 'completed',
+        });
+      }
+    });
+
+    it('still blocks filenames with word-boundaried credential keywords', async () => {
+      const credentialsPath = path.join(STORE_DIR, 'credentials.json');
+      fs.writeFileSync(credentialsPath, '{"api_key": "leak"}');
+      const apiTokenPath = path.join(STORE_DIR, 'api-token.txt');
+      fs.writeFileSync(apiTokenPath, 'token=leak');
+      const privateKeyPath = path.join(STORE_DIR, 'private_key.txt');
+      fs.writeFileSync(privateKeyPath, '-----BEGIN PRIVATE KEY-----');
+
+      for (const filePath of [credentialsPath, apiTokenPath, privateKeyPath]) {
+        const collected = await collectReportSources(
+          `report-keyword-block-${path.basename(filePath)}`,
+          { actor: 'henrik', groupFolder: 'main-group' },
+          [{ scope: 'file', mountedPath: filePath }],
+        );
+        const item = getSourceCollection(collected.sourceCollectionId)
+          ?.items[0];
+        expect(item).toMatchObject({ status: 'failed' });
+        expect(item?.failureReason).toContain('blocked pattern');
+      }
+    });
+
     it('deduplicates repeated identical ledger entries', () => {
       const collection = startSourceCollection('report-dedup', ['memory']);
       addLedgerEntry(collection.id, 'memory', 'Same', 'Same citation');

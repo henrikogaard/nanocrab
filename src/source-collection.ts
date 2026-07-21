@@ -721,20 +721,23 @@ const FILE_SOURCE_EXTENSIONS = new Set([
   '.yaml',
   '.yml',
 ]);
-const FILE_SOURCE_BLOCKED_NAMES = [
+const FILE_SOURCE_BLOCKED_SEGMENTS = new Set([
   '.env',
   '.ssh',
   '.gnupg',
   '.aws',
   '.kube',
+  '.npmrc',
+  '.netrc',
+  'memory.md',
+]);
+
+const FILE_SOURCE_BLOCKED_KEYWORDS = [
   'credentials',
   'secret',
   'token',
   'password',
   'private_key',
-  '.npmrc',
-  '.netrc',
-  'memory.md',
 ];
 
 function pathWithinRoot(candidate: string, root: string): boolean {
@@ -745,11 +748,22 @@ function pathWithinRoot(candidate: string, root: string): boolean {
   );
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function isBlockedFilePath(realPath: string): string | undefined {
   const parts = realPath.toLowerCase().split(path.sep);
-  return FILE_SOURCE_BLOCKED_NAMES.find((pattern) =>
-    parts.some((part) => part === pattern || part.includes(pattern)),
-  );
+  for (const part of parts) {
+    if (FILE_SOURCE_BLOCKED_SEGMENTS.has(part)) return part;
+    for (const keyword of FILE_SOURCE_BLOCKED_KEYWORDS) {
+      const regex = new RegExp(
+        `(^|[^a-z0-9])${escapeRegExp(keyword)}([^a-z0-9]|$)`,
+      );
+      if (regex.test(part)) return keyword;
+    }
+  }
+  return undefined;
 }
 
 function sourceLabelForFile(
