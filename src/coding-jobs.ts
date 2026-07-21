@@ -34,6 +34,7 @@ import {
   getVerifiedDevinAliases,
   getVerifiedDevinRuntimeContext,
   inferLegacyRunnerCli,
+  isAgentCliId,
   isDevinSandboxAuthHandoffAvailable,
   resolveDevinCliModelAlias,
   validateCodingRuntimeSelection,
@@ -237,6 +238,8 @@ export interface CodingJob {
   pipelineId?: string | null;
   stageId?: string | null;
   decisionId?: string | null;
+  /** Runtime explicitly requested by the caller, before fallback/readiness selection. */
+  requestedRuntime?: AgentRuntimeSelection | null;
   actualRuntime?: AgentRuntimeSelection | null;
   runnerCli: AgentCliId;
   activeAttemptId: string | null;
@@ -255,6 +258,8 @@ export interface StartCodingJobInput {
   issueNumber?: number;
   provider?: string;
   model?: string;
+  cli?: string;
+  tool?: string;
   createPr?: boolean;
   dryRun?: boolean;
   branchName?: string;
@@ -268,6 +273,13 @@ export interface StartCodingJobInput {
   runId?: string | null;
   stageKind?: PipelineStageKind | null;
   stageEvidence?: StageRunEvidence | null;
+}
+
+export interface CodingRuntimeRequest {
+  cli?: string;
+  tool?: string;
+  provider?: string;
+  model?: string;
 }
 
 function readJsonFile<T>(filePath: string, fallback: T): T {
@@ -387,6 +399,7 @@ function ensureJobDefaults(job: CodingJob): CodingJob {
     pipelineId: null,
     stageId: null,
     decisionId: null,
+    requestedRuntime: null,
     actualRuntime: null,
     runId: null,
     stageKind: null,
@@ -755,7 +768,10 @@ function codingProvider(
   inputProvider?: string,
   inputModel?: string,
 ): CodingProvider {
-  if (inputProvider && isAgentProvider(inputProvider)) {
+  if (inputProvider !== undefined && inputProvider.trim()) {
+    if (!isAgentProvider(inputProvider)) {
+      throw new Error(`Unknown coding provider: ${inputProvider}`);
+    }
     if (isCodingProvider(inputProvider, inputModel)) return inputProvider;
     throw new Error(
       codingProviderUnavailableReason(inputProvider, inputModel) ||
@@ -772,6 +788,115 @@ function codingProvider(
 function defaultModelForProvider(provider: CodingProvider): string {
   const config = getAgentProviderConfig();
   return config.modelsByProvider[provider] || DEFAULT_AGENT_MODELS[provider];
+}
+
+const DEFAULT_PROVIDER_FOR_CLI: Partial<Record<AgentCliId, CodingProvider>> = {
+  claude: 'claude',
+  codex: 'codex',
+  opencode: 'opencode',
+  pi: 'pi',
+  mistral: 'mistral',
+  // Devin executes a verified provider/model pair through its isolated host
+  // runner. Claude is the safe default when no provider profile is explicit.
+  devin: 'claude',
+};
+
+function normalizeRuntimePart(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+function validateCodingModel(model: string): void {
+  if (
+    model.length > 256 ||
+    Array.from(model).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 0x20 || code === 0x7f;
+    })
+  ) {
+    throw new Error('Coding model contains unsupported control characters');
+  }
+}
+
+/**
+ * Resolve the canonical CLI/provider/model tuple for a coding job.  This is
+ * intentionally synchronous: startup only records the requested runtime;
+ * execution performs the authoritative host/container readiness probe before
+ * any workspace mutation or provider process starts.
+ */
+export function resolveCodingRuntimeSelection(
+  request: CodingRuntimeRequest,
+): AgentRuntimeSelection | null {
+  const cliInput = normalizeRuntimePart(request.cli);
+  const toolInput = normalizeRuntimePart(request.tool);
+  if (
+    cliInput &&
+    toolInput &&
+    cliInput.toLowerCase() !== toolInput.toLowerCase()
+  ) {
+    throw new Error(
+      `Conflicting coding runtime CLI/tool: ${cliInput} vs ${toolInput}`,
+    );
+  }
+  const cliValue = (cliInput || toolInput)?.toLowerCase();
+  const providerValue = normalizeRuntimePart(request.provider)?.toLowerCase();
+  const modelValue = normalizeRuntimePart(request.model);
+
+  if (!cliValue && !providerValue && !modelValue) return null;
+
+  let cli: AgentCliId | undefined;
+  if (cliValue) {
+    if (!isAgentCliId(cliValue)) {
+      throw new Error(`Unknown coding runtime CLI: ${cliValue}`);
+    }
+    cli = cliValue;
+  }
+
+  let provider: CodingProvider | undefined;
+  if (providerValue) {
+    if (!isAgentProvider(providerValue)) {
+      throw new Error(`Unknown coding provider: ${providerValue}`);
+    }
+    if (!isCodingProvider(providerValue, modelValue)) {
+      throw new Error(
+        codingProviderUnavailableReason(providerValue, modelValue) ||
+          `${providerValue} is not a coding-job runtime`,
+      );
+    }
+    provider = providerValue;
+  }
+
+  if (!provider && cli) {
+    provider = DEFAULT_PROVIDER_FOR_CLI[cli];
+  }
+  if (!provider) {
+    const config = getAgentProviderConfig();
+    const configuredModel =
+      config.modelsByProvider[config.provider] ||
+      DEFAULT_AGENT_MODELS[config.provider];
+    if (isCodingProvider(config.provider, modelValue || configuredModel)) {
+      provider = config.provider;
+    } else {
+      provider = 'claude';
+    }
+  }
+
+  const model = modelValue || defaultModelForProvider(provider);
+  validateCodingModel(model);
+  if (!isCodingProvider(provider, model)) {
+    throw new Error(
+      codingProviderUnavailableReason(provider, model) ||
+        `${provider} is not a coding-job runtime`,
+    );
+  }
+  const resolvedCli = cli || inferLegacyRunnerCli(provider);
+  const runtime: AgentRuntimeSelection = {
+    cli: resolvedCli,
+    provider,
+    model,
+  };
+  validateCodingRuntimeSelection(runtime);
+  return runtime;
 }
 
 const CODING_JOB_TRANSITIONS: Record<CodingJobStatus, CodingJobStatus[]> = {
@@ -1745,13 +1870,14 @@ async function runCodingJob(
     upsertCodingJob(job);
     return;
   }
-  if (fallback.provider && fallback.provider !== job.provider) {
-    if (!isCodingProvider(fallback.provider, fallback.model)) {
-      throw new Error(
-        codingProviderUnavailableReason(fallback.provider, fallback.model) ||
-          `${fallback.provider} is not a coding-job runtime`,
-      );
-    }
+  if (
+    fallback.provider &&
+    !isCodingProvider(fallback.provider, fallback.model)
+  ) {
+    throw new Error(
+      codingProviderUnavailableReason(fallback.provider, fallback.model) ||
+        `${fallback.provider} is not a coding-job runtime`,
+    );
   }
 
   const runtimeChanged =
@@ -2071,20 +2197,36 @@ export async function startCodingJob(
     throw new Error(`Repo ${input.repo} is not registered for coding jobs`);
   }
 
-  const actualRuntime = input.actualRuntime || null;
-  if (actualRuntime) validateCodingRuntimeSelection(actualRuntime);
-  const requestedProvider =
-    actualRuntime?.provider ||
-    (input.provider && isAgentProvider(input.provider)
-      ? input.provider
-      : undefined);
-  const requestedModel =
-    actualRuntime?.model ||
-    input.model ||
-    (requestedProvider
-      ? getAgentProviderConfig().modelsByProvider[requestedProvider] ||
-        DEFAULT_AGENT_MODELS[requestedProvider]
-      : undefined);
+  const explicitRuntime = input.actualRuntime
+    ? (() => {
+        validateCodingRuntimeSelection(input.actualRuntime!);
+        validateCodingModel(input.actualRuntime!.model);
+        if (
+          !isCodingProvider(
+            input.actualRuntime!.provider,
+            input.actualRuntime!.model,
+          )
+        ) {
+          throw new Error(
+            codingProviderUnavailableReason(
+              input.actualRuntime!.provider,
+              input.actualRuntime!.model,
+            ) || `${input.actualRuntime!.provider} is not a coding-job runtime`,
+          );
+        }
+        return { ...input.actualRuntime! };
+      })()
+    : null;
+  const requestedRuntime =
+    explicitRuntime ||
+    resolveCodingRuntimeSelection({
+      cli: input.cli,
+      tool: input.tool,
+      provider: input.provider,
+      model: input.model,
+    });
+  const requestedProvider = requestedRuntime?.provider;
+  const requestedModel = requestedRuntime?.model;
   const provider = codingProvider(requestedProvider, requestedModel);
   const model = requestedModel || defaultModelForProvider(provider);
   let prompt = input.prompt || '';
@@ -2159,8 +2301,11 @@ export async function startCodingJob(
     pipelineId: input.pipelineId || null,
     stageId: input.stageId || null,
     decisionId: input.decisionId || null,
-    actualRuntime,
-    runnerCli: actualRuntime?.cli ?? inferLegacyRunnerCli(provider),
+    requestedRuntime,
+    // An explicit runtime is the selected runtime until the execution probe
+    // proves it unavailable and the owner approves a complete fallback.
+    actualRuntime: requestedRuntime,
+    runnerCli: requestedRuntime?.cli ?? inferLegacyRunnerCli(provider),
     activeAttemptId: null,
     executionAttempts: [],
     runId: input.runId || id,
@@ -2192,6 +2337,8 @@ export async function startCodingJob(
 export async function pickGitHubIssue(input: {
   repo: string;
   labels?: string[];
+  cli?: string;
+  tool?: string;
   provider?: string;
   model?: string;
   actualRuntime?: AgentRuntimeSelection | null;
@@ -2216,6 +2363,8 @@ export async function pickGitHubIssue(input: {
     issueNumber: issue.number,
     provider: input.provider,
     model: input.model,
+    cli: input.cli,
+    tool: input.tool,
     actualRuntime: input.actualRuntime,
     createPr: input.createPr,
     requestedBy: input.requestedBy,

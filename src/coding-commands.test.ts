@@ -78,12 +78,13 @@ describe('coding chat commands', () => {
   it('parses mobile coding command arguments', () => {
     expect(
       parseCodingCommand(
-        '/coding-pick owner/repo labels=autofix,p0 provider=codex model=gpt-5.4 no-pr',
+        '/coding-pick owner/repo labels=autofix,p0 tool=codex provider=codex model=gpt-5.4 no-pr',
       ),
     ).toMatchObject({
       action: 'pick',
       repo: 'owner/repo',
       labels: ['autofix', 'p0'],
+      cli: 'codex',
       provider: 'codex',
       model: 'gpt-5.4',
       createPr: false,
@@ -91,6 +92,19 @@ describe('coding chat commands', () => {
     expect(parseCodingCommand('/coding-approve code-123')).toMatchObject({
       action: 'approve',
       jobId: 'code-123',
+    });
+  });
+
+  it('accepts cli as an alias for tool in coding commands', () => {
+    expect(
+      parseCodingCommand(
+        '/coding-pick owner/repo cli=opencode provider=openrouter model=qwen/qwen3-coder',
+      ),
+    ).toMatchObject({
+      action: 'pick',
+      cli: 'opencode',
+      provider: 'openrouter',
+      model: 'qwen/qwen3-coder',
     });
   });
 

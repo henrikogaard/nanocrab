@@ -280,7 +280,7 @@ export function getAgentRuntimeDefinition(
 }
 
 export function isAgentCliId(value: string): value is AgentCliId {
-  return value in RUNTIMES;
+  return Object.prototype.hasOwnProperty.call(RUNTIMES, value);
 }
 
 export async function probeAgentRuntime(

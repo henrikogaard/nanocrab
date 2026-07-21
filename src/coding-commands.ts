@@ -23,6 +23,7 @@ export interface ParsedCodingCommand {
   jobId?: string;
   repo?: string;
   labels?: string[];
+  cli?: string;
   provider?: string;
   model?: string;
   createPr?: boolean;
@@ -63,6 +64,8 @@ export function parseCodingCommand(input: string): ParsedCodingCommand | null {
         .split(',')
         .map((label) => label.trim())
         .filter(Boolean);
+    } else if ((key === 'tool' || key === 'cli') && value) {
+      parsed.cli = value;
     } else if (key === 'provider' && value) {
       parsed.provider = value;
     } else if (key === 'model' && value) {
@@ -99,7 +102,7 @@ export async function runCodingCommand(
       'Coding commands:',
       '/coding-jobs',
       '/coding-job <jobId>',
-      '/coding-pick owner/repo labels=a,b provider=codex model=gpt-5.4 [no-pr]',
+      '/coding-pick owner/repo labels=a,b tool=codex provider=codex model=gpt-5.4 [no-pr]',
       '/coding-approve <jobId>',
       '/coding-pr <jobId>',
       '/coding-ci <jobId>',
@@ -120,6 +123,7 @@ export async function runCodingCommand(
     const result = await pickGitHubIssue({
       repo: command.repo,
       labels: command.labels,
+      cli: command.cli,
       provider: command.provider,
       model: command.model,
       createPr: command.createPr,
