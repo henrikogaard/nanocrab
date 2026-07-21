@@ -34,6 +34,7 @@ function store(overrides: {
   content: string;
   timestamp: string;
   is_from_me?: boolean;
+  thread_id?: string;
 }) {
   storeMessage({
     id: overrides.id,
@@ -43,12 +44,33 @@ function store(overrides: {
     content: overrides.content,
     timestamp: overrides.timestamp,
     is_from_me: overrides.is_from_me ?? false,
+    thread_id: overrides.thread_id,
   });
 }
 
 // --- storeMessage (NewMessage format) ---
 
 describe('storeMessage', () => {
+  it('persists and reads the originating thread id', () => {
+    storeChatMetadata('slack:C123', '2024-01-01T00:00:00.000Z');
+    store({
+      id: 'threaded-1',
+      chat_jid: 'slack:C123',
+      sender: 'U123',
+      sender_name: 'Alice',
+      content: 'threaded command',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      thread_id: '1700000000.123',
+    });
+
+    const messages = getMessagesSince(
+      'slack:C123',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages[0]?.thread_id).toBe('1700000000.123');
+  });
+
   it('stores a message and retrieves it', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 

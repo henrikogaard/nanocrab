@@ -306,13 +306,13 @@ describe('normalizeSlackBotMention', () => {
     ).toBe('<@OTHER> leave this alone');
   });
 
-  it('collapses platform whitespace after mention replacement', () => {
+  it('preserves pasted whitespace after mention replacement', () => {
     expect(
       normalizeSlackBotMention(
-        '<@UBOT|nanocrab>\n\t/coding-jobs',
+        '<@UBOT|nanocrab>\n\t/coding-jobs\n  const value = 1;\n\n  return value;',
         'UBOT',
         '@NanoCrab',
       ),
-    ).toBe('@NanoCrab /coding-jobs');
+    ).toBe('@NanoCrab\n\t/coding-jobs\n  const value = 1;\n\n  return value;');
   });
 });

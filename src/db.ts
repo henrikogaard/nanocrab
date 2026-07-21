@@ -51,6 +51,7 @@ function createSchema(database: Database.Database): void {
       timestamp TEXT,
       is_from_me INTEGER,
       is_bot_message INTEGER DEFAULT 0,
+      thread_id TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -564,6 +565,12 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN thread_id TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_main column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -816,7 +823,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, reply_to_message_id, reply_to_message_content, reply_to_sender_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, thread_id, reply_to_message_id, reply_to_message_content, reply_to_sender_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -826,6 +833,7 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.thread_id ?? null,
     msg.reply_to_message_id ?? null,
     msg.reply_to_message_content ?? null,
     msg.reply_to_sender_name ?? null,
@@ -874,7 +882,7 @@ export function getNewMessages(
   const sql = `
     SELECT * FROM (
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
-             reply_to_message_id, reply_to_message_content, reply_to_sender_name
+             thread_id, reply_to_message_id, reply_to_message_content, reply_to_sender_name
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -908,7 +916,7 @@ export function getMessagesSince(
   const sql = `
     SELECT * FROM (
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
-             reply_to_message_id, reply_to_message_content, reply_to_sender_name
+             thread_id, reply_to_message_id, reply_to_message_content, reply_to_sender_name
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -934,6 +942,7 @@ interface ConversationMessageRow {
   reply_to_message_id: string | null;
   reply_to_message_content: string | null;
   reply_to_sender_name: string | null;
+  thread_id: string | null;
 }
 
 export function getConversationMessagesThrough(
@@ -948,7 +957,7 @@ export function getConversationMessagesThrough(
       `
       SELECT * FROM (
         SELECT id, chat_jid, sender, sender_name, content, timestamp,
-               is_from_me, is_bot_message, reply_to_message_id,
+               is_from_me, is_bot_message, thread_id, reply_to_message_id,
                reply_to_message_content, reply_to_sender_name
         FROM messages
         WHERE chat_jid = ? AND timestamp <= ?
@@ -972,6 +981,7 @@ export function getConversationMessagesThrough(
       is_from_me: row.is_from_me === 1,
       is_bot_message:
         row.is_bot_message === 1 || row.content.startsWith(legacyBotPrefix),
+      thread_id: row.thread_id ?? undefined,
       reply_to_message_id: row.reply_to_message_id ?? undefined,
       reply_to_message_content: row.reply_to_message_content ?? undefined,
       reply_to_sender_name: row.reply_to_sender_name ?? undefined,
@@ -1026,7 +1036,7 @@ export function searchStoredMessages(input: {
       `
       SELECT * FROM (
         SELECT id, chat_jid, sender, sender_name, content, timestamp,
-               is_from_me, is_bot_message, reply_to_message_id,
+               is_from_me, is_bot_message, thread_id, reply_to_message_id,
                reply_to_message_content, reply_to_sender_name
         FROM messages
         WHERE ${conditions.join(' AND ')}
@@ -1049,6 +1059,7 @@ export function searchStoredMessages(input: {
       is_from_me: row.is_from_me === 1,
       is_bot_message:
         row.is_bot_message === 1 || row.content.startsWith(legacyBotPrefix),
+      thread_id: row.thread_id ?? undefined,
       reply_to_message_id: row.reply_to_message_id ?? undefined,
       reply_to_message_content: row.reply_to_message_content ?? undefined,
       reply_to_sender_name: row.reply_to_sender_name ?? undefined,
@@ -1065,6 +1076,7 @@ interface RecentUserMessageRow {
   timestamp: string;
   is_from_me: number;
   is_bot_message: number;
+  thread_id: string | null;
   reply_to_message_id: string | null;
   reply_to_message_content: string | null;
   reply_to_sender_name: string | null;
@@ -1079,7 +1091,7 @@ export function getRecentUserMessages(
     .prepare(
       `
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
-             is_bot_message, reply_to_message_id, reply_to_message_content,
+             is_bot_message, thread_id, reply_to_message_id, reply_to_message_content,
              reply_to_sender_name
       FROM messages
       WHERE chat_jid = ?
@@ -1100,6 +1112,7 @@ export function getRecentUserMessages(
     timestamp: row.timestamp,
     is_from_me: row.is_from_me === 1,
     is_bot_message: row.is_bot_message === 1,
+    thread_id: row.thread_id ?? undefined,
     reply_to_message_id: row.reply_to_message_id ?? undefined,
     reply_to_message_content: row.reply_to_message_content ?? undefined,
     reply_to_sender_name: row.reply_to_sender_name ?? undefined,

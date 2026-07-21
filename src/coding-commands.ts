@@ -24,6 +24,11 @@ type CodingCommandAction =
   | 'close-pr'
   | 'approve-close-pr';
 
+export interface CodingCommandRunOptions {
+  /** Prefix used to keep read-only job metadata within the originating channel. */
+  visibilityScope?: string;
+}
+
 export interface ParsedCodingCommand {
   action: CodingCommandAction;
   jobId?: string;
@@ -144,9 +149,17 @@ function summarizeJob(
     .join('\n');
 }
 
+function isVisibleCodingJob(
+  job: NonNullable<ReturnType<typeof getCodingJob>>,
+  visibilityScope?: string,
+): boolean {
+  return !visibilityScope || job.requestedBy.startsWith(visibilityScope);
+}
+
 export async function runCodingCommand(
   command: ParsedCodingCommand,
   actor: string,
+  options: CodingCommandRunOptions = {},
 ): Promise<string> {
   if (command.action === 'help') {
     return [
@@ -166,6 +179,7 @@ export async function runCodingCommand(
 
   if (command.action === 'list') {
     const jobs = loadCodingJobs()
+      .filter((job) => isVisibleCodingJob(job, options.visibilityScope))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, 8);
     if (jobs.length === 0) return 'No coding jobs yet.';
@@ -240,7 +254,9 @@ export async function runCodingCommand(
 
   if (!command.jobId) return 'A coding job id is required.';
   const existing = getCodingJob(command.jobId);
-  if (!existing) return `Coding job not found: ${command.jobId}`;
+  if (!existing || !isVisibleCodingJob(existing, options.visibilityScope)) {
+    return `Coding job not found: ${command.jobId}`;
+  }
 
   if (command.action === 'show') return summarizeJob(existing);
   if (command.action === 'approve') {

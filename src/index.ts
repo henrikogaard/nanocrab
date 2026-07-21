@@ -352,11 +352,18 @@ export async function processChannelCodingCommand(
   const actor = `channel:${channel.name}:${chatJid}:${latestMessage.sender}`;
 
   let result: string;
-  if (channelCodingWriteActions.has(command.action) && !isAuthorized) {
-    result =
-      'Unauthorized. Coding issue assignment and write actions require an authorized operator in this registered group.';
-  } else {
-    result = await runCodingCommand(command, actor);
+  try {
+    if (channelCodingWriteActions.has(command.action) && !isAuthorized) {
+      result =
+        'Unauthorized. Coding issue assignment and write actions require an authorized operator in this registered group.';
+    } else {
+      result = await runCodingCommand(command, actor, {
+        visibilityScope: `channel:${channel.name}:${chatJid}:`,
+      });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    result = `Command failed: ${message}`;
   }
 
   const text = formatOutbound(result, chatJid);
