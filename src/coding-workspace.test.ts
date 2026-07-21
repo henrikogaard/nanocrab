@@ -222,7 +222,7 @@ describe('coding workspace', () => {
       { git, createAskpass, validateGitMetadata: trustTestGitMetadata },
     );
 
-    expect(result).toEqual({ commitSha });
+    expect(result).toEqual({ commitSha, signingStatus: 'unsigned' });
     expect(git.mock.calls.map(([args]) => args)).toEqual([
       ['ls-files', '--stage', '--cached', '-z'],
       ['ls-files', '--others', '--exclude-standard', '-z'],
@@ -314,6 +314,90 @@ describe('coding workspace', () => {
         { git, validateGitMetadata: trustTestGitMetadata },
       ),
     ).rejects.not.toThrow(token);
+  });
+
+  it('requires a verified host signature when repository policy is require', async () => {
+    const assertOwnership = vi.fn();
+    const treeId = 'd'.repeat(40);
+    const parentSha = 'e'.repeat(40);
+    const commitSha = 'f'.repeat(40);
+    const git = vi.fn<GitTransport>(async (args) => {
+      if (args[0] === 'symbolic-ref') return gitResult('nanocrab/issue-129\n');
+      if (args[0] === 'write-tree') return gitResult(`${treeId}\n`);
+      if (args[0] === 'rev-parse') return gitResult(`${parentSha}\n`);
+      if (args[0] === 'commit-tree') return gitResult(`${commitSha}\n`);
+      if (args[0] === 'verify-commit') return gitResult();
+      return gitResult();
+    });
+
+    const result = await publishCodingWorkspace(
+      {
+        workspace,
+        repo: 'owner/repo',
+        branch: 'nanocrab/issue-129',
+        commitMessage: 'fix: sign publication',
+        token,
+        assertOwnership,
+        commitSigningPolicy: 'require',
+        signingKey: 'bot@example.com',
+      },
+      { git, validateGitMetadata: trustTestGitMetadata },
+    );
+
+    expect(result).toEqual({ commitSha, signingStatus: 'signed' });
+    expect(git.mock.calls.map(([args]) => args)).toContainEqual([
+      'commit-tree',
+      treeId,
+      '-p',
+      parentSha,
+      '--gpg-sign=bot@example.com',
+      '-m',
+      'fix: sign publication',
+    ]);
+    expect(git.mock.calls.map(([args]) => args)).toContainEqual([
+      'verify-commit',
+      commitSha,
+    ]);
+  });
+
+  it('falls back to an unsigned commit with evidence when preferred signing is unavailable', async () => {
+    const treeId = '1'.repeat(40);
+    const parentSha = '2'.repeat(40);
+    const commitSha = '3'.repeat(40);
+    let commitAttempts = 0;
+    const git = vi.fn<GitTransport>(async (args) => {
+      if (args[0] === 'symbolic-ref') return gitResult('nanocrab/issue-129\n');
+      if (args[0] === 'write-tree') return gitResult(`${treeId}\n`);
+      if (args[0] === 'rev-parse') return gitResult(`${parentSha}\n`);
+      if (args[0] === 'commit-tree') {
+        commitAttempts += 1;
+        return args.includes('--no-gpg-sign')
+          ? gitResult(`${commitSha}\n`)
+          : gitResult('', 'signer unavailable', 1);
+      }
+      return gitResult();
+    });
+
+    const result = await publishCodingWorkspace(
+      {
+        workspace,
+        repo: 'owner/repo',
+        branch: 'nanocrab/issue-129',
+        commitMessage: 'fix: prefer signing',
+        token,
+        assertOwnership: vi.fn(),
+        commitSigningPolicy: 'prefer',
+        signingKey: 'missing@example.com',
+      },
+      { git, validateGitMetadata: trustTestGitMetadata },
+    );
+
+    expect(result).toEqual({
+      commitSha,
+      signingStatus: 'preferred-unsigned',
+      signingWarning: 'Git commit creation failed',
+    });
+    expect(commitAttempts).toBe(2);
   });
 
   it('stages model-written attributes without executing repository clean filters', async () => {

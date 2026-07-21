@@ -47,6 +47,7 @@ import {
   listGitHubIssues,
   loadCodingJobs,
   loadCodingRepos,
+  saveCodingRepos,
   openCodingJobPr,
   pickGitHubIssue,
   refreshCodingJobCi,
@@ -321,6 +322,11 @@ router.post('/coding/repos', async (req: Request, res: Response) => {
       repo: req.body.repo,
       defaultBranch: req.body.defaultBranch,
       labels: Array.isArray(req.body.labels) ? req.body.labels : [],
+      commitSigningPolicy:
+        req.body.commitSigningPolicy === 'prefer' ||
+        req.body.commitSigningPolicy === 'require'
+          ? req.body.commitSigningPolicy
+          : 'off',
     });
     auditLog(req, 'coding_repo_registered', repo.fullName);
     res.json({ ok: true, repo });
@@ -330,6 +336,74 @@ router.post('/coding/repos', async (req: Request, res: Response) => {
     });
   }
 });
+
+router.get(
+  '/coding/repos/:owner/:name/commit-signing',
+  (req: Request, res: Response) => {
+    try {
+      const repo = loadCodingRepos().find(
+        (item) =>
+          item.fullName.toLowerCase() ===
+          `${req.params.owner}/${req.params.name}`.toLowerCase(),
+      );
+      if (!repo) {
+        res.status(404).json({ error: 'Coding repo not found' });
+        return;
+      }
+      res.json({
+        repo: repo.fullName,
+        policy: repo.commitSigningPolicy || 'off',
+        signingKeyConfigured: Boolean(process.env.NANOCRAB_GIT_SIGNING_KEY),
+      });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
+
+router.put(
+  '/coding/repos/:owner/:name/commit-signing',
+  (req: Request, res: Response) => {
+    try {
+      const repo = `${req.params.owner}/${req.params.name}`;
+      const policy = req.body.policy;
+      if (policy !== 'off' && policy !== 'prefer' && policy !== 'require') {
+        res
+          .status(400)
+          .json({ error: 'policy must be off, prefer, or require' });
+        return;
+      }
+      const repos = loadCodingRepos();
+      const registered = repos.find(
+        (item) => item.fullName.toLowerCase() === repo.toLowerCase(),
+      );
+      if (!registered) {
+        res.status(404).json({ error: 'Coding repo not found' });
+        return;
+      }
+      registered.commitSigningPolicy = policy;
+      registered.updatedAt = new Date().toISOString();
+      saveCodingRepos(repos);
+      auditLog(
+        req,
+        'coding_repo_commit_signing_policy_updated',
+        `${repo}:${policy}`,
+      );
+      res.json({
+        ok: true,
+        repo: registered.fullName,
+        policy,
+        signingKeyConfigured: Boolean(process.env.NANOCRAB_GIT_SIGNING_KEY),
+      });
+    } catch (err) {
+      res.status(400).json({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
 
 router.get('/coding/repo-rules', (_req: Request, res: Response) => {
   res.json(listAllRepoRules());

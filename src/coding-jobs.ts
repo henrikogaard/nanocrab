@@ -58,6 +58,7 @@ import {
   publishCodingWorkspace,
   prepareCodingWorkspace,
   type CodingWorkspacePublicationInput,
+  type CodingWorkspacePublicationResult,
   type CodingWorkspaceEvidence,
   type CodingWorkspaceInput,
   type PreparedCodingWorkspace,
@@ -98,7 +99,7 @@ export interface CodingJobExecutionDependencies {
   collectWorkspaceEvidence(workspace: string): Promise<CodingWorkspaceEvidence>;
   publishWorkspace(
     input: CodingWorkspacePublicationInput,
-  ): Promise<{ commitSha: string }>;
+  ): Promise<CodingWorkspacePublicationResult>;
   deleteWorkspaceBranch(input: {
     workspace: string;
     repo: string;
@@ -173,6 +174,7 @@ export interface CodingRepo {
   labels: string[];
   assignee?: string;
   milestone?: string;
+  commitSigningPolicy?: 'off' | 'prefer' | 'require';
   autoPick?: boolean;
   enabled: boolean;
   createdAt: string;
@@ -219,6 +221,9 @@ export interface CodingJob {
   dryRun: boolean;
   prUrl: string | null;
   commitSha: string | null;
+  commitSigningPolicy?: 'off' | 'prefer' | 'require';
+  commitSigningStatus?: 'unsigned' | 'signed' | 'preferred-unsigned' | null;
+  commitSigningWarning?: string | null;
   changedFiles: string[];
   diffSummary: string | null;
   testSummary: string | null;
@@ -388,8 +393,11 @@ function upsertCodingJob(job: CodingJob): void {
 }
 
 function ensureJobDefaults(job: CodingJob): CodingJob {
-  const defaults = {
+  const defaults: Partial<CodingJob> = {
     commitSha: null,
+    commitSigningPolicy: 'off',
+    commitSigningStatus: null,
+    commitSigningWarning: null,
     changedFiles: [],
     diffSummary: null,
     testSummary: null,
@@ -495,6 +503,7 @@ export async function registerCodingRepo(input: {
   defaultModel?: string;
   codingRules?: string;
   trustedForPr?: boolean;
+  commitSigningPolicy?: 'off' | 'prefer' | 'require';
 }): Promise<CodingRepo> {
   assertRepoFullName(input.repo);
   const repos = loadCodingRepos();
@@ -507,6 +516,9 @@ export async function registerCodingRepo(input: {
     existing.labels = input.labels || existing.labels;
     if (input.assignee !== undefined) existing.assignee = input.assignee;
     if (input.milestone !== undefined) existing.milestone = input.milestone;
+    if (input.commitSigningPolicy !== undefined) {
+      existing.commitSigningPolicy = input.commitSigningPolicy;
+    }
     existing.enabled = true;
     existing.updatedAt = timestamp;
     saveCodingRepos(repos);
@@ -533,6 +545,7 @@ export async function registerCodingRepo(input: {
     labels: input.labels || [],
     ...(input.assignee ? { assignee: input.assignee } : {}),
     ...(input.milestone ? { milestone: input.milestone } : {}),
+    commitSigningPolicy: input.commitSigningPolicy || 'off',
     enabled: true,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -2293,6 +2306,9 @@ export async function startCodingJob(
     dryRun: input.dryRun === true,
     prUrl: null,
     commitSha: null,
+    commitSigningPolicy: repo.commitSigningPolicy || 'off',
+    commitSigningStatus: null,
+    commitSigningWarning: null,
     changedFiles: [],
     diffSummary: null,
     testSummary: null,
@@ -3003,8 +3019,8 @@ export async function openCodingJobPr(
       `chore: NanoCrab coding job ${job.id}`;
     const token = getGitHubToken();
     if (!token) throw new Error('GITHUB_TOKEN is not configured');
-    const { commitSha: sha } =
-      await codingJobExecutionDependencies().publishWorkspace({
+    const publication = await codingJobExecutionDependencies().publishWorkspace(
+      {
         workspace: repoPath,
         repo: job.repo,
         branch: job.branch,
@@ -3012,8 +3028,14 @@ export async function openCodingJobPr(
         token,
         assertOwnership: assertPublicationOwnership,
         jobId: job.id,
-      });
+        commitSigningPolicy: job.commitSigningPolicy,
+        signingKey: process.env.NANOCRAB_GIT_SIGNING_KEY,
+      },
+    );
+    const { commitSha: sha } = publication;
     assertPublicationOwnership();
+    job.commitSigningStatus = publication.signingStatus;
+    job.commitSigningWarning = publication.signingWarning || null;
     const pr = (await githubApi(`/repos/${job.repo}/pulls`, {
       method: 'POST',
       body: JSON.stringify({
@@ -3027,6 +3049,10 @@ export async function openCodingJobPr(
           '',
           `Job: \`${job.id}\``,
           `Provider: \`${job.provider}/${job.model}\``,
+          `Commit signing: \`${job.commitSigningStatus || job.commitSigningPolicy}\``,
+          job.commitSigningWarning
+            ? `Signing warning: ${job.commitSigningWarning}`
+            : '',
           '',
           '### Changes',
           '```',

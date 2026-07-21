@@ -334,6 +334,18 @@ describe('coding jobs', () => {
     expect(loadCodingRepos()).toHaveLength(1);
   });
 
+  it('persists the repository commit-signing policy for new coding jobs', async () => {
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+
+    const repo = await registerCodingRepo({
+      repo: 'owner/repo',
+      commitSigningPolicy: 'require',
+    });
+
+    expect(repo.commitSigningPolicy).toBe('require');
+    expect(loadCodingRepos()[0]?.commitSigningPolicy).toBe('require');
+  });
+
   it('lists open issues from registered repos and skips pull requests', async () => {
     const fetchMock = mockGitHubFetch((url) => {
       if (url.includes('/issues?')) {
