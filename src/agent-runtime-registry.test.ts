@@ -12,6 +12,7 @@ import {
   probeDevinRuntime,
   resolveDevinCliModelAlias,
   validateCodingRuntimeSelection,
+  probeCursorRuntime,
 } from './agent-runtime-registry.js';
 import type { AgentProvider } from './agent-provider.js';
 import type { AgentCliId, AgentRuntimeSelection } from './types.js';
@@ -112,6 +113,7 @@ describe('agent runtime registry', () => {
     ['codex', 'codex'],
     ['pi', 'pi'],
     ['mistral', 'mistral'],
+    ['cursor', 'cursor'],
     ['opencode', 'opencode'],
     ['openrouter', 'opencode'],
     ['ollama', 'opencode'],
@@ -147,6 +149,7 @@ describe('agent runtime registry', () => {
     ['opencode', 'codex'],
     ['pi', 'openrouter'],
     ['mistral', 'claude'],
+    ['cursor', 'opencode'],
   ] satisfies Array<[AgentCliId, AgentProvider]>)(
     'rejects the incompatible %s CLI and %s provider',
     (cli, provider) => {
@@ -218,7 +221,8 @@ describe('agent runtime registry', () => {
     expect(cliIds).toContain('opencode');
     expect(cliIds).toContain('devin');
     expect(cliIds).toContain('mistral');
-    expect(definitions).toHaveLength(6);
+    expect(cliIds).toContain('cursor');
+    expect(definitions).toHaveLength(7);
   });
 
   it('maps mistral CLI to vibe executable', () => {
@@ -255,7 +259,7 @@ describe('agent runtime registry', () => {
       ['--version'],
       expect.anything(),
     );
-    expect(listAgentRuntimeDefinitions()).toHaveLength(6);
+    expect(listAgentRuntimeDefinitions()).toHaveLength(7);
   });
 
   it('reports missing runtime when executable not found', async () => {
@@ -274,6 +278,41 @@ describe('agent runtime registry', () => {
     });
     expect(result.version).toBeNull();
     expect(result.checkedAt).toMatch(/\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('requires Cursor API-key authentication before probing the executable', async () => {
+    const execFile = vi.fn();
+    await expect(
+      probeCursorRuntime({
+        execFile,
+        credentialAvailable: () => false,
+      }),
+    ).resolves.toMatchObject({
+      cli: 'cursor',
+      status: 'unauthenticated',
+    });
+    expect(execFile).not.toHaveBeenCalled();
+  });
+
+  it('probes Cursor version with a secret-free environment', async () => {
+    const execFile = vi.fn().mockResolvedValue({
+      stdout: 'agent 1.2.3\n',
+      stderr: '',
+    });
+    await expect(
+      probeCursorRuntime({ execFile, credentialAvailable: () => true }),
+    ).resolves.toMatchObject({
+      cli: 'cursor',
+      status: 'healthy',
+      version: '1.2.3',
+    });
+    expect(execFile).toHaveBeenCalledWith(
+      'agent',
+      ['--version'],
+      expect.objectContaining({
+        env: expect.not.objectContaining({ CURSOR_API_KEY: expect.anything() }),
+      }),
+    );
   });
 
   it('fails the public Devin runtime probe closed without touching probe dependencies', async () => {
@@ -327,6 +366,30 @@ describe('agent runtime registry', () => {
       status: 'missing',
       detail: expect.stringContaining('OPENROUTER_API_KEY'),
     });
+  });
+
+  it('keeps Cursor unavailable until the isolation adapter is explicitly verified', async () => {
+    const probeHostRuntime = vi.fn().mockResolvedValue({
+      cli: 'cursor',
+      executable: 'agent',
+      status: 'healthy',
+      version: '1.2.3',
+      checkedAt: new Date().toISOString(),
+      detail: 'version 1.2.3; API key configured',
+    });
+    await expect(
+      probeCodingRunnerReadiness('cursor', { probeHostRuntime }),
+    ).resolves.toMatchObject({
+      cli: 'cursor',
+      status: 'unsupported',
+      detail: expect.stringContaining('host isolation adapter'),
+    });
+    await expect(
+      probeCodingRunnerReadiness('cursor', {
+        probeHostRuntime,
+        cursorIsolationAvailable: () => true,
+      }),
+    ).resolves.toMatchObject({ cli: 'cursor', status: 'healthy' });
   });
 
   it('uses the configured container runtime and image for coding readiness', () => {

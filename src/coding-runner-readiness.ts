@@ -4,6 +4,7 @@ import { readEnvFile } from './env.js';
 import {
   DEVIN_SANDBOX_AUTH_HANDOFF_DETAIL,
   isDevinSandboxAuthHandoffAvailable,
+  CURSOR_ISOLATION_DETAIL,
 } from './agent-runtime-registry.js';
 import type { AgentCliId, AgentRuntimeHealth } from './types.js';
 
@@ -20,6 +21,8 @@ export type ContainerImageInspector = (
 ) => boolean;
 
 type HostRuntimeProbe = (cli: AgentCliId) => Promise<AgentRuntimeHealth>;
+
+type CursorIsolationProbe = () => boolean;
 
 export function getCodingRunnerInfrastructure(
   env: Record<string, string | undefined> = process.env,
@@ -80,8 +83,24 @@ export async function probeCodingRunnerReadiness(
     credentialAvailable?: (key: string) => boolean;
     infrastructure?: CodingRunnerInfrastructure;
     inspectContainerImage?: ContainerImageInspector;
+    cursorIsolationAvailable?: CursorIsolationProbe;
   } = {},
 ): Promise<AgentRuntimeHealth> {
+  if (cli === 'cursor') {
+    const health = await (options.probeHostRuntime || probeHostRuntime)(cli);
+    if (health.status !== 'healthy') return health;
+    const isolated =
+      options.cursorIsolationAvailable?.() ??
+      process.env.NANOCRAB_CURSOR_ISOLATION_VERIFIED === '1';
+    if (!isolated) {
+      return {
+        ...health,
+        status: 'unsupported',
+        detail: CURSOR_ISOLATION_DETAIL,
+      };
+    }
+    return health;
+  }
   if (cli === 'devin') {
     if (!isDevinSandboxAuthHandoffAvailable()) {
       return {
@@ -163,6 +182,7 @@ export async function probeAllCodingRunnerReadiness(): Promise<
     'devin',
     'pi',
     'mistral',
+    'cursor',
   ];
   return Promise.all(clis.map((cli) => probeCodingRunnerReadiness(cli)));
 }
