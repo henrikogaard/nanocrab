@@ -21,6 +21,8 @@ import {
 } from './connector-permissions.js';
 import { readEnvFile } from './env.js';
 import { githubApi } from './coding-jobs.js';
+import { validateMount } from './mount-security.js';
+import type { AdditionalMount } from './types.js';
 
 export type SourceCollectionStatus =
   | 'pending'
@@ -288,12 +290,12 @@ export function startSourceCollection(
               ? descriptor.connectorId
               : undefined,
           sourceLabel:
-            descriptor.sourceLabel ||
-            (descriptor.scope === 'file'
-              ? descriptor.mountedPath
-              : descriptor.scope === 'connector'
-                ? descriptor.connectorId
-                : undefined),
+            descriptor.scope === 'file'
+              ? sourceLabelForFile(descriptor)
+              : descriptor.sourceLabel ||
+                (descriptor.scope === 'connector'
+                  ? descriptor.connectorId
+                  : undefined),
           status: 'pending',
           requestedAt: new Date().toISOString(),
           completedAt: null,
@@ -652,6 +654,7 @@ interface SourceCollectionDependencies {
   authorizeConnectorAction?: typeof authorizeConnectorAction;
   githubApi?: typeof githubApi;
   listMemoryRecords?: typeof listMemoryRecords;
+  validateMount?: typeof validateMount;
 }
 
 function connectorReadAction(connectorId: string): string {
@@ -696,7 +699,98 @@ function authorizeSourceConnector(
   return decision;
 }
 
-function validateMountedSource(mountedPath: string): {
+const FILE_SOURCE_MAX_BYTES = 128 * 1024;
+const FILE_SOURCE_MAX_PREVIEW_BYTES = 8 * 1024;
+const FILE_SOURCE_EXTENSIONS = new Set([
+  '.csv',
+  '.htm',
+  '.html',
+  '.ini',
+  '.js',
+  '.jsx',
+  '.json',
+  '.log',
+  '.md',
+  '.py',
+  '.sql',
+  '.toml',
+  '.ts',
+  '.tsx',
+  '.txt',
+  '.xml',
+  '.yaml',
+  '.yml',
+]);
+const FILE_SOURCE_BLOCKED_SEGMENTS = new Set([
+  '.env',
+  '.ssh',
+  '.gnupg',
+  '.aws',
+  '.kube',
+  '.npmrc',
+  '.netrc',
+  'memory.md',
+]);
+
+const FILE_SOURCE_BLOCKED_KEYWORDS = [
+  'credentials',
+  'secret',
+  'token',
+  'password',
+  'private_key',
+];
+
+function pathWithinRoot(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return (
+    relative === '' ||
+    (!relative.startsWith('..') && !path.isAbsolute(relative))
+  );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isBlockedFilePath(realPath: string): string | undefined {
+  const parts = realPath.toLowerCase().split(path.sep);
+  for (const part of parts) {
+    if (FILE_SOURCE_BLOCKED_SEGMENTS.has(part)) return part;
+    for (const keyword of FILE_SOURCE_BLOCKED_KEYWORDS) {
+      const regex = new RegExp(
+        `(^|[^a-z0-9])${escapeRegExp(keyword)}([^a-z0-9]|$)`,
+      );
+      if (regex.test(part)) return keyword;
+    }
+  }
+  return undefined;
+}
+
+function sourceLabelForFile(
+  descriptor: SourceDescriptor,
+  realPath?: string,
+): string {
+  const requested = descriptor.sourceLabel?.trim();
+  const fallback = realPath
+    ? path.basename(realPath)
+    : descriptor.mountedPath
+      ? path.basename(descriptor.mountedPath)
+      : undefined;
+  const label =
+    requested && !requested.includes('/') && !requested.includes('\\')
+      ? requested
+      : fallback || 'mounted-source';
+  return label
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[/\\]+/g, '/')
+    .slice(0, 120);
+}
+
+function validateMountedSource(
+  mountedPath: string,
+  actorContext: SourceCollectionActorContext,
+  mountValidator: typeof validateMount,
+): {
   allowed: boolean;
   realPath: string;
   reason: string;
@@ -721,38 +815,22 @@ function validateMountedSource(mountedPath: string): {
         reason: 'Path is not a regular file',
       };
     }
-
-    const roots = [STORE_DIR, GROUPS_DIR, path.resolve(process.cwd())]
-      .filter((candidate) => fs.existsSync(candidate))
-      .map((candidate) => fs.realpathSync(candidate));
-    const underRoot = roots.some(
-      (root) => real === root || real.startsWith(`${root}${path.sep}`),
-    );
-    if (!underRoot) {
+    const extension = path.extname(real).toLowerCase();
+    if (!FILE_SOURCE_EXTENSIONS.has(extension)) {
       return {
         allowed: false,
         realPath: real,
-        reason: 'Path is outside allowed local roots',
+        reason: 'File type is not a supported text source',
       };
     }
-
-    const blockedPatterns = [
-      '.env',
-      '.ssh',
-      '.gnupg',
-      '.aws',
-      '.kube',
-      'credentials',
-      'secret',
-      'token',
-      'private_key',
-      '.npmrc',
-      '.netrc',
-    ];
-    const lower = real.toLowerCase();
-    const blockedMatch = blockedPatterns.find((pattern) =>
-      lower.includes(pattern),
-    );
+    if (stat.size > FILE_SOURCE_MAX_BYTES) {
+      return {
+        allowed: false,
+        realPath: real,
+        reason: `File exceeds ${FILE_SOURCE_MAX_BYTES} byte limit`,
+      };
+    }
+    const blockedMatch = isBlockedFilePath(real);
     if (blockedMatch) {
       return {
         allowed: false,
@@ -761,6 +839,32 @@ function validateMountedSource(mountedPath: string): {
       };
     }
 
+    const internalRoots = [STORE_DIR, GROUPS_DIR]
+      .filter((candidate) => fs.existsSync(candidate))
+      .map((candidate) => fs.realpathSync(candidate));
+    const underInternalRoot = internalRoots.some((root) =>
+      pathWithinRoot(real, root),
+    );
+    if (!underInternalRoot) {
+      const mount: AdditionalMount = { hostPath: mountedPath, readonly: true };
+      const validation = mountValidator(mount, actorContext.isMain === true);
+      if (!validation.allowed || validation.realHostPath !== real) {
+        return {
+          allowed: false,
+          realPath: real,
+          reason: 'Path is outside approved mounted roots',
+        };
+      }
+    }
+
+    const content = fs.readFileSync(real);
+    if (content.includes(0)) {
+      return {
+        allowed: false,
+        realPath: real,
+        reason: 'Binary content is not supported',
+      };
+    }
     return { allowed: true, realPath: real, reason: '' };
   } catch (err) {
     return {
@@ -774,21 +878,29 @@ function validateMountedSource(mountedPath: string): {
 async function collectMountedFileSource(
   collectionId: string,
   descriptor: SourceDescriptor,
+  actorContext: SourceCollectionActorContext,
+  mountValidator: typeof validateMount,
 ): Promise<{ section: string; citation: { label: string; source: string } }> {
   const mountedPath = descriptor.mountedPath;
   if (!mountedPath) {
     throw new Error('mountedPath is required for file scope');
   }
-  const validation = validateMountedSource(mountedPath);
+  const validation = validateMountedSource(
+    mountedPath,
+    actorContext,
+    mountValidator,
+  );
   if (!validation.allowed) {
     throw new Error(validation.reason);
   }
 
   const content = fs.readFileSync(validation.realPath, 'utf-8');
   const fileName = path.basename(validation.realPath);
-  const label = descriptor.sourceLabel || fileName;
-  const sourceUrl = descriptor.sourceUrl || `file://${validation.realPath}`;
-  const citationText = `Mounted file source: ${label}\n\n${content.slice(0, 500)}`;
+  const label = sourceLabelForFile(descriptor, fileName);
+  const sourceUrl = `file:${label}`;
+  const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\n+$/, '');
+  const preview = normalizedContent.slice(0, FILE_SOURCE_MAX_PREVIEW_BYTES);
+  const citationText = `Mounted file source: ${label}\n\n${preview}`;
 
   addLedgerEntry(
     collectionId,
@@ -800,7 +912,7 @@ async function collectMountedFileSource(
   );
 
   return {
-    section: `## ${label}\n\nSource: ${sourceUrl}\n\n\`\`\`\n${content.slice(0, 2000)}\n\`\`\``,
+    section: `## ${label}\n\nSource: ${sourceUrl}\n\n\`\`\`text\n${preview}\n\`\`\``,
     citation: { label, source: sourceUrl },
   };
 }
@@ -816,6 +928,7 @@ async function collectSourceDescriptor(
     authorize: typeof authorizeConnectorAction;
     githubFetch: typeof githubApi;
     listMemories: typeof listMemoryRecords;
+    mountValidator: typeof validateMount;
   },
 ): Promise<void> {
   const {
@@ -825,15 +938,22 @@ async function collectSourceDescriptor(
     authorize,
     githubFetch,
     listMemories,
+    mountValidator,
   } = helpers;
   const itemLabel =
-    descriptor.sourceLabel || descriptor.mountedPath || descriptor.connectorId;
+    descriptor.scope === 'file'
+      ? sourceLabelForFile(descriptor)
+      : descriptor.sourceLabel ||
+        descriptor.mountedPath ||
+        descriptor.connectorId;
 
   switch (descriptor.scope) {
     case 'file': {
       const { section, citation } = await collectMountedFileSource(
         record.id,
         descriptor,
+        actorContext,
+        mountValidator,
       );
       sections.push(section);
       citations.push(citation);
@@ -1080,6 +1200,7 @@ export async function collectReportSources(
     dependencies.authorizeConnectorAction ?? authorizeConnectorAction;
   const githubFetch = dependencies.githubApi ?? githubApi;
   const listMemories = dependencies.listMemoryRecords ?? listMemoryRecords;
+  const mountValidator = dependencies.validateMount ?? validateMount;
 
   const expanded: SourceDescriptor[] = [];
   for (const descriptor of sourceDescriptors) {
@@ -1115,6 +1236,7 @@ export async function collectReportSources(
     authorize,
     githubFetch,
     listMemories,
+    mountValidator,
   };
 
   for (const descriptor of expanded) {
@@ -1122,9 +1244,11 @@ export async function collectReportSources(
       await collectSourceDescriptor(record, descriptor, actorContext, helpers);
     } catch (err) {
       const itemLabel =
-        descriptor.sourceLabel ||
-        descriptor.mountedPath ||
-        descriptor.connectorId;
+        descriptor.scope === 'file'
+          ? sourceLabelForFile(descriptor)
+          : descriptor.sourceLabel ||
+            descriptor.mountedPath ||
+            descriptor.connectorId;
       markScopeFailed(
         record.id,
         descriptor.scope,

@@ -444,7 +444,58 @@ describe('source-collection', () => {
         sourceLabel: 'Mounted note',
         citationText: expect.stringContaining('Mounted source content.'),
       });
-      expect(collected.citations[0].source).toMatch(/^file:\/\//);
+      expect(collected.citations[0].source).toBe('file:Mounted note');
+      expect(collected.citations[0].source).not.toContain(filePath);
+    });
+
+    it('preserves leading source content while bounding and rejecting unsafe files', async () => {
+      const indentedPath = path.join(STORE_DIR, 'indented-note.md');
+      fs.writeFileSync(indentedPath, '  keep this indentation\n\n');
+      const collected = await collectReportSources(
+        'report-mounted-content',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [{ scope: 'file', mountedPath: indentedPath }],
+      );
+
+      expect(collected.sections.join('\n')).toContain(
+        '  keep this indentation',
+      );
+      expect(
+        getSourceCollection(collected.sourceCollectionId)?.items[0],
+      ).toMatchObject({
+        itemCount: 1,
+        status: 'completed',
+      });
+    });
+
+    it('rejects oversized and binary mounted sources before reading report content', async () => {
+      const oversizedPath = path.join(STORE_DIR, 'oversized-note.md');
+      fs.writeFileSync(oversizedPath, Buffer.alloc(128 * 1024 + 1, 'x'));
+      const oversized = await collectReportSources(
+        'report-mounted-oversized',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [{ scope: 'file', mountedPath: oversizedPath }],
+      );
+      expect(
+        getSourceCollection(oversized.sourceCollectionId)?.items[0],
+      ).toMatchObject({
+        status: 'failed',
+        failureReason: expect.stringContaining('byte limit'),
+      });
+
+      const binaryPath = path.join(STORE_DIR, 'binary-note.txt');
+      fs.writeFileSync(binaryPath, Buffer.from([0, 1, 2]));
+      const binary = await collectReportSources(
+        'report-mounted-binary',
+        { actor: 'henrik', groupFolder: 'main-group' },
+        [{ scope: 'file', mountedPath: binaryPath }],
+      );
+      expect(
+        getSourceCollection(binary.sourceCollectionId)?.items[0],
+      ).toMatchObject({
+        status: 'failed',
+        failureReason: 'Binary content is not supported',
+      });
     });
 
     it('rejects mounted files outside allowed roots', async () => {
@@ -464,8 +515,61 @@ describe('source-collection', () => {
       const collection = getSourceCollection(collected.sourceCollectionId)!;
       expect(collection.status).toBe('failed');
       expect(collection.items[0].failureReason).toContain(
-        'outside allowed local roots',
+        'outside approved mounted roots',
       );
+    });
+
+    it('does not block legitimate filenames that contain a keyword substring', async () => {
+      const tokenizerPath = path.join(STORE_DIR, 'tokenizer.ts');
+      fs.writeFileSync(tokenizerPath, 'export function tokenize() {}');
+      const secretaryPath = path.join(STORE_DIR, 'secretary-notes.md');
+      fs.writeFileSync(secretaryPath, 'Meeting notes from the secretary.');
+      const secretsManagerPath = path.join(
+        STORE_DIR,
+        'secrets-manager-design.md',
+      );
+      fs.writeFileSync(
+        secretsManagerPath,
+        '# Secrets Manager Design\n\nThis document describes the design.',
+      );
+
+      for (const filePath of [
+        tokenizerPath,
+        secretaryPath,
+        secretsManagerPath,
+      ]) {
+        const collected = await collectReportSources(
+          `report-keyword-false-positive-${path.basename(filePath)}`,
+          { actor: 'henrik', groupFolder: 'main-group' },
+          [{ scope: 'file', mountedPath: filePath }],
+        );
+        expect(
+          getSourceCollection(collected.sourceCollectionId)?.items[0],
+        ).toMatchObject({
+          status: 'completed',
+        });
+      }
+    });
+
+    it('still blocks filenames with word-boundaried credential keywords', async () => {
+      const credentialsPath = path.join(STORE_DIR, 'credentials.json');
+      fs.writeFileSync(credentialsPath, '{"api_key": "leak"}');
+      const apiTokenPath = path.join(STORE_DIR, 'api-token.txt');
+      fs.writeFileSync(apiTokenPath, 'token=leak');
+      const privateKeyPath = path.join(STORE_DIR, 'private_key.txt');
+      fs.writeFileSync(privateKeyPath, '-----BEGIN PRIVATE KEY-----');
+
+      for (const filePath of [credentialsPath, apiTokenPath, privateKeyPath]) {
+        const collected = await collectReportSources(
+          `report-keyword-block-${path.basename(filePath)}`,
+          { actor: 'henrik', groupFolder: 'main-group' },
+          [{ scope: 'file', mountedPath: filePath }],
+        );
+        const item = getSourceCollection(collected.sourceCollectionId)
+          ?.items[0];
+        expect(item).toMatchObject({ status: 'failed' });
+        expect(item?.failureReason).toContain('blocked pattern');
+      }
     });
 
     it('deduplicates repeated identical ledger entries', () => {
