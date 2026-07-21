@@ -74,6 +74,7 @@ import {
   createApproval,
   findPendingApprovalForTarget,
   hasApprovedTarget,
+  listApprovals,
   reviewApproval,
 } from './approvals.js';
 import { resolveProviderFallbackForAction } from './provider-router.js';
@@ -203,10 +204,12 @@ export interface GitHubProjectBoardSummary {
 export interface CodingJob {
   id: string;
   repo: string;
-  type: 'prompt' | 'issue';
+  type: 'prompt' | 'issue' | 'review';
   prompt: string;
   issueNumber: number | null;
   issueTitle: string | null;
+  pullRequestNumber?: number | null;
+  pullRequestUrl?: string | null;
   provider: CodingProvider;
   model: string;
   status: CodingJobStatus;
@@ -256,6 +259,9 @@ export interface StartCodingJobInput {
   repo: string;
   prompt?: string;
   issueNumber?: number;
+  jobType?: 'prompt' | 'issue' | 'review';
+  pullRequestNumber?: number;
+  pullRequestUrl?: string;
   provider?: string;
   model?: string;
   cli?: string;
@@ -2272,10 +2278,12 @@ export async function startCodingJob(
   const job: CodingJob = {
     id,
     repo: input.repo,
-    type: issueNumber ? 'issue' : 'prompt',
+    type: input.jobType || (issueNumber ? 'issue' : 'prompt'),
     prompt,
     issueNumber,
     issueTitle,
+    pullRequestNumber: input.pullRequestNumber || null,
+    pullRequestUrl: input.pullRequestUrl || null,
     provider,
     model,
     status: 'queued',
@@ -2370,6 +2378,172 @@ export async function pickGitHubIssue(input: {
     requestedBy: input.requestedBy,
   });
   return { issue, job };
+}
+
+function parsePullRequestRef(
+  repoOrRef: string,
+  number?: number,
+): {
+  repo: string;
+  number: number;
+} {
+  const match = repoOrRef.match(/^([^#]+)#(\d+)$/);
+  const repo = match?.[1] || repoOrRef;
+  const parsedNumber = number || (match ? Number(match[2]) : NaN);
+  assertRepoFullName(repo);
+  if (!Number.isInteger(parsedNumber) || parsedNumber < 1) {
+    throw new Error('A pull request number is required');
+  }
+  return { repo, number: parsedNumber };
+}
+
+export async function startCodingPullRequestReview(input: {
+  repo: string;
+  pullRequestNumber: number;
+  cli?: string;
+  tool?: string;
+  provider?: string;
+  model?: string;
+  requestedBy: string;
+}): Promise<CodingJob> {
+  const ref = parsePullRequestRef(input.repo, input.pullRequestNumber);
+  const pull = (await githubApi(`/repos/${ref.repo}/pulls/${ref.number}`)) as {
+    title?: string;
+    body?: string | null;
+    html_url?: string;
+    state?: string;
+    base?: { ref?: string };
+    head?: { ref?: string; sha?: string };
+  };
+  const filesPayload = (await githubApi(
+    `/repos/${ref.repo}/pulls/${ref.number}/files?per_page=100`,
+  )) as {
+    files?: Array<{
+      filename?: string;
+      status?: string;
+      additions?: number;
+      deletions?: number;
+      patch?: string;
+    }>;
+  };
+  const fileSummary = (filesPayload.files || [])
+    .map((file) => {
+      const patch = file.patch || '(binary or unavailable diff)';
+      return [
+        `${file.status || 'modified'} ${file.filename || '(unknown file)'} (+${file.additions || 0}/-${file.deletions || 0})`,
+        patch,
+      ].join('\n');
+    })
+    .join('\n\n')
+    .slice(0, 120_000);
+  const prompt = [
+    `Review GitHub pull request ${ref.repo}#${ref.number}.`,
+    `Title: ${pull.title || '(untitled)'}`,
+    `State: ${pull.state || 'unknown'}`,
+    `Base: ${pull.base?.ref || '(unknown)'}; head: ${pull.head?.ref || '(unknown)'} (${pull.head?.sha || 'unknown'})`,
+    `Description:\n${pull.body || '(no description)'}`,
+    '',
+    'Perform a read-only code review. Do not edit files, commit, push, open, merge, or close any pull request.',
+    'Return concise findings first with severity (P0-P3), file and line where possible, then a short approval/risk summary.',
+    '',
+    'Changed files and patches:',
+    fileSummary || '(no changed files returned)',
+  ].join('\n');
+  return startCodingJob({
+    repo: ref.repo,
+    prompt,
+    jobType: 'review',
+    pullRequestNumber: ref.number,
+    pullRequestUrl: pull.html_url,
+    cli: input.cli,
+    tool: input.tool,
+    provider: input.provider,
+    model: input.model,
+    createPr: false,
+    requestedBy: input.requestedBy,
+  });
+}
+
+export async function requestCodingPullRequestClose(
+  repoOrRef: string,
+  pullRequestNumber: number | undefined,
+  by: string,
+): Promise<{ repo: string; number: number; approvalId: string }> {
+  const ref = parsePullRequestRef(repoOrRef, pullRequestNumber);
+  const pull = (await githubApi(`/repos/${ref.repo}/pulls/${ref.number}`)) as {
+    title?: string;
+    html_url?: string;
+    state?: string;
+  };
+  if (pull.state === 'closed') {
+    throw new Error(`${ref.repo}#${ref.number} is already closed`);
+  }
+  const targetId = `${ref.repo}#${ref.number}`;
+  const existing = listApprovals({
+    status: 'pending',
+    kind: 'coding-close-pr',
+    targetType: 'github-pr',
+    targetId,
+    limit: 1,
+  })[0];
+  const approval =
+    existing ||
+    createApproval({
+      kind: 'coding-close-pr',
+      title: `Close ${targetId}`,
+      summary: `Close pull request ${pull.title || targetId}. This does not merge the PR or delete its branch.`,
+      risk: 'high',
+      requester: by,
+      targetType: 'github-pr',
+      targetId,
+      resourceSummary: pull.html_url || targetId,
+      payload: { repo: ref.repo, pullRequestNumber: ref.number },
+    });
+  return { ...ref, approvalId: approval.id };
+}
+
+export async function approveAndCloseCodingPullRequest(
+  repoOrRef: string,
+  pullRequestNumber: number | undefined,
+  by: string,
+): Promise<{ repo: string; number: number; approvalId: string }> {
+  const ref = parsePullRequestRef(repoOrRef, pullRequestNumber);
+  const targetId = `${ref.repo}#${ref.number}`;
+  const approval = listApprovals({
+    status: 'pending',
+    kind: 'coding-close-pr',
+    targetType: 'github-pr',
+    targetId,
+    limit: 1,
+  })[0];
+  if (!approval) {
+    throw new Error(`No pending close approval for ${targetId}`);
+  }
+  const policy = evaluatePolicy({
+    actor: by,
+    actorId: targetId,
+    actionType: 'coding.close_pr',
+    resource: ref.repo,
+    context: { pullRequestNumber: ref.number },
+  });
+  logAuditEvent({
+    actor: by,
+    actorId: targetId,
+    actionType: 'coding.close_pr',
+    resource: targetId,
+    decision: policy.decision === 'denied' ? 'denied' : 'approved',
+    correlationId: approval.id,
+    context: policy,
+  });
+  if (policy.decision === 'denied') {
+    throw new Error(`PR close denied by policy: ${policy.explanation}`);
+  }
+  reviewApproval(approval.id, 'approved', by);
+  await githubApi(`/repos/${ref.repo}/pulls/${ref.number}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ state: 'closed' }),
+  });
+  return { ...ref, approvalId: approval.id };
 }
 
 export function getCodingJob(jobId: string): CodingJob | undefined {

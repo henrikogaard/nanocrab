@@ -21,12 +21,20 @@ export interface MobileCodingCommandDeps {
     prompt?: string;
     requestedBy: string;
     createPr?: boolean;
+    cli?: string;
+    tool?: string;
+    provider?: string;
+    model?: string;
   }): Promise<MobileCodingJobSummary>;
   pickGitHubIssue(input: {
     repo: string;
     labels?: string[];
     requestedBy: string;
     createPr?: boolean;
+    cli?: string;
+    tool?: string;
+    provider?: string;
+    model?: string;
   }): Promise<{
     issue: MobileGitHubIssueSummary;
     job: MobileCodingJobSummary;
@@ -45,6 +53,7 @@ export interface HandleMobileCodingCommandInput {
   text: string;
   chatJid: string;
   sender: string;
+  isAuthorized?: boolean;
   group?: MobileCodingCommandGroup;
   sendMessage(chatJid: string, text: string): Promise<void> | void;
   deps: MobileCodingCommandDeps;
@@ -60,17 +69,36 @@ function parseFlags(args: string[]) {
   for (const arg of args) {
     if (arg === '--pr') flags.set('pr', true);
     else if (arg.startsWith('--labels=')) flags.set('labels', arg.slice(9));
+    else if (arg.startsWith('--tool=')) flags.set('tool', arg.slice(7));
+    else if (arg.startsWith('--cli=')) flags.set('cli', arg.slice(6));
+    else if (arg.startsWith('--provider='))
+      flags.set('provider', arg.slice(11));
+    else if (arg.startsWith('--model=')) flags.set('model', arg.slice(8));
     else positional.push(arg);
   }
   return { positional, flags };
+}
+
+function runtimeFlags(flags: Map<string, string | true>): {
+  cli?: string;
+  tool?: string;
+  provider?: string;
+  model?: string;
+} {
+  const result: ReturnType<typeof runtimeFlags> = {};
+  for (const key of ['cli', 'tool', 'provider', 'model'] as const) {
+    const value = flags.get(key);
+    if (typeof value === 'string' && value.trim()) result[key] = value.trim();
+  }
+  return result;
 }
 
 function helpText() {
   return [
     'Mobile coding commands:',
     '/code repos',
-    '/code start owner/repo describe the change --pr',
-    '/code pick owner/repo --labels=bug,autofix --pr',
+    '/code start owner/repo describe the change --pr [--tool=codex --provider=codex --model=gpt-5.4]',
+    '/code pick owner/repo --labels=bug,autofix --pr [--tool=codex --provider=codex --model=gpt-5.4]',
     '/code status [jobId]',
     '/code approve|cancel|retry|open-pr jobId',
   ].join('\n');
@@ -89,6 +117,13 @@ export async function handleMobileCodingCommand(
     await input.sendMessage(
       input.chatJid,
       'Coding commands are only available in the main control group.',
+    );
+    return true;
+  }
+  if (input.isAuthorized === false) {
+    await input.sendMessage(
+      input.chatJid,
+      'Unauthorized. Coding commands require an authorized operator.',
     );
     return true;
   }
@@ -118,6 +153,7 @@ export async function handleMobileCodingCommand(
         prompt,
         requestedBy: actor,
         createPr: flags.has('pr') || undefined,
+        ...runtimeFlags(flags),
       });
       await input.sendMessage(
         input.chatJid,
@@ -147,6 +183,7 @@ export async function handleMobileCodingCommand(
         labels,
         requestedBy: actor,
         createPr: flags.has('pr') || undefined,
+        ...runtimeFlags(flags),
       });
       if (!picked) {
         await input.sendMessage(

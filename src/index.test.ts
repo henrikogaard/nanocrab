@@ -23,6 +23,11 @@ vi.mock('./control-plane/commands.js', () => ({
   resetControlPlaneCommandCache: vi.fn(),
 }));
 
+vi.mock('./coding-commands.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./coding-commands.js')>();
+  return { ...actual, runCodingCommand: vi.fn() };
+});
+
 vi.mock('./sender-allowlist.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./sender-allowlist.js')>();
   return {
@@ -36,7 +41,11 @@ import {
   executeControlPlaneCommand,
   parseControlPlaneCommand,
 } from './control-plane/commands.js';
-import { processControlPlaneCommand } from './index.js';
+import { runCodingCommand } from './coding-commands.js';
+import {
+  processChannelCodingCommand,
+  processControlPlaneCommand,
+} from './index.js';
 
 function fakeChannel(): Channel {
   return {
@@ -163,5 +172,51 @@ describe('processControlPlaneCommand', () => {
       }),
     );
     expect(channel.sendMessage).toHaveBeenCalled();
+  });
+});
+
+describe('processChannelCodingCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(runCodingCommand).mockResolvedValue('coding response');
+  });
+
+  it('routes trigger-prefixed coding commands from a registered channel', async () => {
+    vi.mocked(isSenderAllowed).mockReturnValue(true);
+    const channel = fakeChannel();
+    const result = await processChannelCodingCommand(
+      channel,
+      'test:123',
+      fakeGroup('@Andy'),
+      [fakeMessage('@Andy /coding-pick owner/repo labels=autofix')],
+    );
+
+    expect(result).toBe(true);
+    expect(runCodingCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'pick', repo: 'owner/repo' }),
+      'channel:test:test:123:u1',
+    );
+    expect(channel.sendMessage).toHaveBeenCalledWith(
+      'test:123',
+      'coding response',
+    );
+  });
+
+  it('blocks unauthorized write commands before the coding runner', async () => {
+    vi.mocked(isSenderAllowed).mockReturnValue(false);
+    const channel = fakeChannel();
+    const result = await processChannelCodingCommand(
+      channel,
+      'test:123',
+      fakeGroup('@Andy'),
+      [fakeMessage('@Andy /coding-approve code-123')],
+    );
+
+    expect(result).toBe(true);
+    expect(runCodingCommand).not.toHaveBeenCalled();
+    expect(channel.sendMessage).toHaveBeenCalledWith(
+      'test:123',
+      expect.stringContaining('Unauthorized'),
+    );
   });
 });

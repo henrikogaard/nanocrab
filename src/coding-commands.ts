@@ -4,8 +4,11 @@ import {
   getCodingJob,
   loadCodingJobs,
   openCodingJobPr,
+  approveAndCloseCodingPullRequest,
   pickGitHubIssue,
   refreshCodingJobCi,
+  requestCodingPullRequestClose,
+  startCodingPullRequestReview,
 } from './coding-jobs.js';
 
 type CodingCommandAction =
@@ -16,12 +19,16 @@ type CodingCommandAction =
   | 'open-pr'
   | 'refresh-ci'
   | 'cancel'
-  | 'pick';
+  | 'pick'
+  | 'review-pr'
+  | 'close-pr'
+  | 'approve-close-pr';
 
 export interface ParsedCodingCommand {
   action: CodingCommandAction;
   jobId?: string;
   repo?: string;
+  pullRequestNumber?: number;
   labels?: string[];
   cli?: string;
   provider?: string;
@@ -45,6 +52,37 @@ export function parseCodingCommand(input: string): ParsedCodingCommand | null {
   }
   if (command === '/coding-pr') return { action: 'open-pr', jobId: args[1] };
   if (command === '/coding-ci') return { action: 'refresh-ci', jobId: args[1] };
+  if (
+    command === '/coding-review-pr' ||
+    command === '/coding-close-pr' ||
+    command === '/coding-approve-close-pr'
+  ) {
+    const parsed: ParsedCodingCommand = {
+      action:
+        command === '/coding-review-pr'
+          ? 'review-pr'
+          : command === '/coding-close-pr'
+            ? 'close-pr'
+            : 'approve-close-pr',
+      repo: args[1],
+    };
+    const refMatch = parsed.repo?.match(/^([^#]+)#(\d+)$/);
+    if (refMatch) {
+      parsed.repo = refMatch[1];
+      parsed.pullRequestNumber = Number(refMatch[2]);
+    } else if (args[2] && /^\d+$/.test(args[2])) {
+      parsed.pullRequestNumber = Number(args[2]);
+    }
+    const flagStart = refMatch ? 2 : 3;
+    for (const arg of args.slice(flagStart)) {
+      const [key, ...rest] = arg.split('=');
+      const value = rest.join('=');
+      if ((key === 'tool' || key === 'cli') && value) parsed.cli = value;
+      else if (key === 'provider' && value) parsed.provider = value;
+      else if (key === 'model' && value) parsed.model = value;
+    }
+    return parsed;
+  }
   if (command === '/coding-cancel') {
     return { action: 'cancel', jobId: args[1] };
   }
@@ -84,6 +122,10 @@ function summarizeJob(
 ): string {
   return [
     `${job.id}: ${job.status} ${job.repo}${job.issueNumber ? `#${job.issueNumber}` : ''}`,
+    job.type === 'review' && job.pullRequestNumber
+      ? `Review: PR #${job.pullRequestNumber}${job.pullRequestUrl ? ` (${job.pullRequestUrl})` : ''}`
+      : '',
+    `Runtime: ${job.runnerCli}/${job.provider}/${job.model}`,
     job.issueTitle || job.prompt.slice(0, 120),
     job.investigationSummary ? `Plan: ${job.investigationSummary}` : '',
     job.prUrl ? `PR: ${job.prUrl}` : '',
@@ -105,6 +147,9 @@ export async function runCodingCommand(
       '/coding-pick owner/repo labels=a,b tool=codex provider=codex model=gpt-5.4 [no-pr]',
       '/coding-approve <jobId>',
       '/coding-pr <jobId>',
+      '/coding-review-pr owner/repo#<pr> tool=codex provider=codex model=gpt-5.4',
+      '/coding-close-pr owner/repo#<pr>',
+      '/coding-approve-close-pr owner/repo#<pr>',
       '/coding-ci <jobId>',
       '/coding-cancel <jobId>',
     ].join('\n');
@@ -138,6 +183,47 @@ export async function runCodingCommand(
     ]
       .filter(Boolean)
       .join('\n');
+  }
+
+  if (command.action === 'review-pr') {
+    if (!command.repo || !command.pullRequestNumber) {
+      return 'Usage: /coding-review-pr owner/repo#<pr> [tool=codex provider=codex model=gpt-5.4]';
+    }
+    const job = await startCodingPullRequestReview({
+      repo: command.repo,
+      pullRequestNumber: command.pullRequestNumber,
+      cli: command.cli,
+      provider: command.provider,
+      model: command.model,
+      requestedBy: actor,
+    });
+    return [
+      `PR review job queued: ${job.id}`,
+      `${job.repo}#${job.pullRequestNumber}`,
+      `Runtime: ${job.runnerCli}/${job.provider}/${job.model}`,
+      `Review output: /coding-job ${job.id}`,
+    ].join('\n');
+  }
+
+  if (command.action === 'close-pr' || command.action === 'approve-close-pr') {
+    if (!command.repo || !command.pullRequestNumber) {
+      return `Usage: /coding-${command.action} owner/repo#<pr>`;
+    }
+    const ref = `${command.repo}#${command.pullRequestNumber}`;
+    if (command.action === 'close-pr') {
+      const requested = await requestCodingPullRequestClose(
+        command.repo,
+        command.pullRequestNumber,
+        actor,
+      );
+      return `Close approval required for ${ref}. Approval: ${requested.approvalId}\nUse /coding-approve-close-pr ${ref} after review.`;
+    }
+    const closed = await approveAndCloseCodingPullRequest(
+      command.repo,
+      command.pullRequestNumber,
+      actor,
+    );
+    return `Closed ${ref}. The PR was not merged and its branch was not deleted. Approval: ${closed.approvalId}`;
   }
 
   if (!command.jobId) return 'A coding job id is required.';

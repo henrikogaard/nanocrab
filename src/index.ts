@@ -20,6 +20,8 @@ import {
   executeControlPlaneCommand,
   parseControlPlaneCommand,
 } from './control-plane/commands.js';
+import { parseChannelCodingCommand } from './channel-command-ingress.js';
+import { runCodingCommand } from './coding-commands.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
@@ -303,15 +305,64 @@ export async function processControlPlaneCommand(
     });
     if (result.text) {
       const text = formatOutbound(result.text, chatJid);
-      if (text) await sendBotTextReply(channel, chatJid, text);
+      if (text)
+        await sendBotTextReply(channel, chatJid, text, latestMessage.thread_id);
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const errorText = `Command failed: ${message}`;
     const text = formatOutbound(errorText, chatJid);
-    if (text) await sendBotTextReply(channel, chatJid, text);
+    if (text)
+      await sendBotTextReply(channel, chatJid, text, latestMessage.thread_id);
   }
 
+  return true;
+}
+
+const channelCodingWriteActions = new Set([
+  'pick',
+  'approve',
+  'cancel',
+  'open-pr',
+  'review-pr',
+  'close-pr',
+  'approve-close-pr',
+]);
+
+export async function processChannelCodingCommand(
+  channel: Channel,
+  chatJid: string,
+  group: RegisteredGroup,
+  messages: NewMessage[],
+): Promise<boolean> {
+  const latestMessage = messages[messages.length - 1];
+  if (!latestMessage) return false;
+
+  const command = parseChannelCodingCommand(latestMessage.content, {
+    trigger: group.trigger,
+    isMain: group.isMain === true,
+    requiresTrigger: group.isMain !== true && group.requiresTrigger !== false,
+  });
+  if (!command) return false;
+
+  const allowlistCfg = loadSenderAllowlist();
+  const isAuthorized =
+    latestMessage.is_from_me ||
+    isSenderAllowed(chatJid, latestMessage.sender, allowlistCfg);
+  const actor = `channel:${channel.name}:${chatJid}:${latestMessage.sender}`;
+
+  let result: string;
+  if (channelCodingWriteActions.has(command.action) && !isAuthorized) {
+    result =
+      'Unauthorized. Coding issue assignment and write actions require an authorized operator in this registered group.';
+  } else {
+    result = await runCodingCommand(command, actor);
+  }
+
+  const text = formatOutbound(result, chatJid);
+  if (text) {
+    await sendBotTextReply(channel, chatJid, text, latestMessage.thread_id);
+  }
   return true;
 }
 
@@ -319,9 +370,11 @@ async function sendBotTextReply(
   channel: Channel,
   chatJid: string,
   text: string,
+  threadId?: string,
 ): Promise<void> {
   const timestamp = new Date().toISOString();
-  await channel.sendMessage(chatJid, text);
+  if (threadId) await channel.sendMessage(chatJid, text, { threadId });
+  else await channel.sendMessage(chatJid, text);
   storeMessageDirect({
     id: `bot-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     chat_jid: chatJid,
@@ -1121,6 +1174,18 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
+          const codingCommandHandled = await processChannelCodingCommand(
+            channel,
+            chatJid,
+            group,
+            messagesToSend,
+          );
+          if (codingCommandHandled) {
+            lastAgentTimestamp[chatJid] = latestMessageToSend.timestamp;
+            saveState();
+            continue;
+          }
+
           const promptMessages = getPromptContextMessages(
             chatJid,
             latestMessageToSend.timestamp,
@@ -1355,6 +1420,9 @@ async function main(): Promise<void> {
       text: msg.content,
       chatJid,
       sender: msg.sender,
+      isAuthorized:
+        msg.is_from_me ||
+        isSenderAllowed(chatJid, msg.sender, loadSenderAllowlist()),
       group,
       sendMessage: async (jid, text) => {
         await sendChannelFollowUp({

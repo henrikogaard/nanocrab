@@ -49,6 +49,7 @@ vi.mock('child_process', () => ({
 
 import { parseCodingCommand, runCodingCommand } from './coding-commands.js';
 import { registerCodingRepo } from './coding-jobs.js';
+import { listApprovals } from './approvals.js';
 
 const TEST_ROOT = '/tmp/nanocrab-coding-commands-test';
 
@@ -106,6 +107,54 @@ describe('coding chat commands', () => {
       provider: 'openrouter',
       model: 'qwen/qwen3-coder',
     });
+  });
+
+  it('parses cross-channel PR review and close commands', () => {
+    expect(
+      parseCodingCommand(
+        '/coding-review-pr owner/repo#42 tool=codex provider=codex model=gpt-5.4',
+      ),
+    ).toMatchObject({
+      action: 'review-pr',
+      repo: 'owner/repo',
+      pullRequestNumber: 42,
+      cli: 'codex',
+      provider: 'codex',
+      model: 'gpt-5.4',
+    });
+    expect(parseCodingCommand('/coding-close-pr owner/repo 42')).toMatchObject({
+      action: 'close-pr',
+      repo: 'owner/repo',
+      pullRequestNumber: 42,
+    });
+    expect(
+      parseCodingCommand('/coding-approve-close-pr owner/repo#42'),
+    ).toMatchObject({
+      action: 'approve-close-pr',
+      repo: 'owner/repo',
+      pullRequestNumber: 42,
+    });
+  });
+
+  it('creates a separate approval before a PR can be closed', async () => {
+    mockGitHubFetch((url) => {
+      if (url.endsWith('/pulls/42')) {
+        return {
+          title: 'Fix scheduler',
+          html_url: 'https://github.com/owner/repo/pull/42',
+          state: 'open',
+        };
+      }
+      return { default_branch: 'main' };
+    });
+
+    const response = await runCodingCommand(
+      parseCodingCommand('/coding-close-pr owner/repo#42')!,
+      'tester',
+    );
+
+    expect(response).toContain('Close approval required for owner/repo#42');
+    expect(listApprovals({ kind: 'coding-close-pr' })).toHaveLength(1);
   });
 
   it('picks an issue and returns approval instructions', async () => {

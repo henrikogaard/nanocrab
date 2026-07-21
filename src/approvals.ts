@@ -9,6 +9,7 @@ export type ApprovalKind =
   | 'provider-fallback'
   | 'coding-implement'
   | 'coding-open-pr'
+  | 'coding-close-pr'
   | 'coding-revert'
   | 'report-outline'
   | 'report-delivery'
