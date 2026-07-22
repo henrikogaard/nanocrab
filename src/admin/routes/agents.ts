@@ -27,6 +27,7 @@ import {
   resolveDevinCliModelAlias,
   validateCodingRuntimeSelection,
 } from '../../agent-runtime-registry.js';
+import { enrichReadiness } from '../../readiness-common.js';
 import { probeCodingRunnerReadiness } from '../../coding-runner-readiness.js';
 import type { AgentRuntimeHealth, AgentRuntimeSelection } from '../../types.js';
 import {
@@ -122,6 +123,28 @@ function saveTasks(tasks: AgentTask[]): void {
   fs.writeFileSync(TASKS_PATH, JSON.stringify(tasks, null, 2));
 }
 
+router.get('/readiness', async (_req: Request, res: Response) => {
+  try {
+    const definitions = listAgentRuntimeDefinitions().filter(
+      (runtime) => runtime.codingRunnerSupported,
+    );
+    const results = await Promise.all(
+      definitions.map(async (runtime) => {
+        const health = await probeCodingRunnerReadiness(runtime.cli);
+        return enrichReadiness(health);
+      }),
+    );
+    res.json({
+      codingRuntimes: results,
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
 // Available container agent providers (for multi-provider support)
 router.get('/providers', (_req: Request, res: Response) => {
   const availability = getProviderAvailability();
@@ -163,7 +186,11 @@ router.get('/providers', (_req: Request, res: Response) => {
 interface CodingRuntimeOption extends AgentRuntimeSelection {
   cliModel: string | null;
   available: boolean;
-  readiness: AgentRuntimeHealth;
+  readiness: AgentRuntimeHealth & {
+    normalizedStatus: string;
+    severity: string;
+    label: string;
+  };
 }
 
 function codingRuntimeIdentity(input: unknown): string {
@@ -286,7 +313,7 @@ router.get('/coding/runtimes', async (_req: Request, res: Response) => {
           cliModel:
             runtime.cli === 'devin' ? resolveDevinCliModelAlias(runtime) : null,
           available: runtimeReadiness.status === 'healthy',
-          readiness: runtimeReadiness,
+          readiness: enrichReadiness(runtimeReadiness),
         };
       },
     );
@@ -305,7 +332,7 @@ async function runtimeProfileResponse(
   return {
     ...profile,
     available: readiness.status === 'healthy',
-    readiness,
+    readiness: enrichReadiness(readiness),
   };
 }
 
