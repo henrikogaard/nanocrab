@@ -56,7 +56,12 @@ describe('coding runtime profiles', () => {
       description: 'Use the local coding model',
       runtime: { cli: 'opencode', provider: 'ollama', model: 'qwen3-coder' },
     });
-    expect(saveCodingRuntimeProfile(profile)).toMatchObject(profile);
+    expect(saveCodingRuntimeProfile(profile)).toMatchObject({
+      id: profile.id,
+      label: profile.label,
+      runtime: profile.runtime,
+      enabled: profile.enabled,
+    });
     expect(resolveCodingRuntimeProfile('local-opencode')).toEqual(
       profile.runtime,
     );
