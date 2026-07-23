@@ -161,7 +161,7 @@ describe('agent-runner OpenAI-compatible dispatch', () => {
     );
   });
 
-  it('uses OpenCode provider-qualified model IDs for AIRouter tool runs', () => {
+  it('uses OpenCode provider-qualified model IDs for compatible tool runs', () => {
     expect(
       openCodeModelForProvider('airouter', 'DeepSeek-V4-Flash'),
     ).toBe('airouter/DeepSeek-V4-Flash');
@@ -170,6 +170,18 @@ describe('agent-runner OpenAI-compatible dispatch', () => {
     ).toBe('airouter/Qwen3.6');
     expect(openCodeModelForProvider('opencode', 'opencode/grok-code-fast-1')).toBe(
       'opencode/grok-code-fast-1',
+    );
+    expect(openCodeModelForProvider('google', 'gemini-2.5-flash')).toBe(
+      'google/gemini-2.5-flash',
+    );
+    expect(openCodeModelForProvider('ollama', 'codestral')).toBe(
+      'ollama/codestral',
+    );
+    expect(openCodeModelForProvider('openrouter', 'openai/gpt-5.4')).toBe(
+      'openrouter/openai/gpt-5.4',
+    );
+    expect(openCodeModelForProvider('openai-compatible', 'model-id')).toBe(
+      'openai-compatible/model-id',
     );
   });
 });

@@ -1335,6 +1335,22 @@ function buildOpenCodeConfig(
       },
     };
   }
+  if (process.env.OPENAI_COMPATIBLE_BASE_URL) {
+    const customModel = model.replace(/^openai-compatible\//, '');
+    provider['openai-compatible'] = {
+      npm: '@ai-sdk/openai-compatible',
+      name: 'Custom OpenAI-Compatible',
+      options: {
+        apiKey: process.env.OPENAI_COMPATIBLE_API_KEY
+          ? '{env:OPENAI_COMPATIBLE_API_KEY}'
+          : undefined,
+        baseURL: process.env.OPENAI_COMPATIBLE_BASE_URL,
+      },
+      models: {
+        [customModel]: { name: customModel },
+      },
+    };
+  }
   if (process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST) {
     const baseURL =
       process.env.OLLAMA_BASE_URL ||
@@ -1441,8 +1457,11 @@ async function runQueryOpenCode(
 }
 
 export function openCodeModelForProvider(provider: string, model: string): string {
-  if (provider === 'airouter' && !model.startsWith('airouter/')) {
-    return `airouter/${model}`;
+  if (
+    isOpenAiCompatibleAgentProvider(provider) &&
+    !model.startsWith(`${provider}/`)
+  ) {
+    return `${provider}/${model}`;
   }
   return model;
 }
@@ -1534,25 +1553,9 @@ async function main(): Promise<void> {
     await runQueryOpenCode(prompt, containerInput, mcpServerPath);
     return;
   }
-  if (provider === 'airouter') {
-    log('Using AIRouter through OpenCode for tool support');
-    await runQueryOpenCode(prompt, containerInput, mcpServerPath);
-    return;
-  }
   if (isOpenAiCompatibleAgentProvider(provider)) {
-    log(`Using OpenAI-compatible provider: ${provider}`);
-    try {
-      await runQueryOpenAiCompatible(prompt, containerInput);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      log(`OpenAI-compatible provider error: ${errorMessage}`);
-      writeOutput({
-        status: 'error',
-        result: null,
-        error: errorMessage,
-      });
-      process.exit(1);
-    }
+    log(`Using ${provider} through OpenCode for tool support`);
+    await runQueryOpenCode(prompt, containerInput, mcpServerPath);
     return;
   }
 
