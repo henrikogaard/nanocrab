@@ -262,7 +262,12 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   app.use('/api/threads', requireAuth, threadsRoutes);
   app.use('/api/projects', requireAuth, projectsRoutes);
   app.use('/api/github', requireAuth, requireRole('admin'), githubRoutes);
-  app.use('/api/github-views', requireAuth, requireRole('admin'), githubViewsRoutes);
+  app.use(
+    '/api/github-views',
+    requireAuth,
+    requireRole('admin'),
+    githubViewsRoutes,
+  );
   app.use('/api/assistant-profile', requireAuth, assistantProfileRoutes);
   app.use(
     '/api/control-plane',

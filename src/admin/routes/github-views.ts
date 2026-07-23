@@ -362,13 +362,15 @@ router.get('/pulls/:number', async (req: Request, res: Response) => {
     };
 
     // Fetch CI, reviews, and changed files in parallel
-    const [checksResult, reviewsResult, filesResult] = await Promise.allSettled([
-      githubApi(
-        `/repos/${repo}/commits/${raw.head?.sha}/check-runs?per_page=50`,
-      ),
-      githubApi(`/repos/${repo}/pulls/${prNumber}/reviews?per_page=20`),
-      githubApi(`/repos/${repo}/pulls/${prNumber}/files?per_page=100`),
-    ]);
+    const [checksResult, reviewsResult, filesResult] = await Promise.allSettled(
+      [
+        githubApi(
+          `/repos/${repo}/commits/${raw.head?.sha}/check-runs?per_page=50`,
+        ),
+        githubApi(`/repos/${repo}/pulls/${prNumber}/reviews?per_page=20`),
+        githubApi(`/repos/${repo}/pulls/${prNumber}/files?per_page=100`),
+      ],
+    );
 
     let ciStatus = 'unknown';
     if (checksResult.status === 'fulfilled') {
