@@ -793,8 +793,8 @@ describe('NanoWorkSession shared views', () => {
     expect(html).not.toContain('aria-modal');
     expect(html).toContain('tabindex="-1"');
     expect(html).toContain('role="tablist"');
-    expect((html.match(/role="tab"/g) || []).length).toBe(10);
-    expect((html.match(/data-work-session-tab=/g) || []).length).toBe(10);
+    expect((html.match(/role="tab"/g) || []).length).toBe(11);
+    expect((html.match(/data-work-session-tab=/g) || []).length).toBe(11);
     expect(html).toContain('data-work-session-tab="approvals"');
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('role="tabpanel"');
@@ -806,6 +806,66 @@ describe('NanoWorkSession shared views', () => {
     expect(html).toContain('Pending approvals');
     expect(html).toContain('<strong>1</strong>');
     expect(html).toContain('Apply the patch');
+    expect(html).toContain('data-session-approval-action="approve"');
+    expect(html).toContain('data-session-approval-action="deny"');
+    expect(html).toContain('data-approval-id="approval-1"');
+    expect(html).not.toContain(
+      'data-session-approval-action="approve" data-approval-id="approval-2"',
+    );
+  });
+
+  it('renders narrative sections and tolerates available projections without items', () => {
+    const adapter = loadWorkSession();
+    const html = adapter.renderInspector(
+      {
+        ...session,
+        projections: {
+          conversation: {
+            available: true,
+            items: [{ role: 'assistant', content: 'Investigating the failure' }],
+          },
+          plan: {
+            available: true,
+            items: [{ title: 'Choose the smallest fix', status: 'done' }],
+          },
+          journalEvents: {
+            available: true,
+            items: [
+              {
+                title: 'Logged outcome',
+                timestamp: '2026-07-20T10:05:00.000Z',
+              },
+            ],
+          },
+        },
+      },
+      'narrative',
+    );
+    const broken = adapter.renderInspector(
+      {
+        ...session,
+        projections: {
+          conversation: { available: true },
+          plan: { available: true },
+          journalEvents: { available: true },
+        },
+      },
+      'narrative',
+    );
+
+    expect(html).toContain('data-work-session-tab="narrative"');
+    expect(html).toContain('Reasoning chain');
+    expect(html).toContain('Investigating the failure');
+    expect(html).toContain('Decision points');
+    expect(html).toContain('Choose the smallest fix');
+    expect(html).toContain('Actions taken');
+    expect(html).toContain('apply_patch');
+    expect(html).toContain('Outcome');
+    expect(html).toContain('src/admin/public/ui/work-session.js');
+    expect(html).toContain('Journal');
+    expect(html).toContain('Logged outcome');
+    expect(broken).toContain('session-narrative');
+    expect(broken).toContain('Waiting for approval');
   });
 
   it.each([

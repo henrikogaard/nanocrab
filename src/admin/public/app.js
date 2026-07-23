@@ -5634,8 +5634,17 @@ function renderScheduleCalendar(tasks) {
 }
 
 // --- Lightweight coding tasks panel ---
-async function renderLightweightTasksPanel(container) {
+async function renderLightweightTasksPanel(container, options = {}) {
   if (!container) return;
+  const preserveDraft = options.preserveDraft === true;
+  const draft = preserveDraft
+    ? {
+        repo: document.getElementById('ltask-repo')?.value || '',
+        provider: document.getElementById('ltask-provider')?.value || '',
+        model: document.getElementById('ltask-model')?.value || '',
+        prompt: document.getElementById('ltask-prompt')?.value || '',
+      }
+    : null;
   let tasks = [];
   let repos = [];
   let providerInfo = {};
@@ -5647,6 +5656,7 @@ async function renderLightweightTasksPanel(container) {
     ]);
   } catch { tasks = []; }
   const providerModels = providerInfo.models || {};
+  window._ltaskProviderModels = providerModels;
   const providerDefs = providerInfo.definitions || {};
   const providerOptions = Object.values(providerDefs)
     .filter((p) => p && p.selectable !== false)
@@ -5702,23 +5712,42 @@ async function renderLightweightTasksPanel(container) {
       <div id="ltask-detail" class="is-hidden"></div>
     </div>`;
   const form = document.getElementById('ltask-create-form');
-  if (form) form.onsubmit = async (e) => {
-    e.preventDefault();
-    const repo = document.getElementById('ltask-repo')?.value;
-    const prompt = document.getElementById('ltask-prompt')?.value?.trim();
-    const provider = document.getElementById('ltask-provider')?.value || undefined;
-    const model = document.getElementById('ltask-model')?.value || undefined;
-    if (!repo || !prompt) { toast('Repository and prompt are required', 'error'); return; }
-    try {
-      await api('/lightweight-tasks', { method: 'POST', body: JSON.stringify({ repo, prompt, provider, model }) });
-      toast('Lightweight task created', 'success');
-      renderLightweightTasksPanel(container);
-    } catch (err) { toast(err?.message || 'Failed to create task', 'error'); }
-  };
-  // Auto-refresh while tasks are active
-  const hasActive = (tasks || []).some((t) => t.status === 'queued' || t.status === 'running');
+  if (form) {
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const repo = document.getElementById('ltask-repo')?.value;
+      const prompt = document.getElementById('ltask-prompt')?.value?.trim();
+      const provider =
+        document.getElementById('ltask-provider')?.value || undefined;
+      const model = document.getElementById('ltask-model')?.value || undefined;
+      if (!repo || !prompt) {
+        toast('Repository and prompt are required', 'error');
+        return;
+      }
+      try {
+        await api('/lightweight-tasks', {
+          method: 'POST',
+          body: JSON.stringify({ repo, prompt, provider, model }),
+        });
+        toast('Lightweight task created', 'success');
+        renderLightweightTasksPanel(container);
+      } catch (err) {
+        toast(err?.message || 'Failed to create task', 'error');
+      }
+    };
+  }
+  if (draft) applyLightweightTaskDraft(draft);
+  // Auto-refresh while tasks are active, preserving in-progress form drafts.
+  const hasActive = (tasks || []).some(
+    (t) => t.status === 'queued' || t.status === 'running',
+  );
   if (hasActive && container.isConnected) {
-    setTimeout(() => { if (container.isConnected) renderLightweightTasksPanel(container); }, 5000);
+    setTimeout(() => {
+      if (!container.isConnected) return;
+      renderLightweightTasksPanel(container, {
+        preserveDraft: true,
+      });
+    }, 5000);
   }
 }
 
@@ -5744,7 +5773,7 @@ window.retryLightweightTask = async function (id) {
     const task = await api(`/lightweight-tasks/${encodeURIComponent(id)}`);
     if (!task) { toast('Task not found', 'error'); return; }
     await api('/lightweight-tasks', { method: 'POST', body: JSON.stringify({ repo: task.repo, prompt: task.prompt, provider: task.provider || undefined, model: task.model || undefined }) });
-    toast('Task retried', 'success');
+    toast('Created a new task from the previous prompt', 'success');
     const panel = document.getElementById('ltask-list')?.closest('.ltask-panel');
     if (panel) renderLightweightTasksPanel(panel.parentElement);
   } catch (err) { toast(err?.message || 'Retry failed', 'error'); }
@@ -17933,6 +17962,26 @@ function bindUnifiedSessionActions(root, state) {
       state.activeTab = tab.dataset.workSessionTab;
       renderUnifiedSessionCanvas(state);
       state.el.querySelector('[aria-selected="true"]')?.focus();
+      return;
+    }
+    const approvalButton = event.target.closest('[data-session-approval-action]');
+    if (approvalButton && root.contains(approvalButton)) {
+      const approvalId = approvalButton.dataset.approvalId;
+      const decision = approvalButton.dataset.sessionApprovalAction;
+      if (!approvalId || !['approve', 'deny'].includes(decision)) return;
+      approvalButton.disabled = true;
+      try {
+        await api(
+          `/approvals/${encodeURIComponent(approvalId)}/${decision}`,
+          { method: 'POST', body: JSON.stringify({}) },
+        );
+        toast(decision === 'approve' ? 'Approved' : 'Denied', 'success');
+        refreshInlineApprovalBanners();
+        await refreshUnifiedSessionDetail(state);
+      } catch (err) {
+        toast(err?.message || `${decision} failed`, 'error');
+        approvalButton.disabled = false;
+      }
       return;
     }
     const actionButton = event.target.closest('[data-work-session-action]');

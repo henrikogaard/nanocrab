@@ -770,9 +770,12 @@ function renderToolCallTimeline(toolCalls) {
     );
 
     var conversation = asRecord(projections.conversation);
-    if (conversation.available === true && conversation.items.length > 0) {
+    var conversationItems = Array.isArray(conversation.items)
+      ? conversation.items
+      : [];
+    if (conversation.available === true && conversationItems.length > 0) {
       var reasoningHtml = '<section class="narrative-section"><h4>Reasoning chain</h4><div class="narrative-steps">';
-      conversation.items.forEach(function (item, index) {
+      conversationItems.forEach(function (item, index) {
         var role = stringValue(item.role || item.type || 'step');
         var content = stringValue(item.content || item.summary || item.detail || '');
         reasoningHtml += '<div class="narrative-step">' +
@@ -785,9 +788,10 @@ function renderToolCallTimeline(toolCalls) {
     }
 
     var plan = asRecord(projections.plan);
-    if (plan.available === true && plan.items.length > 0) {
+    var planItems = Array.isArray(plan.items) ? plan.items : [];
+    if (plan.available === true && planItems.length > 0) {
       var decisionsHtml = '<section class="narrative-section"><h4>Decision points</h4><div class="narrative-decisions">';
-      plan.items.forEach(function (item) {
+      planItems.forEach(function (item) {
         var title = stringValue(item.title || item.name || 'Decision');
         var detail = stringValue(item.content || item.summary || item.detail || '');
         var itemStatus = stringValue(item.status || '');
@@ -837,9 +841,10 @@ function renderToolCallTimeline(toolCalls) {
     }
 
     var journal = asRecord(projections.journalEvents);
-    if (journal.available === true && journal.items.length > 0) {
+    var journalItems = Array.isArray(journal.items) ? journal.items : [];
+    if (journal.available === true && journalItems.length > 0) {
       var journalHtml = '<section class="narrative-section"><h4>Journal</h4><div class="narrative-journal">';
-      journal.items.forEach(function (item) {
+      journalItems.forEach(function (item) {
         var title = stringValue(item.title || item.type || 'entry');
         var detail = stringValue(item.content || item.summary || item.detail || '');
         var timestamp = stringValue(item.timestamp || item.createdAt || '');
