@@ -91,6 +91,7 @@ import learningProposalsRoutes from './routes/learning-proposals.js';
 import sourceCollectionsRoutes from './routes/source-collections.js';
 import workspacesRoutes from './routes/workspaces.js';
 import { startWorkspaceCleanup } from '../workspace-manager.js';
+import channelBindingsRoutes from './routes/channel-bindings.js';
 
 // Plugin system
 import {
@@ -271,6 +272,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
     githubViewsRoutes,
   );
   app.use('/api/workspaces', requireAuth, requireRole('admin'), workspacesRoutes);
+  app.use('/api/channel-bindings', requireAuth, channelBindingsRoutes);
   app.use('/api/assistant-profile', requireAuth, assistantProfileRoutes);
   app.use(
     '/api/control-plane',
