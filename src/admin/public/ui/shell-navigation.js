@@ -31,6 +31,7 @@
     'control-plane': { label: 'Control Plane', icon: 'control-plane' },
     'learning-proposals': { label: 'Learning Proposals', icon: 'learning' },
     'source-collections': { label: 'Source Collections', icon: 'source' },
+    'github-views': { label: 'GitHub', icon: 'gitcode' },
     monitoring: { label: 'Monitoring', icon: 'monitoring' },
     containers: { label: 'Containers', icon: 'containers' },
     integrations: { label: 'Integrations', icon: 'integrations' },
@@ -63,6 +64,11 @@
       title: 'Code',
       detail: 'Repos, terminals, delegated fixes, and Copilot jobs.',
       pages: ['devhub', 'autofix', 'copilot'],
+    },
+    {
+      title: 'GitHub',
+      detail: 'Issues, pull requests, and repo status.',
+      pages: ['github-views'],
     },
     {
       title: 'Operate',

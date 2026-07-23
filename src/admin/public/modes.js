@@ -70,6 +70,7 @@
     'control-plane',
     'learning-proposals',
     'source-collections',
+    'github-views',
     'backup',
     'usage',
     'help',
