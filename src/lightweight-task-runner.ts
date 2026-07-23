@@ -1,6 +1,7 @@
-import { spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { promisify } from 'util';
 
 import {
   CODING_WORKSPACE_DIR,
@@ -31,6 +32,7 @@ import {
 } from './lightweight-tasks.js';
 
 let runnerActive = false;
+const execFileAsync = promisify(execFile);
 
 /**
  * Pick up queued lightweight tasks and execute them one at a time.
@@ -65,7 +67,7 @@ async function executeLightweightTask(task: LightweightTask): Promise<void> {
       throw new Error(`Repo ${task.repo} is not registered for coding`);
     }
 
-    const workspace = prepareTaskWorkspace(task, repo);
+    const workspace = await prepareTaskWorkspace(task, repo);
     updateLightweightTask(taskId, {
       workspace,
       branch: `nanocrab/ltask-${taskId.slice(-8)}`,
@@ -94,7 +96,10 @@ async function executeLightweightTask(task: LightweightTask): Promise<void> {
   }
 }
 
-function prepareTaskWorkspace(task: LightweightTask, repo: CodingRepo): string {
+async function prepareTaskWorkspace(
+  task: LightweightTask,
+  repo: CodingRepo,
+): Promise<string> {
   const repoDirName = task.repo.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const workspace = path.join(
     CODING_WORKSPACE_DIR,
@@ -102,7 +107,43 @@ function prepareTaskWorkspace(task: LightweightTask, repo: CodingRepo): string {
     task.id,
     repoDirName,
   );
-  fs.mkdirSync(workspace, { recursive: true });
+  fs.mkdirSync(path.dirname(workspace), { recursive: true });
+
+  const githubToken = getGitHubToken();
+  const askpassDir = fs.mkdtempSync(path.join('/tmp', 'nanocrab-ltask-git-'));
+  const askpassPath = path.join(askpassDir, 'askpass.sh');
+  fs.writeFileSync(
+    askpassPath,
+    '#!/bin/sh\nprintf "%s" "$NANOCRAB_GIT_TOKEN"\n',
+    { mode: 0o700 },
+  );
+  try {
+    await execFileAsync(
+      'git',
+      [
+        'clone',
+        '--depth',
+        '50',
+        `https://github.com/${task.repo}.git`,
+        workspace,
+      ],
+      {
+        timeout: 120_000,
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: '0',
+          ...(githubToken
+            ? {
+                GIT_ASKPASS: askpassPath,
+                NANOCRAB_GIT_TOKEN: githubToken,
+              }
+            : {}),
+        },
+      },
+    );
+  } finally {
+    fs.rmSync(askpassDir, { recursive: true, force: true });
+  }
 
   // Write a minimal run script
   const nanocrabDir = path.join(workspace, '.nanocrab');
@@ -172,11 +213,6 @@ function buildTaskContainerEnv(
     GIT_AUTHOR_NAME: 'NanoCrab Bot',
     GIT_AUTHOR_EMAIL: 'nanocrab@localhost',
   };
-
-  const githubToken = getGitHubToken();
-  if (githubToken) {
-    env.GITHUB_TOKEN = githubToken;
-  }
 
   // Route provider credentials through the credential proxy
   if (provider === 'claude') {
