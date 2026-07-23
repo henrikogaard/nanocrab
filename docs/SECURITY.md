@@ -386,6 +386,10 @@ This section records planned hardening adapted from AgentPaaS-style governed
 runtimes. Until the linked implementation issues land, do not claim
 default-deny container egress or tamper-evident audit integrity.
 
+Tracked as epic `#218` with children `#219` (topology), `#220` (egress gateway),
+`#221` (hardening + egress audit events), and `#222` (tamper-evident export +
+red-team proof matrix).
+
 ### Planned Controls
 
 | Control | Intended invariant | Current state |
