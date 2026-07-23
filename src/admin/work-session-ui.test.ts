@@ -810,7 +810,7 @@ describe('NanoWorkSession shared views', () => {
 
   it.each([
     ['timeline', 'No timeline recorded'],
-    ['tools', 'No tool calls recorded'],
+    ['tools', 'No tool calls in this session'],
     ['files', 'No files recorded'],
     ['proposals', 'No proposals recorded'],
     ['approvals', 'No approvals recorded'],

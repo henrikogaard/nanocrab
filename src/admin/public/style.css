@@ -38670,3 +38670,60 @@ select {
     overscroll-behavior: contain;
   }
 }
+
+/* Tool Call Timeline */
+.session-tool-timeline {
+  padding: 12px;
+}
+.session-tool-timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+.session-tool-timeline-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.session-tool-timeline-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--card-bg, #1a1a1a);
+}
+.session-tool-timeline-icon {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  border-radius: 50%;
+}
+.session-tool-timeline-icon.done {
+  color: var(--success-color, #4caf50);
+}
+.session-tool-timeline-icon.running {
+  color: var(--warning-color, #ff9800);
+}
+.session-tool-timeline-label {
+  flex: 1;
+  font-size: 13px;
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-tool-timeline-duration {
+  font-size: 11px;
+  color: var(--text-muted, #888);
+}
+.session-tool-timeline-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted, #888);
+}

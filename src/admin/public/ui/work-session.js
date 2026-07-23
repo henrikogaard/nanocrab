@@ -268,6 +268,23 @@
     return toolCalls;
   }
 
+function renderToolCallTimeline(toolCalls) {
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
+    return '<div class="session-tool-timeline-empty">No tool calls in this session</div>';
+  }
+  var timeline = '<div class="session-tool-timeline"><div class="session-tool-timeline-header"><span>Tool Call Timeline</span><span class="badge badge-info">' + toolCalls.length + ' calls</span></div>';
+  timeline += '<div class="session-tool-timeline-bar">';
+  for (var i = 0; i < toolCalls.length; i++) {
+    var tc = toolCalls[i];
+    var name = isRecord(tc) && tc.name ? esc(tc.name) : 'unknown';
+    var status = isRecord(tc) && tc.output ? 'done' : 'running';
+    var duration = isRecord(tc) && tc.duration ? tc.duration + 's' : '';
+    timeline += '<div class="session-tool-timeline-item" title="' + name + ' (' + duration + ')"><div class="session-tool-timeline-icon ' + status + '">' + (status === 'done' ? '\u2713' : '\u25CF') + '</div><div class="session-tool-timeline-label">' + name + '</div><div class="session-tool-timeline-duration">' + duration + '</div></div>';
+  }
+  timeline += '</div></div>';
+  return timeline;
+}
+
   function capabilitiesForStatus(status) {
     switch (status) {
       case 'running':
@@ -770,11 +787,7 @@
     }
     if (activeTab === 'timeline') return renderTimeline(session);
     if (activeTab === 'tools') {
-      return recordList(
-        session.toolCalls,
-        'No tool calls recorded',
-        'work-session-tools',
-      );
+      return renderToolCallTimeline(session.toolCalls);
     }
     if (activeTab === 'files') return fileList(session.changedFiles);
     if (activeTab === 'proposals') {
