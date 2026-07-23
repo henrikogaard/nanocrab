@@ -248,7 +248,8 @@ function syncProfileBindings(agentProfileId: string): void {
       channelBindings[key].push(alias);
     }
     // Also register under 'channel_mention' so the generic scanner picks it up
-    if (!channelBindings['channel_mention']) channelBindings['channel_mention'] = [];
+    if (!channelBindings['channel_mention'])
+      channelBindings['channel_mention'] = [];
     if (!channelBindings['channel_mention'].includes(alias)) {
       channelBindings['channel_mention'].push(alias);
     }
@@ -261,6 +262,9 @@ function syncProfileBindings(agentProfileId: string): void {
       'Synced channel bindings to agent profile',
     );
   } catch (err) {
-    logger.error({ err, agentProfileId }, 'Failed to sync channel bindings to profile');
+    logger.error(
+      { err, agentProfileId },
+      'Failed to sync channel bindings to profile',
+    );
   }
 }
