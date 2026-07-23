@@ -89,6 +89,7 @@ import githubRoutes from './routes/github.js';
 import githubViewsRoutes from './routes/github-views.js';
 import learningProposalsRoutes from './routes/learning-proposals.js';
 import sourceCollectionsRoutes from './routes/source-collections.js';
+import workspacesRoutes from './routes/workspaces.js';
 
 // Plugin system
 import {
@@ -268,6 +269,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
     requireRole('admin'),
     githubViewsRoutes,
   );
+  app.use('/api/workspaces', requireAuth, workspacesRoutes);
   app.use('/api/assistant-profile', requireAuth, assistantProfileRoutes);
   app.use(
     '/api/control-plane',
