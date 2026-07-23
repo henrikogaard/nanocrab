@@ -54,9 +54,15 @@ router.get('/history', (req: Request, res: Response) => {
 
 router.get('/routines', (req: Request, res: Response) => {
   const filters = {
-    ...(queryString(req.query.taskId) && { taskId: queryString(req.query.taskId) }),
-    ...(queryString(req.query.groupFolder) && { groupFolder: queryString(req.query.groupFolder) }),
-    ...(queryString(req.query.channel) && { channel: queryString(req.query.channel) }),
+    ...(queryString(req.query.taskId) && {
+      taskId: queryString(req.query.taskId),
+    }),
+    ...(queryString(req.query.groupFolder) && {
+      groupFolder: queryString(req.query.groupFolder),
+    }),
+    ...(queryString(req.query.channel) && {
+      channel: queryString(req.query.channel),
+    }),
   };
   res.json(getGroupedRoutineAnalytics(filters as any));
 });

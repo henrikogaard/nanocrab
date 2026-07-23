@@ -776,9 +776,13 @@ export function aggregateGroupedRoutineAnalytics(
 
   for (const [routine, routineEntries] of byRoutine) {
     const total = routineEntries.length;
-    const successCount = routineEntries.filter((e) => e.status === 'completed')
-      .length;
-    const totalLatency = routineEntries.reduce((sum, e) => sum + e.latencyMs, 0);
+    const successCount = routineEntries.filter(
+      (e) => e.status === 'completed',
+    ).length;
+    const totalLatency = routineEntries.reduce(
+      (sum, e) => sum + e.latencyMs,
+      0,
+    );
     const deliveryModes: Record<string, number> = {};
     const channels = new Set<string>();
 
