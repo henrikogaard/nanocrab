@@ -8,6 +8,7 @@ import {
   type CreateLightweightTaskInput,
 } from '../../lightweight-tasks.js';
 import { loadCodingRepos } from '../../coding-jobs.js';
+import { runLightweightTaskQueue } from '../../lightweight-task-runner.js';
 import { auditLog } from '../security.js';
 import { logger } from '../../logger.js';
 
@@ -53,6 +54,10 @@ router.post('/', (req: Request, res: Response) => {
     });
     auditLog(req, 'lightweight_task_created', task.id);
     res.json({ ok: true, task });
+    // Kick off the queue asynchronously — don't block the HTTP response
+    runLightweightTaskQueue().catch((err) => {
+      logger.error({ err }, 'Lightweight task queue run failed');
+    });
   } catch (err) {
     logger.error({ err, repo: body.repo }, 'Failed to create lightweight task');
     res.status(400).json({
