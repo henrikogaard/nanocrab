@@ -458,7 +458,7 @@ export async function probeCursorRuntime(
   try {
     const { stdout } = await deps.execFile('agent', ['--version'], {
       env: {
-        PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
+        PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/henrik/.local/bin',
         TERM: 'dumb',
         NO_COLOR: '1',
       },

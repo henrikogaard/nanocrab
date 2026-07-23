@@ -112,6 +112,7 @@ const AGENT_CLIS: AgentCliId[] = [
   'devin',
   'pi',
   'mistral',
+  'cursor',
 ];
 
 function buildBoardCards() {
