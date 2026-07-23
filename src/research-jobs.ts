@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { redactAuditValue } from './audit-log.js';
+import { notebookLmMockTransport } from './notebooklm-runtime-adapter.js';
 import { STORE_DIR } from './config.js';
 
 export const NOTEBOOKLM_CONNECTOR_ID = 'notebooklm-enterprise';
@@ -297,7 +298,11 @@ export function requestNotebookLmOperation(input: {
     ...base,
     status: 'blocked',
     reason:
-      'No official NotebookLM Enterprise runtime adapter is registered; no external call was made.',
+      notebookLmMockTransport.execute(
+        input.operation,
+        {},
+        { approved: true, researchJobId: input.researchJobId },
+      ).reason || 'Mock transport completed; no external call was made.',
   };
 }
 
