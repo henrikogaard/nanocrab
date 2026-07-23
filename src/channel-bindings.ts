@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 
 import { STORE_DIR } from './config.js';
+import { getAgentProfile } from './agent-profiles.js';
 import { logger } from './logger.js';
 
 export interface ChannelBinding {
@@ -79,8 +80,14 @@ export function createChannelBinding(
   if (!input.agentProfileId) {
     throw new Error('agentProfileId is required');
   }
+  if (!getAgentProfile(input.agentProfileId)) {
+    throw new Error(`Agent profile ${input.agentProfileId} does not exist`);
+  }
   if (!input.channelId) {
     throw new Error('channelId is required');
+  }
+  if (input.channelId.length > 256) {
+    throw new Error('channelId exceeds maximum length');
   }
 
   const bindings = readBindings();
