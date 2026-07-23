@@ -38,8 +38,6 @@ export interface DevinReadinessReport {
   executable: string;
   checks: DevinReadinessCheck[];
   operatorChecklist: OperatorChecklistItem[];
-  smokeTestApproved: boolean;
-  rollbackEvidence: string | null;
 }
 
 export interface OperatorChecklistItem {
@@ -48,6 +46,7 @@ export interface OperatorChecklistItem {
   required: boolean;
   verified: boolean;
   detail: string;
+  remediation?: string;
 }
 
 export function generateDevinReadinessReport(): DevinReadinessReport {
@@ -55,7 +54,6 @@ export function generateDevinReadinessReport(): DevinReadinessReport {
   const checklist: OperatorChecklistItem[] = [];
   const now = new Date().toISOString();
 
-  // Check 1: Executable presence
   checks.push({
     id: 'executable',
     label: 'Devin executable accessible',
@@ -65,7 +63,6 @@ export function generateDevinReadinessReport(): DevinReadinessReport {
     action: 'Verify `which devin` resolves to an absolute path',
   });
 
-  // Check 2: Sandbox auth handoff
   const sandboxAuthAvailable = isDevinSandboxAuthHandoffAvailable();
   checks.push({
     id: 'sandbox-auth-handoff',
@@ -77,10 +74,9 @@ export function generateDevinReadinessReport(): DevinReadinessReport {
     actionable: !sandboxAuthAvailable,
     action: sandboxAuthAvailable
       ? undefined
-      : 'Configure Devin credential mount in agent container',
+      : 'Configure host DEVIN_CREDENTIAL_PATH and verify sandbox auth handoff',
   });
 
-  // Check 3: Credential configuration
   checks.push({
     id: 'credential-proxy',
     label: 'Credential proxy route configured',
@@ -88,7 +84,6 @@ export function generateDevinReadinessReport(): DevinReadinessReport {
     detail: 'Verified by sandbox auth handoff check',
   });
 
-  // Check 4: Workspace isolation
   checks.push({
     id: 'workspace-isolation',
     label: 'Workspace isolation',
@@ -96,7 +91,6 @@ export function generateDevinReadinessReport(): DevinReadinessReport {
     detail: 'Per-job isolated workspaces are enforced by coding-jobs.ts',
   });
 
-  // Check 5: Sandbox executable
   checks.push({
     id: 'sandbox-executable',
     label: 'Sandbox executable available',
@@ -104,7 +98,6 @@ export function generateDevinReadinessReport(): DevinReadinessReport {
     detail: 'Verified at container build time (bwrap/sandbox-exec)',
   });
 
-  // Build operator checklist
   checklist.push(
     {
       id: 'runtime-roots',
@@ -119,8 +112,10 @@ export function generateDevinReadinessReport(): DevinReadinessReport {
       label: 'Verify credential path and permissions',
       required: true,
       verified: false,
-      detail:
-        'Confirm credential file is readable and mounted into the container',
+      detail: 'Confirm credential file is readable and accessible via credential proxy',
+      remediation:
+        'Configure host DEVIN_CREDENTIAL_PATH; credentials are injected at ' +
+        'runtime, never mounted into containers',
     },
     {
       id: 'auth-status',
@@ -149,11 +144,10 @@ export function generateDevinReadinessReport(): DevinReadinessReport {
       required: true,
       verified: false,
       detail:
-        'Set explicit owner approval, scope, timeout, cancellation, and rollback criteria',
+        'Set explicit owner approval, scope, timeout, cancellation, and rollback criteria before enabling production Devin calls',
     },
   );
 
-  // Determine overall state
   let state: DevinReadinessState = 'blocked';
   const failedChecks = checks.filter((c) => c.status === 'fail');
 
@@ -172,8 +166,6 @@ export function generateDevinReadinessReport(): DevinReadinessReport {
     executable: 'devin',
     checks,
     operatorChecklist: checklist,
-    smokeTestApproved: false,
-    rollbackEvidence: null,
   };
 }
 
@@ -184,20 +176,38 @@ export async function getDevinReadiness(): Promise<DevinReadinessReport> {
     health = await probeCodingRunnerReadiness('devin');
     report.version = health.version;
     report.executable = health.executable;
+
     if (health.status === 'healthy') {
       report.state = 'healthy';
-      // Update checks based on health
-      report.checks = report.checks.map((check) => {
-        if (check.id === 'executable') {
-          return {
-            ...check,
-            status: 'pass' as const,
-            detail: `Executable: ${health.executable}`,
-          };
-        }
-        return check;
-      });
+    } else if (health.status === 'unauthenticated') {
+      report.state = 'blocked';
+    } else {
+      report.state = report.state === 'blocked' ? 'blocked' : 'unavailable';
     }
+
+    report.checks = report.checks.map((check) => {
+      if (check.id === 'executable') {
+        return {
+          ...check,
+          status:
+            health.status === 'healthy'
+              ? 'pass'
+              : 'fail',
+          detail:
+            health.status === 'healthy'
+              ? `Executable: ${health.executable}`
+              : `Devin probe returned ${health.status}: ${health.detail || 'no detail'}`,
+          actionable: health.status !== 'healthy',
+          action:
+            health.status === 'healthy'
+              ? undefined
+              : health.status === 'missing'
+                ? 'Install Devin or verify PATH includes devin binary'
+                : 'Check Devin installation and retry probe',
+        };
+      }
+      return check;
+    });
   } catch {
     // Runtime probe not available; report stays as configured/blocked/unavailable
   }
