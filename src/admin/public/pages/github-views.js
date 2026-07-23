@@ -197,6 +197,7 @@ window.renderGitHubViews = async function (el) {
   };
 
   window._ghvStartCodingJob = async function (issueNumber) {
+    if (!confirm(`Start a coding job for #${issueNumber} on ${selectedRepo}? This uses the default coding runtime.`)) return;
     try {
       const r = await api('/agents/coding/jobs', {
         method: 'POST',
@@ -204,6 +205,7 @@ window.renderGitHubViews = async function (el) {
           repo: selectedRepo,
           issueNumber,
           createPr: true,
+          requestedBy: 'github-views-dashboard',
         }),
       });
       if (r.ok !== false) {

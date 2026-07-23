@@ -361,13 +361,18 @@ router.get('/pulls/:number', async (req: Request, res: Response) => {
       review_comments?: number;
     };
 
-    // Fetch CI check status
-    let ciStatus = 'unknown';
-    try {
-      const checks = (await githubApi(
+    // Fetch CI, reviews, and changed files in parallel
+    const [checksResult, reviewsResult, filesResult] = await Promise.allSettled([
+      githubApi(
         `/repos/${repo}/commits/${raw.head?.sha}/check-runs?per_page=50`,
-      )) as {
-        total_count?: number;
+      ),
+      githubApi(`/repos/${repo}/pulls/${prNumber}/reviews?per_page=20`),
+      githubApi(`/repos/${repo}/pulls/${prNumber}/files?per_page=100`),
+    ]);
+
+    let ciStatus = 'unknown';
+    if (checksResult.status === 'fulfilled') {
+      const checks = checksResult.value as {
         check_runs?: Array<{ status: string; conclusion: string | null }>;
       };
       const runs = checks.check_runs || [];
@@ -384,16 +389,11 @@ router.get('/pulls/:number', async (req: Request, res: Response) => {
       } else {
         ciStatus = 'failure';
       }
-    } catch {
-      // Non-critical
     }
 
-    // Fetch reviews
     let reviewStatus = 'none';
-    try {
-      const reviews = (await githubApi(
-        `/repos/${repo}/pulls/${prNumber}/reviews?per_page=20`,
-      )) as Array<{ state: string }>;
+    if (reviewsResult.status === 'fulfilled') {
+      const reviews = reviewsResult.value as Array<{ state: string }>;
       if (reviews.some((r) => r.state === 'APPROVED')) {
         reviewStatus = 'approved';
       } else if (reviews.some((r) => r.state === 'CHANGES_REQUESTED')) {
@@ -401,28 +401,21 @@ router.get('/pulls/:number', async (req: Request, res: Response) => {
       } else if (reviews.some((r) => r.state === 'COMMENTED')) {
         reviewStatus = 'commented';
       }
-    } catch {
-      // Non-critical
     }
 
-    // Fetch changed files
     let changedFileList: Array<{
       filename: string;
       status: string;
       additions: number;
       deletions: number;
     }> = [];
-    try {
-      changedFileList = (await githubApi(
-        `/repos/${repo}/pulls/${prNumber}/files?per_page=100`,
-      )) as Array<{
+    if (filesResult.status === 'fulfilled') {
+      changedFileList = filesResult.value as Array<{
         filename: string;
         status: string;
         additions: number;
         deletions: number;
       }>;
-    } catch {
-      // Non-critical
     }
 
     // Find linked coding jobs
