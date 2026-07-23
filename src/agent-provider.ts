@@ -276,6 +276,7 @@ export const CODING_PROVIDER_IDS = new Set<AgentProvider>([
   'pi',
   'mistral',
   'openrouter',
+  'airouter',
   'ollama',
   'openai-compatible',
 ]);

@@ -116,6 +116,7 @@ describe('agent runtime registry', () => {
     ['cursor', 'cursor'],
     ['opencode', 'opencode'],
     ['openrouter', 'opencode'],
+    ['airouter', 'opencode'],
     ['ollama', 'opencode'],
     ['openai-compatible', 'opencode'],
   ] satisfies Array<[AgentProvider, AgentCliId]>)(
@@ -130,6 +131,7 @@ describe('agent runtime registry', () => {
     ['codex', 'codex'],
     ['opencode', 'opencode'],
     ['opencode', 'openrouter'],
+    ['opencode', 'airouter'],
     ['opencode', 'ollama'],
     ['opencode', 'openai-compatible'],
     ['pi', 'pi'],

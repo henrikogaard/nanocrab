@@ -194,6 +194,7 @@ const COMPATIBLE_CODING_PROVIDERS: Readonly<
   opencode: new Set<AgentProvider>([
     'opencode',
     'openrouter',
+    'airouter',
     'ollama',
     'openai-compatible',
   ]),

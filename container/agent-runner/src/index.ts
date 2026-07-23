@@ -1335,6 +1335,22 @@ function buildOpenCodeConfig(
       },
     };
   }
+  if (process.env.OPENAI_COMPATIBLE_BASE_URL) {
+    const customModel = model.replace(/^openai-compatible\//, '');
+    provider['openai-compatible'] = {
+      npm: '@ai-sdk/openai-compatible',
+      name: 'Custom OpenAI-Compatible',
+      options: {
+        apiKey: process.env.OPENAI_COMPATIBLE_API_KEY
+          ? '{env:OPENAI_COMPATIBLE_API_KEY}'
+          : undefined,
+        baseURL: process.env.OPENAI_COMPATIBLE_BASE_URL,
+      },
+      models: {
+        [customModel]: { name: customModel },
+      },
+    };
+  }
   if (process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST) {
     const baseURL =
       process.env.OLLAMA_BASE_URL ||
@@ -1382,18 +1398,22 @@ async function runQueryOpenCode(
   containerInput: ContainerInput,
   mcpServerPath: string,
 ): Promise<{ output: string }> {
-  const model =
+  const provider =
+    process.env.AGENT_PROVIDER || containerInput.provider || 'opencode';
+  const selectedModel =
     containerInput.model ||
     process.env.DEFAULT_MODEL ||
     'opencode/grok-code-fast-1';
+  const model = openCodeModelForProvider(provider, selectedModel);
   const systemPrompt = buildSharedSystemContext(
     undefined,
     containerInput.prompt,
     containerInput.restrictions,
   );
+  const runtimeContext = `Runtime metadata: you are running ${provider}/${selectedModel}. This value is authoritative. If asked which model or provider is active, answer from this metadata directly; do not inspect process state, environment variables, or files.`;
   const effectivePrompt = systemPrompt.trim()
-    ? `${systemPrompt.trim()}\n\nUser request:\n${prompt}`
-    : prompt;
+    ? `${systemPrompt.trim()}\n\n${runtimeContext}\n\nUser request:\n${prompt}`
+    : `${runtimeContext}\n\nUser request:\n${prompt}`;
   const configContent = buildOpenCodeConfig(
     model,
     containerInput,
@@ -1401,7 +1421,7 @@ async function runQueryOpenCode(
   );
 
   return new Promise((resolve) => {
-    const args = ['run', '--model', model, effectivePrompt];
+    const args = ['run', '--format', 'json', '--model', model, effectivePrompt];
     log(`OpenCode args: ${args.slice(0, 3).join(' ')}...`);
     const proc = execFile(
       'opencode',
@@ -1417,14 +1437,21 @@ async function runQueryOpenCode(
         },
       },
       (error, stdout, stderr) => {
-        const output = stdout?.trim() || stderr?.trim() || '';
-        if (error && !output) {
+        const output = extractOpenCodeText(stdout || '');
+        if (error) {
           log(`OpenCode error: ${error.message}`);
           writeOutput({
             status: 'error',
             result: null,
-            error: `OpenCode error: ${error.message}`,
+            error: output || `OpenCode error: ${error.message}`,
           });
+          resolve({ output: '' });
+          return;
+        }
+        if (!output) {
+          const errorMessage = 'OpenCode completed without assistant text';
+          log(errorMessage);
+          writeOutput({ status: 'error', result: null, error: errorMessage });
           resolve({ output: '' });
           return;
         }
@@ -1435,6 +1462,35 @@ async function runQueryOpenCode(
     );
     proc.stdin?.end();
   });
+}
+
+export function openCodeModelForProvider(provider: string, model: string): string {
+  if (
+    isOpenAiCompatibleAgentProvider(provider) &&
+    !model.startsWith(`${provider}/`)
+  ) {
+    return `${provider}/${model}`;
+  }
+  return model;
+}
+
+export function extractOpenCodeText(output: string): string {
+  return output
+    .split('\n')
+    .flatMap((line) => {
+      try {
+        const event = JSON.parse(line) as {
+          type?: string;
+          part?: { type?: string; text?: unknown };
+        };
+        if (event.type !== 'text' || event.part?.type !== 'text') return [];
+        return typeof event.part.text === 'string' ? [event.part.text] : [];
+      } catch {
+        return [];
+      }
+    })
+    .join('')
+    .trim();
 }
 
 async function main(): Promise<void> {
@@ -1525,19 +1581,8 @@ async function main(): Promise<void> {
     return;
   }
   if (isOpenAiCompatibleAgentProvider(provider)) {
-    log(`Using OpenAI-compatible provider: ${provider}`);
-    try {
-      await runQueryOpenAiCompatible(prompt, containerInput);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      log(`OpenAI-compatible provider error: ${errorMessage}`);
-      writeOutput({
-        status: 'error',
-        result: null,
-        error: errorMessage,
-      });
-      process.exit(1);
-    }
+    log(`Using ${provider} through OpenCode for tool support`);
+    await runQueryOpenCode(prompt, containerInput, mcpServerPath);
     return;
   }
 

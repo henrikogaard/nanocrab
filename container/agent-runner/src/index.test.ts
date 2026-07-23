@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildAllowedTools,
   buildMcpServers,
+  extractOpenCodeText,
   isOpenAiCompatibleAgentProvider,
+  openCodeModelForProvider,
   openAiCompatibleBaseUrl,
 } from './index.js';
 
@@ -158,5 +160,47 @@ describe('agent-runner OpenAI-compatible dispatch', () => {
     expect(openAiCompatibleBaseUrl('openai-compatible')).toBe(
       'https://custom.example/v1',
     );
+  });
+
+  it('uses OpenCode provider-qualified model IDs for compatible tool runs', () => {
+    expect(
+      openCodeModelForProvider('airouter', 'DeepSeek-V4-Flash'),
+    ).toBe('airouter/DeepSeek-V4-Flash');
+    expect(
+      openCodeModelForProvider('airouter', 'airouter/Qwen3.6'),
+    ).toBe('airouter/Qwen3.6');
+    expect(openCodeModelForProvider('opencode', 'opencode/grok-code-fast-1')).toBe(
+      'opencode/grok-code-fast-1',
+    );
+    expect(openCodeModelForProvider('google', 'gemini-2.5-flash')).toBe(
+      'google/gemini-2.5-flash',
+    );
+    expect(openCodeModelForProvider('ollama', 'codestral')).toBe(
+      'ollama/codestral',
+    );
+    expect(openCodeModelForProvider('openrouter', 'openai/gpt-5.4')).toBe(
+      'openrouter/openai/gpt-5.4',
+    );
+    expect(openCodeModelForProvider('openai-compatible', 'model-id')).toBe(
+      'openai-compatible/model-id',
+    );
+  });
+
+  it('extracts assistant text without forwarding OpenCode tool events', () => {
+    expect(
+      extractOpenCodeText(
+        [
+          JSON.stringify({ type: 'step_start', part: {} }),
+          JSON.stringify({
+            type: 'tool',
+            part: { type: 'tool', name: 'bash', input: { command: 'pwd' } },
+          }),
+          JSON.stringify({
+            type: 'text',
+            part: { type: 'text', text: 'AIRouter-tool-ok' },
+          }),
+        ].join('\n'),
+      ),
+    ).toBe('AIRouter-tool-ok');
   });
 });

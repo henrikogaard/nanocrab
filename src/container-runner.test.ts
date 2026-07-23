@@ -472,6 +472,47 @@ describe('container-runner custom OpenAI-compatible provider wiring', () => {
     expect(envFileContent).not.toContain('sk-real-custom');
     expect(envFileContent).not.toContain('https://custom.example/v1');
   });
+
+  it('supplies AIRouter proxy credentials to OpenCode tool runs', async () => {
+    mockedReadEnvFile.mockImplementation((keys: string[]) => {
+      const values: Record<string, string> = {
+        AIROUTER_API_KEY: 'sk-real-airouter',
+        AIROUTER_BASE_URL: 'https://api.airouter.ch/v1',
+      };
+      return Object.fromEntries(
+        keys.filter((key) => values[key]).map((key) => [key, values[key]]),
+      );
+    });
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      {
+        ...testInput,
+        provider: 'airouter',
+        model: 'DeepSeek-V4-Flash',
+      },
+      () => {},
+    );
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const envFileContent = vi
+      .mocked(fs.writeFileSync)
+      .mock.calls.filter((call) => call[0] === '/tmp/nanocrab-env-test/env')
+      .at(-1)?.[1]
+      ?.toString();
+    expect(envFileContent).toContain('AIROUTER_API_KEY=placeholder');
+    expect(envFileContent).toContain('AGENT_PROVIDER_API_KEY=placeholder');
+    expect(envFileContent).toContain('XDG_STATE_HOME=/tmp/nanocrab-state');
+    expect(envFileContent).toContain(
+      'AIROUTER_BASE_URL=http://host.docker.internal:3001/__nanocrab/providers/airouter',
+    );
+    expect(envFileContent).not.toContain('sk-real-airouter');
+  });
 });
 
 describe('container-runner MCP env forwarding', () => {
