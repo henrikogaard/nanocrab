@@ -2433,9 +2433,7 @@ export function listAgentProfileRows(): AgentProfile[] {
 }
 
 export function deleteAgentProfileRow(id: string): boolean {
-  const result = db
-    .prepare('DELETE FROM agent_profiles WHERE id = ?')
-    .run(id);
+  const result = db.prepare('DELETE FROM agent_profiles WHERE id = ?').run(id);
   return result.changes > 0;
 }
 
