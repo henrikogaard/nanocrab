@@ -146,7 +146,7 @@ describe('Sessions handoff cockpit UI', () => {
     expect(source).toContain('[data-work-session-action]');
     expect(source).toContain('[data-session-approval-action]');
     expect(source).toContain(
-      "/approvals/${encodeURIComponent(approvalId)}/${decision}",
+      '/approvals/${encodeURIComponent(approvalId)}/${decision}',
     );
     expect(source).toContain("decision === 'approve' ? 'Approved' : 'Denied'");
     expect(source).toContain("['cancel', 'retry'].includes(action)");

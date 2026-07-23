@@ -822,7 +822,9 @@ describe('NanoWorkSession shared views', () => {
         projections: {
           conversation: {
             available: true,
-            items: [{ role: 'assistant', content: 'Investigating the failure' }],
+            items: [
+              { role: 'assistant', content: 'Investigating the failure' },
+            ],
           },
           plan: {
             available: true,
