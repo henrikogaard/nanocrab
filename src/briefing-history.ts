@@ -795,9 +795,13 @@ export function aggregateGroupedRoutineAnalytics(
       avgLatencyMs: total > 0 ? totalLatency / total : 0,
       deliveryModeBreakdown: deliveryModes,
       scheduleAdherence: (() => {
-        const scheduled = routineEntries.filter((e) => e.source === 'scheduled');
+        const scheduled = routineEntries.filter(
+          (e) => e.source === 'scheduled',
+        );
         if (scheduled.length === 0) return 1;
-        const scheduledCompleted = scheduled.filter((e) => e.status === 'completed').length;
+        const scheduledCompleted = scheduled.filter(
+          (e) => e.status === 'completed',
+        ).length;
         return scheduledCompleted / scheduled.length;
       })(),
       channels: Array.from(channels),
