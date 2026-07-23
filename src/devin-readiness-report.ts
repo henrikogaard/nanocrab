@@ -112,7 +112,8 @@ export function generateDevinReadinessReport(): DevinReadinessReport {
       label: 'Verify credential path and permissions',
       required: true,
       verified: false,
-      detail: 'Confirm credential file is readable and accessible via credential proxy',
+      detail:
+        'Confirm credential file is readable and accessible via credential proxy',
       remediation:
         'Configure host DEVIN_CREDENTIAL_PATH; credentials are injected at ' +
         'runtime, never mounted into containers',
@@ -189,10 +190,7 @@ export async function getDevinReadiness(): Promise<DevinReadinessReport> {
       if (check.id === 'executable') {
         return {
           ...check,
-          status:
-            health.status === 'healthy'
-              ? 'pass'
-              : 'fail',
+          status: health.status === 'healthy' ? 'pass' : 'fail',
           detail:
             health.status === 'healthy'
               ? `Executable: ${health.executable}`
