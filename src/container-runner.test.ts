@@ -507,6 +507,7 @@ describe('container-runner custom OpenAI-compatible provider wiring', () => {
       ?.toString();
     expect(envFileContent).toContain('AIROUTER_API_KEY=placeholder');
     expect(envFileContent).toContain('AGENT_PROVIDER_API_KEY=placeholder');
+    expect(envFileContent).toContain('XDG_STATE_HOME=/tmp/nanocrab-state');
     expect(envFileContent).toContain(
       'AIROUTER_BASE_URL=http://host.docker.internal:3001/__nanocrab/providers/airouter',
     );

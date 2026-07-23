@@ -638,6 +638,9 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   setEnv('TZ', TIMEZONE);
+  // Nested OpenCode state mounts cause Docker to create /home/node/.local as
+  // root. Keep ephemeral XDG state in /tmp so the container user can write it.
+  setEnv('XDG_STATE_HOME', '/tmp/nanocrab-state');
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   setEnv(
