@@ -274,7 +274,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
   );
   app.use('/api/workspaces', requireAuth, requireRole('admin'), workspacesRoutes);
   app.use('/api/channel-bindings', requireAuth, requireRole('admin'), channelBindingsRoutes);
-  app.use('/api/lightweight-tasks', requireAuth, lightweightTasksRoutes);
+  app.use('/api/lightweight-tasks', requireAuth, requireRole('admin'), lightweightTasksRoutes);
   app.use('/api/assistant-profile', requireAuth, assistantProfileRoutes);
   app.use(
     '/api/control-plane',

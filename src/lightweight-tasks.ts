@@ -161,12 +161,40 @@ export function cancelLightweightTask(id: string): LightweightTask {
   return task;
 }
 
-export function appendTaskOutput(id: string, chunk: string): void {
-  const tasks = readTasks();
-  const task = tasks.find((t) => t.id === id);
-  if (!task) return;
+// Batched output writes to avoid rewriting the full JSON per chunk
+const pendingOutput = new Map<string, string>();
+let outputFlushTimer: ReturnType<typeof setTimeout> | null = null;
+const OUTPUT_FLUSH_INTERVAL_MS = 2000;
 
-  // Cap output at 100KB
-  task.output = (task.output + chunk).slice(-100_000);
+function flushPendingOutput(): void {
+  outputFlushTimer = null;
+  if (pendingOutput.size === 0) return;
+
+  const tasks = readTasks();
+  for (const [id, chunk] of pendingOutput) {
+    const task = tasks.find((t) => t.id === id);
+    if (task) {
+      task.output = (task.output + chunk).slice(-100_000);
+    }
+  }
+  pendingOutput.clear();
   writeTasks(tasks);
+}
+
+export function appendTaskOutput(id: string, chunk: string): void {
+  const existing = pendingOutput.get(id) || '';
+  pendingOutput.set(id, existing + chunk);
+
+  if (!outputFlushTimer) {
+    outputFlushTimer = setTimeout(flushPendingOutput, OUTPUT_FLUSH_INTERVAL_MS);
+    outputFlushTimer.unref();
+  }
+}
+
+export function flushTaskOutput(): void {
+  if (outputFlushTimer) {
+    clearTimeout(outputFlushTimer);
+    outputFlushTimer = null;
+  }
+  flushPendingOutput();
 }
