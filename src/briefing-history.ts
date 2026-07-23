@@ -99,8 +99,6 @@ export interface BriefingAnalyticsResult {
   byChannel: Record<string, number>;
   byOutcome: Record<BriefingOutcome, number>;
   byApprovalState: Record<BriefingHistoryEntry['approvalState'], number>;
-  byGroup: Record<string, BriefingGroupAnalytics>;
-  schedulePreview: BriefingSchedulePreview[];
   buckets: BriefingAnalyticsBucket[];
 }
 
@@ -567,8 +565,6 @@ export function aggregateBriefingAnalytics(
     byChannel,
     byOutcome,
     byApprovalState,
-    byGroup: {} as Record<string, BriefingGroupAnalytics>,
-    schedulePreview: [] as BriefingSchedulePreview[],
     buckets: Array.from(buckets.values()).sort((a, b) =>
       b.lastAt.localeCompare(a.lastAt),
     ),
@@ -798,7 +794,12 @@ export function aggregateGroupedRoutineAnalytics(
       successRate: total > 0 ? successCount / total : 0,
       avgLatencyMs: total > 0 ? totalLatency / total : 0,
       deliveryModeBreakdown: deliveryModes,
-      scheduleAdherence: total > 0 ? successCount / total : 0,
+      scheduleAdherence: (() => {
+        const scheduled = routineEntries.filter((e) => e.source === 'scheduled');
+        if (scheduled.length === 0) return 1;
+        const scheduledCompleted = scheduled.filter((e) => e.status === 'completed').length;
+        return scheduledCompleted / scheduled.length;
+      })(),
       channels: Array.from(channels),
     });
   }
