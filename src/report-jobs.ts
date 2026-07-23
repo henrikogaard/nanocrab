@@ -213,11 +213,8 @@ async function composeMarkdown(job: ReportJob): Promise<void> {
     : '';
   const sourceLinkPreviews = collected.citations.length
     ? collected.citations
-        .filter(c => c.source && c.source.startsWith('http'))
-        .map(
-          (citation, index) =>
-            `- [${citation.label}](${citation.source})`,
-        )
+        .filter((c) => c.source && c.source.startsWith('http'))
+        .map((citation, index) => `- [${citation.label}](${citation.source})`)
         .join('\n')
     : '';
   const sourceCollection = job.sourceCollectionId
