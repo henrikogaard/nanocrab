@@ -276,7 +276,7 @@ function renderToolCallTimeline(toolCalls) {
   timeline += '<div class="session-tool-timeline-bar">';
   for (var i = 0; i < toolCalls.length; i++) {
     var tc = toolCalls[i];
-    var name = isRecord(tc) && tc.name ? escapeHtml(tc.name) : 'unknown';
+    var name = isRecord(tc) && tc.name ? esc(tc.name) : 'unknown';
     var status = isRecord(tc) && tc.output ? 'done' : 'running';
     var duration = isRecord(tc) && tc.duration ? tc.duration + 's' : '';
     timeline += '<div class="session-tool-timeline-item" title="' + name + ' (' + duration + ')"><div class="session-tool-timeline-icon ' + status + '">' + (status === 'done' ? '\u2713' : '\u25CF') + '</div><div class="session-tool-timeline-label">' + name + '</div><div class="session-tool-timeline-duration">' + duration + '</div></div>';
