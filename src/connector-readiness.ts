@@ -46,7 +46,7 @@ export interface ConnectorReadinessEntry {
   configured: boolean;
   credentialsConfigured: boolean;
   permissionsValid: boolean;
-  transportHealthy: boolean;
+  transportHealthy: boolean | null;
   lastCheckedAt: string | null;
   stale: boolean;
   detail: string;
@@ -88,47 +88,71 @@ function getEnvStatus(
   return { allSet: missing.length === 0, missing };
 }
 
+/**
+ * Get connector-specific read action matching source-collection behavior.
+ * Mirrors connectorReadAction from source-collection.ts.
+ */
+function connectorReadAction(connectorId: string): string {
+  return connectorId === 'github' ? 'issues.read' : 'source.read';
+}
+
 function checkPermission(
   connectorId: string,
-  action: string,
   groupFolder: string,
+  isMain: boolean,
 ): ConnectorPermissionDecision {
+  const action = connectorReadAction(connectorId);
   return authorizeConnectorAction({
     connectorId,
     action,
     groupFolder,
-    isMain: true,
+    isMain,
     context: { actor: 'readiness-check' },
   });
 }
 
+/**
+ * Load configured MCP servers with validation.
+ */
+function loadMcpServers(): Array<{ name: string; envVars?: string[] }> {
+  try {
+    const mcpConfigPath = path.join(STORE_DIR, 'mcp-servers.json');
+    if (!fs.existsSync(mcpConfigPath)) return [];
+    const servers = JSON.parse(fs.readFileSync(mcpConfigPath, 'utf-8'));
+    if (!Array.isArray(servers)) return [];
+    return servers as Array<{ name: string; envVars?: string[] }>;
+  } catch {
+    return [];
+  }
+}
+
 export function getConnectorReadiness(
   groupFolder: string = 'dashboard',
+  isMain: boolean = false,
 ): ConnectorReadinessResult {
   const permissions = loadConnectorPermissions();
   const now = new Date().toISOString();
 
-  // Load configured MCP servers
-  let mcpServers: Array<{ name: string; envVars?: string[] }> = [];
-  try {
-    const mcpConfigPath = path.join(STORE_DIR, 'mcp-servers.json');
-    if (fs.existsSync(mcpConfigPath)) {
-      mcpServers = JSON.parse(fs.readFileSync(mcpConfigPath, 'utf-8'));
-    }
-  } catch {
-    // intentional
-  }
+  const mcpServers = loadMcpServers();
 
   // Build combined connector list from catalog defaults + configured MCP servers
+  // Merge configured env vars for existing catalog entries
   const allConnectorDefs = new Map<
     string,
     (typeof DEFAULT_CONNECTOR_CATALOG)[0]
   >();
   for (const def of DEFAULT_CONNECTOR_CATALOG) {
-    allConnectorDefs.set(def.id, def);
+    allConnectorDefs.set(def.id, { ...def });
   }
   for (const server of mcpServers) {
-    if (!allConnectorDefs.has(server.name)) {
+    const existing = allConnectorDefs.get(server.name);
+    if (existing && server.envVars?.length) {
+      // Prefer configured env vars for catalog entries
+      allConnectorDefs.set(server.name, {
+        ...existing,
+        requiredEnvVars: [...new Set(server.envVars)],
+      });
+    } else if (!existing) {
       allConnectorDefs.set(server.name, {
         id: server.name,
         label: server.name,
@@ -149,14 +173,10 @@ export function getConnectorReadiness(
     const envStatus = getEnvStatus(connectorId, definition.requiredEnvVars);
     const permission = permissions.find((p) => p.connectorId === connectorId);
 
-    // Check read permission
+    // Check read permission using connector-specific action and caller's group scope
     let permissionsValid = true;
     try {
-      const readPermission = checkPermission(
-        connectorId,
-        'source.read',
-        groupFolder,
-      );
+      const readPermission = checkPermission(connectorId, groupFolder, isMain);
       permissionsValid = readPermission.allowed;
     } catch {
       permissionsValid = false;
@@ -186,6 +206,9 @@ export function getConnectorReadiness(
         'Review connector permissions in the Integrations settings';
     }
 
+    // Transport health is unknown until probed; mark null
+    const transportHealthy: boolean | null = null;
+
     entries.push({
       connectorId,
       label: definition.label || connectorId,
@@ -193,9 +216,9 @@ export function getConnectorReadiness(
       configured,
       credentialsConfigured: envStatus.allSet,
       permissionsValid,
-      transportHealthy: status === 'healthy',
-      lastCheckedAt: now,
-      stale: false,
+      transportHealthy,
+      lastCheckedAt: null,
+      stale: true,
       detail,
       recoveryHint,
       missingEnvVars: envStatus.missing,
@@ -206,9 +229,10 @@ export function getConnectorReadiness(
     total: entries.length,
     healthy: entries.filter((e) => e.status === 'healthy').length,
     unavailable: entries.filter((e) => e.status === 'unavailable').length,
-    stale: entries.filter((e) => e.status === 'stale').length,
-    permissionDenied: entries.filter((e) => e.status === 'permission-denied')
-      .length,
+    stale: entries.filter((e) => e.stale).length,
+    permissionDenied: entries.filter(
+      (e) => e.status === 'permission-denied',
+    ).length,
     misconfigured: entries.filter((e) => e.status === 'misconfigured').length,
   };
 
@@ -266,6 +290,7 @@ export interface SmokeTestResult {
   fixtureName: string;
   scenario: SmokeTestFixture['scenario'];
   passed: boolean;
+  skipped: boolean;
   error?: string;
   collectionId?: string;
   sourceCount?: number;
@@ -289,6 +314,7 @@ export async function runConnectorSmokeTests(
           const record = startSourceCollection(reportJobId, [
             'memory',
             'journal',
+            'connector',
           ]);
           collectionId = record.id;
           // Collect memory scope
@@ -305,6 +331,7 @@ export async function runConnectorSmokeTests(
             fixtureName: fixture.name,
             scenario: fixture.scenario,
             passed: true,
+            skipped: false,
             collectionId,
             sourceCount,
             durationMs: Date.now() - startedAt,
@@ -317,15 +344,26 @@ export async function runConnectorSmokeTests(
           const misconfigured = readiness.entries.some(
             (e) => e.status === 'misconfigured' || e.status === 'unavailable',
           );
-          results.push({
-            fixtureName: fixture.name,
-            scenario: fixture.scenario,
-            passed: true,
-            error: misconfigured
-              ? 'Expected misconfigured/unavailable connectors detected'
-              : 'No misconfigured connectors found (acceptable)',
-            durationMs: Date.now() - startedAt,
-          });
+          if (!misconfigured) {
+            results.push({
+              fixtureName: fixture.name,
+              scenario: fixture.scenario,
+              passed: false,
+              skipped: false,
+              error:
+                'Expected at least one misconfigured/unavailable connector but found none',
+              durationMs: Date.now() - startedAt,
+            });
+          } else {
+            results.push({
+              fixtureName: fixture.name,
+              scenario: fixture.scenario,
+              passed: true,
+              skipped: false,
+              error: 'Misconfigured/unavailable connectors correctly detected',
+              durationMs: Date.now() - startedAt,
+            });
+          }
           break;
         }
 
@@ -334,29 +372,42 @@ export async function runConnectorSmokeTests(
           const permissionDenied = readiness.entries.some(
             (e) => e.status === 'permission-denied',
           );
-          results.push({
-            fixtureName: fixture.name,
-            scenario: fixture.scenario,
-            passed: true,
-            error: permissionDenied
-              ? 'Permission denied state correctly detected'
-              : 'No permission-denied connectors (acceptable)',
-            durationMs: Date.now() - startedAt,
-          });
+          if (!permissionDenied) {
+            results.push({
+              fixtureName: fixture.name,
+              scenario: fixture.scenario,
+              passed: false,
+              skipped: false,
+              error:
+                'Expected at least one permission-denied connector but found none',
+              durationMs: Date.now() - startedAt,
+            });
+          } else {
+            results.push({
+              fixtureName: fixture.name,
+              scenario: fixture.scenario,
+              passed: true,
+              skipped: false,
+              error: 'Permission-denied connectors correctly detected',
+              durationMs: Date.now() - startedAt,
+            });
+          }
           break;
         }
 
         case 'timeout':
         case 'malformed-payload':
         case 'duplicate-source': {
-          // These scenarios are validated at the transport level
-          // For now, record as passed with evidence
+          // These require transport-level fixtures (injected timeout/malformed collectors)
+          // Mark as skipped until connector transport fixtures are available
           results.push({
             fixtureName: fixture.name,
             scenario: fixture.scenario,
-            passed: true,
+            passed: false,
+            skipped: true,
             error:
-              'Transport-level validation covered by source-collection fixtures',
+              'Skipped: requires transport-level injection for deterministic ' +
+              'timeout/malformed/duplicate validation',
             durationMs: Date.now() - startedAt,
           });
           break;
@@ -375,6 +426,7 @@ export async function runConnectorSmokeTests(
         fixtureName: fixture.name,
         scenario: fixture.scenario,
         passed: false,
+        skipped: false,
         error: err instanceof Error ? err.message : String(err),
         durationMs: Date.now() - startedAt,
       });
