@@ -313,6 +313,14 @@ describe('agent runtime registry', () => {
         env: expect.not.objectContaining({ CURSOR_API_KEY: expect.anything() }),
       }),
     );
+    const probeEnv = vi.mocked(execFile).mock.calls[0]?.[2]
+      ?.env as NodeJS.ProcessEnv;
+    expect(probeEnv.PATH).toContain('/.local/bin');
+    expect(
+      probeEnv.PATH?.split(':').filter((entry) =>
+        entry.endsWith('/.local/bin'),
+      ),
+    ).toHaveLength(1);
   });
 
   it('fails the public Devin runtime probe closed without touching probe dependencies', async () => {
