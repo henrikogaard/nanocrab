@@ -254,9 +254,7 @@ async function composeMarkdown(job: ReportJob): Promise<void> {
       ? `## Sources\n\n${citations}`
       : '## Sources\n\nNo citations available.',
     '',
-    sourceLinkPreviews
-      ? `## Source Links\n\n${sourceLinkPreviews}`
-      : '',
+    sourceLinkPreviews ? `## Source Links\n\n${sourceLinkPreviews}` : '',
     '',
     sourceLedgerSection,
   ].join('\n');
