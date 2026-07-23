@@ -2432,6 +2432,13 @@ export function listAgentProfileRows(): AgentProfile[] {
   return rows.map(mapAgentProfileRow);
 }
 
+export function deleteAgentProfileRow(id: string): boolean {
+  const result = db
+    .prepare('DELETE FROM agent_profiles WHERE id = ?')
+    .run(id);
+  return result.changes > 0;
+}
+
 export function insertAgentSubscription(
   subscription: AgentSubscription,
 ): AgentSubscription {

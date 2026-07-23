@@ -739,6 +739,7 @@ function renderAgentProfileRoster(profiles, selectedId) {
                 <span class="badge ${status.badge} agent-tool-badge">${status.label}</span>
                 ${activeRuns !== undefined ? `<span class="badge badge-info agent-tool-badge">${esc(String(activeRuns))} active</span>` : ''}
                 ${blockedApprovals !== undefined && blockedApprovals > 0 ? `<span class="badge badge-warning agent-tool-badge">${esc(String(blockedApprovals))} blocked</span>` : ''}
+                <button type="button" class="btn btn-sm btn-ghost agent-profile-toggle-btn" onclick="event.stopPropagation(); toggleAgentProfileEnabled('${agentProfileAttr(id)}', ${!status.enabled})" title="${status.enabled ? 'Disable' : 'Enable'}">${status.enabled ? '⏸' : '▶'}</button>
               </span>
             </button>`;
         })
@@ -897,6 +898,7 @@ function renderAgentProfileDetail(profile) {
       <div class="agent-profile-action-bar">
         <span class="agent-profile-action-status" id="agent-profile-status-${agentProfileAttr(detailId)}" aria-live="polite"></span>
         <button type="button" class="btn btn-sm btn-primary" onclick="saveAgentProfile(window._selectedAgentProfileId)">Save profile</button>
+        <button type="button" class="btn btn-sm btn-ghost" style="color: var(--error-color, #e55)" onclick="deleteAgentProfile(window._selectedAgentProfileId)">Delete</button>
       </div>
       <div class="agent-profile-tab-panel is-identity">
         <div class="agent-profile-panel-head"><span>Identity</span></div>
@@ -1010,10 +1012,14 @@ function renderAgentProfileShellContent(profiles, selectedId) {
       <div>
         <span>Agent profiles</span>
         <strong>Profile cockpit</strong>
-        <small>Read-only roster, model policy, subscriptions, and activity for configured agent personas.</small>
+        <small>Roster, model policy, subscriptions, activity, and lifecycle for configured agent personas.</small>
       </div>
-      <span class="badge badge-muted agent-tool-badge">${roster.length} profile${roster.length === 1 ? '' : 's'}</span>
+      <div class="agent-profile-shell-actions">
+        <span class="badge badge-muted agent-tool-badge">${roster.length} profile${roster.length === 1 ? '' : 's'}</span>
+        <button type="button" class="btn btn-sm btn-primary" onclick="showCreateAgentProfileForm()">+ New agent</button>
+      </div>
     </div>
+    <div id="agent-profile-create-panel" class="is-hidden"></div>
     <div class="agent-profile-layout">
       ${renderAgentProfileRoster(roster, activeId)}
       ${renderAgentProfileDetail(selectedProfile)}
@@ -2130,6 +2136,133 @@ window.saveAgentProfile = async function (id) {
     const message = e?.message || 'Profile save failed';
     agentProfileSetStatus(id, message, 'error');
     toast(message, 'error');
+  }
+};
+
+window.showCreateAgentProfileForm = function () {
+  const panel = document.getElementById('agent-profile-create-panel');
+  if (!panel) return;
+  if (!panel.classList.contains('is-hidden')) {
+    panel.classList.add('is-hidden');
+    return;
+  }
+  panel.classList.remove('is-hidden');
+  panel.innerHTML = `
+    <div class="card agent-profile-create-card">
+      <h3>Create Agent Profile</h3>
+      <form id="agent-profile-create-form" onsubmit="event.preventDefault(); submitCreateAgentProfile();">
+        <div class="agent-profile-field-grid">
+          <label class="agent-profile-field">
+            <span>Handle *</span>
+            <input name="handle" class="input" placeholder="e.g. reviewer" pattern="[a-z0-9-]+" required autocomplete="off">
+          </label>
+          <label class="agent-profile-field">
+            <span>Display name *</span>
+            <input name="displayName" class="input" placeholder="e.g. Code Reviewer" required autocomplete="off">
+          </label>
+          <label class="agent-profile-field">
+            <span>Provider</span>
+            <input name="provider" class="input" placeholder="e.g. claude, codex, opencode" autocomplete="off">
+          </label>
+          <label class="agent-profile-field">
+            <span>Model</span>
+            <input name="model" class="input" placeholder="e.g. claude-sonnet-4-20250514" autocomplete="off">
+          </label>
+          <label class="agent-profile-field">
+            <span>Tool policy</span>
+            <select name="toolPolicy" class="input">
+              <option value="approval-required">approval-required</option>
+              <option value="read-only">read-only</option>
+              <option value="allow">allow</option>
+            </select>
+          </label>
+          <label class="agent-profile-field agent-profile-field-wide">
+            <span>Personality / Instructions</span>
+            <textarea name="personality" class="input" rows="3" placeholder="Describe the agent's personality and behavior"></textarea>
+          </label>
+          <label class="agent-profile-field">
+            <span>Task kinds (comma-separated)</span>
+            <input name="taskKinds" class="input" placeholder="chat, coding_job, report" autocomplete="off">
+          </label>
+          <label class="agent-profile-field">
+            <span>Skills (comma-separated)</span>
+            <input name="skills" class="input" placeholder="skill-name-1, skill-name-2" autocomplete="off">
+          </label>
+        </div>
+        <div class="agent-profile-action-bar">
+          <span id="agent-profile-create-status" aria-live="polite"></span>
+          <button type="submit" class="btn btn-sm btn-primary">Create agent</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="document.getElementById('agent-profile-create-panel').classList.add('is-hidden')">Cancel</button>
+        </div>
+      </form>
+    </div>`;
+};
+
+window.submitCreateAgentProfile = async function () {
+  const form = document.getElementById('agent-profile-create-form');
+  if (!form) return;
+  const status = document.getElementById('agent-profile-create-status');
+  const handle = (form.elements.namedItem('handle')?.value || '').trim();
+  const displayName = (form.elements.namedItem('displayName')?.value || '').trim();
+  if (!handle || !displayName) {
+    if (status) { status.textContent = 'Handle and display name are required.'; status.classList.add('is-error'); }
+    return;
+  }
+  const body = {
+    handle,
+    displayName,
+    provider: (form.elements.namedItem('provider')?.value || '').trim() || null,
+    model: (form.elements.namedItem('model')?.value || '').trim() || null,
+    toolPolicy: form.elements.namedItem('toolPolicy')?.value || 'approval-required',
+    personality: (form.elements.namedItem('personality')?.value || '').trim() || null,
+    taskKinds: (form.elements.namedItem('taskKinds')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+    skills: (form.elements.namedItem('skills')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+  };
+  if (status) { status.textContent = 'Creating...'; status.classList.remove('is-error'); }
+  try {
+    const r = await api('/agent-profiles', { method: 'POST', body: JSON.stringify(body) });
+    if (r.ok && r.profile) {
+      toast(`Agent @${handle} created`, 'success');
+      document.getElementById('agent-profile-create-panel').classList.add('is-hidden');
+      // Reload the agents page to show the new profile
+      if (currentPage === 'agents') navigate('agents');
+    } else {
+      if (status) { status.textContent = r.error || 'Creation failed'; status.classList.add('is-error'); }
+    }
+  } catch (e) {
+    if (status) { status.textContent = e?.message || 'Creation failed'; status.classList.add('is-error'); }
+    toast(e?.message || 'Could not create agent profile', 'error');
+  }
+};
+
+window.toggleAgentProfileEnabled = async function (id, enable) {
+  const endpoint = enable ? 'enable' : 'disable';
+  try {
+    const r = await api(`/agent-profiles/${encodeURIComponent(id)}/${endpoint}`, { method: 'POST' });
+    if (r.ok && r.profile) {
+      agentProfileUpdateLocalProfile(id, r.profile);
+      agentProfileRerender(id);
+      toast(`Agent ${enable ? 'enabled' : 'disabled'}`, 'success');
+    } else {
+      toast(r.error || 'Toggle failed', 'error');
+    }
+  } catch (e) {
+    toast(e?.message || 'Could not toggle agent profile', 'error');
+  }
+};
+
+window.deleteAgentProfile = async function (id) {
+  if (!confirm('Delete this agent profile? This cannot be undone.')) return;
+  try {
+    const r = await api(`/agent-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (r.ok !== false) {
+      toast('Agent profile deleted', 'success');
+      if (currentPage === 'agents') navigate('agents');
+    } else {
+      toast(r.error || 'Delete failed', 'error');
+    }
+  } catch (e) {
+    toast(e?.message || 'Could not delete agent profile', 'error');
   }
 };
 

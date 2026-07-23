@@ -19,6 +19,7 @@ import {
   listAgentSubscriptionsForProfile,
   updateAgentProfile as updateAgentProfileRow,
   updateAgentSubscription as updateAgentSubscriptionRow,
+  deleteAgentProfileRow,
 } from './db.js';
 import type {
   AgentProfile,
@@ -348,6 +349,12 @@ export function getAgentProfileByHandle(
 
 export function listAgentProfiles(): AgentProfile[] {
   return listAgentProfileRows();
+}
+
+export function deleteAgentProfile(id: string): boolean {
+  const profile = getAgentProfileRow(id);
+  if (!profile) return false;
+  return deleteAgentProfileRow(id);
 }
 
 export function createAgentSubscription(

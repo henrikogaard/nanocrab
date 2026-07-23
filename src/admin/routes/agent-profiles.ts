@@ -372,4 +372,21 @@ router.get('/:id/activity', (req: Request, res: Response) => {
   res.json(domain.listAgentProfileActivity(profile.id, 50));
 });
 
+router.delete('/:id', (req: Request, res: Response) => {
+  const profile = findProfileOr404(req, res);
+  if (!profile) return;
+
+  try {
+    const deleted = domain.deleteAgentProfile(routeParam(req, 'id'));
+    if (!deleted) {
+      res.status(404).json({ error: 'Agent profile not found' });
+      return;
+    }
+    auditLog(req, 'agent_profile_deleted', profile.id);
+    res.json({ ok: true });
+  } catch (err) {
+    sendError(res, 400, err);
+  }
+});
+
 export default router;
