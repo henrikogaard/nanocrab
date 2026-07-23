@@ -133,6 +133,7 @@ function safeFilename(value: string): string {
 async function collectReportSources(job: ReportJob): Promise<{
   sections: string[];
   citations: Array<{ label: string; source: string }>;
+  connectorScopes?: string[];
 }> {
   const collected = await reportSourceRuntime.collectSources(
     job.id,
@@ -149,6 +150,7 @@ async function collectReportSources(job: ReportJob): Promise<{
   return {
     sections: collected.sections,
     citations: collected.citations,
+    connectorScopes: collected.connectorScopes,
   };
 }
 
@@ -209,6 +211,12 @@ async function composeMarkdown(job: ReportJob): Promise<void> {
         )
         .join('\n')
     : '';
+  const sourceLinkPreviews = collected.citations.length
+    ? collected.citations
+        .filter((c) => c.source && c.source.startsWith('http'))
+        .map((citation, index) => `- [${citation.label}](${citation.source})`)
+        .join('\n')
+    : '';
   const sourceCollection = job.sourceCollectionId
     ? getSourceCollection(job.sourceCollectionId)
     : null;
@@ -245,6 +253,8 @@ async function composeMarkdown(job: ReportJob): Promise<void> {
     citations
       ? `## Sources\n\n${citations}`
       : '## Sources\n\nNo citations available.',
+    '',
+    sourceLinkPreviews ? `## Source Links\n\n${sourceLinkPreviews}` : '',
     '',
     sourceLedgerSection,
   ].join('\n');

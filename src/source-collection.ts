@@ -564,6 +564,7 @@ export interface CollectedSources {
   sections: string[];
   citations: Array<{ label: string; source: string }>;
   sourceCollectionId: string;
+  connectorScopes?: string[];
 }
 
 async function fetchGitHubConnectorSources(
@@ -1260,7 +1261,16 @@ export async function collectReportSources(
     }
   }
 
-  return { sections, citations, sourceCollectionId: record.id };
+  // Collect connector scopes used in this source collection
+  const connectorScopes = sourceDescriptors
+    .filter((d) => d.scope === 'connector' && d.connectorId)
+    .map((d) => `connector:${d.connectorId}`);
+  return {
+    sections,
+    citations,
+    sourceCollectionId: record.id,
+    connectorScopes,
+  };
 }
 
 export async function collectSources(
