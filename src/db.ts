@@ -2433,6 +2433,10 @@ export function listAgentProfileRows(): AgentProfile[] {
 }
 
 export function deleteAgentProfileRow(id: string): boolean {
+  // Delete child rows first to avoid orphaned records
+  db.prepare('DELETE FROM agent_subscription_events WHERE agent_profile_id = ?').run(id);
+  db.prepare('DELETE FROM agent_profile_activity WHERE agent_profile_id = ?').run(id);
+  db.prepare('DELETE FROM agent_subscriptions WHERE agent_profile_id = ?').run(id);
   const result = db.prepare('DELETE FROM agent_profiles WHERE id = ?').run(id);
   return result.changes > 0;
 }

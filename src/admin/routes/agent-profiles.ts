@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 
 import * as agentProfiles from '../../agent-profiles.js';
 import * as agentRuntimeRegistry from '../../agent-runtime-registry.js';
+import { requireRole } from '../middleware.js';
 import type {
   AgentProfileInput,
   AgentProfileUpdateInput,
@@ -372,7 +373,7 @@ router.get('/:id/activity', (req: Request, res: Response) => {
   res.json(domain.listAgentProfileActivity(profile.id, 50));
 });
 
-router.delete('/:id', (req: Request, res: Response) => {
+router.delete('/:id', requireRole('admin'), (req: Request, res: Response) => {
   const profile = findProfileOr404(req, res);
   if (!profile) return;
 
