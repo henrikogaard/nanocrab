@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildAllowedTools,
   buildMcpServers,
+  extractOpenCodeText,
   isOpenAiCompatibleAgentProvider,
   openCodeModelForProvider,
   openAiCompatibleBaseUrl,
@@ -183,5 +184,23 @@ describe('agent-runner OpenAI-compatible dispatch', () => {
     expect(openCodeModelForProvider('openai-compatible', 'model-id')).toBe(
       'openai-compatible/model-id',
     );
+  });
+
+  it('extracts assistant text without forwarding OpenCode tool events', () => {
+    expect(
+      extractOpenCodeText(
+        [
+          JSON.stringify({ type: 'step_start', part: {} }),
+          JSON.stringify({
+            type: 'tool',
+            part: { type: 'tool', name: 'bash', input: { command: 'pwd' } },
+          }),
+          JSON.stringify({
+            type: 'text',
+            part: { type: 'text', text: 'AIRouter-tool-ok' },
+          }),
+        ].join('\n'),
+      ),
+    ).toBe('AIRouter-tool-ok');
   });
 });

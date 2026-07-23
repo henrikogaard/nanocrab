@@ -1410,9 +1410,10 @@ async function runQueryOpenCode(
     containerInput.prompt,
     containerInput.restrictions,
   );
+  const runtimeContext = `Runtime metadata: you are running ${provider}/${selectedModel}. This value is authoritative. If asked which model or provider is active, answer from this metadata directly; do not inspect process state, environment variables, or files.`;
   const effectivePrompt = systemPrompt.trim()
-    ? `${systemPrompt.trim()}\n\nUser request:\n${prompt}`
-    : prompt;
+    ? `${systemPrompt.trim()}\n\n${runtimeContext}\n\nUser request:\n${prompt}`
+    : `${runtimeContext}\n\nUser request:\n${prompt}`;
   const configContent = buildOpenCodeConfig(
     model,
     containerInput,
@@ -1420,7 +1421,7 @@ async function runQueryOpenCode(
   );
 
   return new Promise((resolve) => {
-    const args = ['run', '--model', model, effectivePrompt];
+    const args = ['run', '--format', 'json', '--model', model, effectivePrompt];
     log(`OpenCode args: ${args.slice(0, 3).join(' ')}...`);
     const proc = execFile(
       'opencode',
@@ -1436,14 +1437,21 @@ async function runQueryOpenCode(
         },
       },
       (error, stdout, stderr) => {
-        const output = stdout?.trim() || stderr?.trim() || '';
-        if (error && !output) {
+        const output = extractOpenCodeText(stdout || '');
+        if (error) {
           log(`OpenCode error: ${error.message}`);
           writeOutput({
             status: 'error',
             result: null,
-            error: `OpenCode error: ${error.message}`,
+            error: output || `OpenCode error: ${error.message}`,
           });
+          resolve({ output: '' });
+          return;
+        }
+        if (!output) {
+          const errorMessage = 'OpenCode completed without assistant text';
+          log(errorMessage);
+          writeOutput({ status: 'error', result: null, error: errorMessage });
           resolve({ output: '' });
           return;
         }
@@ -1464,6 +1472,25 @@ export function openCodeModelForProvider(provider: string, model: string): strin
     return `${provider}/${model}`;
   }
   return model;
+}
+
+export function extractOpenCodeText(output: string): string {
+  return output
+    .split('\n')
+    .flatMap((line) => {
+      try {
+        const event = JSON.parse(line) as {
+          type?: string;
+          part?: { type?: string; text?: unknown };
+        };
+        if (event.type !== 'text' || event.part?.type !== 'text') return [];
+        return typeof event.part.text === 'string' ? [event.part.text] : [];
+      } catch {
+        return [];
+      }
+    })
+    .join('')
+    .trim();
 }
 
 async function main(): Promise<void> {
