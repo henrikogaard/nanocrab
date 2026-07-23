@@ -2533,6 +2533,75 @@ describe('coding jobs', () => {
     expect(envFileContent).not.toContain('openrouter.example');
   });
 
+  it('routes AIRouter coding job credentials through the host proxy', async () => {
+    vi.useRealTimers();
+    mockedReadEnvFile.mockReturnValue({
+      GITHUB_TOKEN: 'test-token',
+      AIROUTER_API_KEY: 'sk-real-airouter',
+      AIROUTER_BASE_URL: 'https://api.airouter.example/v1',
+    });
+    vi.mocked(resolveProviderFallbackForAction).mockReturnValue({
+      approved: true,
+      profile: {
+        id: 'default_coding',
+        label: 'Coding',
+        purpose: 'default_coding',
+        provider: 'airouter',
+        model: 'Qwen3.6',
+        toolPolicy: 'approval-required',
+        updatedAt: new Date(0).toISOString(),
+      },
+      provider: 'airouter',
+      model: 'Qwen3.6',
+    });
+    mockGitHubFetch(() => ({ default_branch: 'main' }));
+    await registerCodingRepo({ repo: 'owner/repo' });
+    let envFileContent = '';
+    vi.mocked(spawn).mockImplementation((_command, args) => {
+      const proc = createFakeProcess();
+      const argv = args as string[];
+      const envFilePath = argv[argv.indexOf('--env-file') + 1];
+      envFileContent = fs.readFileSync(envFilePath, 'utf-8');
+      const firstMount = argv[argv.indexOf('-v') + 1];
+      const jobRoot = firstMount.split(':')[0];
+      setImmediate(() => {
+        const metadataDir = `${jobRoot}/.nanocrab`;
+        fs.mkdirSync(metadataDir, { recursive: true });
+        fs.writeFileSync(`${metadataDir}/diff-stat.txt`, '');
+        fs.writeFileSync(`${metadataDir}/untracked.txt`, '');
+        proc.emit('close', 0);
+      });
+      return proc as never;
+    });
+
+    const job = await startCodingJob({
+      repo: 'owner/repo',
+      prompt: 'Add a focused regression test.',
+      provider: 'airouter',
+      model: 'Qwen3.6',
+      requestedBy: 'whatsapp_main',
+    });
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('await_approval');
+    });
+    approveCodingJob(job.id, 'owner');
+
+    await vi.waitFor(() => {
+      expect(getCodingJob(job.id)?.status).toBe('completed');
+    });
+    expect(envFileContent).toContain('AIROUTER_API_KEY=placeholder');
+    expect(envFileContent).toContain('AGENT_PROVIDER_API_KEY=placeholder');
+    expect(envFileContent).toContain(
+      'AIROUTER_BASE_URL=http://host.docker.internal:3001/__nanocrab/providers/airouter',
+    );
+    expect(envFileContent).toContain(
+      'AGENT_PROVIDER_BASE_URL=http://host.docker.internal:3001/__nanocrab/providers/airouter',
+    );
+    expect(envFileContent).not.toContain('sk-real-airouter');
+    expect(envFileContent).not.toContain('airouter.example');
+  });
+
   it('blocks implementation before plan approval', async () => {
     vi.useRealTimers();
     mockGitHubFetch(() => ({ default_branch: 'main' }));

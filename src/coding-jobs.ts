@@ -135,6 +135,7 @@ const CODING_JOB_PROVIDERS = new Set<AgentProvider>([
   'pi',
   'mistral',
   'openrouter',
+  'airouter',
   'ollama',
   'openai-compatible',
   'cursor',
@@ -147,6 +148,7 @@ type CodingProvider = Extract<
   | 'pi'
   | 'mistral'
   | 'openrouter'
+  | 'airouter'
   | 'ollama'
   | 'openai-compatible'
   | 'cursor'
@@ -1121,6 +1123,8 @@ function buildCodingContainerEnv(
     'OPENCODE_API_KEY',
     'OPENROUTER_API_KEY',
     'OPENROUTER_BASE_URL',
+    'AIROUTER_API_KEY',
+    'AIROUTER_BASE_URL',
     'OLLAMA_BASE_URL',
     'OPENAI_COMPATIBLE_API_KEY',
     'OPENAI_COMPATIBLE_BASE_URL',
@@ -1181,6 +1185,16 @@ function buildCodingContainerEnv(
     const openrouterProxyUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/openrouter`;
     env.OPENROUTER_BASE_URL = openrouterProxyUrl;
     env.AGENT_PROVIDER_BASE_URL = openrouterProxyUrl;
+  }
+  if (job.provider === 'airouter') {
+    const airouterKey = envValue(envFileValues, 'AIROUTER_API_KEY');
+    if (airouterKey) {
+      env.AIROUTER_API_KEY = 'placeholder';
+      env.AGENT_PROVIDER_API_KEY = 'placeholder';
+    }
+    const airouterProxyUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}/__nanocrab/providers/airouter`;
+    env.AIROUTER_BASE_URL = airouterProxyUrl;
+    env.AGENT_PROVIDER_BASE_URL = airouterProxyUrl;
   }
   if (job.provider === 'ollama') {
     env.OLLAMA_BASE_URL =
