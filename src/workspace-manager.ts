@@ -5,7 +5,7 @@ import path from 'path';
 import { promisify } from 'util';
 
 import { DATA_DIR, STORE_DIR } from './config.js';
-import { loadCodingRepos } from './coding-jobs.js';
+import { getGitHubToken, loadCodingRepos } from './coding-jobs.js';
 import { logger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
@@ -87,9 +87,12 @@ async function resolveRepoPath(repo: string): Promise<string> {
   const clonePath = path.resolve(REPOS_DIR, repoDirName);
 
   if (fs.existsSync(path.join(clonePath, '.git'))) {
+    if (fs.lstatSync(clonePath).isSymbolicLink()) {
+      throw new Error('Registered repository clone must not be a symlink');
+    }
     // Fetch latest to keep the clone current
     try {
-      await execFileAsync('git', ['fetch', '--prune'], {
+      await runGitWithCredential('git', ['fetch', '--prune'], {
         cwd: clonePath,
         timeout: GIT_TIMEOUT_MS,
       });
@@ -101,13 +104,10 @@ async function resolveRepoPath(repo: string): Promise<string> {
 
   // Clone the repo
   fs.mkdirSync(REPOS_DIR, { recursive: true });
-  const githubToken = process.env.GITHUB_TOKEN || '';
-  const cloneUrl = githubToken
-    ? `https://x-access-token:${githubToken}@github.com/${repo}.git`
-    : `https://github.com/${repo}.git`;
+  const cloneUrl = `https://github.com/${repo}.git`;
 
   try {
-    await execFileAsync(
+    await runGitWithCredential(
       'git',
       ['clone', '--no-checkout', cloneUrl, clonePath],
       { timeout: GIT_TIMEOUT_MS },
@@ -121,10 +121,48 @@ async function resolveRepoPath(repo: string): Promise<string> {
   return clonePath;
 }
 
+async function runGitWithCredential(
+  command: string,
+  args: string[],
+  options: { cwd?: string; timeout: number },
+): Promise<{ stdout: string; stderr: string }> {
+  const token = getGitHubToken();
+  const askpassPath = path.join(
+    fs.mkdtempSync(path.join('/tmp', 'nanocrab-git-')),
+    'askpass.sh',
+  );
+  fs.writeFileSync(
+    askpassPath,
+    '#!/bin/sh\nprintf "%s" "$NANOCRAB_GIT_TOKEN"\n',
+    { mode: 0o700 },
+  );
+  try {
+    const result = await execFileAsync(command, args, {
+      ...options,
+      env: {
+        ...process.env,
+        ...(token
+          ? {
+              GIT_ASKPASS: askpassPath,
+              GIT_TERMINAL_PROMPT: '0',
+              NANOCRAB_GIT_TOKEN: token,
+            }
+          : { GIT_TERMINAL_PROMPT: '0' }),
+      },
+    });
+    return { stdout: result.stdout, stderr: result.stderr };
+  } finally {
+    fs.rmSync(path.dirname(askpassPath), { recursive: true, force: true });
+  }
+}
+
 export async function createWorkspace(
   input: CreateWorkspaceInput,
 ): Promise<Workspace> {
   assertSafeRepo(input.repo);
+  const branch =
+    input.branch || `nanocrab/ws-${crypto.randomUUID().slice(0, 8)}`;
+  assertSafeBranch(branch);
 
   const workspaces = readWorkspaces();
   const activeCount = workspaces.filter((w) => w.status === 'active').length;
@@ -136,8 +174,6 @@ export async function createWorkspace(
 
   const repoPath = await resolveRepoPath(input.repo);
   const id = crypto.randomUUID().slice(0, 8);
-  const branch = input.branch || `nanocrab/ws-${id}`;
-  assertSafeBranch(branch);
 
   const workspacePath = path.resolve(WORKSPACES_DIR, id);
 
