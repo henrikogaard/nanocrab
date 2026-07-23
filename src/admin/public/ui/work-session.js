@@ -787,11 +787,7 @@ function renderToolCallTimeline(toolCalls) {
     }
     if (activeTab === 'timeline') return renderTimeline(session);
     if (activeTab === 'tools') {
-      return recordList(
-        session.toolCalls,
-        'No tool calls recorded',
-        'work-session-tools',
-      );
+      return renderToolCallTimeline(session.toolCalls);
     }
     if (activeTab === 'files') return fileList(session.changedFiles);
     if (activeTab === 'proposals') {
