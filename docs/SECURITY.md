@@ -27,6 +27,11 @@ application-level permission checks, the attack surface is limited by what's
 mounted. The opt-in host-native Devin coding exception has its separate
 fail-closed boundary in section 3e.
 
+**Current network status:** ordinary agent containers still receive unrestricted
+outbound network access. Credential proxying limits secret exposure for known
+provider routes, but it is not yet a default-deny egress boundary. Planned
+egress governance is documented in section 6.
+
 ### 2. Mount Security
 
 **External Allowlist** - Mount permissions stored at `~/.config/nanocrab/mount-allowlist.json`, which is:
@@ -343,7 +348,7 @@ and credential-proxy route are verified by the deployment.
 | Group folder        | `/workspace/group` (rw)         | `/workspace/group` (rw)  |
 | Global memory       | Implicit via project            | `/workspace/global` (ro) |
 | Additional mounts   | Configurable                    | Read-only unless allowed |
-| Network access      | Unrestricted                    | Unrestricted             |
+| Network access      | Unrestricted today; planned default-deny via host egress gateway | Unrestricted today; planned default-deny via host egress gateway |
 | MCP tools           | Boundary-filtered               | Boundary-filtered        |
 
 ## Security Architecture Diagram
@@ -361,7 +366,7 @@ and credential-proxy route are verified by the deployment.
 │  • IPC authorization                                              │
 │  • Mount validation (external allowlist)                          │
 │  • Container lifecycle                                            │
-│  • Credential proxy (injects provider secrets)                   │
+│  • Credential proxy (injects provider secrets; planned egress gate) │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
                                  ▼ Explicit mounts only, no secrets
@@ -374,3 +379,46 @@ and credential-proxy route are verified by the deployment.
 │  • Runtime secrets limited to explicit tool/CLI exceptions       │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+## 6. Planned Egress Governance And Provable Security Claims
+
+This section records planned hardening adapted from AgentPaaS-style governed
+runtimes. Until the linked implementation issues land, do not claim
+default-deny container egress or tamper-evident audit integrity.
+
+### Planned Controls
+
+| Control | Intended invariant | Current state |
+| --- | --- | --- |
+| Default-deny container network | Agent containers have no direct internet route; approved hosts only | Unrestricted outbound network |
+| Egress gateway | Host credential proxy becomes allow/deny + inject + audit for outbound HTTP | Secret injection for known provider routes |
+| Destination-bound credentials | Each secret may be attached only to approved destinations | Provider-route injection; some CLI/token exceptions still env-file based |
+| Hardened Docker flags | Read-only rootfs, dropped capabilities, no-new-privileges, resource caps | Memory/CPU limits and optional `--user`; no default RO rootfs/cap-drop |
+| Egress audit events | Allow/deny decisions are queryable beside existing policy/audit events | Action policy/audit exists; egress decisions are not first-class |
+| Tamper-evident audit export | Exported audit evidence can be verified for rewrite/reorder/insert | SQLite audit with redaction/replay/export |
+| Red-team smoke + doctor canary | Core security claims fail closed in CI/ops checks | Unit/integration coverage; no egress red-team gate |
+
+### Security Claims Proof Matrix
+
+NanoCrab should only advertise a claim when all of these are true: the control
+is implemented, documented in this file, covered by an automated or operator
+proof, and visible in Audit/Security surfaces when the claim is operator-facing.
+
+| Claim | Evidence required before advertising | Status |
+| --- | --- | --- |
+| Secrets stay off agent containers for proxied providers | Proxy tests + docs + no raw key in container env/files | Implemented for hosted proxy routes |
+| Mounts cannot escape allowlist / blocked patterns | Mount-security tests + external allowlist docs | Implemented |
+| High-impact actions are policy-gated and audited | Policy/audit tests + Audit UI replay/export | Implemented |
+| Connector tools stay inside allowlisted scopes | MCP tool-proxy tests + connector permission docs | Implemented |
+| Agent containers cannot reach unapproved hosts | Topology + gateway deny fixtures + Audit egress events | Planned |
+| Brokered secrets cannot be used against foreign hosts | Destination-bound credential tests | Planned |
+| Container escape surface is reduced by Docker hardening | Runner flag tests + doctor canary | Planned |
+| Audit exports detect tampering | Hash-chain/signature verify command or admin verify path | Planned |
+| Prompt-injection exfil path is blocked at the network edge | Red-team smoke for unknown host / DNS / secret invisibility | Planned |
+
+### Explicit Non-Claims
+
+- NanoCrab is not a marketplace for signed third-party agent bundles.
+- NanoCrab does not claim kernel 0-day resistance or gVisor/Kata isolation.
+- Local/operator host compromise remains outside the agent-sandbox trust model.
+- Until egress governance ships, unrestricted container network access remains an accepted residual risk called out above.

@@ -25,6 +25,7 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 - P0 closure sweep complete: non-epic P0 issues for cockpit/approvals, provider hardening, memory/skill review surfaces, timeline/router safety, GitHub coding jobs, policy/audit/dry-run controls, connector boundaries, and first-run setup are closed. Remaining P0-labeled GitHub issues are roadmap epics with lower-priority follow-up children still open.
 - Cross-channel coding parity and provider/runtime selection are implemented on `main` (PR #163, issue #162 closed), including isolated review jobs and approval-gated PR close actions.
 - Still future work: richer CI-status visualization, more MCP source connectors, deeper production diagnostics, continued dashboard UX polish, and the knowledge-production/personal-operations follow-on slices.
+ - Planned security follow-on: agent-container egress governance (default-deny network topology, credential-proxy egress gateway, destination-bound credentials, container hardening flags, egress audit events, and a security-claims proof matrix). Tracked as epic `#218` with child issues `#219`–`#222`.
 
 ---
 
@@ -330,6 +331,9 @@ These rules are non-negotiable:
 - Project root remains read-only unless a task explicitly mounts a writable repo.
 - `.env`, credentials, OAuth tokens, and provider keys never enter containers directly.
 - Credential proxy or scoped token references are used instead of raw secrets.
+- Agent containers should not retain unrestricted outbound internet once egress governance ships. Default-deny network topology plus host-side allowlisting is the target.
+- Destination-bound credentials are preferred so a brokered secret can only be used for approved hosts.
+- Security claims require proof: unit/integration tests, red-team smoke fixtures, and an explicit claims matrix in `docs/SECURITY.md`.
 - MCP servers are allowlisted and scoped.
 - Provider/model fallback for write-capable actions requires approval.
 - Memory visibility is enforced at query time and generation time.
@@ -356,12 +360,16 @@ These rules are non-negotiable:
    - Draft, validate, diff, approve, install, and sync skills.
 7. **Reports/Documents v1**
    - MCP-backed source collection, outlines, exports, and provenance.
-8. **Personal Operations v1** - PARTIAL
+8. **Agent Container Egress Governance v1** - PLANNED (`#218`–`#222`)
+   - Default-deny container network topology with host-gateway exceptions only (`#219`).
+   - Expand the credential proxy into an allow/deny/inject/audit egress gateway (`#220`).
+   - Destination-bound credentials, stronger Docker hardening flags, egress audit events, and a security-claims proof matrix (`#221`, `#222`).
+9. **Personal Operations v1** - PARTIAL
    - DONE: reusable runbooks, missions started from runbooks, dashboard step tracking, and approval references for sensitive steps.
    - DONE: daily and weekly briefing schedules create approval-gated report tasks from journal/memory sources.
    - DONE: routine blueprints, exact scheduled tasks, delivery modes, webhook approvals, heartbeat checks, run history, and run-now controls.
    - NEXT: richer briefing history, grouped routine analytics, and per-channel delivery preferences.
-9. **Provider Expansion**
+10. **Provider Expansion**
    - DONE: OpenAI Responses API adapter with 11 tests
    - DONE: Anthropic Messages API adapter with 13 tests
    - DONE: Google Gemini API adapter with 12 tests
