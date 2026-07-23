@@ -230,9 +230,8 @@ export function getConnectorReadiness(
     healthy: entries.filter((e) => e.status === 'healthy').length,
     unavailable: entries.filter((e) => e.status === 'unavailable').length,
     stale: entries.filter((e) => e.stale).length,
-    permissionDenied: entries.filter(
-      (e) => e.status === 'permission-denied',
-    ).length,
+    permissionDenied: entries.filter((e) => e.status === 'permission-denied')
+      .length,
     misconfigured: entries.filter((e) => e.status === 'misconfigured').length,
   };
 
