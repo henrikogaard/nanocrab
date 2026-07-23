@@ -1451,6 +1451,7 @@ const _pageMap = {
   'control-plane': 'renderControlPlane',
   'learning-proposals': 'renderLearningProposals',
   'source-collections': 'renderSourceCollections',
+  'github-views': 'renderGitHubViews',
   'session-detail': 'renderSessionDetail',
 };
 // Track which plugin frontends we've already loaded

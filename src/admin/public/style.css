@@ -38727,3 +38727,72 @@ select {
   text-align: center;
   color: var(--text-muted, #888);
 }
+
+/* GitHub Views */
+.ghv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.ghv-toolbar select {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #333);
+  background: var(--card-bg, #1a1a1a);
+  color: var(--text-color, #eee);
+  font-size: 14px;
+}
+.ghv-tabs {
+  display: flex;
+  gap: 6px;
+}
+.ghv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ghv-item {
+  cursor: pointer;
+  padding: 12px 16px;
+  transition: border-color 0.15s;
+}
+.ghv-item:hover {
+  border-color: var(--accent-color, #4a9eff);
+}
+.ghv-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ghv-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted, #888);
+  flex-wrap: wrap;
+}
+.ghv-detail-head {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.ghv-detail-body pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+.ghv-file-list {
+  list-style: none;
+  padding: 0;
+}
+.ghv-file-list li {
+  padding: 4px 0;
+  font-size: 13px;
+}
