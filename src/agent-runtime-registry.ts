@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'util';
 
@@ -459,7 +460,20 @@ export async function probeCursorRuntime(
   try {
     const { stdout } = await deps.execFile('agent', ['--version'], {
       env: {
-        PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin',
+        PATH: Array.from(
+          new Set(
+            [
+              process.env.PATH,
+              '/opt/homebrew/bin',
+              '/usr/local/bin',
+              '/usr/bin',
+              '/bin',
+              path.join(os.homedir(), '.local', 'bin'),
+            ]
+              .filter(Boolean)
+              .flatMap((entry) => entry!.split(':')),
+          ),
+        ).join(':'),
         TERM: 'dumb',
         NO_COLOR: '1',
       },
