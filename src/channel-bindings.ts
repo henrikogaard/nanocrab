@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 
 import { STORE_DIR } from './config.js';
-import { getAgentProfile } from './agent-profiles.js';
+import { getAgentProfile, updateAgentProfile } from './agent-profiles.js';
 import { logger } from './logger.js';
 
 export interface ChannelBinding {
@@ -152,6 +152,7 @@ export function approveChannelBinding(
   writeBindings(bindings);
 
   logger.info({ id, approvedBy }, 'Channel binding approved');
+  syncProfileBindings(binding.agentProfileId);
   return binding;
 }
 
@@ -165,6 +166,7 @@ export function disableChannelBinding(id: string): ChannelBinding {
   writeBindings(bindings);
 
   logger.info({ id }, 'Channel binding disabled');
+  syncProfileBindings(binding.agentProfileId);
   return binding;
 }
 
@@ -181,6 +183,7 @@ export function enableChannelBinding(id: string): ChannelBinding {
   writeBindings(bindings);
 
   logger.info({ id }, 'Channel binding re-enabled');
+  syncProfileBindings(binding.agentProfileId);
   return binding;
 }
 
@@ -189,10 +192,12 @@ export function deleteChannelBinding(id: string): boolean {
   const index = bindings.findIndex((b) => b.id === id);
   if (index === -1) return false;
 
+  const removed = bindings[index];
   bindings.splice(index, 1);
   writeBindings(bindings);
 
   logger.info({ id }, 'Channel binding deleted');
+  syncProfileBindings(removed.agentProfileId);
   return true;
 }
 
@@ -210,9 +215,52 @@ export function disableBindingsForAgent(agentProfileId: string): number {
     }
   }
   if (count > 0) writeBindings(bindings);
+  if (count > 0) syncProfileBindings(agentProfileId);
   return count;
 }
 
 export function getSupportedChannelTypes(): string[] {
   return [...SUPPORTED_CHANNEL_TYPES];
+}
+
+/**
+ * Rebuild an agent profile's channelBindings from its active bindings.
+ * The subscription runner reads profile.channelBindings[chatJid] and
+ * profile.channelBindings['channel_mention'] to resolve @mention handles,
+ * so approved bindings must be synced there to take effect.
+ */
+function syncProfileBindings(agentProfileId: string): void {
+  const profile = getAgentProfile(agentProfileId);
+  if (!profile) return;
+
+  const bindings = readBindings();
+  const active = bindings.filter(
+    (b) => b.agentProfileId === agentProfileId && b.status === 'active',
+  );
+
+  // Build channelBindings: key by channelType, values are handle aliases
+  const channelBindings: Record<string, string[]> = {};
+  for (const binding of active) {
+    const key = binding.channelType;
+    if (!channelBindings[key]) channelBindings[key] = [];
+    const alias = binding.handle || binding.channelId;
+    if (!channelBindings[key].includes(alias)) {
+      channelBindings[key].push(alias);
+    }
+    // Also register under 'channel_mention' so the generic scanner picks it up
+    if (!channelBindings['channel_mention']) channelBindings['channel_mention'] = [];
+    if (!channelBindings['channel_mention'].includes(alias)) {
+      channelBindings['channel_mention'].push(alias);
+    }
+  }
+
+  try {
+    updateAgentProfile(agentProfileId, { channelBindings });
+    logger.info(
+      { agentProfileId, activeBindings: active.length },
+      'Synced channel bindings to agent profile',
+    );
+  } catch (err) {
+    logger.error({ err, agentProfileId }, 'Failed to sync channel bindings to profile');
+  }
 }
