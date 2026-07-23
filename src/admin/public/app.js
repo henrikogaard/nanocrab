@@ -1663,6 +1663,7 @@ async function renderGitCodeConsolidated(el) {
         { id: 'tests', label: 'Tests' },
         { id: 'snippets', label: 'Snippets' },
         { id: 'rules', label: 'Review Rules' },
+        { id: 'ltasks', label: 'Quick Tasks' },
       ],
       'git',
     )}</div>`;
@@ -1675,6 +1676,7 @@ async function renderGitCodeConsolidated(el) {
       tests: renderTestRunner,
       snippets: renderSnippets,
       rules: renderReviewRules,
+      ltasks: (tabEl) => renderLightweightTasksPanel(tabEl),
     },
     loadedTabs,
   );
@@ -3490,6 +3492,7 @@ async function renderChat(el) {
         <div id="chat-provider-selector" class="chat-provider-selector"></div>
       </div>
     </div>
+    <div class="inline-approval-banner-container" id="chat-approval-banner"></div>
     <div class="card chat-session-card">
       <div class="chat-messages" id="chat-messages-area">
         ${renderLegacyChatState('empty')}
@@ -3512,6 +3515,7 @@ async function renderChat(el) {
     <div id="chat-voice-status" class="chat-voice-status"></div>`;
 
   renderProviderBadge(selectedJid);
+  renderInlineApprovalBanner(document.getElementById('chat-approval-banner'));
 
   async function loadMessages(jid) {
     if (!jid) return;
@@ -5589,6 +5593,220 @@ function renderRoutineCockpit(tasks, options = {}) {
   </section>`;
 }
 
+// --- Calendar-style schedule preview ---
+function renderScheduleCalendar(tasks) {
+  const activeTasks = (tasks || []).filter((t) => t.status === 'active' && t.next_run);
+  if (activeTasks.length === 0) {
+    return '<div class="schedule-calendar-empty">No upcoming scheduled runs.</div>';
+  }
+  const now = new Date();
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(now);
+    d.setDate(d.getDate() + i);
+    days.push(d);
+  }
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const headerCells = days.map((d) => {
+    const isToday = d.toDateString() === now.toDateString();
+    return `<div class="schedule-cal-header ${isToday ? 'is-today' : ''}"><span>${dayNames[d.getDay()]}</span><strong>${d.getDate()}</strong></div>`;
+  }).join('');
+  const bodyCells = days.map((d) => {
+    const dayStart = new Date(d); dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(d); dayEnd.setHours(23, 59, 59, 999);
+    const dayTasks = activeTasks.filter((t) => {
+      const run = new Date(t.next_run);
+      return run >= dayStart && run <= dayEnd;
+    }).sort((a, b) => new Date(a.next_run) - new Date(b.next_run));
+    const isToday = d.toDateString() === now.toDateString();
+    const items = dayTasks.map((t) => {
+      const time = new Date(t.next_run);
+      const hh = String(time.getHours()).padStart(2, '0');
+      const mm = String(time.getMinutes()).padStart(2, '0');
+      return `<button type="button" class="schedule-cal-event" onclick="viewTaskDetail('${esc(t.id)}')" title="${esc(taskTitle(t))}"><time>${hh}:${mm}</time><span>${esc(truncate(taskTitle(t), 24))}</span></button>`;
+    }).join('');
+    return `<div class="schedule-cal-cell ${isToday ? 'is-today' : ''}">${items || '<span class="schedule-cal-empty-cell">\u2013</span>'}</div>`;
+  }).join('');
+  return `<section class="schedule-calendar">
+    <div class="schedule-cal-grid">${headerCells}</div>
+    <div class="schedule-cal-grid schedule-cal-body">${bodyCells}</div>
+  </section>`;
+}
+
+// --- Lightweight coding tasks panel ---
+async function renderLightweightTasksPanel(container) {
+  if (!container) return;
+  let tasks = [];
+  let repos = [];
+  let providerInfo = {};
+  try {
+    [tasks, repos, providerInfo] = await Promise.all([
+      api('/lightweight-tasks'),
+      api('/agents/coding/repos').catch(() => []),
+      api('/system/provider').catch(() => ({ provider: 'claude' })),
+    ]);
+  } catch { tasks = []; }
+  const providerModels = providerInfo.models || {};
+  const providerDefs = providerInfo.definitions || {};
+  const providerOptions = Object.values(providerDefs)
+    .filter((p) => p && p.selectable !== false)
+    .map((p) => `<option value="${esc(p.id)}">${esc(p.name || p.id)}</option>`)
+    .join('');
+  const repoOptions = (Array.isArray(repos) ? repos : [])
+    .filter((r) => r.enabled !== false)
+    .map((r) => `<option value="${esc(r.fullName)}">${esc(r.fullName)}</option>`)
+    .join('');
+  const statusBadge = (s) => {
+    const cls = s === 'completed' ? 'badge-success' : s === 'running' ? 'badge-info' : s === 'failed' ? 'badge-error' : s === 'cancelled' ? 'badge-muted' : 'badge-warning';
+    return `<span class="badge ${cls}">${esc(s)}</span>`;
+  };
+  const taskRows = (tasks || []).slice().reverse().slice(0, 20).map((t) => {
+    const canCancel = t.status === 'queued' || t.status === 'running';
+    const canRetry = t.status === 'failed' || t.status === 'cancelled';
+    return `<div class="ltask-row" data-ltask-id="${esc(t.id)}">
+      <div class="ltask-main">
+        <strong>${esc(t.repo)}</strong>
+        <p>${esc(truncate(t.prompt, 120))}</p>
+        <div class="ltask-meta">
+          ${statusBadge(t.status)}
+          ${t.provider ? `<span class="badge badge-accent">${esc(t.provider)}</span>` : ''}
+          ${t.model ? `<span class="badge badge-muted">${esc(t.model)}</span>` : ''}
+          <span>${formatTime(t.createdAt)}</span>
+          ${t.branch ? `<code>${esc(t.branch)}</code>` : ''}
+        </div>
+      </div>
+      <div class="ltask-actions">
+        ${canCancel ? `<button class="btn btn-sm btn-danger" onclick="cancelLightweightTask('${esc(t.id)}')">Cancel</button>` : ''}
+        ${canRetry ? `<button class="btn btn-sm btn-ghost" onclick="retryLightweightTask('${esc(t.id)}')">Retry</button>` : ''}
+        <button class="btn btn-sm btn-ghost" onclick="viewLightweightTask('${esc(t.id)}')">Details</button>
+      </div>
+    </div>`;
+  }).join('');
+  container.innerHTML = `
+    <div class="ltask-panel">
+      <div class="ltask-panel-head">
+        <div><span class="report-kicker">Quick coding</span><h3>Lightweight tasks</h3><p>Run a coding prompt against a repo without full agent profile setup.</p></div>
+      </div>
+      <form id="ltask-create-form" class="ltask-form">
+        <div class="grid grid-2">
+          <div class="form-group"><label>Repository</label><select id="ltask-repo">${repoOptions || '<option value="">No repos configured</option>'}</select></div>
+          <div class="form-group"><label>Provider</label><select id="ltask-provider" onchange="updateLtaskModels()"><option value="">Auto</option>${providerOptions}</select></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="form-group"><label>Model</label><select id="ltask-model"><option value="">Auto</option></select></div>
+          <div class="form-group"><label>&nbsp;</label><button type="submit" class="btn btn-primary">Run task</button></div>
+        </div>
+        <div class="form-group"><label>Prompt</label><textarea id="ltask-prompt" class="routine-textarea" placeholder="Describe the coding task..."></textarea></div>
+      </form>
+      <div class="ltask-list" id="ltask-list">${taskRows || '<div class="ltask-empty">No lightweight tasks yet.</div>'}</div>
+      <div id="ltask-detail" class="is-hidden"></div>
+    </div>`;
+  const form = document.getElementById('ltask-create-form');
+  if (form) form.onsubmit = async (e) => {
+    e.preventDefault();
+    const repo = document.getElementById('ltask-repo')?.value;
+    const prompt = document.getElementById('ltask-prompt')?.value?.trim();
+    const provider = document.getElementById('ltask-provider')?.value || undefined;
+    const model = document.getElementById('ltask-model')?.value || undefined;
+    if (!repo || !prompt) { toast('Repository and prompt are required', 'error'); return; }
+    try {
+      await api('/lightweight-tasks', { method: 'POST', body: JSON.stringify({ repo, prompt, provider, model }) });
+      toast('Lightweight task created', 'success');
+      renderLightweightTasksPanel(container);
+    } catch (err) { toast(err?.message || 'Failed to create task', 'error'); }
+  };
+  // Auto-refresh while tasks are active
+  const hasActive = (tasks || []).some((t) => t.status === 'queued' || t.status === 'running');
+  if (hasActive && container.isConnected) {
+    setTimeout(() => { if (container.isConnected) renderLightweightTasksPanel(container); }, 5000);
+  }
+}
+
+window.updateLtaskModels = function () {
+  const providerId = document.getElementById('ltask-provider')?.value;
+  const modelSelect = document.getElementById('ltask-model');
+  if (!modelSelect) return;
+  const models = (window._ltaskProviderModels || {})[providerId] || [];
+  modelSelect.innerHTML = '<option value="">Auto</option>' + models.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+};
+
+window.cancelLightweightTask = async function (id) {
+  try {
+    await api(`/lightweight-tasks/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+    toast('Task cancelled', 'success');
+    const panel = document.getElementById('ltask-list')?.closest('.ltask-panel');
+    if (panel) renderLightweightTasksPanel(panel.parentElement);
+  } catch (err) { toast(err?.message || 'Cancel failed', 'error'); }
+};
+
+window.retryLightweightTask = async function (id) {
+  try {
+    const task = await api(`/lightweight-tasks/${encodeURIComponent(id)}`);
+    if (!task) { toast('Task not found', 'error'); return; }
+    await api('/lightweight-tasks', { method: 'POST', body: JSON.stringify({ repo: task.repo, prompt: task.prompt, provider: task.provider || undefined, model: task.model || undefined }) });
+    toast('Task retried', 'success');
+    const panel = document.getElementById('ltask-list')?.closest('.ltask-panel');
+    if (panel) renderLightweightTasksPanel(panel.parentElement);
+  } catch (err) { toast(err?.message || 'Retry failed', 'error'); }
+};
+
+window.viewLightweightTask = async function (id) {
+  const detail = document.getElementById('ltask-detail');
+  if (!detail) return;
+  try {
+    const task = await api(`/lightweight-tasks/${encodeURIComponent(id)}`);
+    if (!task) { toast('Task not found', 'error'); return; }
+    detail.classList.remove('is-hidden');
+    detail.innerHTML = `<div class="ltask-detail-card">
+      <div class="ltask-detail-head"><strong>${esc(task.repo)}</strong><button class="btn btn-sm btn-ghost" onclick="document.getElementById('ltask-detail').classList.add('is-hidden')">Close</button></div>
+      <p>${esc(task.prompt)}</p>
+      <div class="ltask-meta">${esc(task.status)} ${task.provider ? '/ ' + esc(task.provider) : ''} ${task.model ? '/ ' + esc(task.model) : ''} ${task.branch ? '/ ' + esc(task.branch) : ''}</div>
+      ${task.error ? `<div class="ltask-error">${esc(task.error)}</div>` : ''}
+      ${task.output ? `<pre class="ltask-output">${esc(task.output.slice(-5000))}</pre>` : '<p class="ltask-no-output">No output yet.</p>'}
+    </div>`;
+  } catch (err) { toast(err?.message || 'Failed to load task', 'error'); }
+};
+
+// --- Inline approval banner for chat and session views ---
+async function renderInlineApprovalBanner(container) {
+  if (!container) return;
+  try {
+    const approvals = await api('/approvals?status=pending&limit=5');
+    const pending = (approvals || []).filter((a) => a.status === 'pending');
+    if (pending.length === 0) { container.innerHTML = ''; return; }
+    container.innerHTML = `<div class="inline-approval-banner">
+      <div class="inline-approval-head"><strong>${pending.length} pending approval${pending.length > 1 ? 's' : ''}</strong><button class="btn btn-sm btn-ghost" onclick="navigate('approvals')">View all</button></div>
+      ${pending.slice(0, 3).map((a) => `<div class="inline-approval-item" data-approval-id="${esc(a.id)}">
+        <div class="inline-approval-info"><strong>${esc(a.title || a.kind || 'Approval')}</strong>${a.summary ? `<span>${esc(truncate(a.summary, 100))}</span>` : ''}${a.risk ? `<span class="badge ${a.risk === 'high' ? 'badge-error' : a.risk === 'medium' ? 'badge-warning' : 'badge-muted'}">${esc(a.risk)}</span>` : ''}</div>
+        <div class="inline-approval-actions">
+          <button class="btn btn-sm btn-primary" onclick="inlineApproveAction('${esc(a.id)}')">Approve</button>
+          <button class="btn btn-sm btn-danger" onclick="inlineDenyAction('${esc(a.id)}')">Deny</button>
+        </div>
+      </div>`).join('')}
+    </div>`;
+  } catch { container.innerHTML = ''; }
+}
+
+window.inlineApproveAction = async function (id) {
+  try {
+    await api(`/approvals/${encodeURIComponent(id)}/approve`, { method: 'POST', body: JSON.stringify({}) });
+    toast('Approved', 'success');
+    refreshInlineApprovalBanners();
+  } catch (err) { toast(err?.message || 'Approve failed', 'error'); }
+};
+
+window.inlineDenyAction = async function (id) {
+  try {
+    await api(`/approvals/${encodeURIComponent(id)}/deny`, { method: 'POST', body: JSON.stringify({}) });
+    toast('Denied', 'success');
+    refreshInlineApprovalBanners();
+  } catch (err) { toast(err?.message || 'Deny failed', 'error'); }
+};
+
+function refreshInlineApprovalBanners() {
+  document.querySelectorAll('.inline-approval-banner-container').forEach((el) => renderInlineApprovalBanner(el));
+}
+
 // Tasks
 async function renderTasks(el) {
   let blueprintLoadIssue = '';
@@ -5747,6 +5965,8 @@ async function renderTasks(el) {
     </div>
 
     ${renderRoutineCockpit(tasks, { loadIssues })}
+    <div class="routine-section-head"><div><div class="card-title">Schedule preview</div><div class="routine-page-subtitle">Upcoming runs across the next 7 days.</div></div></div>
+    ${renderScheduleCalendar(tasks)}
     ${renderRoutineIntakeGuide()}
 
     <div id="new-task-form" class="card routine-wizard is-hidden">
@@ -5888,6 +6108,7 @@ async function renderTasks(el) {
   window._taskTemplates = safeBlueprints;
   window._taskProviderModels = providerModels;
   window._taskProviderDefs = providerDefinitions;
+  window._ltaskProviderModels = providerModels;
   window._taskById = Object.fromEntries(tasks.map((task) => [task.id, task]));
 
   bindTaskCreateForm();
