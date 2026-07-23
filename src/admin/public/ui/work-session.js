@@ -746,8 +746,155 @@ function renderToolCallTimeline(toolCalls) {
     );
   }
 
+  function truncateText(text, maxLen) {
+    var str = stringValue(text);
+    if (str.length <= maxLen) return str;
+    return str.slice(0, maxLen) + '\u2026';
+  }
+
+  function renderNarrative(session) {
+    var model = asRecord(session);
+    var projections = asRecord(model.projections);
+    var sections = [];
+
+    sections.push(
+      '<div class="narrative-opening">' +
+      '<div class="narrative-meta">' +
+      '<span class="narrative-time">' + esc(model.startedAt || 'Unknown time') + '</span>' +
+      '<span class="narrative-context">' + esc(model.group || 'Unknown group') + '</span>' +
+      '<span class="narrative-mode">' + esc(model.mode || 'agent') + '</span>' +
+      '</div>' +
+      '<div class="narrative-status-line">' + esc(statusLabel(model.status)) +
+      (model.currentStep ? ' \u2014 ' + esc(model.currentStep) : '') +
+      '</div></div>'
+    );
+
+    var conversation = asRecord(projections.conversation);
+    var conversationItems = Array.isArray(conversation.items)
+      ? conversation.items
+      : [];
+    if (conversation.available === true && conversationItems.length > 0) {
+      var reasoningHtml = '<section class="narrative-section"><h4>Reasoning chain</h4><div class="narrative-steps">';
+      conversationItems.forEach(function (item, index) {
+        var role = stringValue(item.role || item.type || 'step');
+        var content = stringValue(item.content || item.summary || item.detail || '');
+        reasoningHtml += '<div class="narrative-step">' +
+          '<span class="narrative-step-index">' + (index + 1) + '</span>' +
+          '<div class="narrative-step-body"><span class="narrative-role">' + esc(role) + '</span>' +
+          '<p>' + esc(content) + '</p></div></div>';
+      });
+      reasoningHtml += '</div></section>';
+      sections.push(reasoningHtml);
+    }
+
+    var plan = asRecord(projections.plan);
+    var planItems = Array.isArray(plan.items) ? plan.items : [];
+    if (plan.available === true && planItems.length > 0) {
+      var decisionsHtml = '<section class="narrative-section"><h4>Decision points</h4><div class="narrative-decisions">';
+      planItems.forEach(function (item) {
+        var title = stringValue(item.title || item.name || 'Decision');
+        var detail = stringValue(item.content || item.summary || item.detail || '');
+        var itemStatus = stringValue(item.status || '');
+        decisionsHtml += '<div class="narrative-decision">' +
+          '<strong>' + esc(title) + '</strong>' +
+          (itemStatus ? ' <span class="badge badge-muted">' + esc(itemStatus) + '</span>' : '') +
+          (detail ? '<p>' + esc(detail) + '</p>' : '') +
+          '</div>';
+      });
+      decisionsHtml += '</div></section>';
+      sections.push(decisionsHtml);
+    }
+
+    var toolCalls = Array.isArray(model.toolCalls) ? model.toolCalls.filter(isRecord) : [];
+    if (toolCalls.length > 0) {
+      var actionsHtml = '<section class="narrative-section"><h4>Actions taken</h4><ol class="narrative-actions">';
+      toolCalls.forEach(function (tc) {
+        var name = stringValue(tc.name || 'tool');
+        var output = stringValue(tc.output || tc.result || '');
+        var duration = tc.duration ? ' (' + esc(String(tc.duration)) + 's)' : '';
+        actionsHtml += '<li><code>' + esc(name) + '</code>' + duration +
+          (output ? '<p class="narrative-tool-output">' + esc(truncateText(output, 300)) + '</p>' : '') +
+          '</li>';
+      });
+      actionsHtml += '</ol></section>';
+      sections.push(actionsHtml);
+    }
+
+    var files = Array.isArray(model.changedFiles) ? model.changedFiles : [];
+    var artifacts = Array.isArray(model.artifacts) ? model.artifacts.filter(isRecord) : [];
+    if (files.length > 0 || artifacts.length > 0) {
+      var outcomeHtml = '<section class="narrative-section"><h4>Outcome</h4>';
+      if (files.length > 0) {
+        outcomeHtml += '<div class="narrative-outcome-group"><strong>Changed files</strong><ul class="narrative-files">' +
+          files.map(function (f) { return '<li><code>' + esc(f) + '</code></li>'; }).join('') +
+          '</ul></div>';
+      }
+      if (artifacts.length > 0) {
+        outcomeHtml += '<div class="narrative-outcome-group"><strong>Artifacts</strong><ul class="narrative-artifacts">' +
+          artifacts.map(function (a) {
+            return '<li>' + esc(stringValue(a.title || a.name || a.path || a.id || 'artifact')) + '</li>';
+          }).join('') +
+          '</ul></div>';
+      }
+      outcomeHtml += '</section>';
+      sections.push(outcomeHtml);
+    }
+
+    var journal = asRecord(projections.journalEvents);
+    var journalItems = Array.isArray(journal.items) ? journal.items : [];
+    if (journal.available === true && journalItems.length > 0) {
+      var journalHtml = '<section class="narrative-section"><h4>Journal</h4><div class="narrative-journal">';
+      journalItems.forEach(function (item) {
+        var title = stringValue(item.title || item.type || 'entry');
+        var detail = stringValue(item.content || item.summary || item.detail || '');
+        var timestamp = stringValue(item.timestamp || item.createdAt || '');
+        journalHtml += '<div class="narrative-journal-entry">' +
+          '<strong>' + esc(title) + '</strong>' +
+          (timestamp ? ' <time>' + esc(timestamp) + '</time>' : '') +
+          (detail ? '<p>' + esc(detail) + '</p>' : '') +
+          '</div>';
+      });
+      journalHtml += '</div></section>';
+      sections.push(journalHtml);
+    }
+
+    if (sections.length <= 1) {
+      return '<div class="work-session-empty">No narrative data available for this session. The narrative view assembles reasoning, decisions, tool usage, and outcomes into a readable story.</div>';
+    }
+
+    return '<div class="session-narrative">' + sections.join('') + '</div>';
+  }
+
+  function renderSessionApprovals(session) {
+    var approvals = Array.isArray(session.approvals) ? session.approvals.filter(isRecord) : [];
+    if (approvals.length === 0) {
+      return '<div class="work-session-empty">No approvals recorded</div>';
+    }
+    return '<ul class="work-session-records work-session-approvals">' +
+      approvals.map(function (approval) {
+        var title = stringValue(approval.title || approval.kind || approval.id || 'Approval');
+        var detail = stringValue(approval.summary || approval.detail || '');
+        var status = stringValue(approval.status || 'pending').toLowerCase();
+        var id = stringValue(approval.id || '');
+        var isPending = status === 'pending';
+        var actions = '';
+        if (isPending && id) {
+          actions = '<div class="session-approval-actions">' +
+            '<button type="button" class="btn btn-sm btn-primary" data-session-approval-action="approve" data-approval-id="' + esc(id) + '">Approve</button>' +
+            '<button type="button" class="btn btn-sm btn-danger" data-session-approval-action="deny" data-approval-id="' + esc(id) + '">Deny</button>' +
+            '</div>';
+        }
+        return '<li class="session-approval-item ' + (isPending ? 'is-pending' : 'is-resolved') + '">' +
+          '<div class="session-approval-main"><strong>' + esc(title) + '</strong>' +
+          ' <span class="badge ' + (isPending ? 'badge-warning' : 'badge-muted') + '">' + esc(status) + '</span>' +
+          (detail ? '<p>' + esc(detail) + '</p>' : '') +
+          '</div>' + actions + '</li>';
+      }).join('') + '</ul>';
+  }
+
   var inspectorTabs = [
     { id: 'overview', label: 'Overview' },
+    { id: 'narrative', label: 'Narrative' },
     { id: 'conversation', label: 'Conversation' },
     { id: 'plan', label: 'Plan & tasks' },
     { id: 'timeline', label: 'Timeline' },
@@ -771,6 +918,7 @@ function renderToolCallTimeline(toolCalls) {
 
   function inspectorPanel(session, activeTab) {
     var projections = asRecord(session.projections);
+    if (activeTab === 'narrative') return renderNarrative(session);
     if (activeTab === 'conversation') {
       return projectionPanel(
         projections.conversation,
@@ -826,11 +974,7 @@ function renderToolCallTimeline(toolCalls) {
         '<div class="work-session-panel-summary">' +
         counter('Pending approvals', pendingApprovalCount(session)) +
         '</div>' +
-        recordList(
-          session.approvals,
-          'No approvals recorded',
-          'work-session-approvals',
-        )
+        renderSessionApprovals(session)
       );
     }
     if (activeTab === 'artifacts') {
