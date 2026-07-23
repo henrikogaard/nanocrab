@@ -90,6 +90,7 @@ import githubViewsRoutes from './routes/github-views.js';
 import learningProposalsRoutes from './routes/learning-proposals.js';
 import sourceCollectionsRoutes from './routes/source-collections.js';
 import workspacesRoutes from './routes/workspaces.js';
+import { startWorkspaceCleanup } from '../workspace-manager.js';
 
 // Plugin system
 import {
@@ -269,7 +270,7 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
     requireRole('admin'),
     githubViewsRoutes,
   );
-  app.use('/api/workspaces', requireAuth, workspacesRoutes);
+  app.use('/api/workspaces', requireAuth, requireRole('admin'), workspacesRoutes);
   app.use('/api/assistant-profile', requireAuth, assistantProfileRoutes);
   app.use(
     '/api/control-plane',
@@ -328,6 +329,9 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
 
   // Initialize plugins (runs onInit hooks — alert timers, uptime checker, etc.)
   await initPlugins();
+
+  // Start periodic workspace cleanup (every 5 minutes)
+  startWorkspaceCleanup();
 
   // SPA fallback
   app.get('{*path}', (_req, res) => {

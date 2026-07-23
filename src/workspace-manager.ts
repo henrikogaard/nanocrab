@@ -70,8 +70,10 @@ function assertSafeBranch(branch: string): void {
   }
 }
 
-function resolveRepoPath(repo: string): string {
-  // Look up the repo's local clone path from coding repos config
+const REPOS_DIR = path.resolve(WORKSPACES_DIR, 'repos');
+
+async function resolveRepoPath(repo: string): Promise<string> {
+  // Verify repo is registered for coding
   const repos = loadCodingRepos();
   const codingRepo = repos.find(
     (r) => r.fullName.toLowerCase() === repo.toLowerCase(),
@@ -79,19 +81,43 @@ function resolveRepoPath(repo: string): string {
   if (!codingRepo) {
     throw new Error(`Repo ${repo} is not registered for coding jobs`);
   }
-  // The coding workspace stores clones under a predictable path
+
+  // Maintain a shared clone under data/workspaces/repos/{slug}
   const repoDirName = repo.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  const clonePath = path.resolve(
-    DATA_DIR,
-    'coding-workspaces',
-    'repos',
-    repoDirName,
-  );
-  if (!fs.existsSync(clonePath)) {
+  const clonePath = path.resolve(REPOS_DIR, repoDirName);
+
+  if (fs.existsSync(path.join(clonePath, '.git'))) {
+    // Fetch latest to keep the clone current
+    try {
+      await execFileAsync('git', ['fetch', '--prune'], {
+        cwd: clonePath,
+        timeout: GIT_TIMEOUT_MS,
+      });
+    } catch {
+      // Non-critical — worktree can still be created from existing refs
+    }
+    return clonePath;
+  }
+
+  // Clone the repo
+  fs.mkdirSync(REPOS_DIR, { recursive: true });
+  const githubToken = process.env.GITHUB_TOKEN || '';
+  const cloneUrl = githubToken
+    ? `https://x-access-token:${githubToken}@github.com/${repo}.git`
+    : `https://github.com/${repo}.git`;
+
+  try {
+    await execFileAsync(
+      'git',
+      ['clone', '--no-checkout', cloneUrl, clonePath],
+      { timeout: GIT_TIMEOUT_MS },
+    );
+  } catch (err) {
     throw new Error(
-      `No local clone found for ${repo} at ${clonePath}. Run a coding job first to establish the clone.`,
+      `Failed to clone ${repo}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+
   return clonePath;
 }
 
@@ -108,7 +134,7 @@ export async function createWorkspace(
     );
   }
 
-  const repoPath = resolveRepoPath(input.repo);
+  const repoPath = await resolveRepoPath(input.repo);
   const id = crypto.randomUUID().slice(0, 8);
   const branch = input.branch || `nanocrab/ws-${id}`;
   assertSafeBranch(branch);
@@ -202,7 +228,7 @@ export async function cleanupWorkspace(id: string): Promise<boolean> {
 
   try {
     // Remove the worktree
-    const repoPath = resolveRepoPath(ws.repo);
+    const repoPath = await resolveRepoPath(ws.repo);
     try {
       await execFileAsync('git', ['worktree', 'remove', '--force', ws.path], {
         cwd: repoPath,
@@ -210,7 +236,8 @@ export async function cleanupWorkspace(id: string): Promise<boolean> {
       });
     } catch {
       // If git worktree remove fails, try manual cleanup
-      if (fs.existsSync(ws.path)) {
+      // Validate path is within WORKSPACES_DIR before force-removing
+      if (ws.path.startsWith(WORKSPACES_DIR) && fs.existsSync(ws.path)) {
         fs.rmSync(ws.path, { recursive: true, force: true });
       }
       // Prune worktree entries
