@@ -792,6 +792,7 @@ function buildContainerArgs(
       providerDefinition.runtime === 'openai-compatible' &&
       effectiveProvider !== 'ollama'
     ) {
+      setEnv(providerDefinition.envKey, apiKey ? 'placeholder' : undefined);
       setEnv('AGENT_PROVIDER_API_KEY', apiKey ? 'placeholder' : undefined);
     } else {
       setEnv(providerDefinition.envKey, apiKey);

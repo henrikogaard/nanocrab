@@ -5,6 +5,7 @@ import {
   buildAllowedTools,
   buildMcpServers,
   isOpenAiCompatibleAgentProvider,
+  openCodeModelForProvider,
   openAiCompatibleBaseUrl,
 } from './index.js';
 
@@ -157,6 +158,18 @@ describe('agent-runner OpenAI-compatible dispatch', () => {
     process.env.AGENT_PROVIDER_BASE_URL = 'https://custom.example/v1/';
     expect(openAiCompatibleBaseUrl('openai-compatible')).toBe(
       'https://custom.example/v1',
+    );
+  });
+
+  it('uses OpenCode provider-qualified model IDs for AIRouter tool runs', () => {
+    expect(
+      openCodeModelForProvider('airouter', 'DeepSeek-V4-Flash'),
+    ).toBe('airouter/DeepSeek-V4-Flash');
+    expect(
+      openCodeModelForProvider('airouter', 'airouter/Qwen3.6'),
+    ).toBe('airouter/Qwen3.6');
+    expect(openCodeModelForProvider('opencode', 'opencode/grok-code-fast-1')).toBe(
+      'opencode/grok-code-fast-1',
     );
   });
 });

@@ -1382,10 +1382,13 @@ async function runQueryOpenCode(
   containerInput: ContainerInput,
   mcpServerPath: string,
 ): Promise<{ output: string }> {
-  const model =
+  const provider =
+    process.env.AGENT_PROVIDER || containerInput.provider || 'opencode';
+  const selectedModel =
     containerInput.model ||
     process.env.DEFAULT_MODEL ||
     'opencode/grok-code-fast-1';
+  const model = openCodeModelForProvider(provider, selectedModel);
   const systemPrompt = buildSharedSystemContext(
     undefined,
     containerInput.prompt,
@@ -1435,6 +1438,13 @@ async function runQueryOpenCode(
     );
     proc.stdin?.end();
   });
+}
+
+export function openCodeModelForProvider(provider: string, model: string): string {
+  if (provider === 'airouter' && !model.startsWith('airouter/')) {
+    return `airouter/${model}`;
+  }
+  return model;
 }
 
 async function main(): Promise<void> {
@@ -1521,6 +1531,11 @@ async function main(): Promise<void> {
   }
   if (provider === 'opencode') {
     log('Using OpenCode provider');
+    await runQueryOpenCode(prompt, containerInput, mcpServerPath);
+    return;
+  }
+  if (provider === 'airouter') {
+    log('Using AIRouter through OpenCode for tool support');
     await runQueryOpenCode(prompt, containerInput, mcpServerPath);
     return;
   }
