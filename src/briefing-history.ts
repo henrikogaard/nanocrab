@@ -99,7 +99,29 @@ export interface BriefingAnalyticsResult {
   byChannel: Record<string, number>;
   byOutcome: Record<BriefingOutcome, number>;
   byApprovalState: Record<BriefingHistoryEntry['approvalState'], number>;
+  byGroup: Record<string, BriefingGroupAnalytics>;
+  schedulePreview: BriefingSchedulePreview[];
   buckets: BriefingAnalyticsBucket[];
+}
+
+export interface BriefingGroupAnalytics {
+  routine: string;
+  total: number;
+  successRate: number;
+  avgLatencyMs: number;
+  deliveryModeBreakdown: Record<string, number>;
+  scheduleAdherence: number;
+  channels: string[];
+}
+
+export interface BriefingSchedulePreview {
+  routine: string;
+  nextScheduled: string | null;
+  frequency: string;
+  deliveryMode: string;
+  groupFolder: string;
+  channel: string;
+  recentOutcome: BriefingOutcome | null;
 }
 
 export interface BriefingHistoryOptions {
@@ -545,6 +567,8 @@ export function aggregateBriefingAnalytics(
     byChannel,
     byOutcome,
     byApprovalState,
+    byGroup: {} as Record<string, BriefingGroupAnalytics>,
+    schedulePreview: [] as BriefingSchedulePreview[],
     buckets: Array.from(buckets.values()).sort((a, b) =>
       b.lastAt.localeCompare(a.lastAt),
     ),
@@ -732,4 +756,56 @@ export async function sendChannelFollowUp(
       input.options,
     );
   }
+}
+
+// Grouped routine analytics
+
+export function aggregateGroupedRoutineAnalytics(
+  entries: BriefingHistoryEntry[],
+): BriefingGroupAnalytics[] {
+  const byRoutine = new Map<string, BriefingHistoryEntry[]>();
+
+  for (const entry of entries) {
+    if (!byRoutine.has(entry.routine)) {
+      byRoutine.set(entry.routine, []);
+    }
+    byRoutine.get(entry.routine)!.push(entry);
+  }
+
+  const result: BriefingGroupAnalytics[] = [];
+
+  for (const [routine, routineEntries] of byRoutine) {
+    const total = routineEntries.length;
+    const successCount = routineEntries.filter((e) => e.status === 'completed')
+      .length;
+    const totalLatency = routineEntries.reduce((sum, e) => sum + e.latencyMs, 0);
+    const deliveryModes: Record<string, number> = {};
+    const channels = new Set<string>();
+
+    for (const entry of routineEntries) {
+      const mode = entry.delivery.mode || 'none';
+      deliveryModes[mode] = (deliveryModes[mode] || 0) + 1;
+      channels.add(entry.channel);
+    }
+
+    result.push({
+      routine,
+      total,
+      successRate: total > 0 ? successCount / total : 0,
+      avgLatencyMs: total > 0 ? totalLatency / total : 0,
+      deliveryModeBreakdown: deliveryModes,
+      scheduleAdherence: total > 0 ? successCount / total : 0,
+      channels: Array.from(channels),
+    });
+  }
+
+  return result.sort((a, b) => b.total - a.total);
+}
+
+export function getGroupedRoutineAnalytics(
+  filters: BriefingHistoryFilters = {},
+  options?: BriefingHistoryOptions,
+): BriefingGroupAnalytics[] {
+  const entries = matchingBriefingHistory(filters, options);
+  return aggregateGroupedRoutineAnalytics(entries);
 }
