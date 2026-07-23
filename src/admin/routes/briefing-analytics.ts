@@ -3,6 +3,7 @@ import { Router, type Request, type Response } from 'express';
 import {
   exportBriefingHistory,
   getBriefingAnalytics,
+  getGroupedRoutineAnalytics,
   listBriefingHistory,
   listDeliveryPreferences,
   removeDeliveryPreference,
@@ -49,6 +50,21 @@ router.get('/history', (req: Request, res: Response) => {
     limit: Math.min(parseInt(req.query.limit as string) || 100, 1000),
   };
   res.json(listBriefingHistory(filters));
+});
+
+router.get('/routines', (req: Request, res: Response) => {
+  const filters = {
+    ...(queryString(req.query.taskId) && {
+      taskId: queryString(req.query.taskId),
+    }),
+    ...(queryString(req.query.groupFolder) && {
+      groupFolder: queryString(req.query.groupFolder),
+    }),
+    ...(queryString(req.query.channel) && {
+      channel: queryString(req.query.channel),
+    }),
+  };
+  res.json(getGroupedRoutineAnalytics(filters as any));
 });
 
 router.get('/analytics', (_req: Request, res: Response) => {
