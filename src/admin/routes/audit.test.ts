@@ -24,25 +24,6 @@ vi.mock('../middleware.js', () => ({
     },
 }));
 
-vi.mock('../../container-runtime.js', () => ({
-  isNetworkIsolationEnabled: () => true,
-  isContainerHardeningEnabled: () => true,
-}));
-
-vi.mock('../../egress-gateway.js', () => ({
-  loadEgressAllowlist: () => ({
-    destinations: [
-      {
-        id: 'anthropic',
-        host: 'api.anthropic.com',
-        credentialId: 'ANTHROPIC_API_KEY',
-        port: 443,
-        reason: 'default',
-      },
-    ],
-  }),
-}));
-
 const { default: auditRouter } = await import('./audit.js');
 
 function app(): express.Express {
@@ -127,10 +108,10 @@ describe('runtime audit admin routes', () => {
 
     await withServer(async (baseUrl) => {
       const exportRes = await fetch(
-        new URL(
-          '/runtime-audit/export/tamper-evident?signingKey=test-key',
-          baseUrl,
-        ),
+        new URL('/runtime-audit/export/tamper-evident', baseUrl),
+        {
+          headers: { 'x-signing-key': 'test-key' },
+        },
       );
       expect(exportRes.status).toBe(200);
       const exportData = (await exportRes.json()) as {
