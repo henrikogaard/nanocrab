@@ -34,6 +34,7 @@ vi.mock('./container-runtime.js', () => ({
   CONTAINER_HOST_GATEWAY: 'host.docker.internal',
   CONTAINER_RUNTIME_BIN: 'docker',
   hostGatewayArgs: vi.fn(() => []),
+  agentNetworkArgs: vi.fn(() => []),
 }));
 
 vi.mock('./credential-proxy.js', () => ({

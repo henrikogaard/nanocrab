@@ -38,6 +38,7 @@ vi.mock('../../container-runtime.js', () => ({
   CONTAINER_RUNTIME_BIN: 'docker',
   CONTAINER_HOST_GATEWAY: 'host.docker.internal',
   hostGatewayArgs: () => [],
+  agentNetworkArgs: () => [],
 }));
 
 vi.mock('../../db.js', () => ({
