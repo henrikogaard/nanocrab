@@ -1039,6 +1039,7 @@ export function broadcastMessage(message: {
   chat_jid: string;
   timestamp: string;
   channel?: string;
+  is_bot_message?: boolean;
 }): void {
   broadcast({ type: 'new_message', data: message });
 }

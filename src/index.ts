@@ -398,6 +398,7 @@ async function sendBotTextReply(
     content: text,
     chat_jid: chatJid,
     timestamp,
+    is_bot_message: true,
   });
 }
 
@@ -1042,8 +1043,14 @@ async function runAgent(
         providerFallbackPurpose: 'default_chat',
         providerFallbackAction: 'external-message',
       },
-      (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (proc, containerName, acceptsFollowUpInput) =>
+        queue.registerProcess(
+          chatJid,
+          proc,
+          containerName,
+          group.folder,
+          acceptsFollowUpInput,
+        ),
       wrappedOnOutput,
     );
 

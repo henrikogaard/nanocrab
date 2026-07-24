@@ -303,6 +303,7 @@ describe('GroupQueue', () => {
       {} as any,
       'container-1',
       'test-group',
+      true,
     );
 
     // Enqueue a task while container is active but NOT idle
@@ -382,6 +383,7 @@ describe('GroupQueue', () => {
       {} as any,
       'container-1',
       'test-group',
+      true,
     );
 
     // Container becomes idle
@@ -430,6 +432,60 @@ describe('GroupQueue', () => {
     expect(result).toBe(false);
 
     resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('does not consume follow-ups through containers without interactive input support', async () => {
+    let resolveProcess: () => void;
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('web:one-shot-provider');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'web:one-shot-provider',
+      {} as any,
+      'container-1',
+      'web-one-shot-provider',
+      false,
+    );
+
+    expect(queue.sendMessage('web:one-shot-provider', 'follow up')).toBe(false);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('pipes follow-ups only when the active container supports interactive input', async () => {
+    let resolveProcess: () => void;
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('web:interactive-provider');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'web:interactive-provider',
+      {} as any,
+      'container-1',
+      'web-interactive-provider',
+      true,
+    );
+
+    expect(queue.sendMessage('web:interactive-provider', 'follow up')).toBe(
+      true,
+    );
+
+    resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
 
