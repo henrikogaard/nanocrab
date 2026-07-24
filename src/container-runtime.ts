@@ -64,6 +64,28 @@ export function readonlyMountArgs(
   return ['-v', `${hostPath}:${containerPath}:ro`];
 }
 
+// --- Network isolation / hardening controls (proof-matrix surface) ---
+
+/**
+ * Whether the default-deny agent network topology is enabled. The full
+ * topology implementation lands in issue #219; this flag is the proof-matrix
+ * surface so the matrix can report the configured state without pulling in
+ * the full network-creation code path.
+ */
+export function isNetworkIsolationEnabled(): boolean {
+  const raw = (process.env.CONTAINER_NETWORK_ISOLATION || 'on').toLowerCase();
+  return raw !== 'off';
+}
+
+/**
+ * Whether container hardening flags are enabled. The full flag set lands in
+ * issue #221; this flag is the proof-matrix surface.
+ */
+export function isContainerHardeningEnabled(): boolean {
+  const raw = (process.env.CONTAINER_HARDENING || 'on').toLowerCase();
+  return raw !== 'off';
+}
+
 /** Stop a container by name. Uses execFileSync to avoid shell injection. */
 export function stopContainer(name: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
