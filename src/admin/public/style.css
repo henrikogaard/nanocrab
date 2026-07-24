@@ -40535,3 +40535,111 @@ h1, h2, h3,
     background-attachment: scroll;
   }
 }
+
+/* ==========================================================================
+   SETTINGS CARD COLLAPSE — progressive accordion for the 8000px+ scroll
+   ========================================================================== */
+
+.settings-card-collapse-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px 16px;
+  border: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition);
+}
+
+.settings-card-collapse-toggle:hover {
+  background: var(--surface2);
+}
+
+.settings-card-collapse-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.settings-card-collapse-chevron {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  position: relative;
+  transition: transform var(--transition);
+}
+
+.settings-card-collapse-chevron::before,
+.settings-card-collapse-chevron::after {
+  content: "";
+  position: absolute;
+  background: var(--text-muted);
+  border-radius: 1px;
+  transition: transform var(--transition), opacity var(--transition);
+}
+
+.settings-card-collapse-chevron::before {
+  top: 7px;
+  left: 2px;
+  width: 12px;
+  height: 2px;
+}
+
+.settings-card-collapse-chevron::after {
+  top: 2px;
+  left: 7px;
+  width: 2px;
+  height: 12px;
+}
+
+.settings-card-collapse-toggle[aria-expanded="true"] .settings-card-collapse-chevron::after {
+  transform: rotate(90deg);
+  opacity: 0;
+}
+
+.settings-card-body-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  overflow: hidden;
+  transition: grid-template-rows 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.settings-card-body-wrap.is-open {
+  grid-template-rows: 1fr;
+}
+
+.settings-card-body-wrap > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settings-card-body-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* When collapsed, the card itself shrinks to just the toggle */
+.card:has(.settings-card-collapse-toggle) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.card:has(.settings-card-collapse-toggle) > .settings-card-collapse-toggle {
+  margin: 0;
+}
+
+.card:has(.settings-card-collapse-toggle) > .settings-card-body-wrap {
+  padding: 0 16px 16px;
+}
+
+.card:has(.settings-card-collapse-toggle) > .settings-card-body-wrap.is-open {
+  padding: 0 16px 16px;
+}

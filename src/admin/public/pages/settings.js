@@ -1067,6 +1067,39 @@ window.renderSettings = async function (el) {
       </table>
     </div>`;
 
+  // Progressive enhancement: make each settings card collapsible
+  // to tame the 8000px+ scroll. First two cards stay open.
+  setTimeout(function () {
+    var allCards = Array.from(el.querySelectorAll('.card, .settings-profile-card'));
+    allCards.forEach(function (card, idx) {
+      if (card.querySelector('.settings-card-collapse-toggle')) return;
+      var titleEl = card.querySelector('.card-title, .settings-card-title, h3, h4');
+      if (!titleEl) return;
+      var titleText = titleEl.textContent.trim();
+      var toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'settings-card-collapse-toggle';
+      toggle.setAttribute('aria-expanded', idx < 2 ? 'true' : 'false');
+      toggle.innerHTML = '<span class="settings-card-collapse-chevron"></span>' + titleText;
+      titleEl.style.display = 'none';
+      card.insertBefore(toggle, card.firstChild);
+      var bodyWrap = document.createElement('div');
+      bodyWrap.className = 'settings-card-body-wrap' + (idx < 2 ? ' is-open' : '');
+      var innerWrap = document.createElement('div');
+      innerWrap.className = 'settings-card-body-inner';
+      var children = Array.from(card.children);
+      children.forEach(function (child) {
+        if (child !== toggle) innerWrap.appendChild(child);
+      });
+      bodyWrap.appendChild(innerWrap);
+      card.appendChild(bodyWrap);
+      toggle.addEventListener('click', function () {
+        var open = bodyWrap.classList.toggle('is-open');
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    });
+  }, 0);
+
   // Load user management (owner only)
   if (isOwner) loadUsersSection();
 
