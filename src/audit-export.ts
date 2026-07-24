@@ -104,8 +104,11 @@ function canonicalJsonStringify(value: unknown): string {
     return '[' + value.map(canonicalJsonStringify).join(',') + ']';
   }
   const keys = Object.keys(value).sort();
-  const entries = keys.map((k) =>
-    JSON.stringify(k) + ':' + canonicalJsonStringify((value as Record<string, unknown>)[k]),
+  const entries = keys.map(
+    (k) =>
+      JSON.stringify(k) +
+      ':' +
+      canonicalJsonStringify((value as Record<string, unknown>)[k]),
   );
   return '{' + entries.join(',') + '}';
 }

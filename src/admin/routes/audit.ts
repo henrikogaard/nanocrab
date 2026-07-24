@@ -48,10 +48,14 @@ router.get('/export', (req: Request, res: Response) => {
   });
   res.setHeader('Content-Type', 'application/json');
   // RFC 6266: encode filename safely (date string is ASCII-safe, but be explicit)
-  const filename = 'nanocrab-audit-' + new Date().toISOString().slice(0, 10) + '.json';
+  const filename =
+    'nanocrab-audit-' + new Date().toISOString().slice(0, 10) + '.json';
   res.setHeader(
     'Content-Disposition',
-    'attachment; filename="' + filename + '"; filename*=UTF-8\'\'' + encodeURIComponent(filename),
+    'attachment; filename="' +
+      filename +
+      "\"; filename*=UTF-8''" +
+      encodeURIComponent(filename),
   );
   res.json({ exportedAt: new Date().toISOString(), events });
 });
@@ -89,10 +93,14 @@ router.get('/export/tamper-evident', (req: Request, res: Response) => {
   });
   res.setHeader('Content-Type', 'application/json');
   // RFC 6266 filename encoding
-  const filename = 'nanocrab-audit-chain-' + new Date().toISOString().slice(0, 10) + '.json';
+  const filename =
+    'nanocrab-audit-chain-' + new Date().toISOString().slice(0, 10) + '.json';
   res.setHeader(
     'Content-Disposition',
-    'attachment; filename="' + filename + '"; filename*=UTF-8\'\'' + encodeURIComponent(filename),
+    'attachment; filename="' +
+      filename +
+      "\"; filename*=UTF-8''" +
+      encodeURIComponent(filename),
   );
   res.json(exportData);
 });
