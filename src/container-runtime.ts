@@ -71,6 +71,10 @@ export function readonlyMountArgs(
  * root filesystem can be mounted read-only. These are the minimal paths the
  * agent runtimes (Claude, Codex, OpenCode, OpenAI-compatible) need to write to
  * during a normal session.
+ *
+ * Fix #9: If a runtime writes outside these paths the container will fail with
+ * a read-only filesystem error. The error message includes the failing path
+ * so operators can add it to TMPFS_PATHS env var.
  */
 export const DEFAULT_TMPFS_PATHS = [
   '/tmp',
@@ -100,6 +104,11 @@ export function isContainerHardeningEnabled(): boolean {
  *   --cap-drop=ALL               - drop all Linux capabilities
  *   --security-opt no-new-privileges - prevent privilege escalation
  *   --tmpfs <path>               - writable tmpfs for required paths
+ *
+ * Fix #6: --cap-drop=ALL drops all capabilities including NET_RAW, SYS_PTRACE,
+ * and DAC_OVERRIDE. Node.js-based agent runtimes (Claude Code, Codex, OpenCode)
+ * do not require any special capabilities for normal operation. If a runtime
+ * needs a specific capability, add it via --cap-add after --cap-drop=ALL.
  *
  * The agent image's entrypoint writes to /tmp, /run, and the node user's home
  * cache/config directories; those are mounted as tmpfs so the read-only root
