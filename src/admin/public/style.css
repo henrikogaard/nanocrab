@@ -38091,7 +38091,7 @@ select {
 /* Focus Stack shell */
 .focus-stack-shell {
   display: grid;
-  grid-template-columns: 72px minmax(220px, var(--sidebar-width)) minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr);
   width: 100%;
   max-width: 100%;
   min-height: 100dvh;
@@ -38099,6 +38099,16 @@ select {
 }
 
 .focus-stack-shell.is-inspector-open {
+  grid-template-columns: 72px minmax(0, 1fr) 320px;
+}
+
+/* When the context sidebar has real content (chat threads, today nav),
+   expand to the 3-column layout. */
+.focus-stack-shell.has-context {
+  grid-template-columns: 72px minmax(220px, var(--sidebar-width)) minmax(0, 1fr);
+}
+
+.focus-stack-shell.has-context.is-inspector-open {
   grid-template-columns: 72px minmax(220px, var(--sidebar-width)) minmax(0, 1fr) 320px;
 }
 
@@ -38197,6 +38207,62 @@ select {
   margin-top: auto;
 }
 
+/* Rail footer: theme / help / logout when context sidebar is hidden */
+.focus-stack-rail-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 8px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.rail-footer-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    color var(--transition),
+    border-color var(--transition),
+    background var(--transition),
+    transform var(--transition);
+}
+
+.rail-footer-btn .nav-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.rail-footer-btn:hover {
+  border-color: var(--border-hover);
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.rail-footer-btn:active {
+  transform: translateY(1px) scale(0.96);
+}
+
+.rail-footer-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Theme toggle in rail footer reuses the existing toggle styling */
+.rail-footer-btn.theme-toggle {
+  position: relative;
+}
+
 .focus-stack-context.sidebar {
   position: sticky;
   top: 0;
@@ -38207,6 +38273,12 @@ select {
   width: var(--sidebar-width);
   height: 100dvh;
   box-shadow: inset -1px 0 0 color-mix(in oklch, white 4%, transparent);
+  display: none;
+}
+
+.focus-stack-shell.has-context .focus-stack-context.sidebar {
+  display: flex;
+  flex-direction: column;
 }
 
 .focus-stack-context-header {
@@ -38246,15 +38318,32 @@ select {
 
 .focus-stack-shell > .sidebar-resize-handle {
   left: calc(72px + var(--sidebar-width) - 4px);
+  display: none;
+}
+
+.focus-stack-shell.has-context > .sidebar-resize-handle {
+  display: block;
 }
 
 .focus-stack-canvas.main {
-  grid-column: 3;
+  grid-column: 2;
   min-width: 0;
   width: auto;
   min-height: 100dvh;
   margin-left: 0;
   overflow-x: clip;
+}
+
+.focus-stack-shell.has-context .focus-stack-canvas.main {
+  grid-column: 3;
+}
+
+.focus-stack-shell.has-context.is-inspector-open .focus-stack-canvas.main {
+  grid-column: 3;
+}
+
+.focus-stack-shell.is-inspector-open .focus-stack-canvas.main {
+  grid-column: 2;
 }
 
 .focus-stack-canvas-header {
@@ -38354,7 +38443,7 @@ select {
   position: sticky;
   top: 0;
   z-index: 8;
-  grid-column: 4;
+  grid-column: 3;
   display: none;
   min-width: 0;
   height: 100dvh;
@@ -38362,6 +38451,10 @@ select {
   padding: 16px;
   border-left: 1px solid var(--border);
   background: color-mix(in oklch, var(--surface) 94%, var(--bg));
+}
+
+.focus-stack-shell.has-context .focus-stack-inspector {
+  grid-column: 4;
 }
 
 .focus-stack-inspector.is-open {
@@ -38484,6 +38577,10 @@ select {
 
 @media (max-width: 1200px) and (min-width: 769px) {
   .focus-stack-shell.is-inspector-open {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .focus-stack-shell.has-context.is-inspector-open {
     grid-template-columns: 72px minmax(220px, var(--sidebar-width)) minmax(0, 1fr);
   }
 

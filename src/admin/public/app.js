@@ -1165,8 +1165,13 @@ function showShell(page) {
     ? `<div class="sidebar-data-health" role="status">${esc(window._pluginsLoadIssue)}</div>`
     : '';
 
+  // The context sidebar (middle column) is only useful when it holds
+  // multiple nav items: chat (thread list) and today (4 quick links).
+  // For every other mode it just echoes the page name — pure dead space.
+  const showContextSidebar = displayedMode === 'chat' || routeContext.isToday;
+
   app.innerHTML = `
-    <div class="app focus-stack-shell" data-workspace-mode="${esc(displayedMode)}" data-workspace-section="${esc(routeContext.section)}">
+    <div class="app focus-stack-shell${showContextSidebar ? ' has-context' : ''}" data-workspace-mode="${esc(displayedMode)}" data-workspace-section="${esc(routeContext.section)}">
       <a class="skip-link" href="#page-content">Skip to content</a>
       <div class="more-overlay" onclick="closeMoreDrawer()" aria-hidden="true"></div>
       <div class="more-drawer" id="more-drawer" role="dialog" aria-modal="true" aria-labelledby="more-drawer-title" aria-hidden="true" inert>
@@ -1208,6 +1213,11 @@ function showShell(page) {
           ${navIcon('menu')}
           <span>More</span>
         </button>
+        ${!showContextSidebar ? `<div class="focus-stack-rail-footer">
+          <button class="rail-footer-btn theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme"></button>
+          <a class="rail-footer-btn" href="#/help" onclick="navigate('help'); return false;" title="Help & Manual" aria-label="Help & Manual">${navIcon('help')}</a>
+          <button type="button" onclick="logout()" class="rail-footer-btn" title="Logout" aria-label="Logout">${navIcon('logout')}</button>
+        </div>` : ''}
       </nav>
       <nav class="sidebar focus-stack-context" aria-label="${esc(modeCue.title)} context">
         <div class="focus-stack-context-header">
