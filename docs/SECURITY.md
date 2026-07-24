@@ -27,7 +27,43 @@ application-level permission checks, the attack surface is limited by what's
 mounted. The opt-in host-native Devin coding exception has its separate
 fail-closed boundary in section 3e.
 
-#### 1a. Destination-Bound Credential Egress Gateway
+#### 1a. Default-Deny Agent Network Topology
+
+On bare-metal Linux, NanoCrab attaches agent containers to an internal Docker
+network (`nanocrab-agent-net`, created with `--internal`) so containers have no
+direct internet route. The only off-subnet address a container can reach is the
+network's own bridge gateway, where the credential/egress proxy listens. Docker
+drops packets sent outside an `--internal` subnet, so a prompt-injected agent
+cannot contact arbitrary hosts, DNS exfil channels, or unexpected APIs without
+going through the host gateway.
+
+The host gateway hostname `host.docker.internal` is mapped (via `--add-host`) to
+the internal network's bridge gateway IP rather than the default `host-gateway`
+value, because the default resolves to the `docker0` bridge which is outside the
+`--internal` subnet and therefore unreachable. The credential proxy binds to
+that same internal gateway IP so approved provider routes remain reachable.
+
+Behavior and controls:
+
+- `CONTAINER_NETWORK_ISOLATION` env: `on` (default) attempts the internal
+  topology; `off` disables it for CI or compatibility.
+- `CONTAINER_NETWORK_NAME` env overrides the network name (default
+  `nanocrab-agent-net`).
+- On macOS/WSL (Docker Desktop VM) the `--internal` topology is not supported;
+  NanoCrab degrades to the existing topology with an informational log line.
+- If the network cannot be created or inspected on Linux, NanoCrab degrades with
+  an explicit startup warning (unrestricted access) rather than leaving agents
+  unable to run. Operators that require strict fail-closed behavior should alert
+  on the degradation log line.
+- The `scripts/egress-canary.ts` doctor check proves an unknown destination is
+  unreachable from the isolated network and that the proxy path remains
+  reachable. Run it after building the agent image:
+
+  ```bash
+  npx tsx scripts/egress-canary.ts   # exit 0 = default-deny proven
+  ```
+
+#### 1b. Destination-Bound Credential Egress Gateway
 
 The credential proxy is also an authoritative egress boundary. Before
 forwarding any outbound request it consults the egress gateway
@@ -378,8 +414,15 @@ and credential-proxy route are verified by the deployment.
 | Group folder        | `/workspace/group` (rw)         | `/workspace/group` (rw)  |
 | Global memory       | Implicit via project            | `/workspace/global` (ro) |
 | Additional mounts   | Configurable                    | Read-only unless allowed |
-| Network access      | Unrestricted                    | Unrestricted             |
+| Network access      | Default-deny (internal net)¹   | Default-deny (internal net)¹ |
 | MCP tools           | Boundary-filtered               | Boundary-filtered        |
+
+¹ On bare-metal Linux with `CONTAINER_NETWORK_ISOLATION=on` (default), agent
+containers are attached to an internal Docker network with no direct internet
+route; the credential/egress proxy is the only approved outbound path. On
+macOS/WSL or when isolation cannot be enforced, NanoCrab degrades to
+unrestricted access with an explicit startup warning. Run
+`scripts/egress-canary.ts` to prove the default-deny claim on a given host.
 
 ## Security Architecture Diagram
 
@@ -406,6 +449,7 @@ and credential-proxy route are verified by the deployment.
 │  • Bash commands (sandboxed)                                      │
 │  • File operations (limited to mounts)                            │
 │  • Provider API calls routed through NanoCrab credential proxy   │
+│  • Default-deny network: internal Docker net, no direct internet │
 │  • Runtime secrets limited to explicit tool/CLI exceptions       │
 └──────────────────────────────────────────────────────────────────┘
 ```

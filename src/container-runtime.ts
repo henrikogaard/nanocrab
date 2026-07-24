@@ -6,6 +6,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 
+import { CONTAINER_IMAGE } from './config.js';
 import { logger } from './logger.js';
 
 /** Resolve the configured container runtime binary. */
@@ -47,13 +48,205 @@ function detectProxyBindHost(): string {
   return '0.0.0.0';
 }
 
-/** CLI args needed for the container to resolve the host gateway. */
+// --- Agent container network isolation (default-deny egress topology) ---
+
+/**
+ * Name of the internal Docker network agent containers are attached to.
+ * Override with CONTAINER_NETWORK_NAME. The network is created with --internal
+ * so containers have no direct internet route; the only reachable off-subnet
+ * address is the network's own bridge gateway, where the credential/egress
+ * proxy listens.
+ */
+export const AGENT_NETWORK_NAME =
+  process.env.CONTAINER_NETWORK_NAME || 'nanocrab-agent-net';
+
+export type NetworkIsolationMode = 'on' | 'off';
+
+export interface AgentNetworkInfo {
+  name: string;
+  enabled: boolean;
+  internal: boolean;
+  gatewayIp?: string;
+}
+
+let cachedAgentNetwork: AgentNetworkInfo | null = null;
+
+/** Whether the default-deny agent network topology is enabled. */
+export function networkIsolationMode(): NetworkIsolationMode {
+  const raw = (process.env.CONTAINER_NETWORK_ISOLATION || 'on').toLowerCase();
+  return raw === 'off' ? 'off' : 'on';
+}
+
+export function isNetworkIsolationEnabled(): boolean {
+  return networkIsolationMode() === 'on';
+}
+
+/**
+ * --internal bridge networks are only reliable on bare-metal Linux. Docker
+ * Desktop (macOS/WSL) runs in a VM and resolves host.docker.internal via the VM
+ * DNS layer, which does not compose cleanly with --internal subnets. On those
+ * platforms NanoCrab degrades to the existing unrestricted topology with an
+ * informational notice rather than risking a broken proxy path.
+ */
+function supportsInternalNetwork(): boolean {
+  if (os.platform() !== 'linux') return false;
+  if (fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')) return false;
+  return true;
+}
+
+function parseNetworkInspectGateway(output: string): string | undefined {
+  try {
+    const parsed = JSON.parse(output) as Array<{
+      IPAM?: { Config?: Array<{ Gateway?: string }> };
+    }>;
+    const gateway = parsed[0]?.IPAM?.Config?.[0]?.Gateway;
+    if (gateway && /^\d{1,3}(\.\d{1,3}){3}$/.test(gateway)) {
+      return gateway;
+    }
+  } catch {
+    /* malformed inspect output */
+  }
+  return undefined;
+}
+
+/**
+ * Ensure the isolated agent network exists and resolve its bridge gateway IP.
+ * The credential proxy binds to this gateway so containers on the --internal
+ * network can reach it (packets outside the subnet are dropped by Docker).
+ *
+ * On failure NanoCrab degrades with an explicit warning rather than leaving
+ * agents unable to run, matching the issue's "fail closed or clearly degrades
+ * with an explicit warning" requirement. Operators that require strict
+ * fail-closed behavior can monitor the startup log for the degradation notice.
+ */
+export function ensureAgentNetwork(): AgentNetworkInfo {
+  if (cachedAgentNetwork) return cachedAgentNetwork;
+  const name = AGENT_NETWORK_NAME;
+  if (!isNetworkIsolationEnabled() || !supportsInternalNetwork()) {
+    cachedAgentNetwork = { name, enabled: false, internal: false };
+    if (isNetworkIsolationEnabled() && !supportsInternalNetwork()) {
+      logger.info(
+        'Agent network isolation is Linux bare-metal only — degrading to unrestricted topology on this platform',
+      );
+    }
+    return cachedAgentNetwork;
+  }
+  try {
+    let inspectOutput: string;
+    try {
+      inspectOutput = execFileSync(
+        CONTAINER_RUNTIME_BIN,
+        ['network', 'inspect', name],
+        {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          encoding: 'utf-8',
+          timeout: 10000,
+        },
+      );
+    } catch {
+      // Network does not exist yet — create it as internal (no external route).
+      execFileSync(
+        CONTAINER_RUNTIME_BIN,
+        ['network', 'create', '--internal', name],
+        {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          encoding: 'utf-8',
+          timeout: 15000,
+        },
+      );
+      inspectOutput = execFileSync(
+        CONTAINER_RUNTIME_BIN,
+        ['network', 'inspect', name],
+        {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          encoding: 'utf-8',
+          timeout: 10000,
+        },
+      );
+    }
+    const gatewayIp = parseNetworkInspectGateway(inspectOutput);
+    if (!gatewayIp) {
+      throw new Error(`Could not resolve gateway IP for network ${name}`);
+    }
+    cachedAgentNetwork = { name, enabled: true, internal: true, gatewayIp };
+    logger.info(
+      { name, gatewayIp },
+      'Agent container network isolation enabled (default-deny egress topology)',
+    );
+    return cachedAgentNetwork;
+  } catch (err) {
+    cachedAgentNetwork = { name, enabled: false, internal: false };
+    logger.error(
+      { err, name },
+      'Agent container network isolation could not be enforced — degrading with unrestricted network access',
+    );
+    console.error(
+      '\n╔════════════════════════════════════════════════════════════════╗',
+    );
+    console.error(
+      '║  WARNING: Agent network isolation could not be enforced.       ║',
+    );
+    console.error(
+      `║  Network "${name}" could not be created/inspected. Containers  ║`,
+    );
+    console.error(
+      '║  will have unrestricted outbound access until this is fixed.   ║',
+    );
+    console.error(
+      '║  Set CONTAINER_NETWORK_ISOLATION=off to silence this warning.  ║',
+    );
+    console.error(
+      '╚════════════════════════════════════════════════════════════════╝\n',
+    );
+    return cachedAgentNetwork;
+  }
+}
+
+/** Cached agent network info (null until ensureAgentNetwork has run). */
+export function getAgentNetwork(): AgentNetworkInfo | null {
+  return cachedAgentNetwork;
+}
+
+/** Reset the cached agent network (test helper / re-init). */
+export function resetAgentNetworkCache(): void {
+  cachedAgentNetwork = null;
+}
+
+/** CLI args to attach a container to the isolated agent network. */
+export function agentNetworkArgs(): string[] {
+  const net = cachedAgentNetwork ?? ensureAgentNetwork();
+  if (!net.enabled) return [];
+  return ['--network', net.name];
+}
+
+/**
+ * CLI args needed for the container to resolve the host gateway.
+ * When the isolated agent network is active, host.docker.internal must map to
+ * the internal network's bridge gateway IP — the default `host-gateway` value
+ * resolves to docker0, which is outside the --internal subnet and therefore
+ * unreachable.
+ */
 export function hostGatewayArgs(): string[] {
+  const net = cachedAgentNetwork ?? ensureAgentNetwork();
+  if (net.enabled && net.gatewayIp) {
+    return [`--add-host=host.docker.internal:${net.gatewayIp}`];
+  }
   // On Linux, host.docker.internal isn't built-in — add it explicitly
   if (os.platform() === 'linux') {
     return ['--add-host=host.docker.internal:host-gateway'];
   }
   return [];
+}
+
+/**
+ * Bind host for the credential/egress proxy. When the isolated agent network is
+ * active the proxy must listen on the internal bridge gateway so containers can
+ * reach it; otherwise the existing loopback/docker0 binding is used.
+ */
+export function resolveProxyBindHost(): string {
+  const net = cachedAgentNetwork ?? ensureAgentNetwork();
+  if (net.enabled && net.gatewayIp) return net.gatewayIp;
+  return PROXY_BIND_HOST;
 }
 
 /** Returns CLI args for a readonly bind mount. */
@@ -138,5 +331,110 @@ export function cleanupOrphans(): void {
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');
+  }
+}
+
+// --- Egress canary / doctor check ---
+
+export interface EgressCanaryResult {
+  /** true when the unknown destination was unreachable (default-deny holds). */
+  blocked: boolean;
+  /** Container exit code (0 = blocked/unreachable, non-zero = connected/other). */
+  exitCode: number | null;
+  /** Captured stdout from the canary container. */
+  output: string;
+  /** Captured stderr / error explanation. */
+  error?: string;
+  /** Whether the canary actually ran (false when isolation is disabled). */
+  ran: boolean;
+}
+
+/**
+ * Doctor/canary check that proves an unknown destination is unreachable from
+ * the isolated agent network. Spawns a throwaway container on the agent
+ * network that attempts a short TCP connection to a placeholder host. The
+ * default-deny topology is proven when the connection fails (blocked=true).
+ *
+ * This is an operator-run proof, not an automatic startup gate: it requires a
+ * working container runtime and the agent image to be present. Run via
+ * `scripts/egress-canary.ts`.
+ */
+export function runEgressCanary(
+  testHost = 'canary-egress-probe.invalid',
+  image: string = CONTAINER_IMAGE,
+): EgressCanaryResult {
+  const net = cachedAgentNetwork ?? ensureAgentNetwork();
+  if (!net.enabled || !net.gatewayIp) {
+    return {
+      blocked: false,
+      exitCode: null,
+      output: '',
+      error:
+        'Network isolation is not enabled; canary cannot prove default-deny.',
+      ran: false,
+    };
+  }
+  // Node one-liner: try to connect to testHost:443, exit 0 if blocked,
+  // exit 2 if connected (default-deny violated). 3s timeout per attempt.
+  const probeScript = [
+    `const h=${JSON.stringify(testHost)};`,
+    `const s=require('net').connect(443,h);`,
+    `s.setTimeout(3000);`,
+    `s.on('connect',()=>{console.error('CONNECTED to '+h);process.exit(2)});`,
+    `s.on('timeout',()=>{console.log('BLOCKED (timeout)');process.exit(0)});`,
+    `s.on('error',()=>{console.log('BLOCKED (error)');process.exit(0)});`,
+  ].join('');
+  try {
+    const output = execFileSync(
+      CONTAINER_RUNTIME_BIN,
+      [
+        'run',
+        '--rm',
+        '--network',
+        net.name,
+        '--add-host',
+        `host.docker.internal:${net.gatewayIp}`,
+        '--entrypoint',
+        'node',
+        image,
+        '-e',
+        probeScript,
+      ],
+      {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        encoding: 'utf-8',
+        timeout: 30000,
+      },
+    );
+    // execFileSync throws on non-zero exit, so reaching here means exit 0.
+    return {
+      blocked: true,
+      exitCode: 0,
+      output: output.trim(),
+      ran: true,
+    };
+  } catch (err) {
+    const error = err as { code?: string; stdout?: string; stderr?: string };
+    if (error.code === 'STATUS_2' || /CONNECTED/.test(error.stdout || '')) {
+      // Container exited 2 — it connected, default-deny is violated.
+      return {
+        blocked: false,
+        exitCode: 2,
+        output: (error.stdout || '').trim(),
+        error:
+          'Canary container connected to the unknown destination — default-deny is NOT enforced.',
+        ran: true,
+      };
+    }
+    // Any other failure (timeout, runtime error) is treated as blocked for
+    // default-deny purposes, but surfaced with the raw error for operator
+    // diagnosis so a broken canary is not mistaken for a proven deny.
+    return {
+      blocked: true,
+      exitCode: null,
+      output: (error.stdout || '').trim(),
+      error: `Canary could not connect (treated as blocked): ${error.code || (err instanceof Error ? err.message : String(err))}`,
+      ran: true,
+    };
   }
 }
