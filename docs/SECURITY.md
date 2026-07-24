@@ -21,6 +21,10 @@ Normal agents and container-backed coding CLIs execute in containers
 - **Filesystem isolation** - Only explicitly mounted directories are visible
 - **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
 - **Ephemeral containers** - Fresh environment per invocation (`--rm`)
+- **Hardened runtime** - `--read-only` root, `--cap-drop=ALL`,
+  `--security-opt=no-new-privileges`, and tmpfs for the writable paths the
+  agent runtimes need (`/tmp`, `/run`, `/home/node/.cache`, etc.). Disable
+  with `CONTAINER_HARDENING=off`.
 
 This is the primary security boundary for those paths. Rather than relying on
 application-level permission checks, the attack surface is limited by what's

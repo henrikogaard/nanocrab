@@ -67,6 +67,7 @@ import {
 import {
   CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
+  containerHardeningArgs,
   hostGatewayArgs,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
@@ -1477,6 +1478,7 @@ function runCodingContainer(
   const containerName = `nanocrab-code-${safeName}`;
   const args: string[] = ['run', '--rm', '--name', containerName];
   args.push(...hostGatewayArgs());
+  args.push(...containerHardeningArgs());
 
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();

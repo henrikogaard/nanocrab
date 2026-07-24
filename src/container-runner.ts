@@ -22,6 +22,7 @@ import { logger } from './logger.js';
 import {
   CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
+  containerHardeningArgs,
   hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
@@ -737,6 +738,10 @@ function buildContainerArgs(
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
+
+  // Hardening: read-only root, cap-drop=ALL, no-new-privileges, tmpfs for
+  // writable paths. Disabled via CONTAINER_HARDENING=off.
+  args.push(...containerHardeningArgs());
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),

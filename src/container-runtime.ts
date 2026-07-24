@@ -64,6 +64,67 @@ export function readonlyMountArgs(
   return ['-v', `${hostPath}:${containerPath}:ro`];
 }
 
+// --- Container hardening flags ---
+
+/**
+ * Writable paths inside the agent container that are backed by tmpfs so the
+ * root filesystem can be mounted read-only. These are the minimal paths the
+ * agent runtimes (Claude, Codex, OpenCode, OpenAI-compatible) need to write to
+ * during a normal session.
+ */
+export const DEFAULT_TMPFS_PATHS = [
+  '/tmp',
+  '/run',
+  '/var/run',
+  '/home/node/.cache',
+  '/home/node/.npm',
+  '/home/node/.config',
+  '/home/node/.local',
+] as const;
+
+export type ContainerHardeningMode = 'on' | 'off';
+
+/** Whether container hardening flags are enabled. */
+export function containerHardeningMode(): ContainerHardeningMode {
+  const raw = (process.env.CONTAINER_HARDENING || 'on').toLowerCase();
+  return raw === 'off' ? 'off' : 'on';
+}
+
+export function isContainerHardeningEnabled(): boolean {
+  return containerHardeningMode() === 'on';
+}
+
+/**
+ * Docker hardening flags for agent containers:
+ *   --read-only                  - root filesystem read-only
+ *   --cap-drop=ALL               - drop all Linux capabilities
+ *   --security-opt no-new-privileges - prevent privilege escalation
+ *   --tmpfs <path>               - writable tmpfs for required paths
+ *
+ * The agent image's entrypoint writes to /tmp, /run, and the node user's home
+ * cache/config directories; those are mounted as tmpfs so the read-only root
+ * does not break normal operation. Returns an empty array when hardening is
+ * disabled (CONTAINER_HARDENING=off) or on platforms where the flags are not
+ * supported.
+ */
+export function containerHardeningArgs(
+  tmpfsPaths: readonly string[] = DEFAULT_TMPFS_PATHS,
+): string[] {
+  if (!isContainerHardeningEnabled()) return [];
+  // The flags are Docker-specific; on non-Docker runtimes they may be ignored
+  // or rejected. The container runtime is Docker on all supported platforms.
+  const args: string[] = [
+    '--read-only',
+    '--cap-drop=ALL',
+    '--security-opt',
+    'no-new-privileges',
+  ];
+  for (const p of tmpfsPaths) {
+    args.push('--tmpfs', `${p}:rw,noexec,nosuid,nodev,size=64m`);
+  }
+  return args;
+}
+
 /** Stop a container by name. Uses execFileSync to avoid shell injection. */
 export function stopContainer(name: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {

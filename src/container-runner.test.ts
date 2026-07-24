@@ -60,6 +60,12 @@ vi.mock('./container-runtime.js', () => ({
   CONTAINER_RUNTIME_BIN: 'docker',
   CONTAINER_HOST_GATEWAY: 'host.docker.internal',
   hostGatewayArgs: () => [],
+  containerHardeningArgs: () => [
+    '--read-only',
+    '--cap-drop=ALL',
+    '--security-opt',
+    'no-new-privileges',
+  ],
   readonlyMountArgs: (h: string, c: string) => ['-v', `${h}:${c}:ro`],
   stopContainer: vi.fn(),
 }));
@@ -293,6 +299,21 @@ describe('container-runner timeout behavior', () => {
       expect.objectContaining({ status: 'success' }),
     );
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('applies container hardening flags (read-only, cap-drop, no-new-privileges)', async () => {
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const spawnArgs = vi.mocked(spawn).mock.calls.at(-1)?.[1] as string[];
+    expect(spawnArgs).toContain('--read-only');
+    expect(spawnArgs).toContain('--cap-drop=ALL');
+    expect(spawnArgs).toContain('no-new-privileges');
   });
 });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock logger
 vi.mock('./logger.js', () => ({
@@ -23,11 +23,24 @@ import {
   stopContainer,
   ensureContainerRuntimeRunning,
   cleanupOrphans,
+  containerHardeningArgs,
+  isContainerHardeningEnabled,
+  DEFAULT_TMPFS_PATHS,
 } from './container-runtime.js';
 import { logger } from './logger.js';
 
+const ORIGINAL_ENV = { ...process.env };
+
 beforeEach(() => {
   vi.clearAllMocks();
+  delete process.env.CONTAINER_HARDENING;
+});
+
+afterEach(() => {
+  for (const key of Object.keys(process.env)) {
+    if (!(key in ORIGINAL_ENV)) delete process.env[key];
+  }
+  Object.assign(process.env, ORIGINAL_ENV);
 });
 
 // --- Pure functions ---
@@ -178,5 +191,46 @@ describe('cleanupOrphans', () => {
       { count: 2, names: ['nanocrab-a-1', 'nanocrab-b-2'] },
       'Stopped orphaned containers',
     );
+  });
+});
+
+// --- Container hardening flags ---
+
+describe('containerHardeningArgs', () => {
+  it('is enabled by default and emits read-only, cap-drop, no-new-privileges, and tmpfs flags', () => {
+    delete process.env.CONTAINER_HARDENING;
+    const args = containerHardeningArgs();
+    expect(args).toContain('--read-only');
+    expect(args).toContain('--cap-drop=ALL');
+    expect(args).toContain('no-new-privileges');
+    // tmpfs entries for each default writable path
+    for (const p of DEFAULT_TMPFS_PATHS) {
+      const idx = args.indexOf('--tmpfs');
+      expect(args.slice(idx + 1)).toContain(
+        `${p}:rw,noexec,nosuid,nodev,size=64m`,
+      );
+    }
+  });
+
+  it('returns an empty array when CONTAINER_HARDENING=off', () => {
+    process.env.CONTAINER_HARDENING = 'off';
+    expect(containerHardeningArgs()).toEqual([]);
+    expect(isContainerHardeningEnabled()).toBe(false);
+  });
+
+  it('respects a custom tmpfs path list', () => {
+    const args = containerHardeningArgs(['/custom/tmp']);
+    const tmpfsValues = args.filter((_v, i) => args[i - 1] === '--tmpfs');
+    expect(tmpfsValues).toEqual([
+      '/custom/tmp:rw,noexec,nosuid,nodev,size=64m',
+    ]);
+  });
+
+  it('marks tmpfs mounts with noexec,nosuid,nodev', () => {
+    const args = containerHardeningArgs(['/tmp']);
+    const tmpfsValue = args[args.indexOf('--tmpfs') + 1];
+    expect(tmpfsValue).toMatch(/noexec/);
+    expect(tmpfsValue).toMatch(/nosuid/);
+    expect(tmpfsValue).toMatch(/nodev/);
   });
 });
