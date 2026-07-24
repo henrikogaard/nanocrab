@@ -40790,3 +40790,87 @@ h1, h2, h3,
 .agent-profile-row.is-active::before {
   transform: scaleY(1);
 }
+
+/* ==========================================================================
+   POLISH — Phase 3: input dark-theme fix, scrollbar, focus states
+   ========================================================================== */
+
+/* .input class used in Agents form fields was completely unstyled */
+.input {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 12px;
+  background: color-mix(in oklch, var(--bg) 82%, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--font);
+  outline: none;
+  transition:
+    border-color var(--transition),
+    background var(--transition),
+    box-shadow var(--transition);
+}
+
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 18%, transparent);
+}
+
+textarea.input {
+  resize: vertical;
+  min-height: 60px;
+  line-height: 1.5;
+}
+
+select.input {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+
+/* Custom scrollbar for the dark theme */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface3) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--surface3);
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
+}
+
+/* Focus-visible ring on all interactive elements */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Override the generic focus-visible for inputs that already have
+   a box-shadow focus ring (search-input, .input) */
+.search-input:focus-visible,
+.input:focus-visible {
+  outline: none;
+}
