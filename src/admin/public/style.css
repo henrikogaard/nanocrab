@@ -40874,3 +40874,26 @@ select:focus-visible,
 .input:focus-visible {
   outline: none;
 }
+
+/* Skills panel collapse: same treatment as Settings cards */
+.skills-panel:has(.settings-card-collapse-toggle) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.skills-panel:has(.settings-card-collapse-toggle) > .settings-card-collapse-toggle {
+  margin: 0;
+}
+
+.skills-panel:has(.settings-card-collapse-toggle) > .settings-card-body-wrap {
+  padding: 0 16px 16px;
+}
+
+.skills-panel:has(.settings-card-collapse-toggle) > .settings-card-body-wrap.is-open {
+  padding: 0 16px 16px;
+}
+
+/* Collapsed skills panel gets a bottom border */
+.skills-panel:has(.settings-card-collapse-toggle):not(:has(.settings-card-body-wrap.is-open)) {
+  border-bottom: 1px solid var(--border);
+}

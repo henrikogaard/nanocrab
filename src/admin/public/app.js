@@ -10481,6 +10481,38 @@ async function renderSkills(el, options = {}) {
     }
     </div>`;
 
+  // Progressive enhancement: collapse skills panels to tame the 6500px+ scroll
+  setTimeout(function () {
+    var panels = Array.from(el.querySelectorAll('.skills-panel'));
+    panels.forEach(function (panel, idx) {
+      if (panel.querySelector('.settings-card-collapse-toggle')) return;
+      var titleEl = panel.querySelector('.card-title');
+      if (!titleEl) return;
+      var titleText = titleEl.textContent.trim();
+      var toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'settings-card-collapse-toggle';
+      toggle.setAttribute('aria-expanded', idx < 2 ? 'true' : 'false');
+      toggle.innerHTML = '<span class="settings-card-collapse-chevron"></span>' + titleText;
+      titleEl.style.display = 'none';
+      panel.insertBefore(toggle, panel.firstChild);
+      var bodyWrap = document.createElement('div');
+      bodyWrap.className = 'settings-card-body-wrap' + (idx < 2 ? ' is-open' : '');
+      var innerWrap = document.createElement('div');
+      innerWrap.className = 'settings-card-body-inner';
+      var children = Array.from(panel.children);
+      children.forEach(function (child) {
+        if (child !== toggle) innerWrap.appendChild(child);
+      });
+      bodyWrap.appendChild(innerWrap);
+      panel.appendChild(bodyWrap);
+      toggle.addEventListener('click', function () {
+        var open = bodyWrap.classList.toggle('is-open');
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    });
+  }, 0);
+
   document.getElementById('skills-sh-search-form').onsubmit = async (e) => {
     e.preventDefault();
     await loadSkillsShCatalog();
