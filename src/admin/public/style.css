@@ -40675,3 +40675,118 @@ h1, h2, h3,
   font-weight: 600;
   color: var(--text-secondary);
 }
+
+/* ==========================================================================
+   POLISH — Phase 2: card depth, sidebar refinement, micro-details
+   ========================================================================== */
+
+/* Subtle rest-state shadow on cards for depth without heaviness */
+.project-rail-card,
+.project-section,
+.channels-intent-card,
+.settings-focus-map,
+.dash-next-action,
+.dash-more-strip,
+.dash-quiet-list > *,
+.agent-assign-card,
+.project-action-card,
+.project-mcp-recipe,
+.card {
+  box-shadow: 0 1px 3px color-mix(in oklch, black 12%, transparent);
+}
+
+/* Sidebar mode-route-cue: tighten the paragraph for a more compact feel */
+.mode-route-cue p {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+/* Sidebar nav links: add a subtle left-edge accent on hover */
+.focus-stack-context button.nav-link:hover,
+.focus-stack-context a.nav-link:hover {
+  box-shadow: inset 2px 0 0 var(--accent-border);
+}
+
+/* Stat pills: add a subtle inner glow for depth */
+.agent-stat-pill,
+.settings-command-stat,
+[class*="command-stat"]:not([class*="command-stats"]) {
+  box-shadow: inset 0 1px 0 color-mix(in oklch, white 4%, transparent);
+}
+
+/* Masthead signature line: slightly wider for more presence */
+.focus-stack-canvas-header::after {
+  width: 80px;
+}
+
+/* Card collapse toggle: add a subtle bottom border when collapsed */
+.card:has(.settings-card-collapse-toggle):not(:has(.settings-card-body-wrap.is-open)) {
+  border-bottom: 1px solid var(--border);
+}
+
+/* Today attention list items: add a left accent edge for visual rhythm */
+.dash-quiet-list > * {
+  border-left: 2px solid transparent;
+  transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+
+.dash-quiet-list > *:hover {
+  border-left-color: var(--accent-border);
+}
+
+/* Channels intent cards: add a top accent line on hover */
+.channels-intent-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.channels-intent-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.channels-intent-card:hover::before {
+  transform: scaleX(1);
+}
+
+/* Projects sidebar: add a subtle separator between list items */
+.project-list-item {
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
+}
+
+.project-list-item:last-child {
+  border-bottom: none;
+}
+
+/* Agents roster rows: add a subtle left accent bar on hover */
+.agent-profile-row {
+  position: relative;
+}
+
+.agent-profile-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: scaleY(0);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.agent-profile-row:hover::before,
+.agent-profile-row.is-active::before {
+  transform: scaleY(1);
+}
