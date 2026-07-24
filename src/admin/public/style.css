@@ -40643,3 +40643,33 @@ h1, h2, h3,
 .card:has(.settings-card-collapse-toggle) > .settings-card-body-wrap.is-open {
   padding: 0 16px 16px;
 }
+
+/* ==========================================================================
+   TITLE DEDUP — Phase 2: suppress in-page headings that repeat the masthead
+   ========================================================================== */
+
+/* Agents: the topbar h2 "Agents" duplicates the canvas masthead */
+.agent-page-topbar h2 {
+  display: none;
+}
+
+/* Uptime: the command-center h2 "Uptime Monitoring" duplicates the masthead */
+.uptime-command-copy h2 {
+  display: none;
+}
+
+/* Security: the command-center h2 "Trust cockpit" is descriptive, keep it
+   but ensure it doesn't look like a page title */
+.security-command-copy h2 {
+  font-size: 14px !important;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Projects sidebar h2 "Projects" is a section title for the list, not a
+   page duplicate — keep it but demote visually */
+.projects-sidebar-head h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
