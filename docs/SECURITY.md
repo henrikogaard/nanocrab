@@ -457,3 +457,35 @@ unrestricted access with an explicit startup warning. Run
 │  • Runtime secrets limited to explicit tool/CLI exceptions       │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+## Tamper-Evident Audit Export
+
+Audit exports are hash-chained and HMAC-signed so any after-the-fact
+modification, deletion, or reordering of an event is detectable.
+
+- `GET /api/runtime-audit/export/tamper-evident` produces a signed export
+  with a random seed, per-event SHA-256 hashes, a chain head, and an
+  HMAC-SHA256 signature over the chain head.
+- `POST /api/runtime-audit/export/verify` recomputes the chain and signature
+  and returns a structured report flagging mutated events, broken links, or
+  an invalid signature.
+- Set `AUDIT_EXPORT_KEY` to a long-lived secret for cross-host verification.
+  If unset, a host-derived fallback key is used (tamper-evident within a
+  single host but not portable).
+- `audit.export.tamper_evident` and `audit.export.verify` audit events are
+  emitted on each export/verify operation.
+
+## Security Proof Matrix
+
+The proof matrix maps each security claim in the #218 epic to its current
+proof status (`proven`, `shipped`, `unproven`, `failed`) with evidence and
+operator actions.
+
+- `GET /api/runtime-audit/proof-matrix` returns the matrix as JSON.
+- `npx tsx scripts/security-proof.ts` prints a readout and exits non-zero
+  when any claim is `unproven` or `failed`, so it can be used as a CI gate or
+  post-deploy check.
+
+Claims that depend on operator action (running the egress canary, triggering
+a denied egress request, inspecting a spawned container) are marked `shipped`
+rather than `proven` until that action is taken.

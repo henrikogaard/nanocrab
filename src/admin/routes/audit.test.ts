@@ -102,4 +102,56 @@ describe('runtime audit admin routes', () => {
       expect(events[0].actionType).toBe('channel.send');
     });
   });
+
+  it('allows admins to download a tamper-evident export and verify it', async () => {
+    activeRole = 'admin';
+
+    await withServer(async (baseUrl) => {
+      const exportRes = await fetch(
+        new URL('/runtime-audit/export/tamper-evident', baseUrl),
+        {
+          headers: { 'x-signing-key': 'test-key' },
+        },
+      );
+      expect(exportRes.status).toBe(200);
+      const exportData = (await exportRes.json()) as {
+        count: number;
+        signature: string;
+      };
+      expect(exportData.count).toBeGreaterThan(0);
+      expect(exportData.signature).toMatch(/^[a-f0-9]{64}$/);
+
+      const verifyRes = await fetch(
+        new URL('/runtime-audit/export/verify', baseUrl),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            export: exportData,
+            signingKey: 'test-key',
+          }),
+        },
+      );
+      expect(verifyRes.status).toBe(200);
+      const report = (await verifyRes.json()) as { valid: boolean };
+      expect(report.valid).toBe(true);
+    });
+  });
+
+  it('allows admins to fetch the security proof matrix', async () => {
+    activeRole = 'admin';
+
+    await withServer(async (baseUrl) => {
+      const res = await fetch(new URL('/runtime-audit/proof-matrix', baseUrl));
+      expect(res.status).toBe(200);
+      const matrix = (await res.json()) as {
+        proofs: Array<{ claimId: string }>;
+        summary: Record<string, number>;
+      };
+      const claimIds = matrix.proofs.map((p) => p.claimId);
+      expect(claimIds).toContain('default-deny-network');
+      expect(claimIds).toContain('tamper-evident-audit');
+      expect(matrix.summary).toHaveProperty('proven');
+    });
+  });
 });
