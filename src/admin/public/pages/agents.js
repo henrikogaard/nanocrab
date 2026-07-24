@@ -669,6 +669,7 @@ function renderAgentProfileEmptyState(kind) {
       label: 'No profiles',
       title: 'No agent profiles configured yet',
       detail: 'Agents are named personas with their own provider, model, personality, and capabilities. Create one to start delegating work.',
+      illustration: '<svg class="agent-empty-illustration" viewBox="0 0 120 120" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="60" cy="48" r="18" opacity="0.3"/><circle cx="60" cy="48" r="8" opacity="0.5"/><path d="M60 30v-8M60 66v8M42 48h-8M78 48h8" opacity="0.25"/><path d="M47.3 35.3l-5.6-5.6M72.7 35.3l5.6-5.6M47.3 60.7l-5.6 5.6M72.7 60.7l5.6 5.6" opacity="0.2"/><rect x="30" y="80" width="60" height="24" rx="6" opacity="0.15"/><path d="M42 88h36M42 96h24" opacity="0.2"/><circle cx="38" cy="42" r="3" opacity="0.15"/><circle cx="82" cy="54" r="2" opacity="0.12"/></svg>',
     },
     detail: {
       className: 'agent-profile-empty-state is-detail',
@@ -698,6 +699,7 @@ function renderAgentProfileEmptyState(kind) {
   const state = states[kind] || states.empty;
   return `
     <section class="${state.className}">
+      ${state.illustration || ''}
       <span>${esc(state.label)}</span>
       <strong>${esc(state.title)}</strong>
       <p>${esc(state.detail)}</p>
@@ -726,7 +728,7 @@ function renderAgentProfileRoster(profiles, selectedId) {
                 ? `Active ${timeAgo(latestAt)}`
                 : latestLabel || 'No recent activity';
           return `
-            <button class="agent-profile-row ${isActive ? 'is-active' : ''}" type="button" onclick="selectAgentProfileByIndex(${index})">
+            <button class="agent-profile-row ${isActive ? 'is-active' : ''}" type="button" style="--stagger: ${index}" onclick="selectAgentProfileByIndex(${index})">
               <span class="agent-profile-avatar">${esc(agentProfileInitial(profile))}</span>
               <span class="agent-profile-row-main">
                 <span class="agent-profile-row-title">
@@ -995,22 +997,22 @@ function renderAgentProfileDetail(profile) {
         <p class="agent-profile-assign-intro">Launch a task, coding job, or recurring loop using this agent's configured provider, model, and capabilities.</p>
         <div class="agent-profile-assign-grid">
           <button type="button" class="agent-assign-card" onclick="openAssignWorkWizard('freeform')">
-            <span class="agent-assign-card-icon">⚡</span>
+            <span class="agent-assign-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></span>
             <strong>One-off task</strong>
             <small>Describe work and launch immediately</small>
           </button>
           <button type="button" class="agent-assign-card" onclick="openAssignWorkWizard('github')">
-            <span class="agent-assign-card-icon">🔀</span>
+            <span class="agent-assign-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v3a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3v-3"/><path d="M12 14.5v1"/></svg></span>
             <strong>GitHub issue</strong>
             <small>Pick an issue or target a specific number</small>
           </button>
           <button type="button" class="agent-assign-card" onclick="openAssignWorkWizard('autofix')">
-            <span class="agent-assign-card-icon">🔄</span>
+            <span class="agent-assign-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v5h-5"/></svg></span>
             <strong>Auto-pickup loop</strong>
             <small>Watch a label and auto-assign issues</small>
           </button>
           <button type="button" class="agent-assign-card" onclick="invokeAgentProfile(window._selectedAgentProfileId)">
-            <span class="agent-assign-card-icon">💬</span>
+            <span class="agent-assign-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3A7.5 7.5 0 0 1 12 19.5c-1.2 0-2.4-.3-3.4-.8L4.5 20l1.3-4A7.4 7.4 0 0 1 4.5 12Z"/><path d="M9 11h6"/><path d="M9 14h4"/></svg></span>
             <strong>Quick invoke</strong>
             <small>Send a prompt directly to this profile</small>
           </button>
@@ -1788,6 +1790,12 @@ async function renderAgents(el) {
 
       <div id="task-output-panel" class="task-output-panel is-hidden"></div>
 
+      <div class="agent-below-shell">
+        <button class="agent-accordion-trigger" type="button" aria-expanded="false" onclick="toggleBelowShell(this)">
+          Operations &amp; integrations
+        </button>
+        <div class="agent-accordion-body" id="agent-below-shell-body">
+
       <section class="agent-coding-board" id="github-coding-jobs">
         <div class="agent-coding-brief is-${codingBoardTone}">
           <div>
@@ -2045,6 +2053,9 @@ async function renderAgents(el) {
           )
           .join('')}
         <div class="agent-plugin-manage"><a onclick="navigate('settings')">Manage plugins</a></div>
+      </div>
+
+        </div>
       </div>
     `;
 
@@ -2395,6 +2406,13 @@ window.toggleTaskLauncher = function (forceOpen) {
       ? forceOpen
       : launcher.classList.contains('is-hidden');
   launcher.classList.toggle('is-hidden', !shouldOpen);
+};
+
+window.toggleBelowShell = function (trigger) {
+  const body = document.getElementById('agent-below-shell-body');
+  if (!body || !trigger) return;
+  const isOpen = body.classList.toggle('is-open');
+  trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
 };
 
 window.toggleTaskOutputPanel = function (forceOpen) {
