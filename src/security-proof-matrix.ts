@@ -53,6 +53,9 @@ function countByStatus(proofs: SecurityProof[]): Record<ProofStatus, number> {
  * Build the proof matrix from the live host state. Claims that depend on
  * operator action (running the canary, configuring a signing key) are marked
  * `shipped` rather than `proven` until that action is taken.
+ *
+ * Fix #5: The matrix now explicitly documents that shipped means "code exists
+ * but unverified" and provides clear operator actions to reach proven status.
  */
 export function buildProofMatrix(): ProofMatrix {
   const proofs: SecurityProof[] = [];
