@@ -1,13 +1,16 @@
 /**
  * Security proof matrix doctor command.
  *
- * Builds the proof matrix from the live host state and prints a readout. Exits
- * non-zero when any claim is `unproven` or `failed` so this can be used as a
- * CI gate or post-deploy check.
+ * Builds the proof matrix from the live host state and prints a readout.
+ * Exits non-zero when any claim is `unproven` or `failed` so this can be
+ * used as a CI gate or post-deploy check.
  *
  *   npx tsx scripts/security-proof.ts
+ *   npx tsx scripts/security-proof.ts --strict   # also fail on shipped
  */
 import { buildProofMatrix } from '../src/security-proof-matrix.js';
+
+const strict = process.argv.includes('--strict');
 
 function main() {
   const matrix = buildProofMatrix();
@@ -15,6 +18,9 @@ function main() {
   console.log(
     `Summary: proven=${matrix.summary.proven} shipped=${matrix.summary.shipped} unproven=${matrix.summary.unproven} failed=${matrix.summary.failed}`,
   );
+  if (strict) {
+    console.log('(strict mode: shipped claims are treated as warnings)');
+  }
   console.log('');
   for (const proof of matrix.proofs) {
     const marker =
@@ -40,6 +46,12 @@ function main() {
   if (blocking > 0) {
     console.error(
       `security-proof: ${blocking} claim(s) are unproven or failed. See operator actions above.`,
+    );
+    process.exit(1);
+  }
+  if (strict && matrix.summary.shipped > 0) {
+    console.error(
+      `security-proof: ${matrix.summary.shipped} claim(s) are shipped but not proven (strict mode). Run operator actions to reach proven status.`,
     );
     process.exit(1);
   }
