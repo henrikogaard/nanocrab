@@ -1211,7 +1211,7 @@ function showShell(page) {
       </nav>
       <nav class="sidebar focus-stack-context" aria-label="${esc(modeCue.title)} context">
         <div class="focus-stack-context-header">
-          <span>${routeContext.isToday ? 'Overview' : esc(window.NanoModes.MODES[displayedMode]?.label || 'More')}</span>
+          <span${(routeContext.isToday ? 'Overview' : (window.NanoModes.MODES[displayedMode]?.label || 'More')) === pageLabel ? ' class="is-hidden"' : ''}>${routeContext.isToday ? 'Overview' : esc(window.NanoModes.MODES[displayedMode]?.label || 'More')}</span>
           <h1>${esc(pageLabel)}</h1>
         </div>
         <div class="mode-route-cue compact" aria-label="Active focus route cue">
