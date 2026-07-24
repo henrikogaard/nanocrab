@@ -267,7 +267,6 @@ export function isNetworkIsolationEnabled(): boolean {
   const raw = (process.env.CONTAINER_NETWORK_ISOLATION || 'on').toLowerCase();
   return raw !== 'off';
 }
-
 // --- Container hardening flags ---
 
 /**
@@ -337,6 +336,7 @@ export function containerHardeningArgs(
   }
   return args;
 }
+export function stopContainer(name: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
     throw new Error(`Invalid container name: ${name}`);
   }
