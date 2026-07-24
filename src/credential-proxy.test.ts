@@ -11,6 +11,19 @@ vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
+// Mock the egress gateway so the proxy test doesn't pull in the real config
+// chain (which would re-import env.js before mockEnv is initialized).
+vi.mock('./egress-gateway.js', () => ({
+  auditEgressDecision: vi.fn(() => ({
+    decision: 'allow',
+    reason: 'mocked',
+    host: 'mocked',
+    correlationId: 'mocked',
+    dryRun: false,
+  })),
+  shouldEnforceDeny: vi.fn(() => false),
+}));
+
 import { startCredentialProxy } from './credential-proxy.js';
 
 function makeRequest(
@@ -314,5 +327,37 @@ describe('credential-proxy', () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
+  });
+
+  it('returns 403 when the egress gateway denies the destination', async () => {
+    const { auditEgressDecision, shouldEnforceDeny } =
+      await import('./egress-gateway.js');
+    vi.mocked(auditEgressDecision).mockReturnValueOnce({
+      decision: 'deny',
+      reason: 'Destination evil.example.com is not in the egress allowlist.',
+      host: 'evil.example.com',
+      port: 443,
+      correlationId: 'test-corr',
+      dryRun: false,
+    });
+    vi.mocked(shouldEnforceDeny).mockReturnValueOnce(true);
+
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: { 'content-type': 'application/json' },
+      },
+      '{}',
+    );
+
+    expect(res.statusCode).toBe(403);
+    const parsed = JSON.parse(res.body);
+    expect(parsed.error).toBe('egress_denied');
+    expect(parsed.correlationId).toBe('test-corr');
   });
 });
