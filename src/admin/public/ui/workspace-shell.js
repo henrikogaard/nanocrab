@@ -8,6 +8,7 @@
     chat: route('chat', 'conversation'),
     projects: route('cowork', 'project'),
     'project-chat': route('cowork', 'conversation'),
+    agents: route('agents', 'roster'),
     reports: route('cowork', 'report'),
     'source-collections': route('cowork', 'source'),
     tasks: route('cowork', 'routine'),

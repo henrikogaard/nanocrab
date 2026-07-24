@@ -17,7 +17,7 @@ const {
 // Each rendered route derives its displayed Focus Stack mode independently.
 let hasExplicitActiveMode = false;
 try {
-  hasExplicitActiveMode = ['chat', 'cowork', 'code', 'work'].includes(
+  hasExplicitActiveMode = ['chat', 'cowork', 'agents', 'code', 'work'].includes(
     window.localStorage.getItem('active_mode'),
   );
 } catch {
@@ -917,6 +917,8 @@ const navIconPaths = {
     '<path d="M4 10.5 12 4l8 6.5"/><path d="M6.5 10v8.5h11V10"/><path d="M10 18.5v-5h4v5"/>',
   agents:
     '<path d="M12 3.5 20.5 8v8L12 20.5 3.5 16V8L12 3.5Z"/><path d="M12 8.5v7"/><path d="M8.5 10.5 12 8.5l3.5 2"/><path d="M7.5 15.5 12 18l4.5-2.5"/>',
+  'agent-roster':
+    '<circle cx="9" cy="8" r="3"/><path d="M3.5 19c.5-3.2 2.4-5 5.5-5s5 1.8 5.5 5"/><circle cx="17" cy="9" r="2.2"/><path d="M15 14.2c2.6-.3 4.2 1.2 4.8 4.3"/>',
   messages:
     '<path d="M5 6.5h14v9H9l-4 3v-12Z"/><path d="M8 10h8"/><path d="M8 13h5"/>',
   approvals:
@@ -1015,6 +1017,10 @@ function shellModeCue(mode) {
       title: 'Project work',
       detail: 'Files, artifacts, chats, and approved tools.',
     },
+    agents: {
+      title: 'Agent roster',
+      detail: 'Profiles, delegation, coding jobs, and task assignment.',
+    },
     code: {
       title: 'Code work',
       detail: 'Repos, issues, tests, PRs, and handoffs.',
@@ -1046,7 +1052,7 @@ function showShell(page) {
   stopPolling();
   currentPage = page;
   const NM = window.NanoModes;
-  const primaryDisplayedMode = ['chat', 'cowork', 'code'].includes(
+  const primaryDisplayedMode = ['chat', 'cowork', 'agents', 'code'].includes(
     displayedMode,
   );
   if (primaryDisplayedMode) {

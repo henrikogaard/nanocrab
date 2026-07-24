@@ -668,7 +668,7 @@ function renderAgentProfileEmptyState(kind) {
       className: 'agent-profile-empty-state',
       label: 'No profiles',
       title: 'No agent profiles configured yet',
-      detail: 'Task 7 only displays saved profiles. Create and edit profile definitions in the next profile workflow.',
+      detail: 'Agents are named personas with their own provider, model, personality, and capabilities. Create one to start delegating work.',
     },
     detail: {
       className: 'agent-profile-empty-state is-detail',
@@ -889,18 +889,19 @@ function renderAgentProfileDetail(profile) {
         <span class="badge ${status.badge} agent-tool-badge">${status.label}</span>
       </div>
       <div class="agent-profile-tabs" role="tablist" aria-label="Profile detail sections">
-        <span class="agent-profile-tab is-active" role="tab" aria-selected="true">Identity</span>
-        <span class="agent-profile-tab" role="tab">Model</span>
-        <span class="agent-profile-tab" role="tab">Capabilities</span>
-        <span class="agent-profile-tab" role="tab">Subscriptions</span>
-        <span class="agent-profile-tab" role="tab">Activity</span>
+        <button class="agent-profile-tab is-active" role="tab" aria-selected="true" onclick="switchProfileTab('identity')">Identity</button>
+        <button class="agent-profile-tab" role="tab" onclick="switchProfileTab('model')">Model</button>
+        <button class="agent-profile-tab" role="tab" onclick="switchProfileTab('capabilities')">Capabilities</button>
+        <button class="agent-profile-tab" role="tab" onclick="switchProfileTab('subscriptions')">Subscriptions</button>
+        <button class="agent-profile-tab" role="tab" onclick="switchProfileTab('activity')">Activity</button>
+        <button class="agent-profile-tab" role="tab" onclick="switchProfileTab('assign')">Assign work</button>
       </div>
       <div class="agent-profile-action-bar">
         <span class="agent-profile-action-status" id="agent-profile-status-${agentProfileAttr(detailId)}" aria-live="polite"></span>
         <button type="button" class="btn btn-sm btn-primary" onclick="saveAgentProfile(window._selectedAgentProfileId)">Save profile</button>
         <button type="button" class="btn btn-sm btn-ghost" style="color: var(--error-color, #e55)" onclick="deleteAgentProfile(window._selectedAgentProfileId)">Delete</button>
       </div>
-      <div class="agent-profile-tab-panel is-identity">
+      <div class="agent-profile-tab-panel is-identity is-visible">
         <div class="agent-profile-panel-head"><span>Identity</span></div>
         <form class="agent-profile-form" id="agent-profile-form-${agentProfileAttr(detailId)}">
           <div class="agent-profile-field-grid">
@@ -989,11 +990,39 @@ function renderAgentProfileDetail(profile) {
         </div>
         ${activityRows}
       </div>
-      <div class="agent-profile-tab-panel is-invoke">
-        <div class="agent-profile-panel-head"><span>Invoke</span></div>
-        <textarea id="agent-profile-invoke-prompt-${agentProfileAttr(detailId)}" class="input agent-profile-invoke-input" rows="4" placeholder="Describe the one-off work for this profile."></textarea>
-        <div class="agent-profile-action-row">
-          <button type="button" class="btn btn-sm btn-primary" onclick="invokeAgentProfile(window._selectedAgentProfileId)">Invoke profile</button>
+      <div class="agent-profile-tab-panel is-assign">
+        <div class="agent-profile-panel-head"><span>Assign work to ${esc(agentProfileDisplayName(profile))}</span></div>
+        <p class="agent-profile-assign-intro">Launch a task, coding job, or recurring loop using this agent's configured provider, model, and capabilities.</p>
+        <div class="agent-profile-assign-grid">
+          <button type="button" class="agent-assign-card" onclick="openAssignWorkWizard('freeform')">
+            <span class="agent-assign-card-icon">⚡</span>
+            <strong>One-off task</strong>
+            <small>Describe work and launch immediately</small>
+          </button>
+          <button type="button" class="agent-assign-card" onclick="openAssignWorkWizard('github')">
+            <span class="agent-assign-card-icon">🔀</span>
+            <strong>GitHub issue</strong>
+            <small>Pick an issue or target a specific number</small>
+          </button>
+          <button type="button" class="agent-assign-card" onclick="openAssignWorkWizard('autofix')">
+            <span class="agent-assign-card-icon">🔄</span>
+            <strong>Auto-pickup loop</strong>
+            <small>Watch a label and auto-assign issues</small>
+          </button>
+          <button type="button" class="agent-assign-card" onclick="invokeAgentProfile(window._selectedAgentProfileId)">
+            <span class="agent-assign-card-icon">💬</span>
+            <strong>Quick invoke</strong>
+            <small>Send a prompt directly to this profile</small>
+          </button>
+        </div>
+        <div class="agent-profile-assign-quick">
+          <label>
+            <span>Quick prompt</span>
+            <textarea id="agent-profile-invoke-prompt-${agentProfileAttr(detailId)}" class="input agent-profile-invoke-input" rows="3" placeholder="Describe the work for ${esc(agentProfileDisplayName(profile))}..."></textarea>
+          </label>
+          <div class="agent-profile-action-row">
+            <button type="button" class="btn btn-sm btn-primary" onclick="invokeAgentProfile(window._selectedAgentProfileId)">Send to agent</button>
+          </div>
         </div>
       </div>
     </section>`;
@@ -1038,7 +1067,11 @@ function renderAgentProfileShell(profiles) {
   if (roster.length === 0) {
     return `
       <section class="agent-profile-shell" id="agent-profile-shell">
-        ${renderAgentProfileEmptyState('empty')}
+        <div class="agent-profile-empty-hero">
+          ${renderAgentProfileEmptyState('empty')}
+          <button type="button" class="btn btn-primary" onclick="showCreateAgentProfileForm()">+ Create your first agent</button>
+        </div>
+        <div id="agent-profile-create-panel" class="is-hidden"></div>
       </section>`;
   }
 
@@ -1594,46 +1627,37 @@ async function renderAgents(el) {
     };
 
     el.innerHTML = `
-      <div class="page-header agent-page-header">
-        <h2>Agents</h2>
-        <button class="btn btn-sm btn-primary" onclick="openAssignWorkWizard()">Assign work</button>
-      </div>
-
-      <section class="agent-command-center">
-        <div class="agent-command-main">
-          <div class="agent-command-kicker">Delegation cockpit</div>
-          <h3>Assign, approve, and watch agent work</h3>
-          <p>Use this surface when work should leave your hands: one-off tasks, GitHub issues, recurring automations, coding agents, and human approval gates.</p>
-          <div class="agent-command-actions">
-            <button class="btn btn-sm btn-primary" onclick="openAssignWorkWizard('freeform')">Assign work</button>
-            <button class="btn btn-sm btn-ghost" onclick="copyAgentDelegationBrief()">Copy delegation brief</button>
-            <button class="btn btn-sm btn-ghost" onclick="openAssignWorkWizard('github')">GitHub issue</button>
-            <button class="btn btn-sm btn-ghost" onclick="openAssignWorkWizard('autofix')">Auto-pickup</button>
-            <button class="btn btn-sm btn-ghost" onclick="navigate('approvals')">Approvals</button>
+      <div class="agent-page-topbar">
+        <div class="agent-page-topbar-left">
+          <h2>Agents</h2>
+          <div class="agent-stat-strip">
+            ${agentStats
+              .map(
+                (stat) => `<span class="agent-stat-pill is-${stat.tone}" title="${esc(stat.detail)}">
+                  <strong>${stat.count}</strong>
+                  <em>${esc(stat.label)}</em>
+                </span>`,
+              )
+              .join('')}
           </div>
         </div>
-        <div class="agent-command-stats">
-          ${agentStats
-            .map(
-              (stat) => `<div class="agent-command-stat is-${stat.tone}">
-                <div>
-                  <span>${esc(stat.label)}</span>
-                  <strong>${stat.count}</strong>
-                </div>
-                <small>${esc(stat.detail)}</small>
-              </div>`,
-            )
-            .join('')}
+        <div class="agent-page-topbar-actions">
+          ${agentAttentionItems.length > 0 ? `<button class="btn btn-sm btn-ghost agent-attention-trigger" onclick="document.querySelector('.agent-attention-panel')?.classList.toggle('is-open')" title="Needs attention">${agentAttentionItems.length} need attention</button>` : ''}
+          <button class="btn btn-sm btn-ghost" onclick="copyAgentDelegationBrief()" title="Copy delegation brief">Brief</button>
+          <button class="btn btn-sm btn-primary" onclick="openAssignWorkWizard()">Assign work</button>
         </div>
-      </section>
+      </div>
 
-      <section class="agent-attention-panel" aria-label="Agent attention queue">
+      <section class="agent-attention-panel is-collapsed" aria-label="Agent attention queue">
         <div class="agent-attention-head">
           <div>
             <span>Needs attention</span>
             <small>${agentAttentionItems.length > 0 ? 'Handle blockers before launching more work.' : 'No agent blockers right now.'}</small>
           </div>
-          <button class="btn btn-sm btn-ghost" onclick="refresh()">Refresh</button>
+          <div class="agent-attention-head-actions">
+            <button class="btn btn-sm btn-ghost" onclick="refresh()">Refresh</button>
+            <button class="btn btn-sm btn-ghost" onclick="this.closest('.agent-attention-panel').classList.remove('is-open')">Dismiss</button>
+          </div>
         </div>
         ${
           agentAttentionItems.length > 0
@@ -2049,6 +2073,22 @@ window.selectAgentProfile = function (id) {
   const shell = document.getElementById('agent-profile-shell');
   if (!shell) return;
   shell.innerHTML = renderAgentProfileShellContent(roster, id);
+};
+
+window.switchProfileTab = function (tabName) {
+  const detail = document.querySelector('.agent-profile-detail');
+  if (!detail) return;
+  detail.querySelectorAll('.agent-profile-tab').forEach((tab) => {
+    const label = tab.textContent.trim().toLowerCase().replace(/\s+/g, '');
+    const isActive = label === tabName ||
+      (tabName === 'assign' && label === 'assignwork');
+    tab.classList.toggle('is-active', isActive);
+    tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  });
+  detail.querySelectorAll('.agent-profile-tab-panel').forEach((panel) => {
+    const panelName = panel.className.match(/is-(\w[\w-]*)/)?.[1] || '';
+    panel.classList.toggle('is-visible', panelName === tabName);
+  });
 };
 
 window.selectAgentProfileByIndex = function (index) {
