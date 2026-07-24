@@ -71,7 +71,8 @@ export interface VerificationReport {
 /**
  * Canonical JSON form of an audit event for hashing. Field order is fixed so
  * semantically-equal events produce the same hash regardless of object key
- * insertion order.
+ * insertion order. Recursively sorts all nested object keys so the context
+ * field (and any future nested fields) produce deterministic output.
  */
 function canonicalEventJson(event: AuditEvent): string {
   const canonical = {
@@ -87,7 +88,26 @@ function canonicalEventJson(event: AuditEvent): string {
     durationMs: event.durationMs,
     error: event.error,
   };
-  return JSON.stringify(canonical, Object.keys(canonical).sort());
+  return canonicalJsonStringify(canonical);
+}
+
+/**
+ * Recursively sort object keys and stringify to produce deterministic JSON.
+ * Handles nested objects and arrays so the context field (and any future
+ * nested fields) always produce the same string for semantically equal input.
+ */
+function canonicalJsonStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return '[' + value.map(canonicalJsonStringify).join(',') + ']';
+  }
+  const keys = Object.keys(value).sort();
+  const entries = keys.map((k) =>
+    JSON.stringify(k) + ':' + canonicalJsonStringify((value as Record<string, unknown>)[k]),
+  );
+  return '{' + entries.join(',') + '}';
 }
 
 function sha256(data: string): string {

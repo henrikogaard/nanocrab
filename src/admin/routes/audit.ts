@@ -47,9 +47,11 @@ router.get('/export', (req: Request, res: Response) => {
     limit: Math.min(parseInt(req.query.limit as string) || 1000, 1000),
   });
   res.setHeader('Content-Type', 'application/json');
+  // RFC 6266: encode filename safely (date string is ASCII-safe, but be explicit)
+  const filename = 'nanocrab-audit-' + new Date().toISOString().slice(0, 10) + '.json';
   res.setHeader(
     'Content-Disposition',
-    `attachment; filename="nanocrab-audit-${new Date().toISOString().slice(0, 10)}.json"`,
+    'attachment; filename="' + filename + '"; filename*=UTF-8\'\'' + encodeURIComponent(filename),
   );
   res.json({ exportedAt: new Date().toISOString(), events });
 });
@@ -66,9 +68,12 @@ router.get('/export/tamper-evident', (req: Request, res: Response) => {
     to: queryString(req.query.to),
     limit: Math.min(parseInt(req.query.limit as string) || 1000, 5000),
   };
+  // Fix #3: accept signing key via header instead of query parameter to avoid
+  // exposure in server access logs, browser history, and proxy logs.
   const signingKey =
-    typeof req.query.signingKey === 'string' && req.query.signingKey.trim()
-      ? req.query.signingKey
+    typeof req.headers['x-signing-key'] === 'string' &&
+    req.headers['x-signing-key'].trim()
+      ? req.headers['x-signing-key'].trim()
       : undefined;
   const exportData = buildTamperEvidentExport(filters, signingKey);
   logAuditEvent({
@@ -83,9 +88,11 @@ router.get('/export/tamper-evident', (req: Request, res: Response) => {
     },
   });
   res.setHeader('Content-Type', 'application/json');
+  // RFC 6266 filename encoding
+  const filename = 'nanocrab-audit-chain-' + new Date().toISOString().slice(0, 10) + '.json';
   res.setHeader(
     'Content-Disposition',
-    `attachment; filename="nanocrab-audit-chain-${new Date().toISOString().slice(0, 10)}.json"`,
+    'attachment; filename="' + filename + '"; filename*=UTF-8\'\'' + encodeURIComponent(filename),
   );
   res.json(exportData);
 });
@@ -97,7 +104,7 @@ router.post('/export/verify', (req: Request, res: Response) => {
   }
   const signingKey =
     typeof req.body.signingKey === 'string' && req.body.signingKey.trim()
-      ? req.body.signingKey
+      ? req.body.signingKey.trim()
       : undefined;
   try {
     const report = verifyTamperEvidentExport(req.body.export, signingKey);
