@@ -71,6 +71,7 @@ vi.mock('../container-runtime.js', () => ({
   hostGatewayArgs: vi.fn(() => [
     '--add-host=host.docker.internal:host-gateway',
   ]),
+  agentNetworkArgs: vi.fn(() => []),
   ensureContainerRuntimeRunning: vi.fn(),
   cleanupOrphans: vi.fn(),
 }));
