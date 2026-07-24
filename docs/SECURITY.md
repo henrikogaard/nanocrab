@@ -27,6 +27,41 @@ application-level permission checks, the attack surface is limited by what's
 mounted. The opt-in host-native Devin coding exception has its separate
 fail-closed boundary in section 3e.
 
+#### 1a. Destination-Bound Credential Egress Gateway
+
+The credential proxy is also an authoritative egress boundary. Before
+forwarding any outbound request it consults the egress gateway
+(`src/egress-gateway.ts`), which:
+
+- **Allowlists destinations** — unknown public hosts are denied by default.
+  The default allowlist covers the provider routes the proxy already knows
+  about (Anthropic, OpenRouter, Google Gemini, Airouter, Mistral). Operators
+  can extend or replace it via `PUT /api/egress` (admin only).
+- **Binds credentials to destinations** — a credential is only injected for
+  the destination it is bound to. An `OPENROUTER_API_KEY` cannot be replayed
+  against `api.anthropic.com` even if both are allowlisted.
+- **Audits every decision** — `network.egress.allow` / `network.egress.deny`
+  events are written to the audit log with a correlation ID, the (redacted)
+  reason, and the matched destination. Secret values never appear in audit
+  context.
+- **Supports dry-run** — set `EGRESS_DRY_RUN=1` to audit deny decisions
+  without blocking traffic, useful for validating an allowlist change before
+  enforcing it.
+- **Passes private/loopback destinations** — `127.0.0.0/8`, `10/8`,
+  `172.16/12`, `192.168/16`, `::1`, and `localhost` are allowed without an
+  allowlist entry because they are not real egress (the proxy itself listens
+  on a bridge/loopback address and provider base URLs may point at local
+  runtimes like Ollama).
+
+Denied requests receive HTTP 403 with a JSON body
+`{"error":"egress_denied","reason":...,"correlationId":...}` so agents see a
+clear, auditable rejection rather than a silent drop.
+
+The allowlist is stored at `~/.config/nanocrab/egress-allowlist.json` and is
+loaded lazily on first egress evaluation. The admin API
+(`GET/PUT /api/egress`, `POST /api/egress/evaluate`) lets operators manage the
+allowlist and dry-run a destination without sending real traffic.
+
 ### 2. Mount Security
 
 **External Allowlist** - Mount permissions stored at `~/.config/nanocrab/mount-allowlist.json`, which is:
