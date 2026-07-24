@@ -52,7 +52,6 @@
       title: 'Cowork',
       detail: 'Project setup, agent work, drafts, and approvals.',
       pages: [
-        'agents',
         'tasks',
         'workflows',
         'reports',

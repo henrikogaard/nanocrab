@@ -54,7 +54,7 @@ describe('Agents launcher UI', () => {
     expect(source).toContain('coding-job-meta');
     expect(source).toContain('codingDenyNoteId');
     expect(source).toContain('coding-deny-note-field');
-    expect(source).toContain('page-header agent-page-header');
+    expect(source).toContain('agent-page-topbar');
     expect(source).toContain('card agent-section-card');
     expect(source).not.toContain(
       "prompt('Reason for denying implementation?')",
@@ -644,8 +644,8 @@ describe('Agents launcher UI', () => {
   it('surfaces a delegation command center with attention shortcuts', () => {
     const source = fs.readFileSync(agentsPagePath, 'utf8');
 
-    expect(source).toContain('agent-command-center');
-    expect(source).toContain('Delegation cockpit');
+    expect(source).toContain('agent-page-topbar');
+    expect(source).toContain('agent-stat-strip');
     expect(source).toContain('agentDelegationBriefText');
     expect(source).toContain('agentQuestionDecisionBriefText');
     expect(source).toContain('renderAgentLoadingState');
@@ -947,9 +947,9 @@ describe('Agents launcher UI', () => {
   it('styles the delegation cockpit for desktop and narrow screens', () => {
     const source = fs.readFileSync(stylePath, 'utf8');
 
-    expect(source).toContain('.agent-command-center');
-    expect(source).toContain('.agent-page-header');
-    expect(source).toContain('.agent-command-stats');
+    expect(source).toContain('.agent-page-topbar');
+    expect(source).toContain('.agent-stat-strip');
+    expect(source).toContain('.agent-stat-pill');
     expect(source).toContain('.agent-loading-state');
     expect(source).toContain('.agent-loading-state.is-cockpit');
     expect(source).toContain('.agent-loading-state::after');

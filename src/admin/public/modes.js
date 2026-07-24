@@ -18,6 +18,13 @@
       guidance: 'Projects, files, artifacts, chats, and approved tools.',
       pages: ['projects'],
     },
+    agents: {
+      id: 'agents',
+      label: 'Agents',
+      icon: 'agent-roster',
+      guidance: 'Agent profiles, delegation, coding jobs, and task assignment.',
+      pages: ['agents'],
+    },
     code: {
       id: 'code',
       label: 'Code',
@@ -32,7 +39,7 @@
       pages: [],
     },
   };
-  const MODE_ORDER = ['chat', 'cowork', 'code', 'more'];
+  const MODE_ORDER = ['chat', 'cowork', 'agents', 'code', 'more'];
   const HIDDEN_PAGE_MODES = {
     'project-chat': 'cowork',
   };
@@ -40,7 +47,6 @@
   // Admin / operations pages — reachable via the "More" drawer, not a mode.
   const MORE_IDS = [
     'dashboard',
-    'agents',
     'tasks',
     'workflows',
     'reports',
