@@ -10,13 +10,20 @@ beforeAll(async () => {
 const M = () => (globalThis as any).NanoModes;
 
 describe('MODES config', () => {
-  it('exposes four stable modes in order', () => {
-    expect(M().MODE_ORDER).toEqual(['chat', 'cowork', 'code', 'more']);
+  it('exposes five stable modes in order', () => {
+    expect(M().MODE_ORDER).toEqual([
+      'chat',
+      'cowork',
+      'agents',
+      'code',
+      'more',
+    ]);
   });
 
   it('labels the top-level focus modes', () => {
     expect(M().MODES.chat.label).toBe('Chat');
     expect(M().MODES.cowork.label).toBe('Cowork');
+    expect(M().MODES.agents.label).toBe('Agents');
     expect(M().MODES.code.label).toBe('Code');
     expect(M().MODES.more).toEqual({
       id: 'more',
@@ -42,11 +49,18 @@ describe('MODES config', () => {
   it('enumerates primary and hidden mode-owned page ids without exposing mutable state', () => {
     const pageIds = M().modePageIds();
 
-    expect(pageIds).toEqual(['chat', 'projects', 'gitcode', 'project-chat']);
+    expect(pageIds).toEqual([
+      'chat',
+      'projects',
+      'agents',
+      'gitcode',
+      'project-chat',
+    ]);
     pageIds.push('tampered');
     expect(M().modePageIds()).toEqual([
       'chat',
       'projects',
+      'agents',
       'gitcode',
       'project-chat',
     ]);
@@ -54,7 +68,7 @@ describe('MODES config', () => {
 
   it('keeps More stable while exposing only navigable primary modes', () => {
     expect(M().MODE_ORDER).toContain('more');
-    expect(M().primaryModeIds()).toEqual(['chat', 'cowork', 'code']);
+    expect(M().primaryModeIds()).toEqual(['chat', 'cowork', 'agents', 'code']);
   });
 });
 

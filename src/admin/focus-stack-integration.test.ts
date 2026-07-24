@@ -807,7 +807,7 @@ describe('Focus Stack executable shell integration', () => {
     expect(parsed?.projectId).toBe('project/delta');
     expect(parsed?.threadId).toBe('web:thread-17');
     expect(railMarkup.match(/<span>More<\/span>/g)).toHaveLength(1);
-    expect(mobileMarkup.match(/<button class="bottom-tab/g)).toHaveLength(4);
+    expect(mobileMarkup.match(/<button class="bottom-tab/g)).toHaveLength(5);
     expect(mobileMarkup.match(/<span>More<\/span>/g)).toHaveLength(1);
   });
 

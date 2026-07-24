@@ -6,7 +6,8 @@ on:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    # Keep untrusted fork PR code off the personal self-hosted runner.
+    runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository && 'devbox' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
