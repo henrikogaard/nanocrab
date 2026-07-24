@@ -40174,13 +40174,15 @@ h1, h2, h3,
 }
 
 /* --- Suppress in-page page-header h2s (duplicate canvas header) --- */
+#page-content > .page-header,
 .page-header {
-  display: none;
+  display: none !important;
 }
 
 /* But keep the page-header when it's the only content (loading states) */
+#page-content > .page-header:only-child,
 .page-header:only-child {
-  display: block;
+  display: block !important;
 }
 
 /* --- Channels command-center demotion --- */
