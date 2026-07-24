@@ -119,6 +119,7 @@ export function startCredentialProxy(
         let targetPath = req.url || '/';
         let providerApiKey: string | undefined;
         let isProviderRoute = false;
+        let matchedRoute: typeof providerRoutes[string] | undefined;
         if (routeMatch) {
           isProviderRoute = true;
           const route = providerRoutes[routeMatch[1]];
@@ -141,6 +142,7 @@ export function startCredentialProxy(
             targetUrl = new URL(route.baseUrl.replace(/\/+$/, ''));
             targetPath = routeMatch[2] || '/';
             providerApiKey = route.apiKey;
+            matchedRoute = route;
           }
         }
 
@@ -182,10 +184,8 @@ export function startCredentialProxy(
         }
 
         // Egress gateway: allow/deny the destination and audit the decision.
-        // Credentials are only injected for destinations they are bound to.
-        const route = isProviderRoute
-          ? providerRoutes[routeMatch![1]]
-          : undefined;
+        // Fix #2: always include the credentialId from the matched route,
+        // even for non-provider routes that inject credentials implicitly.
         const egressResult = auditEgressDecision({
           host: targetUrl.hostname,
           port: targetUrl.port
@@ -193,7 +193,7 @@ export function startCredentialProxy(
             : isHttps
               ? 443
               : 80,
-          credentialId: route?.credentialId,
+          credentialId: matchedRoute?.credentialId,
           method: req.method,
         });
         if (

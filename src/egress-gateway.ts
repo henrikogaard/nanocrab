@@ -108,6 +108,9 @@ const DEFAULT_DESTINATIONS: EgressDestination[] = [
 
 let cachedAllowlist: EgressAllowlist | null = null;
 
+/** Fix #8: track file mtime to detect external modifications */
+let cachedAllowlistMtime: number | null = null;
+
 /** Hosts that are not real egress and are always allowed. */
 export function isPrivateHost(host: string): boolean {
   if (!host) return false;
@@ -162,11 +165,25 @@ function normalizeAllowlist(value: unknown): EgressAllowlist {
 }
 
 export function loadEgressAllowlist(): EgressAllowlist {
-  if (cachedAllowlist) return cachedAllowlist;
+  // Fix #8: invalidate cache if the file was modified externally
   try {
-    cachedAllowlist = normalizeAllowlist(
-      JSON.parse(fs.readFileSync(ALLOWLIST_PATH, 'utf-8')),
-    );
+    const stat = fs.statSync(ALLOWLIST_PATH);
+    if (cachedAllowlist && cachedAllowlistMtime === stat.mtimeMs) {
+      return cachedAllowlist;
+    }
+  } catch {
+    // File doesn't exist yet — fall through to default
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(ALLOWLIST_PATH, 'utf-8'));
+    cachedAllowlist = normalizeAllowlist(parsed);
+    try {
+      const stat = fs.statSync(ALLOWLIST_PATH);
+      cachedAllowlistMtime = stat.mtimeMs;
+    } catch {
+      /* mtime tracking failed — continue without it */
+    }
   } catch {
     cachedAllowlist = { destinations: DEFAULT_DESTINATIONS };
     try {
@@ -175,6 +192,8 @@ export function loadEgressAllowlist(): EgressAllowlist {
         ALLOWLIST_PATH,
         `${JSON.stringify(cachedAllowlist, null, 2)}\n`,
       );
+      const stat = fs.statSync(ALLOWLIST_PATH);
+      cachedAllowlistMtime = stat.mtimeMs;
     } catch (err) {
       logger.warn({ err }, 'Failed to write default egress allowlist');
     }
@@ -186,10 +205,17 @@ export function saveEgressAllowlist(allowlist: EgressAllowlist): void {
   fs.mkdirSync(path.dirname(ALLOWLIST_PATH), { recursive: true });
   fs.writeFileSync(ALLOWLIST_PATH, `${JSON.stringify(allowlist, null, 2)}\n`);
   cachedAllowlist = normalizeAllowlist(allowlist);
+  try {
+    const stat = fs.statSync(ALLOWLIST_PATH);
+    cachedAllowlistMtime = stat.mtimeMs;
+  } catch {
+    /* mtime tracking failed */
+  }
 }
 
 export function resetEgressAllowlistCache(): void {
   cachedAllowlist = null;
+  cachedAllowlistMtime = null;
 }
 
 function hostMatches(allowed: string, requested: string): boolean {

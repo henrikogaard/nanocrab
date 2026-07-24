@@ -62,7 +62,29 @@ router.put('/', (req: Request, res: Response) => {
   res.json(allowlist);
 });
 
+// Fix #12: simple in-memory rate limiter for /evaluate to prevent audit log flooding
+const evaluateRateLimit = new Map<string, number[]>();
+const EVALUATE_RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
+const EVALUATE_RATE_LIMIT_MAX = 60; // 60 requests per minute per user
+
+function checkEvaluateRateLimit(userId: string): boolean {
+  const now = Date.now();
+  const timestamps = evaluateRateLimit.get(userId) || [];
+  const recent = timestamps.filter((t) => now - t < EVALUATE_RATE_LIMIT_WINDOW_MS);
+  if (recent.length >= EVALUATE_RATE_LIMIT_MAX) {
+    return false;
+  }
+  recent.push(now);
+  evaluateRateLimit.set(userId, recent);
+  return true;
+}
+
 router.post('/evaluate', (req: Request, res: Response) => {
+  const userId = req.user?.username || 'dashboard';
+  if (!checkEvaluateRateLimit(userId)) {
+    res.status(429).json({ error: 'Rate limit exceeded. Maximum 60 evaluations per minute.' });
+    return;
+  }
   const body = req.body as {
     host?: string;
     port?: number;
