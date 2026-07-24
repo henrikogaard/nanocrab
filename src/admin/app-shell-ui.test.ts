@@ -487,7 +487,7 @@ describe('App shell accessibility UI', () => {
     expect(shell).toContain('window.NanoWorkspaceShell.resolveRoute(');
     expect(shell).toContain('hasExplicitActiveMode ? activeMode : undefined');
     expect(shell).toContain(
-      "const primaryDisplayedMode = ['chat', 'cowork', 'code'].includes(",
+      "const primaryDisplayedMode = ['chat', 'cowork', 'agents', 'code'].includes(",
     );
     expect(shell).toContain(
       'NM.saveActiveMode(activeMode, window.localStorage)',
@@ -591,8 +591,8 @@ describe('App shell accessibility UI', () => {
     const bottomTabsStart = appSource.indexOf('<div class="bottom-tabs">');
     const bottomTabsEnd = appSource.indexOf('</nav>', bottomTabsStart);
     const bottomTabs = appSource.slice(bottomTabsStart, bottomTabsEnd);
-    const focusMobileStart = styleSource.lastIndexOf(
-      '@media (max-width: 768px)',
+    const focusMobileStart = styleSource.indexOf(
+      '@media (max-width: 768px) {\n  .focus-stack-shell,',
     );
     const focusMobileEnd = styleSource.indexOf(
       '\n}\n\n@media',
@@ -622,8 +622,8 @@ describe('App shell accessibility UI', () => {
   it('keeps the modal More header, focused close control, and final tools above mobile chrome', () => {
     const appSource = fs.readFileSync(appPath, 'utf8');
     const styleSource = fs.readFileSync(stylePath, 'utf8');
-    const focusMobileStart = styleSource.lastIndexOf(
-      '@media (max-width: 768px)',
+    const focusMobileStart = styleSource.indexOf(
+      '@media (max-width: 768px) {\n  .focus-stack-shell,',
     );
     const focusMobile = styleSource.slice(focusMobileStart);
 
