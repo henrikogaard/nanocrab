@@ -337,6 +337,9 @@ These rules are non-negotiable:
 - Journal extraction is read-only.
 - GitHub PR creation, file publishing, external messages, and document uploads require clear policy gates.
 - High-impact actions write sanitized policy/audit events, and dry-run paths avoid external writes while preserving reviewable timelines.
+- Agent containers run on a default-deny internal Docker network on bare-metal
+  Linux; the credential/egress proxy is the only approved outbound path
+  (`CONTAINER_NETWORK_ISOLATION`, `scripts/egress-canary.ts`). See issue #219.
 
 ---
 

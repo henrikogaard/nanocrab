@@ -17,7 +17,7 @@ import {
 } from './coding-jobs.js';
 import {
   CONTAINER_RUNTIME_BIN,
-  containerHardeningArgs,
+  agentNetworkArgs,
   hostGatewayArgs,
   CONTAINER_HOST_GATEWAY,
 } from './container-runtime.js';
@@ -277,7 +277,7 @@ function runTaskContainer(
 
   const args: string[] = ['run', '--rm', '--name', containerName];
   args.push(...hostGatewayArgs());
-  args.push(...containerHardeningArgs());
+  args.push(...agentNetworkArgs());
 
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();

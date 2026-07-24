@@ -40,7 +40,7 @@ vi.mock('./container-runtime.js', () => ({
   hostGatewayArgs: vi.fn(() => [
     '--add-host=host.docker.internal:host-gateway',
   ]),
-  containerHardeningArgs: vi.fn(() => []),
+  agentNetworkArgs: vi.fn(() => []),
 }));
 
 vi.mock('./credential-proxy.js', () => ({

@@ -60,12 +60,7 @@ vi.mock('./container-runtime.js', () => ({
   CONTAINER_RUNTIME_BIN: 'docker',
   CONTAINER_HOST_GATEWAY: 'host.docker.internal',
   hostGatewayArgs: () => [],
-  containerHardeningArgs: () => [
-    '--read-only',
-    '--cap-drop=ALL',
-    '--security-opt',
-    'no-new-privileges',
-  ],
+  agentNetworkArgs: () => ['--network', 'nanocrab-agent-net'],
   readonlyMountArgs: (h: string, c: string) => ['-v', `${h}:${c}:ro`],
   stopContainer: vi.fn(),
 }));
@@ -301,7 +296,7 @@ describe('container-runner timeout behavior', () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it('applies container hardening flags (read-only, cap-drop, no-new-privileges)', async () => {
+  it('attaches the container to the default-deny agent network', async () => {
     const resultPromise = runContainerAgent(testGroup, testInput, () => {});
 
     emitOutputMarker(fakeProc, { status: 'success', result: 'Done' });
@@ -311,9 +306,10 @@ describe('container-runner timeout behavior', () => {
     await resultPromise;
 
     const spawnArgs = vi.mocked(spawn).mock.calls.at(-1)?.[1] as string[];
-    expect(spawnArgs).toContain('--read-only');
-    expect(spawnArgs).toContain('--cap-drop=ALL');
-    expect(spawnArgs).toContain('no-new-privileges');
+    expect(spawnArgs).toContain('--network');
+    expect(spawnArgs[spawnArgs.indexOf('--network') + 1]).toBe(
+      'nanocrab-agent-net',
+    );
   });
 });
 

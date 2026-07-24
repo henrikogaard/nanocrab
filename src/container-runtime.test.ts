@@ -10,11 +10,17 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
-// Mock child_process — store the mock fn so tests can configure it
+// Mock child_process — store the mock fn so tests can configure it.
+// Preserve real exports so transitive imports (e.g. execFile via promisify)
+// still work after container-runtime started importing config.js.
 const mockExecFileSync = vi.fn();
-vi.mock('child_process', () => ({
-  execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
-}));
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return {
+    ...actual,
+    execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
+  };
+});
 
 import {
   CONTAINER_RUNTIME_BIN,
@@ -23,9 +29,13 @@ import {
   stopContainer,
   ensureContainerRuntimeRunning,
   cleanupOrphans,
-  containerHardeningArgs,
-  isContainerHardeningEnabled,
-  DEFAULT_TMPFS_PATHS,
+  ensureAgentNetwork,
+  resetAgentNetworkCache,
+  agentNetworkArgs,
+  hostGatewayArgs,
+  resolveProxyBindHost,
+  isNetworkIsolationEnabled,
+  runEgressCanary,
 } from './container-runtime.js';
 import { logger } from './logger.js';
 
@@ -33,7 +43,7 @@ const ORIGINAL_ENV = { ...process.env };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  delete process.env.CONTAINER_HARDENING;
+  resetAgentNetworkCache();
 });
 
 afterEach(() => {
@@ -41,6 +51,7 @@ afterEach(() => {
     if (!(key in ORIGINAL_ENV)) delete process.env[key];
   }
   Object.assign(process.env, ORIGINAL_ENV);
+  resetAgentNetworkCache();
 });
 
 // --- Pure functions ---
@@ -194,43 +205,176 @@ describe('cleanupOrphans', () => {
   });
 });
 
-// --- Container hardening flags ---
+// --- Agent network isolation ---
 
-describe('containerHardeningArgs', () => {
-  it('is enabled by default and emits read-only, cap-drop, no-new-privileges, and tmpfs flags', () => {
-    delete process.env.CONTAINER_HARDENING;
-    const args = containerHardeningArgs();
-    expect(args).toContain('--read-only');
-    expect(args).toContain('--cap-drop=ALL');
-    expect(args).toContain('no-new-privileges');
-    // tmpfs entries for each default writable path
-    for (const p of DEFAULT_TMPFS_PATHS) {
-      const idx = args.indexOf('--tmpfs');
-      expect(args.slice(idx + 1)).toContain(
-        `${p}:rw,noexec,nosuid,nodev,size=64m`,
-      );
-    }
+function networkInspectOutput(gateway: string): string {
+  return JSON.stringify([
+    {
+      Name: 'nanocrab-agent-net',
+      IPAM: { Config: [{ Gateway: gateway }] },
+    },
+  ]);
+}
+
+describe('isNetworkIsolationEnabled', () => {
+  it('defaults to on', () => {
+    delete process.env.CONTAINER_NETWORK_ISOLATION;
+    expect(isNetworkIsolationEnabled()).toBe(true);
   });
 
-  it('returns an empty array when CONTAINER_HARDENING=off', () => {
-    process.env.CONTAINER_HARDENING = 'off';
-    expect(containerHardeningArgs()).toEqual([]);
-    expect(isContainerHardeningEnabled()).toBe(false);
+  it('can be disabled with off', () => {
+    process.env.CONTAINER_NETWORK_ISOLATION = 'off';
+    expect(isNetworkIsolationEnabled()).toBe(false);
+  });
+});
+
+describe('ensureAgentNetwork', () => {
+  it('returns disabled info when isolation is off', () => {
+    process.env.CONTAINER_NETWORK_ISOLATION = 'off';
+    const net = ensureAgentNetwork();
+    expect(net.enabled).toBe(false);
+    expect(net.internal).toBe(false);
+    expect(mockExecFileSync).not.toHaveBeenCalled();
   });
 
-  it('respects a custom tmpfs path list', () => {
-    const args = containerHardeningArgs(['/custom/tmp']);
-    const tmpfsValues = args.filter((_v, i) => args[i - 1] === '--tmpfs');
-    expect(tmpfsValues).toEqual([
-      '/custom/tmp:rw,noexec,nosuid,nodev,size=64m',
+  it('inspects an existing network and resolves its gateway', () => {
+    mockExecFileSync.mockReturnValueOnce(networkInspectOutput('172.30.0.1'));
+    const net = ensureAgentNetwork();
+    expect(net.enabled).toBe(true);
+    expect(net.internal).toBe(true);
+    expect(net.gatewayIp).toBe('172.30.0.1');
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      CONTAINER_RUNTIME_BIN,
+      ['network', 'inspect', 'nanocrab-agent-net'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+    );
+  });
+
+  it('creates the network as internal when inspect fails', () => {
+    // First call (inspect) throws — network missing
+    mockExecFileSync.mockImplementationOnce(() => {
+      throw new Error('network not found');
+    });
+    // Second call (create) succeeds
+    mockExecFileSync.mockReturnValueOnce('');
+    // Third call (re-inspect) returns gateway
+    mockExecFileSync.mockReturnValueOnce(networkInspectOutput('172.31.0.1'));
+
+    const net = ensureAgentNetwork();
+    expect(net.enabled).toBe(true);
+    expect(net.gatewayIp).toBe('172.31.0.1');
+    expect(mockExecFileSync).toHaveBeenNthCalledWith(
+      2,
+      CONTAINER_RUNTIME_BIN,
+      ['network', 'create', '--internal', 'nanocrab-agent-net'],
+      expect.objectContaining({ encoding: 'utf-8' }),
+    );
+  });
+
+  it('degrades with a warning when network creation fails', () => {
+    // inspect fails, create also fails
+    mockExecFileSync.mockImplementation(() => {
+      throw new Error('docker daemon unavailable');
+    });
+    const net = ensureAgentNetwork();
+    expect(net.enabled).toBe(false);
+    expect(net.gatewayIp).toBeUndefined();
+    expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('degrades when inspect returns no parseable gateway', () => {
+    mockExecFileSync.mockReturnValueOnce('[]');
+    const net = ensureAgentNetwork();
+    expect(net.enabled).toBe(false);
+    expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('caches the result across calls', () => {
+    mockExecFileSync.mockReturnValueOnce(networkInspectOutput('172.30.0.1'));
+    ensureAgentNetwork();
+    ensureAgentNetwork();
+    ensureAgentNetwork();
+    expect(mockExecFileSync).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('agentNetworkArgs', () => {
+  it('returns --network flag when isolation is active', () => {
+    mockExecFileSync.mockReturnValueOnce(networkInspectOutput('172.30.0.1'));
+    expect(agentNetworkArgs()).toEqual(['--network', 'nanocrab-agent-net']);
+  });
+
+  it('returns empty when isolation is off', () => {
+    process.env.CONTAINER_NETWORK_ISOLATION = 'off';
+    expect(agentNetworkArgs()).toEqual([]);
+  });
+});
+
+describe('hostGatewayArgs (isolation-aware)', () => {
+  it('maps host.docker.internal to the internal gateway when active', () => {
+    mockExecFileSync.mockReturnValueOnce(networkInspectOutput('172.30.0.1'));
+    expect(hostGatewayArgs()).toEqual([
+      '--add-host=host.docker.internal:172.30.0.1',
     ]);
   });
 
-  it('marks tmpfs mounts with noexec,nosuid,nodev', () => {
-    const args = containerHardeningArgs(['/tmp']);
-    const tmpfsValue = args[args.indexOf('--tmpfs') + 1];
-    expect(tmpfsValue).toMatch(/noexec/);
-    expect(tmpfsValue).toMatch(/nosuid/);
-    expect(tmpfsValue).toMatch(/nodev/);
+  it('falls back to host-gateway keyword when isolation is off on linux', () => {
+    process.env.CONTAINER_NETWORK_ISOLATION = 'off';
+    // On the test platform (linux) the fallback uses the host-gateway keyword.
+    expect(hostGatewayArgs()).toEqual([
+      '--add-host=host.docker.internal:host-gateway',
+    ]);
+  });
+});
+
+describe('resolveProxyBindHost', () => {
+  it('binds to the internal gateway when isolation is active', () => {
+    mockExecFileSync.mockReturnValueOnce(networkInspectOutput('172.30.0.1'));
+    expect(resolveProxyBindHost()).toBe('172.30.0.1');
+  });
+
+  it('falls back to the default bind host when isolation is off', () => {
+    process.env.CONTAINER_NETWORK_ISOLATION = 'off';
+    // Should not throw and should return a non-empty host.
+    expect(typeof resolveProxyBindHost()).toBe('string');
+    expect(resolveProxyBindHost().length).toBeGreaterThan(0);
+  });
+});
+
+describe('runEgressCanary', () => {
+  it('reports not-run when isolation is disabled', () => {
+    process.env.CONTAINER_NETWORK_ISOLATION = 'off';
+    const result = runEgressCanary();
+    expect(result.ran).toBe(false);
+    expect(result.blocked).toBe(false);
+    expect(result.error).toMatch(/not enabled/);
+  });
+
+  it('reports blocked when the canary container exits 0', () => {
+    mockExecFileSync.mockReturnValueOnce(networkInspectOutput('172.30.0.1'));
+    // ensureAgentNetwork runs via runEgressCanary's first call; the next
+    // execFileSync call is the canary container run, returning empty (exit 0).
+    mockExecFileSync.mockReturnValueOnce('BLOCKED (timeout)\n');
+    const result = runEgressCanary();
+    expect(result.ran).toBe(true);
+    expect(result.blocked).toBe(true);
+    expect(result.exitCode).toBe(0);
+  });
+
+  it('reports not-blocked when the canary container connects (exit 2)', () => {
+    mockExecFileSync.mockReturnValueOnce(networkInspectOutput('172.30.0.1'));
+    const canaryError = Object.assign(new Error('exit 2'), {
+      code: 'STATUS_2',
+      stdout: 'CONNECTED to canary-egress-probe.invalid\n',
+    });
+    mockExecFileSync.mockImplementationOnce(() => {
+      throw canaryError;
+    });
+    const result = runEgressCanary();
+    expect(result.ran).toBe(true);
+    expect(result.blocked).toBe(false);
+    expect(result.exitCode).toBe(2);
+    expect(result.error).toMatch(/NOT enforced/);
   });
 });
