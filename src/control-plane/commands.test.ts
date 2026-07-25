@@ -63,6 +63,7 @@ vi.mock('../container-runtime.js', () => ({
   CONTAINER_RUNTIME_BIN: 'docker',
   CONTAINER_HOST_GATEWAY: 'host.docker.internal',
   hostGatewayArgs: vi.fn(() => []),
+  agentNetworkArgs: vi.fn(() => []),
   ensureContainerRuntimeRunning: vi.fn(),
   cleanupOrphans: vi.fn(),
 }));

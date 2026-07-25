@@ -73,6 +73,28 @@ describe('Git & Code workspace shell UI', () => {
     );
   });
 
+  it('adds a Quick Tasks tab for lightweight coding without full agent setup', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const panelStart = source.indexOf(
+      'async function renderLightweightTasksPanel',
+    );
+    const panelEnd = source.indexOf('window.updateLtaskModels');
+    const panelSource =
+      panelStart >= 0 && panelEnd > panelStart
+        ? source.slice(panelStart, panelEnd)
+        : '';
+
+    expect(source).toContain("{ id: 'ltasks', label: 'Quick Tasks' }");
+    expect(source).toContain(
+      'ltasks: (tabEl) => renderLightweightTasksPanel(tabEl)',
+    );
+    expect(panelSource).toContain(
+      'window._ltaskProviderModels = providerModels',
+    );
+    expect(panelSource).toContain('preserveDraft: true');
+    expect(panelSource).toContain("api('/lightweight-tasks'");
+  });
+
   it('styles the Git & Code command center and responsive lane layout', () => {
     const source = fs.readFileSync(stylePath, 'utf8');
 

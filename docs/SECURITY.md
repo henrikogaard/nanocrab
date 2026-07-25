@@ -21,16 +21,86 @@ Normal agents and container-backed coding CLIs execute in containers
 - **Filesystem isolation** - Only explicitly mounted directories are visible
 - **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
 - **Ephemeral containers** - Fresh environment per invocation (`--rm`)
+- **Hardened runtime** - `--read-only` root, `--cap-drop=ALL`,
+  `--security-opt=no-new-privileges`, and tmpfs for the writable paths the
+  agent runtimes need (`/tmp`, `/run`, `/home/node/.cache`, etc.). Disable
+  with `CONTAINER_HARDENING=off`.
 
 This is the primary security boundary for those paths. Rather than relying on
 application-level permission checks, the attack surface is limited by what's
 mounted. The opt-in host-native Devin coding exception has its separate
 fail-closed boundary in section 3e.
 
-**Current network status:** ordinary agent containers still receive unrestricted
-outbound network access. Credential proxying limits secret exposure for known
-provider routes, but it is not yet a default-deny egress boundary. Planned
-egress governance is documented in section 6.
+#### 1a. Default-Deny Agent Network Topology
+
+On bare-metal Linux, NanoCrab attaches agent containers to an internal Docker
+network (`nanocrab-agent-net`, created with `--internal`) so containers have no
+direct internet route. The only off-subnet address a container can reach is the
+network's own bridge gateway, where the credential/egress proxy listens. Docker
+drops packets sent outside an `--internal` subnet, so a prompt-injected agent
+cannot contact arbitrary hosts, DNS exfil channels, or unexpected APIs without
+going through the host gateway.
+
+The host gateway hostname `host.docker.internal` is mapped (via `--add-host`) to
+the internal network's bridge gateway IP rather than the default `host-gateway`
+value, because the default resolves to the `docker0` bridge which is outside the
+`--internal` subnet and therefore unreachable. The credential proxy binds to
+that same internal gateway IP so approved provider routes remain reachable.
+
+Behavior and controls:
+
+- `CONTAINER_NETWORK_ISOLATION` env: `on` (default) attempts the internal
+  topology; `off` disables it for CI or compatibility.
+- `CONTAINER_NETWORK_NAME` env overrides the network name (default
+  `nanocrab-agent-net`).
+- On macOS/WSL (Docker Desktop VM) the `--internal` topology is not supported;
+  NanoCrab degrades to the existing topology with an informational log line.
+- If the network cannot be created or inspected on Linux, NanoCrab degrades with
+  an explicit startup warning (unrestricted access) rather than leaving agents
+  unable to run. Operators that require strict fail-closed behavior should alert
+  on the degradation log line.
+- The `scripts/egress-canary.ts` doctor check proves an unknown destination is
+  unreachable from the isolated network and that the proxy path remains
+  reachable. Run it after building the agent image:
+
+  ```bash
+  npx tsx scripts/egress-canary.ts   # exit 0 = default-deny proven
+  ```
+
+#### 1b. Destination-Bound Credential Egress Gateway
+
+The credential proxy is also an authoritative egress boundary. Before
+forwarding any outbound request it consults the egress gateway
+(`src/egress-gateway.ts`), which:
+
+- **Allowlists destinations** — unknown public hosts are denied by default.
+  The default allowlist covers the provider routes the proxy already knows
+  about (Anthropic, OpenRouter, Google Gemini, Airouter, Mistral). Operators
+  can extend or replace it via `PUT /api/egress` (admin only).
+- **Binds credentials to destinations** — a credential is only injected for
+  the destination it is bound to. An `OPENROUTER_API_KEY` cannot be replayed
+  against `api.anthropic.com` even if both are allowlisted.
+- **Audits every decision** — `network.egress.allow` / `network.egress.deny`
+  events are written to the audit log with a correlation ID, the (redacted)
+  reason, and the matched destination. Secret values never appear in audit
+  context.
+- **Supports dry-run** — set `EGRESS_DRY_RUN=1` to audit deny decisions
+  without blocking traffic, useful for validating an allowlist change before
+  enforcing it.
+- **Passes private/loopback destinations** — `127.0.0.0/8`, `10/8`,
+  `172.16/12`, `192.168/16`, `::1`, and `localhost` are allowed without an
+  allowlist entry because they are not real egress (the proxy itself listens
+  on a bridge/loopback address and provider base URLs may point at local
+  runtimes like Ollama).
+
+Denied requests receive HTTP 403 with a JSON body
+`{"error":"egress_denied","reason":...,"correlationId":...}` so agents see a
+clear, auditable rejection rather than a silent drop.
+
+The allowlist is stored at `~/.config/nanocrab/egress-allowlist.json` and is
+loaded lazily on first egress evaluation. The admin API
+(`GET/PUT /api/egress`, `POST /api/egress/evaluate`) lets operators manage the
+allowlist and dry-run a destination without sending real traffic.
 
 ### 2. Mount Security
 
@@ -348,8 +418,15 @@ and credential-proxy route are verified by the deployment.
 | Group folder        | `/workspace/group` (rw)         | `/workspace/group` (rw)  |
 | Global memory       | Implicit via project            | `/workspace/global` (ro) |
 | Additional mounts   | Configurable                    | Read-only unless allowed |
-| Network access      | Unrestricted today; planned default-deny via host egress gateway | Unrestricted today; planned default-deny via host egress gateway |
+| Network access      | Default-deny (internal net)¹   | Default-deny (internal net)¹ |
 | MCP tools           | Boundary-filtered               | Boundary-filtered        |
+
+¹ On bare-metal Linux with `CONTAINER_NETWORK_ISOLATION=on` (default), agent
+containers are attached to an internal Docker network with no direct internet
+route; the credential/egress proxy is the only approved outbound path. On
+macOS/WSL or when isolation cannot be enforced, NanoCrab degrades to
+unrestricted access with an explicit startup warning. Run
+`scripts/egress-canary.ts` to prove the default-deny claim on a given host.
 
 ## Security Architecture Diagram
 
@@ -376,53 +453,39 @@ and credential-proxy route are verified by the deployment.
 │  • Bash commands (sandboxed)                                      │
 │  • File operations (limited to mounts)                            │
 │  • Provider API calls routed through NanoCrab credential proxy   │
+│  • Default-deny network: internal Docker net, no direct internet │
 │  • Runtime secrets limited to explicit tool/CLI exceptions       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## 6. Planned Egress Governance And Provable Security Claims
+## Tamper-Evident Audit Export
 
-This section records planned hardening adapted from AgentPaaS-style governed
-runtimes. Until the linked implementation issues land, do not claim
-default-deny container egress or tamper-evident audit integrity.
+Audit exports are hash-chained and HMAC-signed so any after-the-fact
+modification, deletion, or reordering of an event is detectable.
 
-Tracked as epic `#218` with children `#219` (topology), `#220` (egress gateway),
-`#221` (hardening + egress audit events), and `#222` (tamper-evident export +
-red-team proof matrix).
+- `GET /api/runtime-audit/export/tamper-evident` produces a signed export
+  with a random seed, per-event SHA-256 hashes, a chain head, and an
+  HMAC-SHA256 signature over the chain head.
+- `POST /api/runtime-audit/export/verify` recomputes the chain and signature
+  and returns a structured report flagging mutated events, broken links, or
+  an invalid signature.
+- Set `AUDIT_EXPORT_KEY` to a long-lived secret for cross-host verification.
+  If unset, a host-derived fallback key is used (tamper-evident within a
+  single host but not portable).
+- `audit.export.tamper_evident` and `audit.export.verify` audit events are
+  emitted on each export/verify operation.
 
-### Planned Controls
+## Security Proof Matrix
 
-| Control | Intended invariant | Current state |
-| --- | --- | --- |
-| Default-deny container network | Agent containers have no direct internet route; approved hosts only | Unrestricted outbound network |
-| Egress gateway | Host credential proxy becomes allow/deny + inject + audit for outbound HTTP | Secret injection for known provider routes |
-| Destination-bound credentials | Each secret may be attached only to approved destinations | Provider-route injection; some CLI/token exceptions still env-file based |
-| Hardened Docker flags | Read-only rootfs, dropped capabilities, no-new-privileges, resource caps | Memory/CPU limits and optional `--user`; no default RO rootfs/cap-drop |
-| Egress audit events | Allow/deny decisions are queryable beside existing policy/audit events | Action policy/audit exists; egress decisions are not first-class |
-| Tamper-evident audit export | Exported audit evidence can be verified for rewrite/reorder/insert | SQLite audit with redaction/replay/export |
-| Red-team smoke + doctor canary | Core security claims fail closed in CI/ops checks | Unit/integration coverage; no egress red-team gate |
+The proof matrix maps each security claim in the #218 epic to its current
+proof status (`proven`, `shipped`, `unproven`, `failed`) with evidence and
+operator actions.
 
-### Security Claims Proof Matrix
+- `GET /api/runtime-audit/proof-matrix` returns the matrix as JSON.
+- `npx tsx scripts/security-proof.ts` prints a readout and exits non-zero
+  when any claim is `unproven` or `failed`, so it can be used as a CI gate or
+  post-deploy check.
 
-NanoCrab should only advertise a claim when all of these are true: the control
-is implemented, documented in this file, covered by an automated or operator
-proof, and visible in Audit/Security surfaces when the claim is operator-facing.
-
-| Claim | Evidence required before advertising | Status |
-| --- | --- | --- |
-| Secrets stay off agent containers for proxied providers | Proxy tests + docs + no raw key in container env/files | Implemented for hosted proxy routes |
-| Mounts cannot escape allowlist / blocked patterns | Mount-security tests + external allowlist docs | Implemented |
-| High-impact actions are policy-gated and audited | Policy/audit tests + Audit UI replay/export | Implemented |
-| Connector tools stay inside allowlisted scopes | MCP tool-proxy tests + connector permission docs | Implemented |
-| Agent containers cannot reach unapproved hosts | Topology + gateway deny fixtures + Audit egress events | Planned |
-| Brokered secrets cannot be used against foreign hosts | Destination-bound credential tests | Planned |
-| Container escape surface is reduced by Docker hardening | Runner flag tests + doctor canary | Planned |
-| Audit exports detect tampering | Hash-chain/signature verify command or admin verify path | Planned |
-| Prompt-injection exfil path is blocked at the network edge | Red-team smoke for unknown host / DNS / secret invisibility | Planned |
-
-### Explicit Non-Claims
-
-- NanoCrab is not a marketplace for signed third-party agent bundles.
-- NanoCrab does not claim kernel 0-day resistance or gVisor/Kata isolation.
-- Local/operator host compromise remains outside the agent-sandbox trust model.
-- Until egress governance ships, unrestricted container network access remains an accepted residual risk called out above.
+Claims that depend on operator action (running the egress canary, triggering
+a denied egress request, inspecting a spawned container) are marked `shipped`
+rather than `proven` until that action is taken.

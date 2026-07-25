@@ -36,8 +36,9 @@ import {
 } from './container-runner.js';
 import {
   cleanupOrphans,
+  ensureAgentNetwork,
   ensureContainerRuntimeRunning,
-  PROXY_BIND_HOST,
+  resolveProxyBindHost,
 } from './container-runtime.js';
 import {
   getAllChats,
@@ -397,6 +398,7 @@ async function sendBotTextReply(
     content: text,
     chat_jid: chatJid,
     timestamp,
+    is_bot_message: true,
   });
 }
 
@@ -1041,8 +1043,14 @@ async function runAgent(
         providerFallbackPurpose: 'default_chat',
         providerFallbackAction: 'external-message',
       },
-      (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (proc, containerName, acceptsFollowUpInput) =>
+        queue.registerProcess(
+          chatJid,
+          proc,
+          containerName,
+          group.folder,
+          acceptsFollowUpInput,
+        ),
       wrappedOnOutput,
     );
 
@@ -1291,6 +1299,7 @@ function recoverPendingMessages(): void {
 
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
+  ensureAgentNetwork();
   cleanupOrphans();
 }
 
@@ -1310,10 +1319,14 @@ async function main(): Promise<void> {
   loadState();
   restoreRemoteControl();
 
-  // Start credential proxy (containers route API calls through this)
+  // Start credential proxy (containers route API calls through this).
+  // When the default-deny agent network is active the proxy must bind to the
+  // internal bridge gateway so containers can reach it; resolveProxyBindHost
+  // accounts for that, falling back to the loopback/docker0 binding otherwise.
+  const proxyBindHost = resolveProxyBindHost();
   const proxyServer = await startCredentialProxy(
     CREDENTIAL_PROXY_PORT,
-    PROXY_BIND_HOST,
+    proxyBindHost,
   );
 
   // Graceful shutdown handlers

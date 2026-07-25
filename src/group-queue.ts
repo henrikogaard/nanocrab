@@ -24,6 +24,7 @@ interface GroupState {
   process: ChildProcess | null;
   containerName: string | null;
   groupFolder: string | null;
+  acceptsFollowUpInput: boolean;
   retryCount: number;
 }
 
@@ -48,6 +49,7 @@ export class GroupQueue {
         process: null,
         containerName: null,
         groupFolder: null,
+        acceptsFollowUpInput: false,
         retryCount: 0,
       };
       this.groups.set(groupJid, state);
@@ -134,11 +136,13 @@ export class GroupQueue {
     proc: ChildProcess,
     containerName: string,
     groupFolder?: string,
+    acceptsFollowUpInput = false,
   ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
     if (groupFolder) state.groupFolder = groupFolder;
+    state.acceptsFollowUpInput = acceptsFollowUpInput;
   }
 
   /**
@@ -159,7 +163,12 @@ export class GroupQueue {
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder || state.isTaskContainer)
+    if (
+      !state.active ||
+      !state.groupFolder ||
+      state.isTaskContainer ||
+      !state.acceptsFollowUpInput
+    )
       return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
@@ -226,6 +235,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.acceptsFollowUpInput = false;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -255,6 +265,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.acceptsFollowUpInput = false;
       this.activeCount--;
       this.drainGroup(groupJid);
     }

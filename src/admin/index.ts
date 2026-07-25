@@ -77,6 +77,7 @@ import agentMessagesRoutes, {
 import questionsRoutes, { initQuestionsDb } from './routes/questions.js';
 import approvalsRoutes from './routes/approvals.js';
 import auditRoutes from './routes/audit.js';
+import egressRoutes from './routes/egress.js';
 import chatRoutes from './routes/chat.js';
 import developerRoutes, {
   recordMonitoringSnapshot,
@@ -232,6 +233,8 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
 
   // Runtime audit is separate from the auth/security audit log exposed by authRoutes.
   app.use('/api/runtime-audit', requireAuth, auditRoutes);
+  // Egress gateway allowlist management and dry-run evaluation.
+  app.use('/api/egress', requireAuth, egressRoutes);
 
   // Core API routes — role-based access control
   // Any authenticated user (viewer+)
@@ -272,9 +275,24 @@ export async function initAdminServer(state: NanoCrabState): Promise<void> {
     requireRole('admin'),
     githubViewsRoutes,
   );
-  app.use('/api/workspaces', requireAuth, requireRole('admin'), workspacesRoutes);
-  app.use('/api/channel-bindings', requireAuth, requireRole('admin'), channelBindingsRoutes);
-  app.use('/api/lightweight-tasks', requireAuth, requireRole('admin'), lightweightTasksRoutes);
+  app.use(
+    '/api/workspaces',
+    requireAuth,
+    requireRole('admin'),
+    workspacesRoutes,
+  );
+  app.use(
+    '/api/channel-bindings',
+    requireAuth,
+    requireRole('admin'),
+    channelBindingsRoutes,
+  );
+  app.use(
+    '/api/lightweight-tasks',
+    requireAuth,
+    requireRole('admin'),
+    lightweightTasksRoutes,
+  );
   app.use('/api/assistant-profile', requireAuth, assistantProfileRoutes);
   app.use(
     '/api/control-plane',

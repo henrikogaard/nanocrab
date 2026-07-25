@@ -9,6 +9,7 @@ const scriptPath = path.join(
 );
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
 const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
+const indexPath = path.join(process.cwd(), 'src/index.ts');
 
 type WebChatHarnessApi = {
   setActiveThreadId(id: string): void;
@@ -86,6 +87,18 @@ describe('WebChat new conversation start surface', () => {
     );
     expect(source).toContain('function applyChatRunEvent(msg, threadId)');
     expect(source).toContain("msg.type === 'task_progress'");
+    expect(source).toContain(
+      "msg.type === 'new_message' && msg.data.is_bot_message",
+    );
+    const runtimeSource = fs.readFileSync(indexPath, 'utf8');
+    const sendReplyBlock = runtimeSource.slice(
+      runtimeSource.indexOf('async function sendBotTextReply'),
+      runtimeSource.indexOf('type ResolvedAgentProfileInvocation'),
+    );
+    const replyBroadcastBlock = sendReplyBlock.slice(
+      sendReplyBlock.indexOf('broadcastMessage({'),
+    );
+    expect(replyBroadcastBlock).toContain('is_bot_message: true');
     expect(source).toContain('if (evJid !== threadId) return false');
     expect(source).toContain('isTerminalTaskProgress(msg.data)');
     expect(source).toContain("setWsMessageSubscriber('web-chat-thread'");

@@ -16,6 +16,7 @@ import { request as httpRequest, RequestOptions } from 'http';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
+import { auditEgressDecision, shouldEnforceDeny } from './egress-gateway.js';
 
 export type AuthMode = 'api-key' | 'oauth';
 
@@ -58,12 +59,18 @@ export function startCredentialProxy(
   );
   const providerRoutes: Record<
     string,
-    { baseUrl: string; apiKey?: string; requiresApiKey: boolean }
+    {
+      baseUrl: string;
+      apiKey?: string;
+      requiresApiKey: boolean;
+      credentialId?: string;
+    }
   > = {
     openrouter: {
       baseUrl: secret('OPENROUTER_BASE_URL') || 'https://openrouter.ai/api/v1',
       apiKey: secret('OPENROUTER_API_KEY'),
       requiresApiKey: true,
+      credentialId: 'OPENROUTER_API_KEY',
     },
     google: {
       baseUrl:
@@ -71,6 +78,7 @@ export function startCredentialProxy(
         'https://generativelanguage.googleapis.com/v1beta/openai',
       apiKey: secret('GEMINI_API_KEY') || secret('GOOGLE_API_KEY'),
       requiresApiKey: true,
+      credentialId: 'GEMINI_API_KEY',
     },
     airouter: {
       baseUrl:
@@ -79,6 +87,7 @@ export function startCredentialProxy(
         'https://api.airouter.ch/v1',
       apiKey: secret('AIROUTER_API_KEY'),
       requiresApiKey: true,
+      credentialId: 'AIROUTER_API_KEY',
     },
     'openai-compatible': {
       baseUrl:
@@ -87,11 +96,13 @@ export function startCredentialProxy(
         '',
       apiKey: secret('OPENAI_COMPATIBLE_API_KEY'),
       requiresApiKey: false,
+      credentialId: 'OPENAI_COMPATIBLE_API_KEY',
     },
     mistral: {
       baseUrl: secret('MISTRAL_BASE_URL') || 'https://api.mistral.ai/v1',
       apiKey: secret('MISTRAL_API_KEY'),
       requiresApiKey: true,
+      credentialId: 'MISTRAL_API_KEY',
     },
   };
 
@@ -168,6 +179,40 @@ export function startCredentialProxy(
               headers['authorization'] = `Bearer ${oauthToken}`;
             }
           }
+        }
+
+        // Egress gateway: allow/deny the destination and audit the decision.
+        // Credentials are only injected for destinations they are bound to.
+        const matchedRoute = isProviderRoute
+          ? providerRoutes[routeMatch![1]]
+          : undefined;
+        const egressResult = auditEgressDecision({
+          host: targetUrl.hostname,
+          port: targetUrl.port
+            ? parseInt(targetUrl.port, 10)
+            : isHttps
+              ? 443
+              : 80,
+          credentialId: matchedRoute?.credentialId,
+          method: req.method,
+        });
+        if (
+          egressResult.decision === 'deny' &&
+          shouldEnforceDeny(egressResult)
+        ) {
+          logger.warn(
+            { host: egressResult.host, reason: egressResult.reason },
+            'Egress gateway denied outbound request',
+          );
+          res.writeHead(403, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              error: 'egress_denied',
+              reason: egressResult.reason,
+              correlationId: egressResult.correlationId,
+            }),
+          );
+          return;
         }
 
         const upstream = makeRequest(

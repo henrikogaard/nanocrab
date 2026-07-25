@@ -22,6 +22,7 @@ import { logger } from './logger.js';
 import {
   CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
+  agentNetworkArgs,
   hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
@@ -738,6 +739,9 @@ function buildContainerArgs(
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
+  // Attach to the default-deny agent network when isolation is active.
+  args.push(...agentNetworkArgs());
+
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
   // or when getuid is unavailable (native Windows without WSL).
@@ -821,7 +825,11 @@ function buildContainerArgs(
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
-  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onProcess: (
+    proc: ChildProcess,
+    containerName: string,
+    acceptsFollowUpInput: boolean,
+  ) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
@@ -1025,7 +1033,10 @@ export async function runContainerAgent(
       detached: true,
     });
 
-    onProcess(container, containerName);
+    // Only the Claude Agent SDK path keeps polling /workspace/ipc/input after
+    // the first result. One-shot providers must finish before another turn is
+    // started, otherwise the host can incorrectly mark a follow-up delivered.
+    onProcess(container, containerName, effectiveProvider === 'claude');
     registerContainerProcess(input.groupFolder, container, containerName);
 
     let stdout = '';
