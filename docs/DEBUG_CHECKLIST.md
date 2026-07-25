@@ -39,6 +39,60 @@ grep -E "image found|image NOT found|image missing" logs/nanocrab.log
 
 If you need Kubernetes enabled, set `CONTAINER_IMAGE` to an image stored in a registry that the kubelet won't GC, or raise the GC thresholds.
 
+
+
+## Channel agent replies but shows typing / exit 137 loop
+
+Telegram/WhatsApp can stay online while agent containers die before any reply.
+
+### Fast diagnosis
+
+```bash
+# 1) Is exactly one NanoCrab process running?
+pgrep -af 'nanocrab/dist/index.js|node dist/index.js'
+
+# 2) Is the credential proxy listening on the agent-net gateway?
+ss -lntp | rg '3001|9744'
+
+# 3) Can an agent-net container reach the proxy?
+GW=$(docker network inspect nanocrab-agent-net --format '{{(index .IPAM.Config 0).Gateway}}')
+docker run --rm --network nanocrab-agent-net --add-host=host.docker.internal:$GW \
+  --entrypoint curl nanocrab-agent:latest -sS -m 5 -o /dev/null -w '%{http_code}\n' \
+  http://host.docker.internal:3001/__nanocrab/providers/airouter/models
+
+# 4) Is UFW only allowing docker0 (172.17) instead of agent-net (often 172.19)?
+sudo ufw status | rg '3001'
+```
+
+### Common causes
+
+1. **UFW blocks agent-net → proxy**  
+   Allow `from <agent-net-subnet> to any port 3001 proto tcp`. See `docs/SECURITY.md` §1a.
+
+2. **Two NanoCrab processes**  
+   A manual `nohup node dist/index.js` plus `systemctl --user start nanocrab` causes
+   `EADDRINUSE` on `:3001`. The crash-looping unit runs `cleanupOrphans()` and
+   `docker stop`s live agent containers every few seconds (looks like exit 137).
+
+   Fix: stop the extra process, keep a single systemd unit:
+
+   ```bash
+   systemctl --user stop nanocrab
+   pkill -f '/home/.*/nanocrab/dist/index.js' || true
+   systemctl --user reset-failed nanocrab
+   systemctl --user start nanocrab
+   systemctl --user status nanocrab --no-pager
+   ```
+
+3. **Default-deny topology without proxy path**  
+   Run `npx tsx scripts/egress-canary.ts` after the firewall rule is fixed.
+
+### Expected healthy signals
+
+- One process owns `0.0.0.0:9744` and the agent-net gateway `:3001`
+- Proxy canary from agent-net returns HTTP 200 for provider routes
+- Logs show `Agent output` then `Telegram message sent` / channel send success
+
 ## Quick Status Check
 
 ```bash

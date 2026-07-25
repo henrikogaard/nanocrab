@@ -253,6 +253,29 @@ describe('Approval inbox UI wiring', () => {
     expect(style).toContain('.approval-empty-actions');
   });
 
+  it('renders a premium Approvals command surface with metric tones and kickers', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+    const style = fs.readFileSync(stylePath, 'utf8');
+
+    expect(source).toContain('approval-command-surface');
+    expect(source).toContain('Decision desk');
+    expect(source).toContain('approval-kicker');
+    expect(source).toContain('approval-stat is-');
+    expect(source).toContain('awaiting review');
+    expect(source).toContain('highest risk');
+    expect(source).toContain('<p class="approval-kicker">Decision queue</p>');
+    expect(source).toContain('<p class="approval-kicker">Queue</p>');
+    expect(source).toContain('<p class="approval-kicker">Trace</p>');
+    expect(source).toContain(
+      '<p class="approval-kicker">Approval inspector</p>',
+    );
+    expect(style).toContain('.approval-command-surface');
+    expect(style).toContain('.approval-kicker');
+    expect(style).toContain('.approval-stat.is-attention');
+    expect(style).toContain('.approval-stat.is-ready');
+    expect(style).toContain('Approvals command surface redesign');
+  });
+
   it('styles approval impact, overview stats, and responsive quick filters', () => {
     const source = fs.readFileSync(stylePath, 'utf8');
 

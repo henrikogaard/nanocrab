@@ -2411,7 +2411,7 @@ function renderApprovalDecisionBrief(approvals, pending, history) {
   const highRisk = pending.filter((approval) => approval.risk === 'high');
   return `<section class="approval-decision-brief ${highRisk.length || externalWrites.length ? 'is-attention' : ''}">
     <div class="approval-brief-primary">
-      <span>Decision queue</span>
+      <p class="approval-kicker">Decision queue</p>
       <strong>${pending.length ? `${pending.length} approvals need review` : 'No pending approvals'}</strong>
       <small>${esc(mostCommonApprovalWorkType(pending.length ? pending : approvals))} is the busiest lane. External writes include MCP action requests and project documents.</small>
     </div>
@@ -2639,7 +2639,7 @@ function renderApprovalPanelEmptyState() {
   return `
     <aside class="approval-panel approval-panel-empty-state">
       <div class="approval-panel-empty-copy">
-        <span class="report-kicker">Approval inspector</span>
+        <p class="approval-kicker">Approval inspector</p>
         <h3>Select an approval to inspect provenance</h3>
         <p>Review source, target, payload, and impact before allowing agents to write files, send messages, or call external MCP tools.</p>
       </div>
@@ -2816,22 +2816,23 @@ async function renderApprovals(el) {
     .join('');
 
   el.innerHTML = `
-    <div class="page-header">
-      <div>
+    <section class="approval-command-surface" aria-label="Approvals command surface">
+      <div class="approval-command-copy">
+        <p class="approval-kicker">Decision desk</p>
         <h2>Approval Inbox</h2>
         <p class="approval-page-subtitle">Review MCP action requests, external writes, project documents, and coding gates before agents change anything important.</p>
+      </div>
+      <div class="approval-overview" role="list" aria-label="Approval readiness metrics">
+        <button type="button" class="approval-stat is-${pending.length ? 'attention' : 'ready'}" role="listitem" onclick="applyApprovalQuickFilter({status:'pending'})"><strong>${pending.length}</strong><span>Pending</span><small>awaiting review</small></button>
+        <button type="button" class="approval-stat is-${approvals.filter(isExternalWriteApproval).length ? 'attention' : 'ready'}" role="listitem" onclick="applyApprovalQuickFilter({externalWrites:'1'})"><strong>${approvals.filter(isExternalWriteApproval).length}</strong><span>External writes</span><small>highest risk</small></button>
+        <button type="button" class="approval-stat is-${approvals.filter((approval) => approval.kind === 'tool-action').length ? 'active' : 'muted'}" role="listitem" onclick="applyApprovalQuickFilter({kind:'tool-action'})"><strong>${approvals.filter((approval) => approval.kind === 'tool-action').length}</strong><span>MCP action</span><small>tool gates</small></button>
+        <button type="button" class="approval-stat is-ready" role="listitem" onclick="applyApprovalQuickFilter({reviewed:'1'})"><strong>${history.length}</strong><span>Reviewed</span><small>history</small></button>
       </div>
       <div class="approval-page-actions">
         <button class="btn btn-sm btn-ghost" onclick="copyApprovalPolicyRunbook()">Copy policy runbook</button>
         <button class="btn btn-sm btn-ghost" onclick="navigate('approvals')">Refresh</button>
       </div>
-    </div>
-    <div class="approval-overview">
-      <button type="button" class="approval-stat" onclick="applyApprovalQuickFilter({status:'pending'})"><span>Pending</span><strong>${pending.length}</strong></button>
-      <button type="button" class="approval-stat" onclick="applyApprovalQuickFilter({externalWrites:'1'})"><span>External writes</span><strong>${approvals.filter(isExternalWriteApproval).length}</strong></button>
-      <button type="button" class="approval-stat" onclick="applyApprovalQuickFilter({kind:'tool-action'})"><span>MCP action</span><strong>${approvals.filter((approval) => approval.kind === 'tool-action').length}</strong></button>
-      <button type="button" class="approval-stat" onclick="applyApprovalQuickFilter({reviewed:'1'})"><span>Reviewed</span><strong>${history.length}</strong></button>
-    </div>
+    </section>
     ${renderApprovalDecisionBrief(approvals, pending, history)}
     <div class="approval-lane-map">
       ${approvalLaneCards
@@ -2879,12 +2880,18 @@ async function renderApprovals(el) {
     <div class="approval-inbox">
       <div class="approval-main">
         <div class="approval-section-head">
-          <h3>Pending</h3>
+          <div>
+            <p class="approval-kicker">Queue</p>
+            <h3>Pending</h3>
+          </div>
           <span>${pending.length} awaiting review</span>
         </div>
         ${pending.length ? groupedHtml : renderApprovalEmptyState('pending')}
         <div class="approval-section-head">
-          <h3>History</h3>
+          <div>
+            <p class="approval-kicker">Trace</p>
+            <h3>History</h3>
+          </div>
           <span>${history.length} reviewed</span>
         </div>
         ${

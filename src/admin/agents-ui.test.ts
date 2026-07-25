@@ -54,7 +54,7 @@ describe('Agents launcher UI', () => {
     expect(source).toContain('coding-job-meta');
     expect(source).toContain('codingDenyNoteId');
     expect(source).toContain('coding-deny-note-field');
-    expect(source).toContain('agent-page-topbar');
+    expect(source).toContain('agent-command-surface');
     expect(source).toContain('card agent-section-card');
     expect(source).not.toContain(
       "prompt('Reason for denying implementation?')",
@@ -102,8 +102,8 @@ describe('Agents launcher UI', () => {
 
   it('keeps coding agent availability rows class-driven', () => {
     const source = fs.readFileSync(agentsPagePath, 'utf8');
-    const start = source.indexOf('<div class="card-title">Coding Agents</div>');
-    const end = source.indexOf('<div class="card-title">Bot Agents', start);
+    const start = source.indexOf('Coding Agents');
+    const end = source.indexOf('Bot Agents', start);
     const codingAgentsMarkup = source.slice(start, end);
 
     expect(start).toBeGreaterThan(-1);
@@ -135,15 +135,17 @@ describe('Agents launcher UI', () => {
     const rowStart = source.indexOf('const agentCards = groups');
     const rowEnd = source.indexOf('// Tool options for the launcher', rowStart);
     const rowMarkup = source.slice(rowStart, rowEnd);
-    const cardStart = source.indexOf('<div class="card agent-section-card">');
-    const cardEnd = source.indexOf('agentTasks.length > 0', cardStart);
-    const cardMarkup = source.slice(cardStart, cardEnd);
+    const cardStart = source.indexOf('id="bot-agents-card"');
+    const cardEnd = source.indexOf('coding-tasks-card', cardStart);
+    const cardMarkup = source.slice(
+      cardStart,
+      cardEnd === -1 ? undefined : cardEnd,
+    );
 
     expect(rowStart).toBeGreaterThan(-1);
     expect(rowEnd).toBeGreaterThan(rowStart);
     expect(cardStart).toBeGreaterThan(-1);
-    expect(cardEnd).toBeGreaterThan(cardStart);
-    expect(cardMarkup).toContain('<div class="card-title">Bot Agents');
+    expect(cardMarkup).toContain('Bot Agents');
     expect(cardMarkup).toContain('agent-tool-badge');
     expect(rowMarkup).toContain('agent-bot-row');
     expect(rowMarkup).toContain('agent-bot-row ${!isEnabled ?');
@@ -227,10 +229,7 @@ describe('Agents launcher UI', () => {
     const cardStart = source.indexOf(
       '<div class="card agent-section-card" id="repo-coding-rules-card"',
     );
-    const cardEnd = source.indexOf(
-      '<div class="card agent-section-card">\n        <div class="card-title">Coding Agents</div>',
-      cardStart,
-    );
+    const cardEnd = source.indexOf('id="coding-agents-card"', cardStart);
     const cardMarkup = source.slice(cardStart, cardEnd);
 
     expect(rowStart).toBeGreaterThan(-1);
@@ -644,8 +643,8 @@ describe('Agents launcher UI', () => {
   it('surfaces a delegation command center with attention shortcuts', () => {
     const source = fs.readFileSync(agentsPagePath, 'utf8');
 
-    expect(source).toContain('agent-page-topbar');
-    expect(source).toContain('agent-stat-strip');
+    expect(source).toContain('agent-command-surface');
+    expect(source).toContain('agent-command-metrics');
     expect(source).toContain('agentDelegationBriefText');
     expect(source).toContain('agentQuestionDecisionBriefText');
     expect(source).toContain('renderAgentLoadingState');
@@ -656,7 +655,7 @@ describe('Agents launcher UI', () => {
     expect(source).toContain('_agentDelegationState');
     expect(source).toContain('copyAgentDelegationBrief');
     expect(source).toContain('copyAgentQuestionDecisionBrief');
-    expect(source).toContain('Copy delegation brief');
+    expect(source).toContain('Copy brief');
     expect(source).toContain('Copy question brief');
     expect(source).toContain('copyTextWithFallback');
     expect(source).toContain('Agent delegation brief');
@@ -735,6 +734,47 @@ describe('Agents launcher UI', () => {
     );
   });
 
+  it('elevates the assign wizard and coding job queue into a premium launch desk', () => {
+    const source = fs.readFileSync(agentsPagePath, 'utf8');
+    const styles = fs.readFileSync(stylePath, 'utf8');
+
+    expect(source).toContain('Launch desk');
+    expect(source).toContain('role="dialog"');
+    expect(source).toContain('aria-labelledby="assign-work-title"');
+    expect(source).toContain('role="tab"');
+    expect(source).toContain("setAttribute('aria-selected'");
+    expect(source).toContain('agent-coding-job-list');
+    expect(source).toContain('agent-coding-job-card');
+    expect(source).toContain('agent-coding-queue-actions');
+    expect(source).toContain("openAssignWorkWizard('github')");
+    expect(source).toContain('Assign issue');
+    expect(source).toContain('GitHub coding board');
+    expect(styles).toContain('.agent-coding-job-card');
+    expect(styles).toContain('.agent-coding-job-list');
+    expect(styles).toContain('.agent-coding-queue-actions');
+    expect(styles).toContain('.assign-wizard-title');
+    expect(styles).toContain('Agents assign + coding board redesign');
+  });
+
+  it('keeps secondary Agents operations under a clearer accordion and section kickers', () => {
+    const source = fs.readFileSync(agentsPagePath, 'utf8');
+    expect(source).toContain('Coding tools, bot agents, and history');
+    expect(source).toContain('id="coding-agents-card"');
+    expect(source).toContain('id="bot-agents-card"');
+    expect(source).toContain(
+      '<span class="agent-kicker">Delegates</span>Coding Agents',
+    );
+    expect(source).toContain(
+      '<span class="agent-kicker">Channels</span>Bot Agents',
+    );
+    expect(source).toContain(
+      '<span class="agent-kicker">Attention</span>Pending Questions',
+    );
+    expect(source).toContain(
+      '<span class="agent-kicker">Policy</span>Repo Coding Rules',
+    );
+  });
+
   it('frames GitHub coding as a handoff board with setup, pickup, and queue state', () => {
     const source = fs.readFileSync(agentsPagePath, 'utf8');
 
@@ -774,6 +814,25 @@ describe('Agents launcher UI', () => {
     expect(source).toContain('Open PR');
     expect(source).toContain('Revert');
     expect(source).toContain('Close PR');
+  });
+
+  it('renders a premium command surface and soft agent kickers', () => {
+    const source = fs.readFileSync(agentsPagePath, 'utf8');
+    const styles = fs.readFileSync(stylePath, 'utf8');
+
+    expect(source).toContain('agent-command-surface');
+    expect(source).toContain('agent-command-metrics');
+    expect(source).toContain('agent-metric is-');
+    expect(source).toContain('agent-kicker');
+    expect(source).toContain('Choose who works next');
+    expect(source).toContain('Copy brief');
+    expect(source).toContain(
+      "class=\"agent-attention-panel ${agentAttentionItems.length > 0 ? 'is-open' : 'is-collapsed'}\"",
+    );
+    expect(styles).toContain('.agent-command-surface');
+    expect(styles).toContain('.agent-metric');
+    expect(styles).toContain('font-family: var(--font-display)');
+    expect(styles).not.toMatch(/\.agent-stat-pill\s*\{/);
   });
 
   it('adds an editable agent profile cockpit with explicit states', () => {
@@ -955,9 +1014,9 @@ describe('Agents launcher UI', () => {
   it('styles the delegation cockpit for desktop and narrow screens', () => {
     const source = fs.readFileSync(stylePath, 'utf8');
 
-    expect(source).toContain('.agent-page-topbar');
-    expect(source).toContain('.agent-stat-strip');
-    expect(source).toContain('.agent-stat-pill');
+    expect(source).toContain('.agent-command-surface');
+    expect(source).toContain('.agent-command-metrics');
+    expect(source).toContain('.agent-metric');
     expect(source).toContain('.agent-loading-state');
     expect(source).toContain('.agent-loading-state.is-cockpit');
     expect(source).toContain('.agent-loading-state::after');

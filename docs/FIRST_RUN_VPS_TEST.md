@@ -8,6 +8,7 @@ Do not reuse production secrets.
 - Start a fresh Ubuntu LTS VPS with at least 2 vCPU, 4 GB RAM, and 30 GB disk.
 - Add your SSH key, disable password SSH if the provider does not do so by default, and note the public IP.
 - Open only SSH and the intended dashboard/Caddy ports in the provider firewall.
+- On Linux with UFW, also allow the credential proxy port from the Docker agent network subnet (typically `172.19.0.0/16` → TCP `3001`). `docker0` (`172.17.0.0/16`) alone is not enough for `nanocrab-agent-net`.
 
 ## 2. Install Host Prerequisites
 
