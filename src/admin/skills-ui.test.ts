@@ -6,6 +6,17 @@ const appPath = path.join(process.cwd(), 'src/admin/public/app.js');
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
 
 describe('Skills capability library UI', () => {
+  it('builds collapse toggles with text nodes instead of HTML interpolation', () => {
+    const source = fs.readFileSync(appPath, 'utf8');
+
+    expect(source).toContain(
+      'toggle.append(chevron, document.createTextNode(titleText))',
+    );
+    expect(source).not.toContain(
+      'toggle.innerHTML = \'<span class="settings-card-collapse-chevron"></span>\' + titleText',
+    );
+  });
+
   const skillsSource = (source: string) =>
     source.slice(
       source.indexOf('async function renderSkills'),
