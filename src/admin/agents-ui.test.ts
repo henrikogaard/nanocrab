@@ -877,7 +877,9 @@ describe('Agents launcher UI', () => {
     expect(source).toContain('name="taskKinds"');
     expect(source).toContain('agent-profile-action-status');
     expect(source).toContain('agent-profile-invoke-prompt-');
-    expect(source).toContain("Quick invoke uses this profile's configured provider, model, and capabilities");
+    expect(source).toContain(
+      "Quick invoke uses this profile's configured provider, model, and capabilities",
+    );
     expect(source).toContain('function agentProfileAttr');
     expect(source).toContain(
       'value="${agentProfileAttr(agentProfileDisplayName(profile))}"',

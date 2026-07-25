@@ -13,7 +13,7 @@ describe('Skills capability library UI', () => {
       'toggle.append(chevron, document.createTextNode(titleText))',
     );
     expect(source).not.toContain(
-      "toggle.innerHTML = '<span class=\"settings-card-collapse-chevron\"></span>' + titleText",
+      'toggle.innerHTML = \'<span class="settings-card-collapse-chevron"></span>\' + titleText',
     );
   });
 
