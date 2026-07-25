@@ -26,3 +26,7 @@ jobs:
           OPENAI_KEY: ${{ secrets.QWEN_API_KEY }}
           OPENAI_API_BASE: ${{ secrets.QWEN_API_BASE }}
           CONFIG__MODEL: ${{ secrets.QWEN_MODEL }}
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "false"
+          github_action_config.auto_improve: "false"
+          github_action_config.pr_actions: '["opened","reopened","ready_for_review","synchronize"]'
