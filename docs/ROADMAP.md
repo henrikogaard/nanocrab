@@ -24,6 +24,7 @@ This roadmap focuses on making NanoCrab more Hermes/OpenClaw-like while keeping 
 - Standalone cleanup is implemented: NanoCrab is treated as its own product with NanoCrab-first code, plugins, skills, MCP names, container names, docs, and migration tooling.
 - P0 closure sweep complete: non-epic P0 issues for cockpit/approvals, provider hardening, memory/skill review surfaces, timeline/router safety, GitHub coding jobs, policy/audit/dry-run controls, connector boundaries, and first-run setup are closed. Remaining P0-labeled GitHub issues are roadmap epics with lower-priority follow-up children still open.
 - Cross-channel coding parity and provider/runtime selection are implemented on `main` (PR #163, issue #162 closed), including isolated review jobs and approval-gated PR close actions.
+- Agent-container egress governance is shipped on `main` (PRs #224–#227): default-deny topology, destination-bound egress gateway, container hardening, audit events, tamper-evident export, and the proof matrix. Host-specific operator proof remains tracked by epic `#218` and children `#219`–`#222`.
 - Still future work: richer CI-status visualization, more MCP source connectors, deeper production diagnostics, continued dashboard UX polish, and the knowledge-production/personal-operations follow-on slices.
 
 ---
@@ -359,12 +360,17 @@ These rules are non-negotiable:
    - Draft, validate, diff, approve, install, and sync skills.
 7. **Reports/Documents v1**
    - MCP-backed source collection, outlines, exports, and provenance.
-8. **Personal Operations v1** - PARTIAL
+8. **Agent Container Egress Governance v1** - SHIPPED (operator proof remains host-specific)
+   - DONE: default-deny container network topology with host-gateway exceptions only (`#219`, PR #224).
+   - DONE: credential-proxy allow/deny/inject/audit egress gateway with destination binding (`#220`, PR #225).
+   - DONE: container hardening flags, egress audit events, tamper-evident export, and security proof matrix (`#221`–`#222`, PRs #226–#227).
+   - NEXT: run the host-specific canary, denial, hardening, and export mutation proofs and record the results.
+9. **Personal Operations v1** - PARTIAL
    - DONE: reusable runbooks, missions started from runbooks, dashboard step tracking, and approval references for sensitive steps.
    - DONE: daily and weekly briefing schedules create approval-gated report tasks from journal/memory sources.
    - DONE: routine blueprints, exact scheduled tasks, delivery modes, webhook approvals, heartbeat checks, run history, and run-now controls.
    - NEXT: richer briefing history, grouped routine analytics, and per-channel delivery preferences.
-9. **Provider Expansion**
+10. **Provider Expansion**
    - DONE: OpenAI Responses API adapter with 11 tests
    - DONE: Anthropic Messages API adapter with 13 tests
    - DONE: Google Gemini API adapter with 12 tests
