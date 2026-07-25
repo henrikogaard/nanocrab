@@ -17,13 +17,13 @@ jobs:
       - uses: the-pr-agent/pr-agent@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_KEY: ${{ secrets.QWEN_API_KEY }}
-          OPENAI_API_BASE: ${{ secrets.QWEN_API_BASE }}
-          config.model: "openai/Qwen3.6"
-          config.fallback_models: '["openai/Qwen3.6"]'
-          config.custom_model_max_tokens: "32000"
-          github_action_config.auto_review: "true"
-          github_action_config.auto_describe: "false"
-          github_action_config.auto_improve: "false"
-          github_action_config.handle_push_trigger: "true"
-          github_action_config.push_commands: '["/review"]'
+          OPENAI__KEY: ${{ secrets.QWEN_API_KEY }}
+          OPENAI__API_BASE: ${{ secrets.QWEN_API_BASE }}
+          CONFIG__MODEL: "openai/Qwen3.6"
+          CONFIG__FALLBACK_MODELS: '["openai/Qwen3.6"]'
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "32000"
+          GITHUB_ACTION_CONFIG__AUTO_REVIEW: "true"
+          GITHUB_ACTION_CONFIG__AUTO_DESCRIBE: "false"
+          GITHUB_ACTION_CONFIG__AUTO_IMPROVE: "false"
+          GITHUB_ACTION_CONFIG__HANDLE_PUSH_TRIGGER: "true"
+          GITHUB_ACTION_CONFIG__PUSH_COMMANDS: '["/review"]'
