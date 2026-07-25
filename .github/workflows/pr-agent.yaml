@@ -21,6 +21,7 @@ jobs:
           OPENAI_API_BASE: ${{ secrets.QWEN_API_BASE }}
           config.model: "Qwen3.6"
           config.fallback_models: '["Qwen3.6"]'
+          config.custom_model_max_tokens: "32000"
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "false"
           github_action_config.auto_improve: "false"
