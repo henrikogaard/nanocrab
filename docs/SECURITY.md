@@ -67,6 +67,25 @@ Behavior and controls:
   npx tsx scripts/egress-canary.ts   # exit 0 = default-deny proven
   ```
 
+- **Host firewall caveat (Linux + UFW):** Docker bridge traffic still hits the
+  host `INPUT` chain. If UFW is active with default-deny incoming, allow the
+  credential proxy port from the agent network subnet (not only `docker0`):
+
+  ```bash
+  # Discover the agent-net gateway/subnet, then open only the proxy port.
+  docker network inspect nanocrab-agent-net --format '{{(index .IPAM.Config 0).Subnet}} {{(index .IPAM.Config 0).Gateway}}'
+  # Typical values: subnet 172.19.0.0/16, gateway 172.19.0.1, proxy port 3001
+  sudo ufw allow from 172.19.0.0/16 to any port 3001 proto tcp \
+    comment 'NanoCrab credential proxy for nanocrab-agent-net'
+  sudo ufw status | rg '3001'
+  ```
+
+  A rule limited to `172.17.0.0/16` (docker0) is not enough once agents attach
+  to `nanocrab-agent-net`. Without the agent-net allow rule, containers time out
+  reaching `host.docker.internal:3001`, OpenCode/provider calls hang, and the
+  host may stop the container (exit 137) while Telegram/WhatsApp keep showing
+  typing indicators.
+
 #### 1b. Destination-Bound Credential Egress Gateway
 
 The credential proxy is also an authoritative egress boundary. Before

@@ -51,21 +51,31 @@ function codingJobCanOpenPr(job) {
 
 function codingJobCanRefreshCi(job) {
   return Boolean(
-    job?.commitSha && ['open_pr', 'ci_running', 'completed'].includes(job.status),
+    job?.commitSha &&
+    ['open_pr', 'ci_running', 'completed'].includes(job.status),
   );
 }
 
 function codingJobCanRevert(job) {
   return Boolean(
     job?.branch &&
-      !['queued', 'investigate', 'plan', 'implement', 'test', 'cancelled'].includes(
-        job.status,
-      ) &&
-      (job.commitSha ||
-        job.prUrl ||
-        ['await_pr_approval', 'open_pr', 'ci_running', 'completed', 'failed'].includes(
-          job.status,
-        )),
+    ![
+      'queued',
+      'investigate',
+      'plan',
+      'implement',
+      'test',
+      'cancelled',
+    ].includes(job.status) &&
+    (job.commitSha ||
+      job.prUrl ||
+      [
+        'await_pr_approval',
+        'open_pr',
+        'ci_running',
+        'completed',
+        'failed',
+      ].includes(job.status)),
   );
 }
 
@@ -115,7 +125,11 @@ function deriveCodingProviderFit(job, codingProvidersById = {}) {
       candidate?.name === job?.model ||
       candidate?.model === job?.model,
   );
-  if (!provider || provider.codingCapable === false || model?.codingCapable === false) {
+  if (
+    !provider ||
+    provider.codingCapable === false ||
+    model?.codingCapable === false
+  ) {
     return {
       key: 'review',
       label: 'Provider fit: review',
@@ -226,47 +240,84 @@ function renderAgentRecoveryState(kind, message, options = {}) {
 
 function agentActionErrorMessage(kind, err) {
   const message =
-    typeof err === 'string'
-      ? err
-      : err?.message || err?.error || '';
+    typeof err === 'string' ? err : err?.message || err?.error || '';
   const detail = message ? `: ${message}` : '';
   if (kind === 'launch') {
-    return 'Could not launch the delegated task. Check the selected tool, model, workspace path, and container readiness' + detail;
+    return (
+      'Could not launch the delegated task. Check the selected tool, model, workspace path, and container readiness' +
+      detail
+    );
   }
   if (kind === 'repo') {
-    return 'Could not register the coding repo. Confirm the owner/repo name and GitHub access before assigning issues' + detail;
+    return (
+      'Could not register the coding repo. Confirm the owner/repo name and GitHub access before assigning issues' +
+      detail
+    );
   }
   if (kind === 'rule') {
-    return 'Could not save the repo rule. Keep your text in the editor, check the coding repo record, and retry' + detail;
+    return (
+      'Could not save the repo rule. Keep your text in the editor, check the coding repo record, and retry' +
+      detail
+    );
   }
   if (kind === 'issue') {
-    return 'Could not start a coding issue handoff. Check repo permissions, labels, provider setup, and Code readiness' + detail;
+    return (
+      'Could not start a coding issue handoff. Check repo permissions, labels, provider setup, and Code readiness' +
+      detail
+    );
   }
   if (kind === 'autofix') {
-    return 'Could not enable Autofix pickup. Check the GitHub repo, label, provider, and Autofix plugin settings' + detail;
+    return (
+      'Could not enable Autofix pickup. Check the GitHub repo, label, provider, and Autofix plugin settings' +
+      detail
+    );
   }
   if (kind === 'cancel-task') {
-    return 'Could not cancel the delegated task. It may have already finished; refresh the task history before retrying' + detail;
+    return (
+      'Could not cancel the delegated task. It may have already finished; refresh the task history before retrying' +
+      detail
+    );
   }
   if (kind === 'share-task') {
-    return 'Could not prepare the task summary for sharing. Refresh the task output and try again' + detail;
+    return (
+      'Could not prepare the task summary for sharing. Refresh the task output and try again' +
+      detail
+    );
   }
   if (kind === 'bot-agent') {
-    return 'Could not update the bot agent. Check channel state and keep at least one primary bot enabled' + detail;
+    return (
+      'Could not update the bot agent. Check channel state and keep at least one primary bot enabled' +
+      detail
+    );
   }
   if (kind === 'primary-bot') {
-    return 'Could not set the primary bot. Confirm the bot is enabled and the group record is available' + detail;
+    return (
+      'Could not set the primary bot. Confirm the bot is enabled and the group record is available' +
+      detail
+    );
   }
   if (kind === 'coding-job') {
-    return 'Could not update the coding job. Refresh the job evidence, check approvals or CI state, and retry' + detail;
+    return (
+      'Could not update the coding job. Refresh the job evidence, check approvals or CI state, and retry' +
+      detail
+    );
   }
   if (kind === 'answer') {
-    return 'Could not send the agent decision. Refresh pending questions before answering again' + detail;
+    return (
+      'Could not send the agent decision. Refresh pending questions before answering again' +
+      detail
+    );
   }
   if (kind === 'message') {
-    return 'Could not send the agent message. Check both agent groups are available and retry' + detail;
+    return (
+      'Could not send the agent message. Check both agent groups are available and retry' +
+      detail
+    );
   }
-  return 'Agent action could not complete. Refresh the delegation cockpit and retry' + detail;
+  return (
+    'Agent action could not complete. Refresh the delegation cockpit and retry' +
+    detail
+  );
 }
 
 function renderAgentLoadingState(kind = 'cockpit') {
@@ -322,13 +373,22 @@ function agentDelegationBriefText(state) {
   const questions = state?.questions || [];
   const channels = state?.channels || [];
   const enabledAgents = groups.filter((group) => group.enabled !== false);
-  const connectedChannels = channels.filter((channel) => channel.connected === true);
-  const statLines = stats.map((stat) => `- ${stat.label}: ${stat.count} (${stat.detail})`);
-  const attentionLines = attentionItems.map((item) => `- ${item.label}: ${item.detail}`);
+  const connectedChannels = channels.filter(
+    (channel) => channel.connected === true,
+  );
+  const statLines = stats.map(
+    (stat) => `- ${stat.label}: ${stat.count} (${stat.detail})`,
+  );
+  const attentionLines = attentionItems.map(
+    (item) => `- ${item.label}: ${item.detail}`,
+  );
   const runningTaskLines = tasks
     .filter((task) => task.isRunning)
     .slice(0, 8)
-    .map((task) => `- ${task.tool}/${task.model}: ${task.prompt?.slice(0, 120) || task.id}`);
+    .map(
+      (task) =>
+        `- ${task.tool}/${task.model}: ${task.prompt?.slice(0, 120) || task.id}`,
+    );
   const questionLines = questions
     .slice(0, 8)
     .map(
@@ -364,13 +424,19 @@ function agentDelegationBriefText(state) {
     `- Data health: ${loadIssues.length ? 'needs review' : 'ready'} (${loadIssues.length || 0} feed issues)`,
     '',
     'Needs attention',
-    ...(attentionLines.length ? attentionLines : ['- No agent blockers right now.']),
+    ...(attentionLines.length
+      ? attentionLines
+      : ['- No agent blockers right now.']),
     '',
     'Questions waiting for a decision',
-    ...(questionLines.length ? questionLines : ['- No unanswered agent questions.']),
+    ...(questionLines.length
+      ? questionLines
+      : ['- No unanswered agent questions.']),
     '',
     'Running tasks',
-    ...(runningTaskLines.length ? runningTaskLines : ['- No one-off agent tasks are currently running.']),
+    ...(runningTaskLines.length
+      ? runningTaskLines
+      : ['- No one-off agent tasks are currently running.']),
   ].join('\n');
 }
 
@@ -429,12 +495,15 @@ function agentProfileDisplayName(profile) {
 }
 
 function agentProfileHandle(profile) {
-  const raw = String(profile?.handle || profile?.slug || agentProfileId(profile));
+  const raw = String(
+    profile?.handle || profile?.slug || agentProfileId(profile),
+  );
   return raw.startsWith('@') ? raw : `@${raw}`;
 }
 
 function agentProfileArray(value) {
-  if (Array.isArray(value)) return value.filter((item) => item !== null && item !== undefined);
+  if (Array.isArray(value))
+    return value.filter((item) => item !== null && item !== undefined);
   if (typeof value === 'string' && value.trim()) {
     return value
       .split(',')
@@ -495,7 +564,9 @@ function agentProfileNullableText(value) {
 }
 
 function agentProfileControl(form, name) {
-  return form?.elements?.namedItem(name) || form?.querySelector(`[name="${name}"]`);
+  return (
+    form?.elements?.namedItem(name) || form?.querySelector(`[name="${name}"]`)
+  );
 }
 
 function agentProfileFieldValue(form, name) {
@@ -564,15 +635,15 @@ function agentProfileBlockedApprovalCount(profile) {
     profile?.activitySummary?.blockedApprovals;
   if (explicit !== undefined) return explicit;
 
-  const activity = agentProfileArray(profile?.activity || profile?.activityItems);
-  if (activity.length === 0) return undefined;
-  return (
-    activity.filter((item) =>
-      ['approval_blocked', 'blocked', 'await_approval'].includes(
-        item?.kind || item?.status || item?.state || '',
-      ),
-    ).length
+  const activity = agentProfileArray(
+    profile?.activity || profile?.activityItems,
   );
+  if (activity.length === 0) return undefined;
+  return activity.filter((item) =>
+    ['approval_blocked', 'blocked', 'await_approval'].includes(
+      item?.kind || item?.status || item?.state || '',
+    ),
+  ).length;
 }
 
 function agentProfileErrorCount(profile) {
@@ -583,7 +654,9 @@ function agentProfileErrorCount(profile) {
     profile?.activitySummary?.errors;
   if (explicit !== undefined) return explicit;
 
-  const activity = agentProfileArray(profile?.activity || profile?.activityItems);
+  const activity = agentProfileArray(
+    profile?.activity || profile?.activityItems,
+  );
   if (activity.length === 0) return undefined;
   return activity.filter((item) =>
     ['error', 'failed', 'failure'].includes(
@@ -604,7 +677,9 @@ function agentProfileLatestAt(profile) {
 }
 
 function agentProfileTimestamp(...values) {
-  return values.find((value) => typeof value === 'string' && value.trim()) || '';
+  return (
+    values.find((value) => typeof value === 'string' && value.trim()) || ''
+  );
 }
 
 function agentProfileLatestLabel(profile) {
@@ -656,44 +731,52 @@ function renderAgentProfileEmptyState(kind) {
       className: 'agent-profile-loading-state',
       label: 'Profiles loading',
       title: 'Loading agent profiles',
-      detail: 'Reading the profile roster, model policies, capabilities, subscriptions, and recent activity.',
+      detail:
+        'Reading the profile roster, model policies, capabilities, subscriptions, and recent activity.',
     },
     unavailable: {
       className: 'agent-profile-unavailable-state',
       label: 'Profiles unavailable',
       title: 'Agent profile roster unavailable',
-      detail: 'The Agents cockpit is still usable, but the profile feed did not load. Refresh after checking the profile route.',
+      detail:
+        'The Agents cockpit is still usable, but the profile feed did not load. Refresh after checking the profile route.',
     },
     empty: {
       className: 'agent-profile-empty-state',
       label: 'No profiles',
-      title: 'No agent profiles configured yet',
-      detail: 'Agents are named personas with their own provider, model, personality, and capabilities. Create one to start delegating work.',
-      illustration: '<svg class="agent-empty-illustration" viewBox="0 0 120 120" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="60" cy="48" r="18" opacity="0.3"/><circle cx="60" cy="48" r="8" opacity="0.5"/><path d="M60 30v-8M60 66v8M42 48h-8M78 48h8" opacity="0.25"/><path d="M47.3 35.3l-5.6-5.6M72.7 35.3l5.6-5.6M47.3 60.7l-5.6 5.6M72.7 60.7l5.6 5.6" opacity="0.2"/><rect x="30" y="80" width="60" height="24" rx="6" opacity="0.15"/><path d="M42 88h36M42 96h24" opacity="0.2"/><circle cx="38" cy="42" r="3" opacity="0.15"/><circle cx="82" cy="54" r="2" opacity="0.12"/></svg>',
+      title: 'Create the first agent',
+      detail:
+        'Named personas carry provider, model, personality, and capability policy. Start with one focused role and assign work from the same surface.',
+      illustration:
+        '<svg class="agent-empty-illustration" viewBox="0 0 120 120" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="60" cy="48" r="18" opacity="0.3"/><circle cx="60" cy="48" r="8" opacity="0.5"/><path d="M60 30v-8M60 66v8M42 48h-8M78 48h8" opacity="0.25"/><path d="M47.3 35.3l-5.6-5.6M72.7 35.3l5.6-5.6M47.3 60.7l-5.6 5.6M72.7 60.7l5.6 5.6" opacity="0.2"/><rect x="30" y="80" width="60" height="24" rx="6" opacity="0.15"/><path d="M42 88h36M42 96h24" opacity="0.2"/><circle cx="38" cy="42" r="3" opacity="0.15"/><circle cx="82" cy="54" r="2" opacity="0.12"/></svg>',
     },
     detail: {
       className: 'agent-profile-empty-state is-detail',
       label: 'No selection',
-      title: 'Select a profile',
-      detail: 'Pick a profile from the roster to inspect its model, capabilities, subscriptions, and activity.',
+      title: 'Select an agent',
+      detail:
+        'Choose someone from the roster to inspect model policy, capabilities, subscriptions, and activity.',
     },
     detailUnavailable: {
       className: 'agent-profile-unavailable-state is-detail',
       label: 'Profile detail unavailable',
       title: 'Profile detail could not load',
-      detail: 'The roster loaded, but subscriptions and activity did not. Refresh after checking the profile detail route.',
+      detail:
+        'The roster loaded, but subscriptions and activity did not. Refresh after checking the profile detail route.',
     },
     subscriptions: {
       className: 'agent-profile-empty-state is-subscriptions',
       label: 'Subscriptions',
       title: 'No subscriptions configured',
-      detail: 'This profile is not watching any trigger, inbox, issue, or workflow subscription.',
+      detail:
+        'This profile is not watching any trigger, inbox, issue, or workflow subscription.',
     },
     activity: {
       className: 'agent-profile-empty-state is-activity',
       label: 'Activity',
       title: 'No activity recorded',
-      detail: 'No runs, blocked approvals, or errors have been recorded for this profile yet.',
+      detail:
+        'No runs, blocked approvals, or errors have been recorded for this profile yet.',
     },
   };
   const state = states[kind] || states.empty;
@@ -779,7 +862,8 @@ function renderAgentProfileDetail(profile) {
     profile.provider_profile ||
     profile.model?.profile ||
     profile.runtime?.providerProfile;
-  const provider = profile.provider || profile.model?.provider || profile.runtime?.provider;
+  const provider =
+    profile.provider || profile.model?.provider || profile.runtime?.provider;
   const model =
     (typeof profile.model === 'string' ? profile.model : '') ||
     profile.modelId ||
@@ -821,7 +905,9 @@ function renderAgentProfileDetail(profile) {
       ? renderAgentProfileEmptyState('subscriptions')
       : subscriptions
           .map((subscription) => {
-            const enabled = subscription?.enabled !== false && subscription?.status !== 'disabled';
+            const enabled =
+              subscription?.enabled !== false &&
+              subscription?.status !== 'disabled';
             const state =
               subscription?.lastRunState ||
               subscription?.runState ||
@@ -837,7 +923,8 @@ function renderAgentProfileDetail(profile) {
               subscription?.lastRunAt,
               subscription?.last_run_at,
             );
-            const lastRunId = subscription?.lastRunId || subscription?.last_run_id;
+            const lastRunId =
+              subscription?.lastRunId || subscription?.last_run_id;
             const lastMatch = lastMatchAt
               ? `Matched ${timeAgo(lastMatchAt)}`
               : 'No matches yet';
@@ -845,7 +932,7 @@ function renderAgentProfileDetail(profile) {
               ? `Run ${timeAgo(lastRunAt)}`
               : lastRunId
                 ? `Run ${lastRunId}`
-              : 'No runs yet';
+                : 'No runs yet';
             return `
               <div class="agent-profile-subscription-row ${enabled ? '' : 'is-disabled'}">
                 <div>
@@ -863,8 +950,17 @@ function renderAgentProfileDetail(profile) {
       ? renderAgentProfileEmptyState('activity')
       : activity
           .map((item) => {
-            const state = item?.status || item?.state || item?.kind || item?.type || 'activity';
-            const stateClass = ['blocked', 'approval_blocked', 'await_approval'].includes(state)
+            const state =
+              item?.status ||
+              item?.state ||
+              item?.kind ||
+              item?.type ||
+              'activity';
+            const stateClass = [
+              'blocked',
+              'approval_blocked',
+              'await_approval',
+            ].includes(state)
               ? 'is-blocked'
               : ['error', 'failed', 'failure'].includes(state)
                 ? 'is-error'
@@ -1034,21 +1130,28 @@ function renderAgentProfileDetail(profile) {
 function renderAgentProfileShellContent(profiles, selectedId) {
   const roster = normalizeAgentProfiles(profiles);
   const fallbackId = roster.length > 0 ? agentProfileId(roster[0]) : '';
-  const activeId = roster.some((profile) => agentProfileId(profile) === selectedId)
+  const activeId = roster.some(
+    (profile) => agentProfileId(profile) === selectedId,
+  )
     ? selectedId
     : fallbackId;
-  const selectedProfile = roster.find((profile) => agentProfileId(profile) === activeId);
+  const selectedProfile = roster.find(
+    (profile) => agentProfileId(profile) === activeId,
+  );
   window._selectedAgentProfileId = activeId;
+  const enabledCount = roster.filter(
+    (profile) => agentProfileStatus(profile).enabled,
+  ).length;
   return `
     <div class="agent-profile-shell-head">
       <div>
-        <span>Agent profiles</span>
-        <strong>Profile cockpit</strong>
-        <small>Roster, model policy, subscriptions, activity, and lifecycle for configured agent personas.</small>
+        <p class="agent-kicker">Agent roster</p>
+        <strong>Choose who works next</strong>
+        <small>Pick a persona, inspect policy and activity, then assign work without leaving this surface.</small>
       </div>
       <div class="agent-profile-shell-actions">
-        <span class="badge badge-muted agent-tool-badge">${roster.length} profile${roster.length === 1 ? '' : 's'}</span>
-        <button type="button" class="btn btn-sm btn-primary" onclick="showCreateAgentProfileForm()">+ New agent</button>
+        <span class="agent-count-chip">${enabledCount}/${roster.length} active</span>
+        <button type="button" class="btn btn-sm btn-primary" onclick="showCreateAgentProfileForm()">New agent</button>
       </div>
     </div>
     <div id="agent-profile-create-panel" class="is-hidden"></div>
@@ -1072,7 +1175,7 @@ function renderAgentProfileShell(profiles) {
       <section class="agent-profile-shell" id="agent-profile-shell">
         <div class="agent-profile-empty-hero">
           ${renderAgentProfileEmptyState('empty')}
-          <button type="button" class="btn btn-primary" onclick="showCreateAgentProfileForm()">+ Create your first agent</button>
+          <button type="button" class="btn btn-primary" onclick="showCreateAgentProfileForm()">Create first agent</button>
         </div>
         <div id="agent-profile-create-panel" class="is-hidden"></div>
       </section>`;
@@ -1214,12 +1317,17 @@ async function renderAgents(el) {
     ]);
     const groups = Array.isArray(groupsRaw) ? groupsRaw : [];
     let agentProfiles =
-      agentProfilesRaw === null ? null : normalizeAgentProfiles(agentProfilesRaw);
+      agentProfilesRaw === null
+        ? null
+        : normalizeAgentProfiles(agentProfilesRaw);
     if (Array.isArray(agentProfiles) && agentProfiles.length > 0) {
       let profileDetailLoadFailed = false;
       agentProfiles = await Promise.all(
         agentProfiles.map(async (profile) => {
-          if (Array.isArray(profile?.subscriptions) && Array.isArray(profile?.activity)) {
+          if (
+            Array.isArray(profile?.subscriptions) &&
+            Array.isArray(profile?.activity)
+          ) {
             return profile;
           }
           try {
@@ -1374,12 +1482,13 @@ async function renderAgents(el) {
       .join('');
 
     const enabledPlugins = plugins.filter((p) => p.enabled);
-    const codingCliOptions = [...new Set(codingRuntimes.map((runtime) => runtime.cli))]
+    const codingCliOptions = [
+      ...new Set(codingRuntimes.map((runtime) => runtime.cli)),
+    ]
       .map((cli) => `<option value="${esc(cli)}">${esc(cli)}</option>`)
       .join('');
-    const codingRuntimeProfileOptions = (Array.isArray(codingRuntimeProfiles)
-      ? codingRuntimeProfiles
-      : []
+    const codingRuntimeProfileOptions = (
+      Array.isArray(codingRuntimeProfiles) ? codingRuntimeProfiles : []
     )
       .map(
         (profile) =>
@@ -1447,7 +1556,7 @@ async function renderAgents(el) {
         ]
           .filter(Boolean)
           .join('');
-        return `<div class="agent-task-row">
+        return `<article class="agent-coding-job-card is-${esc(lane.key)}">
         <div class="agent-task-main">
           <div class="agent-task-head">
             <span class="badge badge-muted agent-mini-badge">${esc(job.repo)}</span>
@@ -1474,7 +1583,7 @@ async function renderAgents(el) {
           ${actions}
           <button class="btn btn-sm btn-ghost" onclick="viewCodingJob('${esc(job.id)}')">View</button>
         </div>
-      </div>`;
+      </article>`;
       })
       .join('');
     const pendingApprovalCount = approvals.filter(
@@ -1526,10 +1635,14 @@ async function renderAgents(el) {
       {
         label: 'Awaiting you',
         count:
-          pendingApprovalCount + pendingQuestions.length + waitingCodingJobCount,
+          pendingApprovalCount +
+          pendingQuestions.length +
+          waitingCodingJobCount,
         detail: 'Approvals, questions, and PR gates',
         tone:
-          pendingApprovalCount + pendingQuestions.length + waitingCodingJobCount >
+          pendingApprovalCount +
+            pendingQuestions.length +
+            waitingCodingJobCount >
           0
             ? 'attention'
             : 'ready',
@@ -1587,7 +1700,10 @@ async function renderAgents(el) {
         ? {
             tone: 'active',
             label: `${waitingCodingJobCount} coding gate${waitingCodingJobCount === 1 ? '' : 's'}`,
-            detail: latestCodingJob?.issueTitle || latestCodingJob?.prompt || 'Implementation or PR approval needed',
+            detail:
+              latestCodingJob?.issueTitle ||
+              latestCodingJob?.prompt ||
+              'Implementation or PR approval needed',
             action: 'Inspect',
             onclick: "scrollToAgentSection('github-coding-jobs')",
           }
@@ -1630,43 +1746,51 @@ async function renderAgents(el) {
     };
 
     el.innerHTML = `
-      <div class="agent-page-topbar">
-        <div class="agent-page-topbar-left">
+      <section class="agent-command-surface" aria-label="Agents command surface">
+        <div class="agent-command-copy">
+          <p class="agent-kicker">Delegation desk</p>
           <h2>Agents</h2>
-          <div class="agent-stat-strip">
-            ${agentStats
-              .map(
-                (stat) => `<span class="agent-stat-pill is-${stat.tone}" title="${esc(stat.detail)}">
-                  <strong>${stat.count}</strong>
-                  <em>${esc(stat.label)}</em>
-                </span>`,
-              )
-              .join('')}
-          </div>
+          <p class="agent-command-lead">Route work to the right persona, clear blockers first, and keep coding jobs under one command surface.</p>
         </div>
-        <div class="agent-page-topbar-actions">
+        <div class="agent-command-metrics" role="list" aria-label="Agent readiness metrics">
+          ${agentStats
+            .map(
+              (
+                stat,
+              ) => `<article class="agent-metric is-${stat.tone}" role="listitem" title="${esc(stat.detail)}">
+                <strong>${stat.count}</strong>
+                <span>${esc(stat.label)}</span>
+                <small>${esc(stat.detail)}</small>
+              </article>`,
+            )
+            .join('')}
+        </div>
+        <div class="agent-command-actions">
           ${agentAttentionItems.length > 0 ? `<button class="btn btn-sm btn-ghost agent-attention-trigger" onclick="document.querySelector('.agent-attention-panel')?.classList.toggle('is-open')" title="Needs attention">${agentAttentionItems.length} need attention</button>` : ''}
-          <button class="btn btn-sm btn-ghost" onclick="copyAgentDelegationBrief()" title="Copy delegation brief">Brief</button>
+          <button class="btn btn-sm btn-ghost" onclick="copyAgentDelegationBrief()" title="Copy delegation brief">Copy brief</button>
           <button class="btn btn-sm btn-primary" onclick="openAssignWorkWizard()">Assign work</button>
         </div>
-      </div>
+      </section>
 
-      <section class="agent-attention-panel is-collapsed" aria-label="Agent attention queue">
+      <section class="agent-attention-panel ${agentAttentionItems.length > 0 ? 'is-open' : 'is-collapsed'}" aria-label="Agent attention queue">
         <div class="agent-attention-head">
           <div>
-            <span>Needs attention</span>
+            <p class="agent-kicker">Queue</p>
+            <strong>${agentAttentionItems.length > 0 ? 'Needs attention' : 'Clear queue'}</strong>
             <small>${agentAttentionItems.length > 0 ? 'Handle blockers before launching more work.' : 'No agent blockers right now.'}</small>
           </div>
           <div class="agent-attention-head-actions">
             <button class="btn btn-sm btn-ghost" onclick="refresh()">Refresh</button>
-            <button class="btn btn-sm btn-ghost" onclick="this.closest('.agent-attention-panel').classList.remove('is-open')">Dismiss</button>
+            ${agentAttentionItems.length > 0 ? `<button class="btn btn-sm btn-ghost" onclick="this.closest('.agent-attention-panel').classList.remove('is-open')">Hide</button>` : ''}
           </div>
         </div>
         ${
           agentAttentionItems.length > 0
-            ? agentAttentionItems
+            ? `<div class="agent-attention-list">${agentAttentionItems
                 .map(
-                  (item) => `<button class="agent-attention-row is-${item.tone}" onclick="${item.onclick}">
+                  (
+                    item,
+                  ) => `<button class="agent-attention-row is-${item.tone}" onclick="${item.onclick}">
                     <span>
                       <strong>${esc(item.label)}</strong>
                       <small>${esc(item.detail).slice(0, 140)}</small>
@@ -1674,25 +1798,26 @@ async function renderAgents(el) {
                     <em>${esc(item.action)}</em>
                   </button>`,
                 )
-                .join('')
+                .join('')}</div>`
             : '<div class="agent-attention-empty">Ready for the next useful delegation.</div>'
         }
       </section>
 
       ${renderAgentProfileShell(agentProfiles)}
 
-      <div id="task-launcher" class="card assign-wizard is-hidden">
+      <div id="task-launcher" class="card assign-wizard is-hidden" role="dialog" aria-labelledby="assign-work-title">
         <div class="assign-wizard-head">
           <div>
-            <div class="assign-wizard-title">Assign work</div>
-            <div class="assign-wizard-subtitle">Start a one-off task, pick a GitHub issue, or enable automatic issue pickup.</div>
+            <p class="agent-kicker">Launch desk</p>
+            <div class="assign-wizard-title" id="assign-work-title">Assign work</div>
+            <div class="assign-wizard-subtitle">One-off tasks, GitHub issues, or automatic issue pickup without leaving Agents.</div>
           </div>
-          <button class="btn btn-sm btn-ghost" onclick="toggleTaskLauncher(false)">Close</button>
+          <button class="btn btn-sm btn-ghost" onclick="toggleTaskLauncher(false)" aria-label="Close assign work">Close</button>
         </div>
         <div class="assign-mode-tabs" role="tablist" aria-label="Assignment type">
-          <button class="assign-mode is-active" id="assign-mode-freeform" onclick="setAssignMode('freeform')">Freeform task</button>
-          <button class="assign-mode" id="assign-mode-github" onclick="setAssignMode('github')">GitHub issue</button>
-          <button class="assign-mode" id="assign-mode-autofix" onclick="setAssignMode('autofix')">Auto-pickup</button>
+          <button class="assign-mode is-active" id="assign-mode-freeform" role="tab" aria-selected="true" onclick="setAssignMode('freeform')">Freeform task</button>
+          <button class="assign-mode" id="assign-mode-github" role="tab" aria-selected="false" onclick="setAssignMode('github')">GitHub issue</button>
+          <button class="assign-mode" id="assign-mode-autofix" role="tab" aria-selected="false" onclick="setAssignMode('autofix')">Auto-pickup</button>
         </div>
 
         <div class="assign-pane" id="assign-pane-freeform">
@@ -1793,22 +1918,25 @@ async function renderAgents(el) {
 
       <div class="agent-below-shell">
         <button class="agent-accordion-trigger" type="button" aria-expanded="false" onclick="toggleBelowShell(this)">
-          Operations &amp; integrations
+          <span>
+            <span class="agent-kicker">Operations</span>
+            <strong>Coding tools, bot agents, and history</strong>
+          </span>
         </button>
         <div class="agent-accordion-body" id="agent-below-shell-body">
 
-      <section class="agent-coding-board" id="github-coding-jobs">
+      <section class="agent-coding-board" id="github-coding-jobs" aria-label="GitHub coding board">
         <div class="agent-coding-brief is-${codingBoardTone}">
           <div>
-            <span>GitHub handoff</span>
+            <p class="agent-kicker">GitHub handoff</p>
             <strong>${esc(codingBoardTitle)}</strong>
             <p>${esc(codingBoardDetail)}</p>
           </div>
           <div class="agent-coding-brief-side">
-            <div class="agent-coding-brief-stats">
-              <span><strong>${codingRepos.length}</strong><small>repos</small></span>
-              <span><strong>${activeCodingJobCount}</strong><small>active</small></span>
-              <span><strong>${waitingCodingJobCount}</strong><small>gates</small></span>
+            <div class="agent-coding-brief-stats" role="list" aria-label="Coding board metrics">
+              <span role="listitem"><strong>${codingRepos.length}</strong><small>repos</small></span>
+              <span role="listitem"><strong>${activeCodingJobCount}</strong><small>active</small></span>
+              <span role="listitem"><strong>${waitingCodingJobCount}</strong><small>gates</small></span>
             </div>
             <button class="btn btn-sm btn-ghost" onclick="navigate('autofix')">GitHub workbench</button>
           </div>
@@ -1845,20 +1973,24 @@ async function renderAgents(el) {
         </div>
         <div class="agent-coding-queue-head">
           <div>
+            <p class="agent-kicker">Queue</p>
             <span>Coding jobs</span>
             <small>${codingJobs.length} job${codingJobs.length === 1 ? '' : 's'} tracked in this workspace</small>
           </div>
-          <button class="btn btn-sm btn-ghost" onclick="refresh()">Refresh</button>
+          <div class="agent-coding-queue-actions">
+            <button class="btn btn-sm btn-ghost" onclick="openAssignWorkWizard('github')">Assign issue</button>
+            <button class="btn btn-sm btn-ghost" onclick="refresh()">Refresh</button>
+          </div>
         </div>
         ${
           codingJobs.length === 0
             ? renderAgentCodeEmptyState('jobs')
-            : codingJobRows
+            : `<div class="agent-coding-job-list" aria-label="Coding job queue">${codingJobRows}</div>`
         }
       </section>
 
       <div class="card agent-section-card" id="repo-coding-rules-card">
-        <div class="card-title">Repo Coding Rules <span class="badge badge-muted agent-tool-badge">${codingRepoRules.length}</span></div>
+        <div class="card-title"><span class="agent-kicker">Policy</span>Repo Coding Rules <span class="badge badge-muted agent-tool-badge">${codingRepoRules.length}</span></div>
         <div class="agent-rule-form">
           <label class="agent-rule-field">Repo<select class="search-input" id="repo-rule-repo">${codingRepoOptions || '<option value="">No repos</option>'}</select></label>
           <label class="agent-rule-field">Title<input class="search-input" id="repo-rule-title" placeholder="Use Node 22"></label>
@@ -1868,8 +2000,8 @@ async function renderAgents(el) {
         ${codingRepoRuleRows}
       </div>
 
-      <div class="card agent-section-card">
-        <div class="card-title">Coding Agents</div>
+      <div class="card agent-section-card" id="coding-agents-card">
+        <div class="card-title"><span class="agent-kicker">Delegates</span>Coding Agents</div>
         ${tools
           .filter((t) => t.available)
           .map((t) => {
@@ -1894,9 +2026,7 @@ async function renderAgents(el) {
         ${tools
           .filter((t) => !t.available)
           .map(
-            (
-              t,
-            ) => `<div class="agent-tool-row is-unavailable">
+            (t) => `<div class="agent-tool-row is-unavailable">
           <div class="agent-tool-main">
             <span class="status-dot offline"></span>
             <div>
@@ -1910,8 +2040,8 @@ async function renderAgents(el) {
           .join('')}
       </div>
 
-      <div class="card agent-section-card">
-        <div class="card-title">Bot Agents <span class="badge badge-muted agent-tool-badge">${groups.length}</span></div>
+      <div class="card agent-section-card" id="bot-agents-card">
+        <div class="card-title"><span class="agent-kicker">Channels</span>Bot Agents <span class="badge badge-muted agent-tool-badge">${groups.length}</span></div>
         ${agentCards}
       </div>
 
@@ -1930,9 +2060,7 @@ async function renderAgents(el) {
         <div class="card-title">Recent Sessions <span class="badge badge-muted agent-tool-badge">${recent.length}</span></div>
         ${recent
           .map(
-            (
-              r,
-            ) => `<div class="agent-session-row">
+            (r) => `<div class="agent-session-row">
           <div class="agent-session-main">
             <div class="agent-session-head">
               <span class="badge badge-muted agent-mini-badge">${esc(r.group)}</span>
@@ -1953,15 +2081,13 @@ async function renderAgents(el) {
         pendingQuestions.length > 0
           ? `<div class="card agent-question-card" id="pending-questions-card">
         <div class="card-title agent-question-title">
-          <span>Pending Questions <span class="badge badge-warning agent-tool-badge">${pendingQuestions.length}</span></span>
+          <span><span class="agent-kicker">Attention</span>Pending Questions <span class="badge badge-warning agent-tool-badge">${pendingQuestions.length}</span></span>
           <button class="btn btn-sm btn-ghost" onclick="copyAgentQuestionDecisionBrief()">Copy question brief</button>
         </div>
         <div class="agent-question-brief">Answer these before assigning more automation. Questions often encode missing user intent, approval risk, or routing between Copilot, Cowork, and Code.</div>
         ${pendingQuestions
           .map(
-            (
-              q,
-            ) => `<div class="agent-question-row">
+            (q) => `<div class="agent-question-row">
           <div class="agent-question-text">${esc(q.question)}</div>
           <div class="agent-question-meta">From: ${esc(q.group_folder)} \u2022 ${timeAgo(q.created_at)}</div>
           <div class="agent-question-actions">
@@ -1980,9 +2106,7 @@ async function renderAgents(el) {
         <div class="card-title">Container Providers</div>
         ${agentProviders
           .map(
-            (
-              p,
-            ) => `<div class="agent-tool-row">
+            (p) => `<div class="agent-tool-row">
           <div class="agent-tool-main">
             <span class="status-dot ${p.available ? 'online' : 'offline'}"></span>
             <div>
@@ -2005,9 +2129,7 @@ async function renderAgents(el) {
         ${agentMsgs
           .slice(0, 15)
           .map(
-            (
-              m,
-            ) => `<div class="agent-message-row">
+            (m) => `<div class="agent-message-row">
           <div class="agent-message-main">
             <div class="agent-message-route">
               <span class="badge badge-muted agent-mini-badge">${esc(m.from_group)}</span>
@@ -2097,7 +2219,10 @@ window.switchProfileTab = function (tabName) {
     tab.tabIndex = isActive ? 0 : -1;
   });
   detail.querySelectorAll('[data-profile-tab-panel]').forEach((panel) => {
-    panel.classList.toggle('is-visible', panel.dataset.profileTabPanel === tabName);
+    panel.classList.toggle(
+      'is-visible',
+      panel.dataset.profileTabPanel === tabName,
+    );
   });
 };
 
@@ -2134,7 +2259,9 @@ window.saveAgentProfile = async function (id) {
   const current =
     window._agentProfilesById?.[id] ||
     (Array.isArray(window._agentProfileRoster)
-      ? window._agentProfileRoster.find((profile) => agentProfileId(profile) === id)
+      ? window._agentProfileRoster.find(
+          (profile) => agentProfileId(profile) === id,
+        )
       : {});
   const currentAllowedMcpServers =
     current?.allowedMcpServers ?? current?.allowed_mcp_servers;
@@ -2151,9 +2278,12 @@ window.saveAgentProfile = async function (id) {
     providerProfileId: agentProfileNullableText(
       agentProfileFieldValue(form, 'providerProfileId'),
     ),
-    provider: agentProfileNullableText(agentProfileFieldValue(form, 'provider')),
+    provider: agentProfileNullableText(
+      agentProfileFieldValue(form, 'provider'),
+    ),
     model: agentProfileNullableText(agentProfileFieldValue(form, 'model')),
-    toolPolicy: agentProfileFieldValue(form, 'toolPolicy') || 'approval-required',
+    toolPolicy:
+      agentProfileFieldValue(form, 'toolPolicy') || 'approval-required',
     allowedMcpServers: allowedMcpServers.length
       ? allowedMcpServers
       : Array.isArray(currentAllowedMcpServers)
@@ -2253,9 +2383,14 @@ window.submitCreateAgentProfile = async function () {
   if (!form) return;
   const status = document.getElementById('agent-profile-create-status');
   const handle = (form.elements.namedItem('handle')?.value || '').trim();
-  const displayName = (form.elements.namedItem('displayName')?.value || '').trim();
+  const displayName = (
+    form.elements.namedItem('displayName')?.value || ''
+  ).trim();
   if (!handle || !displayName) {
-    if (status) { status.textContent = 'Handle and display name are required.'; status.classList.add('is-error'); }
+    if (status) {
+      status.textContent = 'Handle and display name are required.';
+      status.classList.add('is-error');
+    }
     return;
   }
   const body = {
@@ -2263,24 +2398,46 @@ window.submitCreateAgentProfile = async function () {
     displayName,
     provider: (form.elements.namedItem('provider')?.value || '').trim() || null,
     model: (form.elements.namedItem('model')?.value || '').trim() || null,
-    toolPolicy: form.elements.namedItem('toolPolicy')?.value || 'approval-required',
-    personality: (form.elements.namedItem('personality')?.value || '').trim() || null,
-    taskKinds: (form.elements.namedItem('taskKinds')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
-    skills: (form.elements.namedItem('skills')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+    toolPolicy:
+      form.elements.namedItem('toolPolicy')?.value || 'approval-required',
+    personality:
+      (form.elements.namedItem('personality')?.value || '').trim() || null,
+    taskKinds: (form.elements.namedItem('taskKinds')?.value || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    skills: (form.elements.namedItem('skills')?.value || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
-  if (status) { status.textContent = 'Creating...'; status.classList.remove('is-error'); }
+  if (status) {
+    status.textContent = 'Creating...';
+    status.classList.remove('is-error');
+  }
   try {
-    const r = await api('/agent-profiles', { method: 'POST', body: JSON.stringify(body) });
+    const r = await api('/agent-profiles', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
     if (r.ok && r.profile) {
       toast(`Agent @${handle} created`, 'success');
-      document.getElementById('agent-profile-create-panel').classList.add('is-hidden');
+      document
+        .getElementById('agent-profile-create-panel')
+        .classList.add('is-hidden');
       // Reload the agents page to show the new profile
       if (currentPage === 'agents') navigate('agents');
     } else {
-      if (status) { status.textContent = r.error || 'Creation failed'; status.classList.add('is-error'); }
+      if (status) {
+        status.textContent = r.error || 'Creation failed';
+        status.classList.add('is-error');
+      }
     }
   } catch (e) {
-    if (status) { status.textContent = e?.message || 'Creation failed'; status.classList.add('is-error'); }
+    if (status) {
+      status.textContent = e?.message || 'Creation failed';
+      status.classList.add('is-error');
+    }
     toast(e?.message || 'Could not create agent profile', 'error');
   }
 };
@@ -2288,7 +2445,10 @@ window.submitCreateAgentProfile = async function () {
 window.toggleAgentProfileEnabled = async function (id, enable) {
   const endpoint = enable ? 'enable' : 'disable';
   try {
-    const r = await api(`/agent-profiles/${encodeURIComponent(id)}/${endpoint}`, { method: 'POST' });
+    const r = await api(
+      `/agent-profiles/${encodeURIComponent(id)}/${endpoint}`,
+      { method: 'POST' },
+    );
     if (r.ok && r.profile) {
       agentProfileUpdateLocalProfile(id, r.profile);
       agentProfileRerender(id);
@@ -2304,7 +2464,9 @@ window.toggleAgentProfileEnabled = async function (id, enable) {
 window.deleteAgentProfile = async function (id) {
   if (!confirm('Delete this agent profile? This cannot be undone.')) return;
   try {
-    const r = await api(`/agent-profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const r = await api(`/agent-profiles/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
     if (r.ok !== false) {
       toast('Agent profile deleted', 'success');
       if (currentPage === 'agents') navigate('agents');
@@ -2324,7 +2486,11 @@ window.invokeAgentProfile = async function (id) {
   if (!prompt) {
     promptEl?.classList.add('input-error');
     promptEl?.focus();
-    agentProfileSetStatus(id, 'Enter a prompt before invoking this profile.', 'error');
+    agentProfileSetStatus(
+      id,
+      'Enter a prompt before invoking this profile.',
+      'error',
+    );
     toast('Enter an invocation prompt', 'warning');
     return;
   }
@@ -2332,10 +2498,13 @@ window.invokeAgentProfile = async function (id) {
 
   agentProfileSetStatus(id, 'Recording invocation...', 'info');
   try {
-    const r = await api('/agent-profiles/' + encodeURIComponent(id) + '/invoke', {
-      method: 'POST',
-      body: JSON.stringify({ prompt }),
-    });
+    const r = await api(
+      '/agent-profiles/' + encodeURIComponent(id) + '/invoke',
+      {
+        method: 'POST',
+        body: JSON.stringify({ prompt }),
+      },
+    );
     if (r.activity) {
       const current = window._agentProfilesById?.[id] || {};
       const activity = [
@@ -2439,9 +2608,9 @@ window.scrollToAgentSection = function (id) {
 
 window.setAssignMode = function (mode) {
   ['freeform', 'github', 'autofix'].forEach((name) => {
-    document
-      .getElementById(`assign-mode-${name}`)
-      ?.classList.toggle('is-active', name === mode);
+    const tab = document.getElementById(`assign-mode-${name}`);
+    tab?.classList.toggle('is-active', name === mode);
+    tab?.setAttribute('aria-selected', name === mode ? 'true' : 'false');
     const pane = document.getElementById(`assign-pane-${name}`);
     if (pane) pane.classList.toggle('is-hidden', name !== mode);
   });
@@ -2669,9 +2838,16 @@ function updateCodingRuntimeFor(prefix) {
   const cli = document.getElementById(`${prefix}-cli-select`)?.value;
   const providerEl = document.getElementById(`${prefix}-provider-select`);
   if (!providerEl) return;
-  const providers = [...new Set(codingRuntimeOptionsForCli(cli).map((runtime) => runtime.provider))];
+  const providers = [
+    ...new Set(
+      codingRuntimeOptionsForCli(cli).map((runtime) => runtime.provider),
+    ),
+  ];
   providerEl.innerHTML = providers
-    .map((provider) => `<option value="${esc(provider)}">${esc(provider)}</option>`)
+    .map(
+      (provider) =>
+        `<option value="${esc(provider)}">${esc(provider)}</option>`,
+    )
     .join('');
   updateCodingRuntimeProviderFor(prefix);
 }
@@ -2736,9 +2912,16 @@ window.updateAssignAutofixRuntime = function () {
   const cli = document.getElementById('assign-af-cli')?.value;
   const providerEl = document.getElementById('assign-af-provider');
   if (!providerEl) return;
-  const providers = [...new Set(codingRuntimeOptionsForCli(cli).map((runtime) => runtime.provider))];
+  const providers = [
+    ...new Set(
+      codingRuntimeOptionsForCli(cli).map((runtime) => runtime.provider),
+    ),
+  ];
   providerEl.innerHTML = providers
-    .map((provider) => `<option value="${esc(provider)}">${esc(provider)}</option>`)
+    .map(
+      (provider) =>
+        `<option value="${esc(provider)}">${esc(provider)}</option>`,
+    )
     .join('');
   updateAssignAutofixRuntimeProvider();
 };
@@ -2801,7 +2984,9 @@ function assignmentPlanDirective(mode) {
 }
 
 function assignedCodingPrompt(prompt, mode) {
-  return [assignmentPlanDirective(mode), prompt || ''].filter(Boolean).join('\n\n');
+  return [assignmentPlanDirective(mode), prompt || '']
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 window.startAssignedCodingJob = async function () {
@@ -2834,7 +3019,10 @@ window.startAssignedCodingJob = async function () {
     return;
   }
   const { cli, provider, model } = selectedRuntime;
-  if (targetType === 'issue-number' && (!issueNumber || Number.isNaN(issueNumber))) {
+  if (
+    targetType === 'issue-number' &&
+    (!issueNumber || Number.isNaN(issueNumber))
+  ) {
     toast('Enter a valid issue number', 'warning');
     document.getElementById('assign-coding-issue-number')?.focus();
     return;
@@ -2987,7 +3175,10 @@ window.viewCodingJob = async function (id) {
     const job = await api('/agents/coding/jobs/' + encodeURIComponent(id));
     const statusBadge = codingJobStatusBadge(job.status);
     const lane = deriveCodingStageLaneDetails(job.status);
-    const providerFit = deriveCodingProviderFit(job, window._codingProvidersById || {});
+    const providerFit = deriveCodingProviderFit(
+      job,
+      window._codingProvidersById || {},
+    );
     const actions = [
       job.status === 'await_approval'
         ? `<label class="coding-deny-note-field"><span>Deny note</span><input id="${esc(codingDenyNoteId(id))}" placeholder="Reason or follow-up"></label>`
@@ -3254,9 +3445,7 @@ window.controlCodingJob = async function (id, action) {
 
 window.denyCodingJobImplementation = async function (id) {
   const noteInput = document.getElementById(codingDenyNoteId(id));
-  const note =
-    noteInput?.value.trim() ||
-    'Denied from Agents dashboard';
+  const note = noteInput?.value.trim() || 'Denied from Agents dashboard';
   try {
     const r = await api('/agents/coding/jobs/' + id + '/deny-implementation', {
       method: 'POST',
