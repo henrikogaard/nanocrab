@@ -152,6 +152,40 @@ let workspaceInspectorTrigger = null;
 let moreDrawerTrigger = null;
 let workspaceInspectorEscapeReady = false;
 
+// Post-render: demote uppercase section kickers to sentence-case.
+// The CSS has 200+ text-transform:uppercase rules scattered across
+// per-component selectors. Rather than overriding each one, we walk
+// the rendered DOM once after each page paint and neutralise the
+// small accent-coloured kicker spans that produce the AI-tell rhythm.
+function demoteUppercaseKickers() {
+  var page = document.getElementById('page-content');
+  if (!page) return;
+  var spans = page.querySelectorAll('span, em, small');
+  for (var i = 0; i < spans.length; i++) {
+    var el = spans[i];
+    var style = window.getComputedStyle(el);
+    if (style.textTransform !== 'uppercase') continue;
+    // Only target small kicker-like elements (<=12px, short text)
+    var fontSize = parseFloat(style.fontSize);
+    if (fontSize > 12) continue;
+    var text = el.textContent.trim();
+    if (text.length === 0 || text.length > 50) continue;
+    // Skip form labels, badges, status pills, tab labels
+    var cls = el.className || '';
+    if (cls.indexOf('badge') !== -1) continue;
+    if (cls.indexOf('tab') !== -1) continue;
+    if (cls.indexOf('nav-') !== -1) continue;
+    if (cls.indexOf('status') !== -1) continue;
+    if (el.closest('label')) continue;
+    if (el.closest('.agent-stat-pill')) continue;
+    if (el.closest('.agent-profile-field')) continue;
+    // Demote: sentence-case, normal tracking, muted weight
+    el.style.textTransform = 'none';
+    el.style.letterSpacing = '0';
+    el.style.fontWeight = '600';
+  }
+}
+
 function synchronizeMoreDrawerControls() {
   const drawer = document.getElementById('more-drawer');
   const isOpen = Boolean(drawer?.classList.contains('open'));
@@ -1297,6 +1331,7 @@ function showShell(page) {
     pendingPageTabAlias && pendingPageTabAlias.page === page ? pendingPageTabAlias : null;
   const afterRouteRender = () => {
     synchronizeMoreDrawerControls();
+    demoteUppercaseKickers();
     if (!routeTabAlias) return;
     activatePageTabAlias(routeTabAlias);
     if (pendingPageTabAlias === routeTabAlias) pendingPageTabAlias = null;
@@ -3251,7 +3286,7 @@ async function renderUptime(el) {
           <div class="form-group"><label>Alert Channel</label><select id="mon-alert">${groups.map((g) => `<option value="${g.jid}">${esc(g.name)}</option>`).join('')}</select></div>
           <div class="form-group"><label>Alert After (consecutive failures)</label><input id="mon-alert-after" value="3" type="number" min="1"></div>
         </div>
-        <div class="form-group"><label>Body Validation (optional — one check per line, e.g. <code>ok=true</code>)</label><textarea class="uptime-body-editor" id="mon-expected-body" placeholder="ok=true\nstatus=ready\ndependencies.database.status=up"></textarea></div>
+        <div class="form-group"><label>Body Validation (optional, one check per line, e.g. <code>ok=true</code>)</label><textarea class="uptime-body-editor" id="mon-expected-body" placeholder="ok=true\nstatus=ready\ndependencies.database.status=up"></textarea></div>
         <button type="submit" class="btn btn-primary">Add Monitor</button>
       </form>
     </div>
@@ -3358,7 +3393,7 @@ window.checkMonitorNow = async (id, btnEl) => {
   btnEl.disabled = true;
   btnEl.textContent = 'Checking...';
   const r = await api(`/uptime/${id}/check`, { method: 'POST' });
-  if (r.ok) toast(`${r.status || 'N/A'} — ${r.responseTime}ms`, 'success');
+  if (r.ok) toast(`${r.status || 'N/A'} - ${r.responseTime}ms`, 'success');
   else toast(uptimeActionErrorMessage('check', r), 'error');
   navigate('monitoring');
 };
@@ -6914,7 +6949,7 @@ function credentialReadinessBriefText(state) {
     .slice(0, 12);
   const laneLines = credentialLaneCards().map((card) => {
     const stat = categoryStats[card.lane] || { ready: 0, total: 0 };
-    return `- ${card.lane}: ${stat.ready}/${stat.total} ready — ${card.body}`;
+    return `- ${card.lane}: ${stat.ready}/${stat.total} ready - ${card.body}`;
   });
   return [
     'Review this NanoCrab credential readiness state.',
@@ -7818,7 +7853,7 @@ async function renderMcp(el) {
         </div>
         <div class="form-group"><label>Required Environment Variables (comma-separated key names)</label><input id="mcp-envvars" placeholder="MY_API_KEY, MY_SECRET"></div>
         <p class="mcp-form-env-note">These env vars must be set in <strong>Credentials</strong> for the server to work. They'll be passed from .env into the container.</p>
-        <div class="form-group"><label>Setup Notes (optional — shown to admin)</label><input id="mcp-notes" placeholder="e.g. Get API key at example.com/api"></div>
+        <div class="form-group"><label>Setup Notes (optional, shown to admin)</label><input id="mcp-notes" placeholder="e.g. Get API key at example.com/api"></div>
         <button type="submit" class="btn btn-primary">Add Server</button>
       </form>
     </div>
@@ -8969,7 +9004,7 @@ async function renderReports(el) {
   const reportProfileOptions = (providerProfiles.profiles || [])
     .map(
       (profile) =>
-        `<option value="${esc(profile.id)}" ${profile.id === 'default_reports' ? 'selected' : ''}>${esc(profile.label || profile.id)} — ${esc(profile.provider)}/${esc(profile.model)}</option>`,
+        `<option value="${esc(profile.id)}" ${profile.id === 'default_reports' ? 'selected' : ''}>${esc(profile.label || profile.id)} - ${esc(profile.provider)}/${esc(profile.model)}</option>`,
     )
     .join('');
   const reportJobs = Array.isArray(jobs) ? jobs : [];
@@ -15898,8 +15933,8 @@ async function renderSecurity(el) {
       name: 'IP Allowlist',
       status: allowlist.enabled,
       desc: allowlist.enabled
-        ? `Enabled — ${allowlist.ips.length} IP${allowlist.ips.length !== 1 ? 's' : ''} allowed`
-        : 'Disabled — all IPs can access the dashboard',
+        ? `Enabled - ${allowlist.ips.length} IP${allowlist.ips.length !== 1 ? 's' : ''} allowed`
+        : 'Disabled - all IPs can access the dashboard',
     },
     {
       name: 'Container Sandbox',
@@ -15909,7 +15944,7 @@ async function renderSecurity(el) {
     {
       name: 'Credential Isolation',
       status: true,
-      desc: '.env is shadow-mounted as /dev/null in containers — agents cannot read host secrets',
+      desc: '.env is shadow-mounted as /dev/null in containers - agents cannot read host secrets',
     },
     {
       name: 'MCP Restrictions',
@@ -16071,7 +16106,7 @@ async function renderSecurity(el) {
         <div class="card-title">Next hardening moves</div>
         <div class="security-recommendation-list">
           ${!allowlist.enabled ? `<div class="security-recommendation is-warning">Consider enabling the IP Allowlist to restrict dashboard access to your IP only.</div>` : ''}
-          <div class="security-recommendation">Rotate API keys periodically — manage them in <button class="link-button" onclick="navigate('credentials')">Credentials</button>.</div>
+          <div class="security-recommendation">Rotate API keys periodically - manage them in <button class="link-button" onclick="navigate('credentials')">Credentials</button>.</div>
           <div class="security-recommendation">Change your admin password regularly in <button class="link-button" onclick="navigate('settings')">Settings</button>.</div>
           <div class="security-recommendation">Enable SSH key-only auth and disable password login on the server.</div>
         </div>
@@ -25224,7 +25259,7 @@ window.viewTerminalTranscript = async function (sessionId) {
       activeTerminal.term.reset();
       activeTerminal.term.write((data.content || '').slice(-50000));
       activeTerminal.term.write(
-        '\r\n\r\n[END OF SESSION — ' + esc(sessionId) + ']\r\n',
+        '\r\n\r\n[END OF SESSION - ' + esc(sessionId) + ']\r\n',
       );
     }
     toast('Loaded session: ' + sessionId, 'info');

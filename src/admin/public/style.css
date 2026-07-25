@@ -40994,3 +40994,147 @@ select:focus-visible,
 .skills-panel:has(.settings-card-collapse-toggle):not(:has(.settings-card-body-wrap.is-open)) {
   border-bottom: 1px solid var(--border);
 }
+
+/* ==========================================================================
+   ANTI-SLOP PASS - kill AI tells, reduce gratuitous motion,
+   demote over-designed elements to functional cockpit treatment
+   ========================================================================== */
+
+/* 1. Kill breathing dot in masthead eyebrow - decorative status dot is a Tell */
+.focus-stack-canvas-header > div > span::before {
+  animation: none;
+  box-shadow: none;
+  display: none;
+}
+
+/* 1b. Demote masthead eyebrow from uppercase mono to sentence-case */
+.focus-stack-canvas-header > div > span {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/* 2. Kill signature line animation - gratuitous for a daily tool */
+.focus-stack-canvas-header::after {
+  animation: none;
+  transform: scaleX(1);
+  opacity: 0.3;
+}
+
+/* 3. Kill entrance cascade on page children - too much motion for MOTION 3 */
+#page-content > * {
+  animation: none;
+}
+
+/* 4. Remove ambient dot grid - visual noise in a data-dense tool */
+.focus-stack-canvas.main {
+  background-image: none;
+}
+
+/* 5. Tone down hover-lift: border change only, no translateY */
+.card:hover,
+.stat-card:hover,
+.agent-card:hover,
+.project-card:hover,
+.channel-card:hover,
+.uptime-card:hover,
+.security-card:hover,
+.memory-card:hover,
+.skill-card:hover,
+.credential-card:hover,
+.monitoring-card:hover,
+.container-card:hover,
+.project-section:hover,
+.channels-intent-card:hover,
+.settings-focus-map:hover,
+.dash-next-action:hover,
+.dash-more-strip:hover,
+.dash-quiet-list > *:hover,
+.agent-assign-card:hover,
+.project-action-card:hover,
+.project-mcp-recipe:hover {
+  transform: none;
+  border-color: var(--accent-border);
+  box-shadow: none;
+}
+
+/* 6. Demote masthead from display-title to functional header */
+.focus-stack-canvas-header strong {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+/* 7. Demote uppercase kickers to sentence-case, reduce tracking */
+.settings-kicker,
+.messages-kicker,
+.cowork-kicker,
+.autofix-command-center > div:first-child > span,
+.copilot-command-center > div:first-child > span,
+[class*="-kicker"],
+[class*="-command-center"] > div:first-child > span {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 8. Kill the breathing dot on the original agent roster too */
+.agent-status-dot {
+  animation: none;
+}
+
+/* 9. Remove scroll-depth glow if present */
+.focus-stack-canvas.main::before,
+.focus-stack-canvas.main::after {
+  display: none;
+}
+
+/* 10. Reduce card rest-state shadow to nothing - flat is honest for a cockpit */
+.card,
+.stat-card,
+.agent-card,
+.project-card,
+.channel-card,
+.settings-card,
+.skills-panel,
+.project-section,
+.channels-intent-card,
+.settings-focus-map,
+.dash-next-action,
+.dash-more-strip,
+.agent-assign-card,
+.project-action-card,
+.project-mcp-recipe {
+  box-shadow: none;
+}
+
+/* 11. Stat pills: remove inner glow, keep them flat */
+[class*="command-stat"] {
+  box-shadow: none;
+}
+
+/* 12. Sidebar nav hover: remove left-edge accent animation, keep it subtle */
+.sidebar-nav .nav-link:hover {
+  border-left-color: transparent;
+}
+
+/* 13. Today attention items: remove left accent edge on hover */
+.dash-quiet-list > *:hover {
+  border-left-color: transparent;
+}
+
+/* 14. Channels intent cards: remove top accent line draw-in */
+.channels-intent-card::before {
+  animation: none;
+  transform: scaleX(0);
+}
+
+/* 15. Agents roster rows: remove left accent bar on hover/active */
+.agent-roster-row:hover,
+.agent-roster-row.active {
+  border-left-color: transparent;
+}
