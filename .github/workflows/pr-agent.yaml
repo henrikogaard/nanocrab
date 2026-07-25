@@ -6,23 +6,39 @@ on:
   issue_comment:
     types: [created]
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   pr-agent:
+    # Automatic reviews run for PR events. Manual /review comments are limited
+    # to trusted repository collaborators and PRs; arbitrary issue comments
+    # must not start a secret-bearing self-hosted job.
     if: |
-      (github.event_name == 'pull_request' ||
-       (github.event_name == 'issue_comment' &&
-        github.event.action == 'created' &&
-        contains(github.event.comment.body, '/')))
-    runs-on: self-hosted
+      github.event.sender.type != 'Bot' &&
+      (
+        github.event_name == 'pull_request' ||
+        (
+          github.event_name == 'issue_comment' &&
+          github.event.issue.pull_request != null &&
+          startsWith(github.event.comment.body, '/review') &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+        )
+      )
+    runs-on: devbox
     steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
-
-      - uses: qodo-ai/pr-agent@main
+      # The action reads the PR through GitHub's API. Do not check out an
+      # untrusted PR onto the self-hosted runner.
+      - uses: the-pr-agent/pr-agent@6ad7cf75d95cb3bbb54cf2ad92050eb03804964a
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.QWEN_API_KEY }}
-          OPENAI_API_BASE: ${{ secrets.QWEN_API_BASE }}
-          CONFIG__MODEL: ${{ secrets.QWEN_MODEL }}
+          OPENAI__KEY: ${{ secrets.QWEN_API_KEY }}
+          OPENAI__API_BASE: ${{ secrets.QWEN_API_BASE }}
+          CONFIG__MODEL: "openai/Qwen3.6"
+          CONFIG__FALLBACK_MODELS: '["openai/Qwen3.6"]'
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "32000"
+          GITHUB_ACTION_CONFIG__AUTO_REVIEW: "true"
+          GITHUB_ACTION_CONFIG__AUTO_DESCRIBE: "false"
+          GITHUB_ACTION_CONFIG__AUTO_IMPROVE: "false"
