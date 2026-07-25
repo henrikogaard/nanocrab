@@ -1080,7 +1080,9 @@ window.renderSettings = async function (el) {
       toggle.type = 'button';
       toggle.className = 'settings-card-collapse-toggle';
       toggle.setAttribute('aria-expanded', idx < 2 ? 'true' : 'false');
-      toggle.innerHTML = '<span class="settings-card-collapse-chevron"></span>' + titleText;
+      var chevron = document.createElement('span');
+      chevron.className = 'settings-card-collapse-chevron';
+      toggle.append(chevron, document.createTextNode(titleText));
       titleEl.style.display = 'none';
       card.insertBefore(toggle, card.firstChild);
       var bodyWrap = document.createElement('div');

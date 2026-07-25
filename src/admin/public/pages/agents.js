@@ -754,6 +754,7 @@ function renderAgentProfileDetail(profile) {
 
   const id = agentProfileId(profile);
   const detailId = agentProfileDomId(id);
+  const tabId = (name) => `agent-profile-${detailId}-${name}`;
 
   if (profile.detailUnavailable) {
     return `
@@ -891,19 +892,19 @@ function renderAgentProfileDetail(profile) {
         <span class="badge ${status.badge} agent-tool-badge">${status.label}</span>
       </div>
       <div class="agent-profile-tabs" role="tablist" aria-label="Profile detail sections">
-        <button class="agent-profile-tab is-active" role="tab" aria-selected="true" onclick="switchProfileTab('identity')">Identity</button>
-        <button class="agent-profile-tab" role="tab" onclick="switchProfileTab('model')">Model</button>
-        <button class="agent-profile-tab" role="tab" onclick="switchProfileTab('capabilities')">Capabilities</button>
-        <button class="agent-profile-tab" role="tab" onclick="switchProfileTab('subscriptions')">Subscriptions</button>
-        <button class="agent-profile-tab" role="tab" onclick="switchProfileTab('activity')">Activity</button>
-        <button class="agent-profile-tab" role="tab" onclick="switchProfileTab('assign')">Assign work</button>
+        <button id="${tabId('tab-identity')}" class="agent-profile-tab is-active" role="tab" aria-selected="true" aria-controls="${tabId('identity')}" data-profile-tab="identity" onclick="switchProfileTab('identity')">Identity</button>
+        <button id="${tabId('tab-model')}" class="agent-profile-tab" role="tab" aria-selected="false" aria-controls="${tabId('model')}" data-profile-tab="model" onclick="switchProfileTab('model')">Model</button>
+        <button id="${tabId('tab-capabilities')}" class="agent-profile-tab" role="tab" aria-selected="false" aria-controls="${tabId('capabilities')}" data-profile-tab="capabilities" onclick="switchProfileTab('capabilities')">Capabilities</button>
+        <button id="${tabId('tab-subscriptions')}" class="agent-profile-tab" role="tab" aria-selected="false" aria-controls="${tabId('subscriptions')}" data-profile-tab="subscriptions" onclick="switchProfileTab('subscriptions')">Subscriptions</button>
+        <button id="${tabId('tab-activity')}" class="agent-profile-tab" role="tab" aria-selected="false" aria-controls="${tabId('activity')}" data-profile-tab="activity" onclick="switchProfileTab('activity')">Activity</button>
+        <button id="${tabId('tab-assign')}" class="agent-profile-tab" role="tab" aria-selected="false" aria-controls="${tabId('assign')}" data-profile-tab="assign" onclick="switchProfileTab('assign')">Assign work</button>
       </div>
       <div class="agent-profile-action-bar">
         <span class="agent-profile-action-status" id="agent-profile-status-${agentProfileAttr(detailId)}" aria-live="polite"></span>
         <button type="button" class="btn btn-sm btn-primary" onclick="saveAgentProfile(window._selectedAgentProfileId)">Save profile</button>
         <button type="button" class="btn btn-sm btn-ghost" style="color: var(--error-color, #e55)" onclick="deleteAgentProfile(window._selectedAgentProfileId)">Delete</button>
       </div>
-      <div class="agent-profile-tab-panel is-identity is-visible">
+      <div id="${tabId('identity')}" class="agent-profile-tab-panel is-identity is-visible" role="tabpanel" aria-labelledby="${tabId('tab-identity')}" data-profile-tab-panel="identity">
         <div class="agent-profile-panel-head"><span>Identity</span></div>
         <form class="agent-profile-form" id="agent-profile-form-${agentProfileAttr(detailId)}">
           <div class="agent-profile-field-grid">
@@ -931,7 +932,7 @@ function renderAgentProfileDetail(profile) {
           </div>
         </form>
       </div>
-      <div class="agent-profile-tab-panel is-model">
+      <div id="${tabId('model')}" class="agent-profile-tab-panel is-model" role="tabpanel" aria-labelledby="${tabId('tab-model')}" data-profile-tab-panel="model">
         <div class="agent-profile-panel-head"><span>Model</span></div>
         <div class="agent-profile-field-grid" form="agent-profile-form-${agentProfileAttr(detailId)}">
           <label class="agent-profile-field">
@@ -959,7 +960,7 @@ function renderAgentProfileDetail(profile) {
           </label>
         </div>
       </div>
-      <div class="agent-profile-tab-panel is-capabilities">
+      <div id="${tabId('capabilities')}" class="agent-profile-tab-panel is-capabilities" role="tabpanel" aria-labelledby="${tabId('tab-capabilities')}" data-profile-tab-panel="capabilities">
         <div class="agent-profile-panel-head"><span>Capabilities</span></div>
         <div class="agent-profile-capability-grid">
           <label>
@@ -980,11 +981,11 @@ function renderAgentProfileDetail(profile) {
           </label>
         </div>
       </div>
-      <div class="agent-profile-tab-panel is-subscriptions">
+      <div id="${tabId('subscriptions')}" class="agent-profile-tab-panel is-subscriptions" role="tabpanel" aria-labelledby="${tabId('tab-subscriptions')}" data-profile-tab-panel="subscriptions">
         <div class="agent-profile-panel-head"><span>Subscriptions</span></div>
         ${subscriptionRows}
       </div>
-      <div class="agent-profile-tab-panel is-activity">
+      <div id="${tabId('activity')}" class="agent-profile-tab-panel is-activity" role="tabpanel" aria-labelledby="${tabId('tab-activity')}" data-profile-tab-panel="activity">
         <div class="agent-profile-panel-head"><span>Activity</span></div>
         <div class="agent-profile-state-strip">
           ${blockedApprovals !== undefined ? `<span class="badge ${blockedApprovals > 0 ? 'badge-warning' : 'badge-muted'} agent-tool-badge">${esc(String(blockedApprovals))} approval blocked</span>` : ''}
@@ -992,9 +993,9 @@ function renderAgentProfileDetail(profile) {
         </div>
         ${activityRows}
       </div>
-      <div class="agent-profile-tab-panel is-assign">
+      <div id="${tabId('assign')}" class="agent-profile-tab-panel is-assign" role="tabpanel" aria-labelledby="${tabId('tab-assign')}" data-profile-tab-panel="assign">
         <div class="agent-profile-panel-head"><span>Assign work to ${esc(agentProfileDisplayName(profile))}</span></div>
-        <p class="agent-profile-assign-intro">Launch a task, coding job, or recurring loop using this agent's configured provider, model, and capabilities.</p>
+        <p class="agent-profile-assign-intro">Use the workspace assignment controls below. Quick invoke uses this profile's configured provider, model, and capabilities; coding and automation workflows let you choose their runtime explicitly.</p>
         <div class="agent-profile-assign-grid">
           <button type="button" class="agent-assign-card" onclick="openAssignWorkWizard('freeform')">
             <span class="agent-assign-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg></span>
@@ -2089,16 +2090,14 @@ window.selectAgentProfile = function (id) {
 window.switchProfileTab = function (tabName) {
   const detail = document.querySelector('.agent-profile-detail');
   if (!detail) return;
-  detail.querySelectorAll('.agent-profile-tab').forEach((tab) => {
-    const label = tab.textContent.trim().toLowerCase().replace(/\s+/g, '');
-    const isActive = label === tabName ||
-      (tabName === 'assign' && label === 'assignwork');
+  detail.querySelectorAll('[data-profile-tab]').forEach((tab) => {
+    const isActive = tab.dataset.profileTab === tabName;
     tab.classList.toggle('is-active', isActive);
     tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    tab.tabIndex = isActive ? 0 : -1;
   });
-  detail.querySelectorAll('.agent-profile-tab-panel').forEach((panel) => {
-    const panelName = panel.className.match(/is-(\w[\w-]*)/)?.[1] || '';
-    panel.classList.toggle('is-visible', panelName === tabName);
+  detail.querySelectorAll('[data-profile-tab-panel]').forEach((panel) => {
+    panel.classList.toggle('is-visible', panel.dataset.profileTabPanel === tabName);
   });
 };
 

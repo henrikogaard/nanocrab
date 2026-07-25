@@ -9,6 +9,17 @@ const settingsPagePath = path.join(
 const stylePath = path.join(process.cwd(), 'src/admin/public/style.css');
 
 describe('Settings personal space UI', () => {
+  it('builds collapse toggles with text nodes instead of HTML interpolation', () => {
+    const source = fs.readFileSync(settingsPagePath, 'utf8');
+
+    expect(source).toContain(
+      'toggle.append(chevron, document.createTextNode(titleText))',
+    );
+    expect(source).not.toContain(
+      "toggle.innerHTML = '<span class=\"settings-card-collapse-chevron\"></span>' + titleText",
+    );
+  });
+
   it('frames Settings as the personal operating space for memory, skills, and access', () => {
     const source = fs.readFileSync(settingsPagePath, 'utf8');
 
