@@ -6,39 +6,83 @@ on:
   issue_comment:
     types: [created]
 
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   issues: write
   pull-requests: write
+  checks: write
 
 jobs:
   pr-agent:
-    # Automatic reviews run for PR events. Manual /review comments are limited
-    # to trusted repository collaborators and PRs; arbitrary issue comments
-    # must not start a secret-bearing self-hosted job.
     if: |
       github.event.sender.type != 'Bot' &&
       (
         github.event_name == 'pull_request' ||
         (
-          github.event_name == 'issue_comment' &&
           github.event.issue.pull_request != null &&
           startsWith(github.event.comment.body, '/review') &&
           contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
         )
       )
     runs-on: devbox
+    timeout-minutes: 10
     steps:
-      # The action reads the PR through GitHub's API. Do not check out an
-      # untrusted PR onto the self-hosted runner.
+      - name: Record PR Agent start
+        run: echo "PR_AGENT_STARTED_AT=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
       - uses: the-pr-agent/pr-agent@6ad7cf75d95cb3bbb54cf2ad92050eb03804964a
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI__KEY: ${{ secrets.QWEN_API_KEY }}
-          OPENAI__API_BASE: ${{ secrets.QWEN_API_BASE }}
-          CONFIG__MODEL: "openai/Qwen3.6"
-          CONFIG__FALLBACK_MODELS: '["openai/Qwen3.6"]'
-          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "32000"
-          GITHUB_ACTION_CONFIG__AUTO_REVIEW: "true"
-          GITHUB_ACTION_CONFIG__AUTO_DESCRIBE: "false"
-          GITHUB_ACTION_CONFIG__AUTO_IMPROVE: "false"
+          OPENAI_KEY: ${{ secrets.QWEN_API_KEY }}
+          OPENAI_API_BASE: ${{ secrets.QWEN_API_BASE }}
+          config.model: "openai/DeepSeek-V4-Flash"
+          config.fallback_models: '["openai/Qwen3.6"]'
+          config.custom_model_max_tokens: "32000"
+          pr_reviewer.require_ticket_analysis_review: "false"
+          pr_reviewer.enable_review_labels_security: "false"
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "false"
+          github_action_config.auto_improve: "false"
+          github_action_config.handle_push_trigger: "true"
+          github_action_config.push_commands: '["/review"]'
+
+      - name: Verify PR Agent reviewed current head
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        env:
+          PR_AGENT_STARTED_AT: ${{ env.PR_AGENT_STARTED_AT }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const issueNumber = context.payload.pull_request?.number ?? context.payload.issue?.number
+            if (!issueNumber) {
+              core.setFailed('Unable to determine pull request number')
+              return
+            }
+
+            const { data: pull } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: issueNumber,
+            })
+            const startedAt = Date.parse(process.env.PR_AGENT_STARTED_AT)
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              per_page: 100,
+            })
+            const review = comments.find((comment) =>
+              comment.user?.login === 'github-actions[bot]' &&
+              comment.body?.includes('## PR Reviewer Guide') &&
+              Date.parse(comment.updated_at) >= startedAt
+            )
+
+            if (!review) {
+              core.setFailed(`PR Agent did not publish a fresh review for ${pull.head.sha}`)
+              return
+            }
+            core.info(`Verified PR Agent review for ${pull.head.sha.slice(0, 8)}: ${review.html_url}`)
